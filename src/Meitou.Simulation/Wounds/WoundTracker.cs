@@ -101,7 +101,7 @@ public sealed class WoundTracker
     public void Remove(CharacterId id) => bodies.Remove(id);
     public void Clear() => bodies.Clear();
 
-    /// <summary>One line per wound: <c>C I torsoRegion-or--1 segment t sidex sidey sidez cos sin aspect depth dose hits age size</c>. Side file only: vanilla saves stay byte-exact.</summary>
+    /// <summary>One line per wound: <c>C I torsoRegion-or--1 segment t sidex sidey sidez cos sin aspect depth dose hits age size born</c>. Side file only: vanilla saves stay byte-exact.</summary>
     public IEnumerable<string> Write(Func<CharacterId, (int C, int I)?> handle)
     {
         var f = System.Globalization.CultureInfo.InvariantCulture;
@@ -113,7 +113,7 @@ public sealed class WoundTracker
                 var list = (k == 0 ? body.Torso : body.Limbs).ToArray();
                 for (int i = 0; i < list.Length; i++)
                     if (list[i] is { } w)
-                        yield return string.Create(f, $"{h.C} {h.I} {(k == 0 ? i : -1)} {w.Segment} {w.T} {w.Side.X} {w.Side.Y} {w.Side.Z} {w.Shape.Cosine} {w.Shape.Sine} {w.Shape.Aspect} {w.Shape.Depth} {w.Dose} {w.Hits} {w.Age} {w.Size}");
+                        yield return string.Create(f, $"{h.C} {h.I} {(k == 0 ? i : -1)} {w.Segment} {w.T} {w.Side.X} {w.Side.Y} {w.Side.Z} {w.Shape.Cosine} {w.Shape.Sine} {w.Shape.Aspect} {w.Shape.Depth} {w.Dose} {w.Hits} {w.Age} {w.Size} {w.Born}");
             }
         }
     }
@@ -124,10 +124,10 @@ public sealed class WoundTracker
         foreach (var line in lines)
         {
             var p = line.Split(' ');
-            if (p.Length != 16 || character((int.Parse(p[0], f), int.Parse(p[1], f))) is not { } id) continue;
+            if (p.Length != 17 || character((int.Parse(p[0], f), int.Parse(p[1], f))) is not { } id) continue;
             float F(int i) => float.Parse(p[i], f);
             if (!bodies.TryGetValue(id, out var body)) bodies[id] = body = new WoundBody();
-            body.Restore(int.Parse(p[2], f), new Wound(int.Parse(p[3], f), F(4), new Vector3(F(5), F(6), F(7)), new WoundShape(F(8), F(9), F(10), F(11)), F(12), int.Parse(p[13], f), int.Parse(p[14], f), F(15)));
+            body.Restore(int.Parse(p[2], f), new Wound(int.Parse(p[3], f), F(4), new Vector3(F(5), F(6), F(7)), new WoundShape(F(8), F(9), F(10), F(11)), F(12), int.Parse(p[13], f), int.Parse(p[14], f), F(15), long.Parse(p[16], f)));
         }
     }
 
