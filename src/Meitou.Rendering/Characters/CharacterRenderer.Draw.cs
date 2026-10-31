@@ -399,7 +399,7 @@ internal sealed unsafe partial class CharacterRenderer
                 ref readonly var f = ref partFrames[l.PartBase + p];
                 if (!f.Shows) continue;
                 var part = parts[p];
-                if (part.Anatomy) continue;   // under the skin: no shadow of its own
+                if (part.Anatomy && depth) continue;   // under the skin: no shadow of its own
                 var mesh = part.Mesh;
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
