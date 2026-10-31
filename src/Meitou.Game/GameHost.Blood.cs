@@ -125,8 +125,11 @@ sealed partial class GameHost
     readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
     static readonly Meitou.Simulation.Wounds.WoundBody NoWounds = new();
 
+    const float GutLifeSeconds = 600;
+
     sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; }
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
+    readonly HashSet<CharacterId> gutsSpilled = [];
 
     /// <summary>A deep belly wound spills the bowel as one loose body, as the GTA V FLESH port's guts prop: it falls from the wound and lies where it lands. Visual only.</summary>
     void UpdateGuts(World world, float dt, bool draw = true)
@@ -138,16 +141,18 @@ sealed partial class GameHost
         {
             var hot = world.Characters.Previous[slot];
             var id = world.Characters.IdOf(slot);
-            if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id)) continue;
+            if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) continue;
             var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
             gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y };
         }
+        foreach (var (who, gone) in gutFalls.ToArray())
+            if (gone.Age > GutLifeSeconds) { gutFalls.Remove(who); gutsSpilled.Add(who); }   // spilled once: the wound stays and does not spill again
         foreach (var fall in gutFalls.Values)
         {
+            fall.Age += dt;
             if (fall.Position.Y > fall.Floor + 0.35f)
             {
                 // Slow at first, dragged out of the wound, then falling free.
-                fall.Age += dt;
                 fall.Velocity.Y -= (fall.Age < 0.8f ? 8 : 40) * dt;
                 fall.Position += fall.Velocity * dt;
                 fall.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitX, 3 * dt) * fall.Rotation);
@@ -174,6 +179,7 @@ sealed partial class GameHost
             woundQueue.Clear();
             wounds.Clear();
             gutFalls.Clear();
+            gutsSpilled.Clear();
             world.CombatEvents = woundQueue;
         }
         if (world.Tick / WoundHealTicks != woundHealStep) { woundHealStep = world.Tick / WoundHealTicks; wounds.Heal(WoundHealDose); }
