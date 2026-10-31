@@ -246,7 +246,7 @@ sealed partial class GameHost
             if (!id.IsNone && world.Characters.Cold(id.Slot)?.Appearance is { } look)
             {
                 look.BodyLayers.Clear();   // shirts and shorts painted on the body
-                look.Parts.RemoveAll(p => p.Record.Type != FcsRecordType.WEAPON && p.Mode == Meitou.Data.Characters.AttachMode.SharedSkeleton && p.Record.Type != FcsRecordType.ATTACHMENT);
+                look.Parts.RemoveAll(p => p.Record.Type is not (FcsRecordType.WEAPON or FcsRecordType.ATTACHMENT));   // masks and scarves too, whatever bone they hang on
             }
     }
 
