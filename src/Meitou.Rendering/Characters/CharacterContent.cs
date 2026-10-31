@@ -215,11 +215,11 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
     const float AnatomyGrid = 0.1f, AnatomyClearance = 0.2f;
     /// <summary>What a stump shows, as Gore Lab's SeverBoneExposure: the limb's bone a little past the skin's cut (LimbHide heights), muscle up to it.</summary>
-    static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p)
+    static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p, bool female)
     {
         int group = WoundMasks.BodyGroup(batch.Bone);
         if (group == 0 || batch.Layer > 1 || !(batch.Bone.Contains("UpperArm") || batch.Bone.Contains("Thigh"))) return false;   // what stays on the body
-        float cut = group < 3 ? 13.83f : 8.6f;
+        float cut = group < 3 ? (female ? 14.1f : 13.83f) : 8.6f;
         return p.Y > cut - (batch.Layer == 0 ? 1.3f : -0.2f);
     }
 
@@ -417,7 +417,7 @@ internal sealed class CharacterContent : IDisposable
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
-                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted) ? 0.25f : 0) }, Bones = over.Bones, Weights = over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) }, Bones = over.Bones, Weights = over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
             }
         }
         // Clustered on a fine grid: seen only through cuts, the file's detail is lost, and triangles that collapse go.
