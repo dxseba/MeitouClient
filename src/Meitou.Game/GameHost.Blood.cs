@@ -145,23 +145,6 @@ sealed partial class GameHost
             var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
             gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y };
         }
-        // A stump shows its cut bone (Gore Lab's SeverBoneExposure): on the upper arm or thigh, pointing down the lost limb.
-        debris.Extent(Meitou.Rendering.DebrisRenderer.StumpBone);
-        for (int slot = 0; draw && gpu.Characters is { } characters && slot < world.Characters.HighWater; slot++)
-        {
-            if (!world.Characters.Previous[slot].Alive || world.Characters.Cold(slot)?.Medical is not { } medical) continue;
-            var id = world.Characters.IdOf(slot);
-            foreach (var part in medical.Parts)
-                if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb)
-                {
-                    string side = limb % 2 == 0 ? "L" : "R";
-                    // Anchored to what stays on the body: the lost limb's own bones drift off with the ragdoll.
-                    if (characters.BonePosition(DrawKey(id), $"Bip01 {side} {(limb < 2 ? "Clavicle" : "Thigh")}") is not { } root
-                        || characters.BonePosition(DrawKey(id), limb < 2 ? "Bip01 Neck" : "Bip01 Pelvis") is not { } body) continue;
-                    var along = Vector3.Normalize(root - body);
-                    gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.StumpBone, limb < 2 ? 0.22f : 0.32f, Turn(Vector3.UnitZ, along), root + along * StumpBoneOut));
-                }
-        }
         foreach (var (who, gone) in gutFalls.ToArray())
             if (gone.Age > GutLifeSeconds) { gutFalls.Remove(who); gutsSpilled.Add(who); }   // spilled once: the wound stays and does not spill again
         foreach (var fall in gutFalls.Values)

@@ -210,6 +210,15 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
     const float AnatomyClearance = 0.2f;
+    /// <summary>What a stump shows, as Gore Lab's SeverBoneExposure: the limb's bone a little past the skin's cut (LimbHide heights), muscle up to it.</summary>
+    static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p)
+    {
+        int group = WoundMasks.BodyGroup(batch.Bone);
+        if (group == 0 || batch.Layer > 1) return false;
+        float cut = group < 3 ? 13.83f : 8.6f;
+        return p.Y > cut - (batch.Layer == 0 ? 0.8f : 0.1f);
+    }
+
     /// <summary>A group no wound opens: the bowel is never drawn in the body, the loose body stands for it (<see cref="DebrisRenderer.Bowel"/>).</summary>
     const int LooseBowelGroup = 5;
     readonly string modsDirectory;
@@ -402,7 +411,7 @@ internal sealed class CharacterContent : IDisposable
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
-                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted) ? 0.25f : 0) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
             }
         }
         var array = vertices.ToArray();

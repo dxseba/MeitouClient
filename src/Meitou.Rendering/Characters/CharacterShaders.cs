@@ -144,14 +144,15 @@ static class CharacterShaders
             vAnatomy = anatomy ? 1u : 0u;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
-            if (anatomy)
+            if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
+            else if (anatomy)
             {
                 vClip = 1000.0;
                 uint lost = floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]);
                 for (uint i = 0u; i < 16u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 4u + i / 4u][i % 4u];
-                    if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - aColour.a) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
+                    if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - floor(aColour.a + 0.5)) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
                 }
             }
             vMaterial = aInstanceData.y;
@@ -390,7 +391,7 @@ static class CharacterShaders
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
-                if (vWounds == 0u || tex(vWounds, vUv).g < 0.5) discard;
+                if (vAnatomy == 1u && (vWounds == 0u || tex(vWounds, vUv).g < 0.5)) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
