@@ -54,6 +54,8 @@ internal sealed class AssetPart
     public PickBox[] PickBoxes = [];
     // The frame (CharacterRenderer.Update) it was last listed in, so the material update takes each part once.
     public long MaterialFrame = -1;
+    /// <summary>Metal plate: a wound does not tear it.</summary>
+    public bool Plate;
     /// <summary>Anatomy under the skin: shows only while the character has a wound mask.</summary>
     public bool Anatomy;
     /// <summary>The body mesh, whose vertices take the asset's morph.</summary>
@@ -829,7 +831,7 @@ internal sealed class CharacterContent : IDisposable
             if (loaded is null || loaded.Gpu.Parts.Count == 0) continue;
             var ap = new AssetPart
             {
-                Label = $"{part.Record.Type} '{part.Record.Name}' .{part.Field}", Mesh = loaded.Gpu, Shared = shared, Material = ItemMaterial(c, part, path, loaded),
+                Plate = part.Record.GetInt("material type") == 3, Label = $"{part.Record.Type} '{part.Record.Name}' .{part.Field}", Mesh = loaded.Gpu, Shared = shared, Material = ItemMaterial(c, part, path, loaded),
                 BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, ShownShots = part.ShownShots, Muzzle = part is { Field: "live ammo", ShownShots: 1, Shown: WeaponShown.RangedDrawn }, HideSide = part.HideSide, PickBoxes = loaded.PickBoxes ?? [],
                 FileDistances = loaded.FileDistances, FileFirst = loaded.FileFirst, FileRadius = loaded.FileRadius,
             };
