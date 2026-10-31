@@ -119,6 +119,7 @@ static class CharacterShaders
         out vec4 vBlood;        // the blood mapping of character.hlsl (cylinder projection of the part in its own space), before the race scale
         flat out uint vCuts;
         out vec3 vBindPos;
+        out float vCutBand;     // a cut limb: distance past the cut, below 0 gone
         flat out uint vWounds;  // the wound mask, 0 without wounds
         flat out float vClipLayer;
         flat out float vPlated;
@@ -175,6 +176,7 @@ static class CharacterShaders
             vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
+            vCutBand = 1000.0;
             if ((aInstanceData.z & 12u) != 0u)
             {
                 // Worn on the body: torn where a wound of its own body group lies under it (the wound spheres are in the same bind space; in it a hand hangs by the hip).
@@ -212,11 +214,11 @@ static class CharacterShaders
                 uint cutBone = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
                 uint cutGroup = (floatBitsToUint(cutHeader[1 + cutBone / 32u][cutBone / 8u % 4u]) >> (cutBone % 8u * 4u)) & 15u;
                 uint only = floatBitsToUint(cutHeader[0][3]);
-                if (only != 0u) vHidden = cutGroup == (only >> 8) && aPosition.y < float(only & 255u) * 0.1 ? 0.0 : 1.0;
+                if (only != 0u) { vHidden = cutGroup == (only >> 8) ? 0.0 : 1.0; vCutBand = float(only & 255u) * 0.1 - aPosition.y; }
                 else if (cutGroup >= 1u && cutGroup <= 4u)
                 {
                     uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;
-                    if (height != 0u && aPosition.y < float(height) * 0.1) vHidden = 1.0;
+                    if (height != 0u) vCutBand = aPosition.y - float(height) * 0.1;
                 }
             }
             if ((aInstanceData.z & {{HeadOnly}}u) != 0u) vHidden = (marks & {{CharacterContent.HeadBit}}u) == 0u ? 1.0 : 0.0;   // a cut-off head: its vertices only
@@ -297,6 +299,7 @@ static class CharacterShaders
         in float vHidden;
         in vec4 vColour;
         in vec4 vBlood;
+        in float vCutBand;
         flat in uint vWounds;
         flat in uint vCuts;
         in vec3 vBindPos;
@@ -332,9 +335,13 @@ static class CharacterShaders
         }
 
         // Open flesh over the albedo, from the character's wound mask.
-        void woundSurface(inout vec3 albedo, inout float gloss, CharMaterial m)
+        void woundSurface(inout vec3 albedo, inout float gloss, CharMaterial m, inout vec3 bend)
         {
             vec4 field = woundField(vUv);
+            // The lips: the ring's slope tips the normal, so light finds a raised, parted edge.
+            float rise = field.b - field.g;
+            vec3 dx = dFdx(vWorld), dy = dFdy(vWorld), across = cross(dy, normalize(vNormal)), down = cross(normalize(vNormal), dx);
+            bend = (across * dFdx(rise) + down * dFdy(rise)) / max(abs(dot(dx, across)), 1e-5) * 0.09;
             vec3 cut = field.rgb;
             if (field.a > 0.5) discard;   // only the deepest cuts open onto the anatomy
             // A painted cut, rim to core: bruise, thin fat, wet meat with fine grain, dark bottom.
@@ -515,6 +522,16 @@ static class CharacterShaders
                 nm = vec4(0.5, 0.5, 1.0, 0.5);
             }
             // Metal plate does not tear: it takes the wound's blood.
+            vec3 woundBend = vec3(0.0);
+            // A cut limb's end: a clean edge, then a ragged band of flesh with bone at its heart.
+            if (vCutBand < 1000.0)
+            {
+                float edge = vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0);
+                if (edge < 0.0) discard;
+                float band = 1.0 - smoothstep(0.1, 0.32, edge);
+                albedo = mix(albedo, !gl_FrontFacing && edge < 0.2 ? vec3(0.7, 0.64, 0.5) : m.colour1.rgb * 0.55, band);
+                gloss = mix(gloss, 0.7, band);
+            }
             if (vPlated > 0.0 && vClip > -0.5) { float smear = smoothstep(-0.5, 0.2, vClip + 0.25 * sin(vBlood.y * 23.0 + vBlood.x * 5.0)); albedo = mix(albedo, vec3(0.16, 0.01, 0.012), smear * 0.9); gloss = mix(gloss, 0.7, smear); }
             else if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.18 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
             if (vAnatomy != 0u)
@@ -544,13 +561,14 @@ static class CharacterShaders
                 albedo = m.colour1.rgb * 0.5 * (0.7 + 0.3 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));   // meat, not a void
                 gloss = 0.3;
             }
-            else if (vWounds != 0u) woundSurface(albedo, gloss, m);
+            else if (vWounds != 0u) woundSurface(albedo, gloss, m, woundBend);
             if (cut) discard;
             // The game writes character albedo darkened: 0.7 for bodies, heads and hair (character.hlsl DARKEN), 0.8 for worn items (skin.hlsl); not its icons (rtticons.hlsl,
             // a fog distance of -1).
             // An item attached with its own mesh (StaticObject, not Worn) is not darkened.
             if (view.fogDistance > -0.5 || view.fogDistance < -1.5) albedo *= m.shading != 0u ? 0.7 : flag(f, 16384u) ? 0.8 : 1.0;
 
+            n = normalize(n - woundBend);
             vec3 smoothNormal = n;
             if (flag(f, 2u) && m.shading != 2u && dot(vTangent.xyz, vTangent.xyz) > 1e-8)
             {
