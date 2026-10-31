@@ -323,7 +323,7 @@ internal sealed unsafe partial class CharacterRenderer
         {
             var part = parts[p];
             ref var f = ref partFrames[l.PartBase + p];
-            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal));
+            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) && (l.PartOnly == 0 || part.IsBody);
             if (!f.Shows) continue;
             f.Model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             f.Scale = part.Shared ? worldScale : f.Model.ScaleLength();

@@ -276,6 +276,7 @@ sealed partial class GameHost
             var held = HeldLook(c.Appearance, c.HeldTool, out var heldPending);
             var look = player.EditorPreview(c.Id, c.Appearance) ?? held;
             if (editing is null) CutHead(c, look);
+            if (editing is null) CutLimbs(c);
             var glide = player.EditorBlend(c.Id);   // after the preview, which may just have swapped the look
             list.Add(new CharacterInstance(DrawKey(c.Id), look, position, yaw, poses)
             {

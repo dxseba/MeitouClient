@@ -72,6 +72,7 @@ sealed partial class GameHost
     Vector3 SandboxSpawn()
     {
         Meitou.Simulation.PopulationSystem.SandboxFemale = g.SandboxFemale;
+        Meitou.Simulation.Wounds.SeveredLevels.Forced = g.SandboxSeverLevel;
         var world = session.World;
         string record = SandboxRecord(scene.Database!);
         float half = g.Sandbox >= 2 ? 15 : 0;

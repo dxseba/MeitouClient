@@ -191,7 +191,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         /// <summary>The blood of its first 8 body parts, a byte each (<see cref="CharacterInstance.Blood"/>).</summary>
         public ulong Blood;
         /// <summary>The wound mask index for the palette header, 0 without wounds.</summary>
-        public uint WoundMask, LostGroups, LimbCuts;
+        public uint WoundMask, LostGroups, LimbCuts, PartOnly;
         public Vector4[]? WoundSpheres, WoundCuts;
         /// <summary>Posed this frame whatever the thinning (the player's, a ragdoll, a new asset or a first pose).</summary>
         public bool MustPose;
@@ -488,6 +488,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             l.WoundCuts = woundMasks.Cuts(inst.Key);
             l.LostGroups = inst.LostGroups;
             l.LimbCuts = inst.LimbCuts;
+            l.PartOnly = inst.PartOnly;
             if (l.WoundMask != 0) boneTotal += CharacterShaders.WoundHeaderBones;
             l.BoneBase = boneTotal;
             boneTotal += asset.Rig.BoneCount;
@@ -591,6 +592,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     *(uint*)header = l.WoundMask;
                     ((uint*)header)[1] = l.LostGroups;
                     ((uint*)header)[2] = l.LimbCuts;
+                    ((uint*)header)[3] = l.PartOnly;
                     var groups = woundMasks.BoneGroups(rig);
                     groups.AsSpan().CopyTo(new Span<uint>(header + 16, 8));
                     l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 64, WoundMasks.Spheres16));

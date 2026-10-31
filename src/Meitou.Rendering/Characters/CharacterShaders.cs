@@ -209,7 +209,9 @@ static class CharacterShaders
                 mat4 cutHeader = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
                 uint cutBone = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
                 uint cutGroup = (floatBitsToUint(cutHeader[1 + cutBone / 32u][cutBone / 8u % 4u]) >> (cutBone % 8u * 4u)) & 15u;
-                if (cutGroup >= 1u && cutGroup <= 4u)
+                uint only = floatBitsToUint(cutHeader[0][3]);
+                if (only != 0u) vHidden = cutGroup == (only >> 8) && aPosition.y < float(only & 255u) * 0.1 ? 0.0 : 1.0;
+                else if (cutGroup >= 1u && cutGroup <= 4u)
                 {
                     uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;
                     if (height != 0u && aPosition.y < float(height) * 0.1) vHidden = 1.0;

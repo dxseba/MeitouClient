@@ -25,6 +25,8 @@ sealed partial class GameHost
         public required Vector2 Aside;
         public required float Spin, Flight;
         public required ulong Blood;
+        /// <summary>A cut-off limb part: <see cref="CharacterInstance.PartOnly"/>.</summary>
+        public uint PartOnly;
         /// <summary>The shown tick its fall started (NaN until its look is drawn) and the seconds into it that it landed, at what height (NaN: still falling).</summary>
         public double Tick = double.NaN;
         public float Landed = float.NaN, RestY;
@@ -67,10 +69,34 @@ sealed partial class GameHost
         while (heads.Count > Math.Max(config.GroundItemLimit, 1)) heads.RemoveAt(0);
     }
 
+    readonly HashSet<(CharacterId, int)> limbsCut = [];
+
+    /// <summary>Every newly lost limb cut below the top: the part below the cut falls, the body's own mesh in the pose of the moment.</summary>
+    void CutLimbs(CharacterSnapshot c)
+    {
+        if (gpu.Characters is not { } characters || session.World.Characters.Cold(c.Id.Slot)?.Medical is not { } medical) return;
+        foreach (var part in medical.Parts)
+        {
+            if (part.Limb != Meitou.Simulation.Bodies.LimbState.Stump || part.Template.LimbSlot is not (>= 0 and <= 3 and var limb) || !limbsCut.Add((c.Id, limb))) continue;
+            int level = Meitou.Simulation.Wounds.SeveredLevels.Of(c.Id, limb);
+            if (level == 0) continue;
+            string side = limb % 2 == 0 ? "L" : "R";
+            long from = DrawKey(c.Id), key = from ^ (1L << 53) ^ ((long)limb << 48);
+            if (characters.LastDrawn(from, $"Bip01 {side} {(limb < 2 ? "Hand" : "Foot")}") is not ({ } world, { } look, var start) || !characters.HoldPose(key, from)) continue;
+            uint group = (uint)(limb < 2 ? 1 + limb : 1 + limb);
+            heads.Add(new FallingHead
+            {
+                Key = key, From = from, Look = look, World = world, Start = start, Aside = new Vector2(start.X + 3, start.Z + 2), Axis = Vector3.UnitX, Spin = 3,
+                Flight = MathF.Sqrt(2 * MathF.Max(start.Y - session.World.Walkability.GroundHeight(start.X, start.Z, start.Y) - 0.6f, 0) / FallGravity), Blood = c.BloodAmounts,
+                PartOnly = group << 8 | (uint)(Meitou.Simulation.Wounds.SeveredLevels.Height(level, limb) * 10),
+            });
+        }
+    }
+
     /// <summary>The heads, each placed where its fall has it now: the head bone along the drop, the whole head turned about it until it lands.</summary>
     void AddHeads(CharacterDrawList list)
     {
-        if (headsEpoch != worldEpoch) { heads.Clear(); headsSeen.Clear(); headsEpoch = worldEpoch; }
+        if (headsEpoch != worldEpoch) { heads.Clear(); headsSeen.Clear(); limbsCut.Clear(); headsEpoch = worldEpoch; }
         if (heads.Count == 0 || gpu.Characters is not { } characters) return;
         double clock = session.ShownTick + session.SimulationAlpha;
         float tick = session.World.TickSeconds;
@@ -89,7 +115,7 @@ sealed partial class GameHost
             }
             if (!float.IsNaN(h.Landed)) at.Y = h.RestY;
             var world = h.World * Matrix4x4.CreateTranslation(-h.Start) * Matrix4x4.CreateFromAxisAngle(h.Axis, h.Spin * t) * Matrix4x4.CreateTranslation(at);
-            list.Add(new CharacterInstance(h.Key, h.Look, at, 0, []) { World = world, FreezeFrom = h.From, Blood = h.Blood });
+            list.Add(new CharacterInstance(h.Key, h.Look, at, 0, []) { World = world, FreezeFrom = h.From, Blood = h.Blood, PartOnly = h.PartOnly, Wounds = h.PartOnly != 0 ? [new CharacterWoundMark("", "", 0, default, 1, 0, 1, 0)] : [] });
         }
     }
 

@@ -149,6 +149,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     /// </summary>
     void DropSeveredLimb(World world, int slot, CharacterCold cold, int limb)
     {
+        if (limb is >= 0 and <= 3 && Wounds.SeveredLevels.Of(world.Characters.IdOf(slot), limb) > 0) return;   // the host drops the part below the cut, cut from the body
         // The first entry of the slot whose record exists (FUN_14064edc0: one whose target did not resolve is skipped, and with none nothing drops; the stump and wound stay).
         ItemInstance? item = null;
         foreach (var severed in cold.Race?.SeveredLimbs ?? [])
