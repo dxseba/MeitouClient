@@ -335,9 +335,13 @@ static class CharacterShaders
             gloss = mix(gloss, 0.85, run);
             float grain = 0.82 + 0.18 * sin((vUv.x + vUv.y) * 900.0 + sin(vUv.x * 310.0) * 2.0);
             albedo = mix(albedo, albedo * vec3(0.8, 0.5, 0.48), cut.b);
-            albedo = mix(albedo, vec3(0.55, 0.42, 0.26), cut.g);
-            albedo = mix(albedo, m.colour1.rgb * 0.6 * grain, smoothstep(0.0, 0.35, cut.r + cut.g * 0.25 - 0.2));
-            albedo = mix(albedo, 0.14 * m.colour1.rgb, smoothstep(0.3, 1.0, cut.r));
+            float lump = 0.5 + 0.5 * sin(vUv.x * 410.0 + sin(vUv.y * 260.0) * 2.5) * sin(vUv.y * 370.0 + sin(vUv.x * 210.0) * 2.5);
+            vec3 meat = mix(m.colour1.rgb * 0.75, m.colour1.rgb * 0.3, lump) * grain;
+            albedo = mix(albedo, meat, smoothstep(0.1, 0.45, cut.g));
+            // Only a broken thread of fat at the lip, not a band; the heart stays dark red, never black.
+            float lip = smoothstep(0.1, 0.3, cut.g) * (1.0 - smoothstep(0.3, 0.5, cut.g)) * smoothstep(0.45, 0.7, lump);
+            albedo = mix(albedo, vec3(0.6, 0.47, 0.3), lip * 0.7);
+            albedo = mix(albedo, m.colour1.rgb * 0.22, smoothstep(0.5, 1.0, cut.r));
             gloss = mix(gloss, 0.75, cut.g);
         }
         layout(location = 0) out vec4 fragColour;
