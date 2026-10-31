@@ -209,7 +209,7 @@ internal sealed class CharacterContent : IDisposable
         float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0);
 
     /// <summary>How far anatomy is pulled in along its normals (world units). Negative: it sits on top of the darkened skin, and the wound mask alone limits it to the cuts.</summary>
-    const float AnatomyInset = -0.25f;
+    const float AnatomyInset = -0.12f;
     readonly string modsDirectory;
 
     public CharacterContent(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)

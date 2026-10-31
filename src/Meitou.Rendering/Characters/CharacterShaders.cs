@@ -381,7 +381,15 @@ static class CharacterShaders
                 albedo = mix(albedo, blood.rgb, clamp(blood.a - 1.0 + clamp(amount, 0.0, 1.0), 0.0, 1.0));
             }
             if (vClip > 0.0) discard;
-            if (vAnatomy != 0u) { if (vWounds == 0u || tex(vWounds, vUv).g < 0.35) discard; }   // only inside a cut
+            if (vAnatomy != 0u)
+            {
+                float open = vWounds == 0u ? 0.0 : tex(vWounds, vUv).g;
+                if (open < 0.35) discard;   // only inside a cut
+                // Fibres along the mesh height (the fragment's blood mapping), wet and darker towards the cut's edge.
+                float fibre = 0.72 + 0.28 * sin(vBlood.y * 260.0 + sin(vBlood.x * 9.0) * 3.0);
+                albedo *= fibre * mix(0.35, 1.0, smoothstep(0.35, 0.9, open));
+                gloss = 0.5;
+            }
             else if (vWounds != 0u) woundSurface(albedo, gloss);
             if (cut) discard;
             // The game writes character albedo darkened: 0.7 for bodies, heads and hair (character.hlsl DARKEN), 0.8 for worn items (skin.hlsl); not its icons (rtticons.hlsl,
