@@ -8,7 +8,7 @@ namespace Meitou.Simulation.Wounds;
 public enum WoundRegion { Unknown = -1, Chest, Abdomen, Back }
 
 /// <summary>One wound. <see cref="Segment"/>: L upper arm 0, L forearm 1, R upper arm 2, R forearm 3, L thigh 4, L calf 5, R thigh 6, R calf 7, head 8, torso 9; -1 for the three region wounds of old saves.</summary>
-public readonly record struct Wound(int Segment, float T, Vector3 Side, WoundShape Shape, float Dose, int Hits, int Age);
+public readonly record struct Wound(int Segment, float T, Vector3 Side, WoundShape Shape, float Dose, int Hits, int Age, float Size = 1);
 
 /// <summary>The visual wounds of one character: one per torso region, and up to <see cref="LimbSlots"/> on the limbs, a near hit deepening a wound and the oldest giving way.</summary>
 public sealed class WoundBody
@@ -81,7 +81,7 @@ public sealed class WoundBody
             float c = MathF.Cos(tilt), s = MathF.Sin(tilt);
             shape = shape with { Cosine = shape.Cosine * c - shape.Sine * s, Sine = shape.Cosine * s + shape.Sine * c };
         }
-        limbs[target] = new Wound(segment, old?.T ?? Math.Clamp(t, 0.25f, 0.75f), old?.Side ?? side, shape, r.Dose, r.Hits, ++clock);
+        limbs[target] = new Wound(segment, old?.T ?? Math.Clamp(t, 0.25f, 0.75f), old?.Side ?? side, shape, r.Dose, r.Hits, ++clock, MathF.Max(old?.Size ?? 0, input.Size));
         return true;
     }
 }
@@ -98,7 +98,7 @@ public sealed class WoundTracker
     public void Remove(CharacterId id) => bodies.Remove(id);
     public void Clear() => bodies.Clear();
 
-    /// <summary>One line per wound: <c>C I torsoRegion-or--1 segment t sidex sidey sidez cos sin aspect depth dose hits age</c>. Side file only: vanilla saves stay byte-exact.</summary>
+    /// <summary>One line per wound: <c>C I torsoRegion-or--1 segment t sidex sidey sidez cos sin aspect depth dose hits age size</c>. Side file only: vanilla saves stay byte-exact.</summary>
     public IEnumerable<string> Write(Func<CharacterId, (int C, int I)?> handle)
     {
         var f = System.Globalization.CultureInfo.InvariantCulture;
@@ -110,7 +110,7 @@ public sealed class WoundTracker
                 var list = (k == 0 ? body.Torso : body.Limbs).ToArray();
                 for (int i = 0; i < list.Length; i++)
                     if (list[i] is { } w)
-                        yield return string.Create(f, $"{h.C} {h.I} {(k == 0 ? i : -1)} {w.Segment} {w.T} {w.Side.X} {w.Side.Y} {w.Side.Z} {w.Shape.Cosine} {w.Shape.Sine} {w.Shape.Aspect} {w.Shape.Depth} {w.Dose} {w.Hits} {w.Age}");
+                        yield return string.Create(f, $"{h.C} {h.I} {(k == 0 ? i : -1)} {w.Segment} {w.T} {w.Side.X} {w.Side.Y} {w.Side.Z} {w.Shape.Cosine} {w.Shape.Sine} {w.Shape.Aspect} {w.Shape.Depth} {w.Dose} {w.Hits} {w.Age} {w.Size}");
             }
         }
     }
@@ -121,10 +121,10 @@ public sealed class WoundTracker
         foreach (var line in lines)
         {
             var p = line.Split(' ');
-            if (p.Length != 15 || character((int.Parse(p[0], f), int.Parse(p[1], f))) is not { } id) continue;
+            if (p.Length != 16 || character((int.Parse(p[0], f), int.Parse(p[1], f))) is not { } id) continue;
             float F(int i) => float.Parse(p[i], f);
             if (!bodies.TryGetValue(id, out var body)) bodies[id] = body = new WoundBody();
-            body.Restore(int.Parse(p[2], f), new Wound(int.Parse(p[3], f), F(4), new Vector3(F(5), F(6), F(7)), new WoundShape(F(8), F(9), F(10), F(11)), F(12), int.Parse(p[13], f), int.Parse(p[14], f)));
+            body.Restore(int.Parse(p[2], f), new Wound(int.Parse(p[3], f), F(4), new Vector3(F(5), F(6), F(7)), new WoundShape(F(8), F(9), F(10), F(11)), F(12), int.Parse(p[13], f), int.Parse(p[14], f), F(15)));
         }
     }
 
@@ -146,7 +146,7 @@ public sealed class WoundTracker
         var forward = new Vector2(MathF.Sin(e.VictimYaw), MathF.Cos(e.VictimYaw));
         bool behind = Vector2.Dot(e.Direction, forward) > 0;
         // The region picks the chart, so a hit from behind on the Back region is a valid front-of-chart hit.
-        var input = new WoundInput(cut, WoundAttack.Front, false, true, e.Damage.Cut > 0 ? e.Damage.Cut + e.Damage.Blunt * 0.5f : 0, e.Damage.Blunt, e.Damage.Pierce, maximum * VisibleShare);   // a blade bruises what it cuts: most of a heavy weapon's damage is blunt
+        var input = new WoundInput(cut, WoundAttack.Front, false, true, e.Damage.Cut > 0 ? e.Damage.Cut + e.Damage.Blunt * 0.5f : 0, e.Damage.Blunt, e.Damage.Pierce, maximum * VisibleShare, Size: Math.Clamp(0.7f + (e.Damage.Cut + e.Damage.Pierce) / 10, 0.7f, 3f));   // the harder the blade bites, the longer the cut   // a blade bruises what it cuts: most of a heavy weapon's damage is blunt
         bool applied;
         if (e.LimbSlot is >= 0 and <= 3)
         {

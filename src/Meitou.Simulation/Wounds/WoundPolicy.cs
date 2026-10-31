@@ -14,7 +14,7 @@ public readonly record struct WoundShape(float Cosine = 1, float Sine = 0, float
 /// <summary>A sample of a cut: core within area within ring, each 0 to 1.</summary>
 public readonly record struct WoundProfile(float Core, float Area, float Ring);
 
-public readonly record struct WoundInput(int CutDirection, WoundAttack Attack, bool Harpoon, bool FrontTorso, float Cutting, float Blunt, float Pierce, float Maximum, float LocalDose = 0, int LocalHits = 0);
+public readonly record struct WoundInput(int CutDirection, WoundAttack Attack, bool Harpoon, bool FrontTorso, float Cutting, float Blunt, float Pierce, float Maximum, float LocalDose = 0, int LocalHits = 0, float Size = 1);
 
 public readonly record struct WoundResult(bool Accepted, WoundKind Kind, WoundShape Shape, float AcceptedDamage, float Dose, int Hits);
 

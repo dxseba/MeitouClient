@@ -271,7 +271,7 @@ static class CharacterShaders
                 float x = dot(d, axis) / len, y = abs(dot(d, vec2(-axis.y, axis.x)));
                 if (abs(x) >= 1.0) continue;
                 float wobble = sin(x * 9.0 + c.x * 80.0) * 0.06 + sin(x * 23.0 + c.y * 90.0) * 0.03;
-                float half_ = len * (0.1 + 0.16 * depth) * pow(1.0 - x * x, 0.8) * (1.0 + wobble);
+                float half_ = min(len, 0.06) * (0.1 + 0.2 * depth) * (1.0 + len * 12.0) * pow(1.0 - x * x, 0.8) * (1.0 + wobble);
                 float sd = y - half_;
                 vec4 here = vec4(1.0 - smoothstep(-half_ * 0.55 - aa, -half_ * 0.55 + aa, sd), 1.0 - smoothstep(-aa, aa, sd), 1.0 - smoothstep(0.0, len * 0.06 + aa, sd), depth);
                 here.w *= here.y;

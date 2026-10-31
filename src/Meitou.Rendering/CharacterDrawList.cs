@@ -7,7 +7,7 @@ namespace Meitou.Rendering;
 public readonly record struct CharacterPose(string Animation, float Time, float Weight);
 
 /// <summary>A wound placed on the bone from <paramref name="BoneA"/> to <paramref name="BoneB"/>, <paramref name="T"/> along it, on the <paramref name="Side"/> of the bind pose; the rest is its cut shape.</summary>
-public readonly record struct CharacterWoundMark(string BoneA, string BoneB, float T, Vector3 Side, float Cosine, float Sine, float Aspect, float Depth);
+public readonly record struct CharacterWoundMark(string BoneA, string BoneB, float T, Vector3 Side, float Cosine, float Sine, float Aspect, float Depth, float Size = 1);
 
 /// <summary>
 /// A character to draw this frame, already interpolated by the host. <see cref="Key"/> is stable while the character exists, so

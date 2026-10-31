@@ -234,25 +234,25 @@ sealed partial class GameHost
                 {
                 // Off the centre line: each wound keeps its own slant and height.
                 float off = w.Age * 37 % 7 / 3f - 1;
-                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
+                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size));
             }
         foreach (var slot in body.Limbs)
             if (slot is { } w && marks.Count < Meitou.Simulation.Wounds.WoundBody.LimbSlots + 3)
             {
                 if (w.Segment == 9)
                 {
-                    marks.Add(new("Bip01 Pelvis", "Bip01 Neck", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
+                    marks.Add(new("Bip01 Pelvis", "Bip01 Neck", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size));
                     continue;
                 }
                 if (w.Segment == 8)
                 {
-                    marks.Add(new("Bip01 Neck", "Bip01 Head", 2.2f + w.T, new Vector3(w.Age % 2 == 0 ? 0.9f : -0.9f, 0.5f, 0.2f * w.Side.Z), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
+                    marks.Add(new("Bip01 Neck", "Bip01 Head", 2.2f + w.T, new Vector3(w.Age % 2 == 0 ? 0.9f : -0.9f, 0.5f, 0.2f * w.Side.Z), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size));
                     continue;
                 }
                 string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";
                 bool lower = (w.Segment & 1) != 0;
                 var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));
-                marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
+                marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size));
             }
         // A stump without a wound still needs the (blank) mask that lets its anatomy draw: a mark on no bone paints nothing.
         if (marks.Count == 0 && LostGroups(id) != 0) marks.Add(new("", "", 0, default, 1, 0, 1, 0));
