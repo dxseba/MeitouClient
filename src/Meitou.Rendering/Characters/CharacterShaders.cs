@@ -396,7 +396,7 @@ static class CharacterShaders
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
                 gloss = 0.5;
             }
-            else if (m.shading == 1u && !gl_FrontFacing && vWounds != 0u)
+            else if (m.shading == 1u && !gl_FrontFacing && vWounds != 0u && dot(vNormal, view.eye - vWorld) < 0.0)   // truly the inside: a flipped outer triangle still has its normal towards the eye
             {
                 // The body's inside, drawn only through a hole: the cavity behind the anatomy. An unwounded body keeps its plain colour: a reduced level's flipped triangles must not vanish.
                 // Wet cavity wall, not a black void.
