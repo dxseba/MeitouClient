@@ -395,6 +395,7 @@ static class CharacterShaders
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
+                if (vAnatomy == 2u) albedo *= 0.6;   // a stump's cut flesh, wet and dark
                 gloss = 0.5;
             }
             else if (m.shading == 1u && !gl_FrontFacing && vWounds != 0u && dot(vNormal, view.eye - vWorld) < 0.0)   // truly the inside: a flipped outer triangle still has its normal towards the eye

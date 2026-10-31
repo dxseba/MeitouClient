@@ -216,7 +216,7 @@ internal sealed class CharacterContent : IDisposable
         int group = WoundMasks.BodyGroup(batch.Bone);
         if (group == 0 || batch.Layer > 1) return false;
         float cut = group < 3 ? 13.83f : 8.6f;
-        return p.Y > cut - (batch.Layer == 0 ? 0.8f : 0.1f);
+        return p.Y > cut - (batch.Layer == 0 ? 1.3f : -0.2f);
     }
 
     /// <summary>A group no wound opens: the bowel is never drawn in the body, the loose body stands for it (<see cref="DebrisRenderer.Bowel"/>).</summary>
