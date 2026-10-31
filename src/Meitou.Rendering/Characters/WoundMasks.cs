@@ -150,11 +150,11 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     void Runs(int cx, int cy, in CharacterWoundMark w)
     {
         var random = new Random(cx * 7919 + cy);
-        int count = 1 + (int)(w.Depth * 2.5f);
+        int count = 1 + (int)(w.Depth * 1.6f);
         for (int run = 0; run < count; run++)
         {
             float x = cx + (random.NextSingle() - 0.5f) * 14, drift = 0, width = 1.6f + random.NextSingle() * 1.6f;
-            int length = 25 + random.Next(70);
+            int length = 10 + (int)(random.NextSingle() * random.NextSingle() * 50);
             for (int step = 0; step < length; step++)
             {
                 drift = Math.Clamp(drift + (random.NextSingle() - 0.5f) * 0.5f, -0.7f, 0.7f);
