@@ -118,6 +118,7 @@ static class CharacterShaders
         out vec4 vColour;
         out vec4 vBlood;        // the blood mapping of character.hlsl (cylinder projection of the part in its own space), before the race scale
         flat out uint vCuts;
+        out vec3 vBindPos;
         flat out uint vWounds;  // the wound mask, 0 without wounds
         flat out float vClipLayer;
         flat out float vPlated;
@@ -170,6 +171,7 @@ static class CharacterShaders
             vAnatomy = anatomy ? 1u : 0u;
             vPlated = (aInstanceData.z & 8u) != 0u ? 1.0 : 0.0;
             vCuts = aInstanceData.x - 16u;
+            vBindPos = aTangent.xyz;
             vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
@@ -297,6 +299,7 @@ static class CharacterShaders
         in vec4 vBlood;
         flat in uint vWounds;
         flat in uint vCuts;
+        in vec3 vBindPos;
         flat in float vClipLayer;
         flat in float vPlated;
         flat in uint vAnatomy;
@@ -519,14 +522,14 @@ static class CharacterShaders
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
                 if (vWounds == 0u) discard;   // the skin's own holes cut it, per pixel (the depth push in the vertex stage)
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
-                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).r > 0.35 && woundField(vUv).a > 0.5) discard;
-                // Bone snaps under the heaviest blows: a jagged gap across it at the cut's core, with splintered ends left either side.
-                if (vAnatomy == 1u && vClipLayer < 0.5 && m.shading != 1u)
-                {
-                    vec4 hit = woundField(vUv);
-                    float splinter = sin(vBlood.x * 37.0) * 0.1 + sin(vBlood.x * 91.0 + vBlood.y * 13.0) * 0.07;
-                    if (hit.r > 0.95 + splinter && hit.a > 0.97) discard;
-                }
+                // In bind space, per pixel: the anatomy's own UVs are one skin vertex's and would cut it in blocks.
+                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5)
+                    for (uint i = 0u; i < 64u; i++)
+                    {
+                        vec4 c = cutMats.m[vCuts - 16u + i / 4u][i % 4u];
+                        float reach = max(mod(c.w, 10.0) - 1.3, 0.0) * 1.1;
+                        if (c.w > 0.0 && reach > 0.0 && distance(vBindPos, c.xyz) + 0.12 * sin(vBindPos.x * 9.0 + vBindPos.y * 7.0) * sin(vBindPos.z * 8.0) < reach) discard;
+                    }
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
