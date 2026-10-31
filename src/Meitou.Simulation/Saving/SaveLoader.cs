@@ -39,6 +39,9 @@ public sealed class SaveLoadOptions
 /// </summary>
 public static class SaveLoader
 {
+    /// <summary>Characters of the last load by handle, for side files keyed by character.</summary>
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<(int C, int I), CharacterId> LastSpawned = new();
+
     /// <summary>Meitou-only CAMERA string: the world seed in decimal (docs/formats/save.md "CAMERA"). The original ignores it.</summary>
     public const string SeedKey = "meitou seed";
 
@@ -276,6 +279,7 @@ public static class SaveLoader
             squad.Members.Add(id);
             bySource[sc] = id;
             context.Spawned[(sc.Handle.C, sc.Handle.I)] = id;
+            LastSpawned[(sc.Handle.C, sc.Handle.I)] = id;
             loaded.Characters.Add(id);
             loaded.SpawnedSlots.Add((platoon.Name, sc.Handle.I));
             if (sc.IsLeader && squad.Leader.IsNone) squad.Leader = id;

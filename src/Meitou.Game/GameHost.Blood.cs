@@ -183,6 +183,8 @@ sealed partial class GameHost
     const float WoundHealDose = 0.01f;
     long woundHealStep;
 
+    const string WoundFile = "wounds.meitou";
+
     void UpdateWounds(World world)
     {
         Meitou.Rendering.Characters.WoundMasks.Sample ??= static (x, y, w) =>
@@ -197,6 +199,8 @@ sealed partial class GameHost
             wounds.Clear();
             gutFalls.Clear();
             gutsSpilled.Clear();
+            if (saveInUse is { } folder && File.Exists(Path.Combine(folder, WoundFile)))
+                wounds.Read(File.ReadLines(Path.Combine(folder, WoundFile)), key => Meitou.Simulation.Saving.SaveLoader.LastSpawned.TryGetValue(key, out var who) ? who : null);
             world.CombatEvents = woundQueue;
         }
         if (world.Tick / WoundHealTicks != woundHealStep) { woundHealStep = world.Tick / WoundHealTicks; wounds.Heal(WoundHealDose); }

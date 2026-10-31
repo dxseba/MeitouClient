@@ -203,12 +203,15 @@ sealed partial class GameHost
         double captureMs = watch.Elapsed.TotalMilliseconds;
         string folder = destination ?? QuickSave.Folder();
         if (!feedback) saveInUse = folder;
+        var woundHandles = Meitou.Simulation.Saving.SaveCapture.LastHandles;
+        string[]? wounds2 = woundHandles is null ? null : [.. wounds.Write(id => woundHandles.TryGetValue(id, out var hand) ? (hand.C, hand.I) : null)];
         saveWrite = Task.Run(() =>
         {
             try
             {
                 var written = Stopwatch.StartNew();
                 game.Write(folder);
+                if (wounds2 is { } lines) File.WriteAllLines(Path.Combine(folder, WoundFile), lines);
                 Console.WriteLine($"save      {folder}: captured in {captureMs:0.0} ms{(ahead ? "" : " (the base made on the spot)")}, written in {written.ElapsedMilliseconds} ms");
                 if (!feedback) saveNotices.Enqueue(("Saved", false));
             }

@@ -37,6 +37,19 @@ public class WoundTrackerTests
     }
 
     [Fact]
+    public void Wounds_survive_their_side_file()
+    {
+        var t = new WoundTracker();
+        t.Apply(Hit(), WoundRegion.Chest, 100);
+        t.Apply(Hit(limb: 1), WoundRegion.Unknown, 100);
+        var lines = t.Write(_ => (7, 9)).ToArray();
+        var back = new WoundTracker();
+        back.Read(lines, key => key == (7, 9) ? Victim : null);
+        Assert.Equal(t.Of(Victim)!.Torso[0], back.Of(Victim)!.Torso[0]);
+        Assert.Equal(t.Of(Victim)!.Limbs[0], back.Of(Victim)!.Limbs[0]);
+    }
+
+    [Fact]
     public void Wounds_grow_shallower_and_close()
     {
         var t = new WoundTracker();

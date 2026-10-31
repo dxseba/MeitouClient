@@ -158,6 +158,8 @@ public static partial class SaveCapture
         public readonly List<(SaveItem Item, CharacterId Owner)> Owners = [];
     }
 
+    /// <summary>The handles of the last capture, for side files keyed by character.</summary>
+    public static volatile Dictionary<CharacterId, Hand>? LastHandles;
     [ThreadStatic] static MemoryPass? memoryPass;
 
     static Dialogue.SquadMemory? MemoryOf(World world) => world.Systems.OfType<Dialogue.DialogueSystem>().FirstOrDefault()?.Memory;
@@ -169,6 +171,7 @@ public static partial class SaveCapture
     {
         if (memoryPass is not { } pass) return;
         memoryPass = null;
+        LastHandles = pass.Handles;
         foreach (var (record, data) in pass.Targets)
             MemorySave.Write(record, data, id => pass.Handles.TryGetValue(id, out var hand) ? hand : null);
         // The carry links (FUN_1406280a0 writes the partner's handle under `carrying`, the null one when it is not saved).
