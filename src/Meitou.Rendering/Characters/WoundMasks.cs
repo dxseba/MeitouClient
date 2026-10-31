@@ -17,9 +17,10 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     /// <summary>The cut chart's unit in UV: a body's UVs give about 0.05 per world unit (<b>Observed</b> tuning value).</summary>
     const float ChartUv = 0.045f;
 
-    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public long Used; public Vector4[] Spheres = new Vector4[16]; }
+    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public long Used; public Vector4[] Spheres = new Vector4[Spheres16]; }
 
     /// <summary>World units round a wound in which the anatomy shows: a tuning value.</summary>
+    public const int Spheres16 = 64;
     const float SphereRadius = 1.4f;
 
     readonly Dictionary<long, Mask> masks = [];
@@ -51,7 +52,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         repaints++;
         Array.Clear(pixels);
         int count = 0;
-        var spheres = new Vector4[16];
+        var spheres = new Vector4[Spheres16];
         foreach (var w in wounds)
             if (Paint(w, rig, points) is { } at && count < spheres.Length) spheres[count++] = new Vector4(at, SphereRadius + 10 * BodyGroup(w.BoneA));
         using (var batch = gpu.Uploads.Begin())

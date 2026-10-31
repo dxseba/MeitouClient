@@ -413,7 +413,7 @@ internal sealed class CharacterContent : IDisposable
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
-                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted) ? 0.25f : 0) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted) ? 0.25f : 0) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
             }
         }
         var array = vertices.ToArray();

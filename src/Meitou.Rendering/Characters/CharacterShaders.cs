@@ -16,7 +16,7 @@ static class CharacterShaders
     public const int InstanceLocation = 7, DataLocation = 11, PreviousLocation = 12;
     /// <summary>The storage buffers of set 0 after the frame's own (the order of the extra list given to <c>NativeFrame.Prepare</c>): the bone palettes, the materials, the face morph offsets, last frame's palettes (motion pass).</summary>
     /// <summary>A wounded body's palette starts one entry early: that entry's first float holds the bits of its wound mask's bindless index (<see cref="WoundMasks"/>).</summary>
-    public const int WoundHeaderBones = 5;
+    public const int WoundHeaderBones = 17;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
     public const uint WoundFlag = 1u << 31, TearFlag = 1u << 29;
@@ -111,6 +111,7 @@ static class CharacterShaders
         out vec4 vColour;
         out vec4 vBlood;        // the blood mapping of character.hlsl (cylinder projection of the part in its own space), before the race scale
         flat out uint vWounds;  // the wound mask, 0 without wounds
+        flat out float vClipLayer;
         flat out uint vAnatomy; // 1 on the anatomy part, whose UVs are its nearest skin
         out float vClip;        // anatomy: above 0 outside every wound
         out float vBloodAmount; // the blood amount of the vertex's body part (the instance carries the parts': two 8-bit amounts in the w of each matrix row)
@@ -142,6 +143,7 @@ static class CharacterShaders
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
             bool wounded = (aInstanceData.z & 0x80000000u) != 0u, anatomy = (aInstanceData.z & 0x40000000u) != 0u;
             vAnatomy = anatomy ? 1u : 0u;
+            vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
             if ((aInstanceData.z & 0x20000000u) != 0u)
@@ -150,9 +152,9 @@ static class CharacterShaders
                 uint primary = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
                 mat4 first = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
                 uint group = (floatBitsToUint(first[1 + primary / 32u][primary / 8u % 4u]) >> (primary % 8u * 4u)) & 15u;
-                for (uint i = 0u; i < 16u; i++)
+                for (uint i = 0u; i < 64u; i++)
                 {
-                    vec4 c = skin.bones[aInstanceData.x - 4u + i / 4u][i % 4u];
+                    vec4 c = skin.bones[aInstanceData.x - 16u + i / 4u][i % 4u];
                     if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, mod(c.w, 10.0) * 0.8 - distance(aPosition, c.xyz));
                 }
             }
@@ -161,9 +163,9 @@ static class CharacterShaders
             {
                 vClip = 1000.0;
                 uint lost = floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]);
-                for (uint i = 0u; i < 16u; i++)
+                for (uint i = 0u; i < 64u; i++)
                 {
-                    vec4 c = skin.bones[aInstanceData.x - 4u + i / 4u][i % 4u];
+                    vec4 c = skin.bones[aInstanceData.x - 16u + i / 4u][i % 4u];
                     if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - floor(aColour.a + 0.5)) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
                 }
             }
@@ -245,6 +247,7 @@ static class CharacterShaders
         in vec4 vColour;
         in vec4 vBlood;
         flat in uint vWounds;
+        flat in float vClipLayer;
         flat in uint vAnatomy;
         in float vClip;
         in float vBloodAmount;
@@ -404,6 +407,8 @@ static class CharacterShaders
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
                 if (vAnatomy == 1u && (vWounds == 0u || tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g < 0.5)) discard;
+                // By depth, as Gore Lab's RemoveLayer: a cut's core loses its muscle and shows the bone and organs behind; they stay whole.
+                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).r > 0.6) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);

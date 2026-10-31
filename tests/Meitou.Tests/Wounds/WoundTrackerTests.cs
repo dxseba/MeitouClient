@@ -15,15 +15,13 @@ public class WoundTrackerTests
         new(kind, tick, CombatHitSource.Melee, CharacterId.None, Victim, 2, limb, default, new Vector2(0, dirZ), new HitDamage(40, 0, 0), 0, cut);
 
     [Fact]
-    public void Torso_hits_deepen_one_wound_and_a_blow_from_behind_lands_on_the_back()
+    public void Each_torso_hit_opens_its_own_wound_and_three_on_the_belly_are_deep()
     {
         var t = new WoundTracker();
-        for (int i = 0; i < 3; i++) Assert.True(t.Apply(Hit(i), WoundRegion.Abdomen, 100));
-        Assert.True(t.Apply(Hit(9, dirZ: 1), WoundRegion.Abdomen, 100));
+        for (int i = 0; i < 3; i++) Assert.True(t.Apply(Hit(i * 40), WoundRegion.Abdomen, 100));
         var body = t.Of(Victim)!;
-        Assert.Equal(3, body.Torso[(int)WoundRegion.Abdomen]!.Value.Hits);
         Assert.True(body.DeepAbdomen);
-        Assert.Equal(1, body.Torso[(int)WoundRegion.Back]!.Value.Hits);
+        Assert.Contains(body.Limbs.ToArray(), w => w is { Segment: 9 });
     }
 
     [Fact]
@@ -33,7 +31,7 @@ public class WoundTrackerTests
         for (int i = 0; i < 200; i++) Assert.True(t.Apply(Hit(i, limb: 3), WoundRegion.Unknown, 100));
         var limbs = t.Of(Victim)!.Limbs.ToArray();
         Assert.Equal(WoundBody.LimbSlots, limbs.Length);
-        Assert.All(limbs, w => Assert.InRange(w!.Value.Segment, 6, 7));
+        Assert.All(limbs.Where(w => w is not null), w => Assert.InRange(w!.Value.Segment, 6, 7));
     }
 
     [Fact]
@@ -45,7 +43,7 @@ public class WoundTrackerTests
         var lines = t.Write(_ => (7, 9)).ToArray();
         var back = new WoundTracker();
         back.Read(lines, key => key == (7, 9) ? Victim : null);
-        Assert.Equal(t.Of(Victim)!.Torso[0], back.Of(Victim)!.Torso[0]);
+        Assert.Equal(t.Of(Victim)!.Limbs[1], back.Of(Victim)!.Limbs[1]);
         Assert.Equal(t.Of(Victim)!.Limbs[0], back.Of(Victim)!.Limbs[0]);
     }
 
@@ -54,9 +52,9 @@ public class WoundTrackerTests
     {
         var t = new WoundTracker();
         t.Apply(Hit(), WoundRegion.Chest, 100);
-        float dose = t.Of(Victim)!.Torso[(int)WoundRegion.Chest]!.Value.Dose;
+        float dose = t.Of(Victim)!.Limbs[0]!.Value.Dose;
         t.Heal(dose / 2);
-        Assert.Equal(dose / 2, t.Of(Victim)!.Torso[(int)WoundRegion.Chest]!.Value.Dose, 4);
+        Assert.Equal(dose / 2, t.Of(Victim)!.Limbs[0]!.Value.Dose, 4);
         t.Heal(dose);
         Assert.Null(t.Of(Victim));
     }

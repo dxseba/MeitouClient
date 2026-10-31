@@ -7,13 +7,13 @@ namespace Meitou.Simulation.Wounds;
 /// <summary>Torso regions; <see cref="Back"/> collects torso hits from behind. Ported from Kenshi Gore Lab's <c>TorsoWounds</c>.</summary>
 public enum WoundRegion { Unknown = -1, Chest, Abdomen, Back }
 
-/// <summary>One wound. <see cref="Segment"/>: L upper arm 0, L forearm 1, R upper arm 2, R forearm 3, L thigh 4, L calf 5, R thigh 6, R calf 7, head 8; -1 on the torso.</summary>
+/// <summary>One wound. <see cref="Segment"/>: L upper arm 0, L forearm 1, R upper arm 2, R forearm 3, L thigh 4, L calf 5, R thigh 6, R calf 7, head 8, torso 9; -1 for the three region wounds of old saves.</summary>
 public readonly record struct Wound(int Segment, float T, Vector3 Side, WoundShape Shape, float Dose, int Hits, int Age);
 
 /// <summary>The visual wounds of one character: one per torso region, and up to <see cref="LimbSlots"/> on the limbs, a near hit deepening a wound and the oldest giving way.</summary>
 public sealed class WoundBody
 {
-    public const int LimbSlots = 8;
+    public const int LimbSlots = 96;
     readonly Wound?[] torso = new Wound?[3];
     readonly Wound?[] limbs = new Wound?[LimbSlots];
     int clock;
@@ -22,7 +22,8 @@ public sealed class WoundBody
     public ReadOnlySpan<Wound?> Limbs => limbs;
 
     /// <summary>A deep belly wound, the condition for exposed guts.</summary>
-    public bool DeepAbdomen => torso[(int)WoundRegion.Abdomen] is { Dose: >= 1.2f, Hits: >= 3 };
+    public bool DeepAbdomen => BellyHits >= 3;
+    public int BellyHits { get; set; }
 
     /// <summary>Closes every wound by <paramref name="dose"/>, shallower as it heals; a closed one goes. True while any is left.</summary>
     public bool Heal(float dose)
@@ -58,7 +59,7 @@ public sealed class WoundBody
 
     public bool ApplyLimb(int segment, float t, Vector3 side, float tilt, WoundInput input)
     {
-        if (segment is < 0 or > 8 || !float.IsFinite(t)) return false;
+        if (segment is < 0 or > 9 || !float.IsFinite(t)) return false;
         int target = -1;
         for (int i = 0; i < LimbSlots && target < 0; i++)
             if (limbs[i] is { } w && w.Segment == segment && MathF.Abs(w.T - t) < 0.18f && Vector3.Dot(w.Side, side) > 0.5f) target = i;
@@ -163,7 +164,15 @@ public sealed class WoundTracker
             float side = behind ? -1 : 1;
             applied = body.ApplyLimb(8, 0.3f + ((roll >> 8) & 0xFF) / 255f * 0.5f, new Vector3(0, 0, side), 0, input);
         }
-        else applied = body.ApplyTorso(region is WoundRegion.Unknown ? region : behind ? WoundRegion.Back : region, input);
+        else
+        {
+            // Each torso hit its own wound, on its own spot; only a near hit deepens one.
+            ulong roll = Rng.Hash((ulong)e.Tick, (ulong)(uint)e.Victim.Slot, default, (ulong)e.Part + 77);
+            float across = ((roll >> 8) & 0xFFFF) / 65535f * 2 - 1, height = ((roll >> 24) & 0xFFFF) / 65535f;
+            float t = region == WoundRegion.Chest ? 0.5f + height * 0.42f : 0.12f + height * 0.42f;
+            applied = body.ApplyLimb(9, t, Vector3.Normalize(new Vector3(across * 1.1f, 0, behind ? -1 : 1)), 0, input);
+            if (applied && region == WoundRegion.Abdomen) body.BellyHits++;
+        }
         if (applied) bodies[e.Victim] = body;
         return applied;
     }

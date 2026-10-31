@@ -205,6 +205,8 @@ sealed partial class GameHost
         if (g.SandboxSever && !sandboxFoe.IsNone && world.Tick == 30) world.Commands.Enqueue(new Meitou.Simulation.DebugSever(sandboxFoe, 0) { Tick = world.Tick });   // a stump to check
         if (sandboxFoe.IsNone || world.Tick % 20 != 0 || world.Characters.Cold(sandboxFoe.Slot)?.Medical is not { } medical) return;
         int part = dummyHits % medical.Parts.Count;
+        if (g.SandboxTorso)   // the chest and stomach only
+            part = medical.Parts.Select((p, i) => (p, i)).Where(x => x.p.Template.StringId is "100-gamedata.quack" or "101-gamedata.quack").ElementAt(dummyHits % 2).i;
         int cut = (dummyHits++ / medical.Parts.Count) % 2 == 0 ? 1 : 3;
         float yaw = world.Characters.Previous[sandboxFoe.Slot].Yaw;
         var position = world.Characters.Previous[sandboxFoe.Slot].Position;
