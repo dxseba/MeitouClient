@@ -95,6 +95,7 @@ sealed partial class GameHost
             population.SpawnSandbox(world, extra[i], new Vector2(r * MathF.Cos(angle), r * MathF.Sin(angle)), player: true, yaw: angle + MathF.PI, variant: i + 1);
         }
         sandboxFollow |= g.SandboxBare;   // a wound test watches the fighters
+        if (g.SandboxPower is { } power) (Meitou.Simulation.Combat.CombatSystem.TestPowerOf, Meitou.Simulation.Combat.CombatSystem.TestPower) = (sandboxHero, power / 100);
         playerSquad = world.Squads.Find(world.Player.Squad);
         world.Commands.Enqueue(new SelectCommand([sandboxHero]) { Tick = world.Tick });
         bool patrol = false, fight = false;

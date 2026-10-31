@@ -92,6 +92,7 @@ public sealed partial class CombatSystem
             ? DamageFormulas.UnarmedPacket(UnarmedRating(world, a, ac, fighter), Eff(ac, StatsEnumerated.Toughness), str, fighter.FistsItem, kind, dc.Race.StringId, fighter.DamageOutput, combat)
             : DamageFormulas.Packet(skill, dex, str, fighter.Weapon!, kind, dc.Race.StringId, fighter.DamageOutput, combat);
         packet = Powered(packet, tech, blow);
+        if (table.IdOf(a) == TestPowerOf) packet = packet with { Cut = packet.Cut * TestPower, Blunt = packet.Blunt * TestPower, Pierce = packet.Pierce * TestPower };
 
         var ctx = MakeContext(world, d, dc);
         var events = hitEvents;   // Apply is serial, so one list serves every hit

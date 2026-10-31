@@ -18,6 +18,10 @@ public readonly record struct CombatEvent(CombatEventKind Kind, long Tick, Comba
 
 public sealed partial class CombatSystem
 {
+    /// <summary>A sandbox test: this character's melee damage is multiplied by <see cref="TestPower"/>.</summary>
+    public static CharacterId TestPowerOf { get; set; } = CharacterId.None;
+    public static float TestPower { get; set; } = 1;
+
     /// <summary>Publishes a hit and its medical events. Serial, like the hits themselves.</summary>
     internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false)
     {
