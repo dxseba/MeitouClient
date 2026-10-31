@@ -146,7 +146,7 @@ public sealed class WoundTracker
         var forward = new Vector2(MathF.Sin(e.VictimYaw), MathF.Cos(e.VictimYaw));
         bool behind = Vector2.Dot(e.Direction, forward) > 0;
         // The region picks the chart, so a hit from behind on the Back region is a valid front-of-chart hit.
-        var input = new WoundInput(cut, WoundAttack.Front, false, true, e.Damage.Cut > 0 ? e.Damage.Cut + e.Damage.Blunt * 0.5f : 0, e.Damage.Blunt, e.Damage.Pierce, maximum * VisibleShare, Size: Math.Clamp(0.7f + (e.Damage.Cut + e.Damage.Pierce) / 10, 0.7f, 3f));   // the harder the blade bites, the longer the cut   // a blade bruises what it cuts: most of a heavy weapon's damage is blunt
+        var input = new WoundInput(cut, WoundAttack.Front, false, true, e.Damage.Cut > 0 ? e.Damage.Cut + e.Damage.Blunt * 0.5f : 0, e.Damage.Blunt, e.Damage.Pierce, maximum * VisibleShare, Size: Math.Clamp(0.7f + (e.Damage.Cut + e.Damage.Pierce) / 14, 0.7f, 1.8f));   // the harder the blade bites, the longer the cut   // a blade bruises what it cuts: most of a heavy weapon's damage is blunt
         bool applied;
         if (e.LimbSlot is >= 0 and <= 3)
         {

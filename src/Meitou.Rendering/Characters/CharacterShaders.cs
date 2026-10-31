@@ -145,7 +145,7 @@ static class CharacterShaders
                     float radius = mod(c.w, 10.0), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
                     dent = max(dent, near * near * (3.0 - 2.0 * near) * max(radius - 1.0, 0.0) * 0.28);
                 }
-                local -= aNormal * min(dent, 0.75);
+                local -= aNormal * min(dent, own == 0u ? 0.55 : own < 3u ? 0.25 : 0.4);   // never past the bone: arms are thinnest
             }
             vec4 p = world * vec4(local, 1.0);
             vCurvature = aColour.z;
@@ -458,7 +458,7 @@ static class CharacterShaders
                 if (vAnatomy == 1u && (vWounds == 0u || woundField(vUv).g < 0.5)) discard;
                 if (vAnatomy == 1u && vClipLayer > 1.5 && vClipLayer < 3.5) discard;   // patchy tendon and fat read as holes: the wound's own rim stands for them
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
-                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).a > 0.7) discard;
+                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).r > 0.9 && woundField(vUv).a > 0.85) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
