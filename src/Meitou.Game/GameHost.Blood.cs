@@ -154,6 +154,11 @@ sealed partial class GameHost
         foreach (var slot in body.Limbs)
             if (slot is { } w && marks.Count < 16)
             {
+                if (w.Segment == 8)
+                {
+                    marks.Add(new("Bip01 Neck", "Bip01 Head", w.T + 0.6f, w.Side, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+                    continue;
+                }
                 string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";
                 bool lower = (w.Segment & 1) != 0;
                 var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));

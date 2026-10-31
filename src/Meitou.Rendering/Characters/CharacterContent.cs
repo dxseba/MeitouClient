@@ -387,8 +387,6 @@ internal sealed class CharacterContent : IDisposable
         var vertices = new List<Vertex>();
         foreach (var batch in Meitou.Data.Characters.EcorcheAsset.Read(stream))
         {
-            // Hands, feet and head stay out for now: their anatomy is larger than the skin there.
-            if (batch.Bone.Contains("Hand") || batch.Bone.Contains("Foot") || batch.Bone.Contains("Toe") || batch.Bone.Contains("Finger") || batch.Bone.Contains("Head") || batch.Bone.Contains("Jaw")) continue;
             if ((rig.Handle(batch.Bone) ?? (batch.Bone == "Bip01 Jaw" ? rig.Handle("Bip01 Head") : null)) is not { } bone) continue;
             var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.48f, 0.09f, 0.08f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.55f, 0.12f, 0.12f, 1) };
             foreach (var v in batch.Vertices)

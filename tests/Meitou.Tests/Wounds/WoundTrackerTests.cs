@@ -42,7 +42,7 @@ public class WoundTrackerTests
         var t = new WoundTracker();
         Assert.False(t.Apply(Hit(kind: CombatEventKind.PartSevered), WoundRegion.Chest, 100));
         Assert.False(t.Apply(Hit(cut: -1), WoundRegion.Chest, 100));
-        Assert.False(t.Apply(Hit(), WoundRegion.Unknown, 100));
         Assert.Null(t.Of(Victim));
+        Assert.True(t.Apply(Hit(), WoundRegion.Unknown, 100));   // neither torso nor limb: the head
     }
 }

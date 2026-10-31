@@ -7,7 +7,7 @@ namespace Meitou.Simulation.Wounds;
 /// <summary>Torso regions; <see cref="Back"/> collects torso hits from behind. Ported from Kenshi Gore Lab's <c>TorsoWounds</c>.</summary>
 public enum WoundRegion { Unknown = -1, Chest, Abdomen, Back }
 
-/// <summary>One wound. <see cref="Segment"/>: L upper arm 0, L forearm 1, R upper arm 2, R forearm 3, L thigh 4, L calf 5, R thigh 6, R calf 7; -1 on the torso.</summary>
+/// <summary>One wound. <see cref="Segment"/>: L upper arm 0, L forearm 1, R upper arm 2, R forearm 3, L thigh 4, L calf 5, R thigh 6, R calf 7, head 8; -1 on the torso.</summary>
 public readonly record struct Wound(int Segment, float T, Vector3 Side, WoundShape Shape, float Dose, int Hits, int Age);
 
 /// <summary>The visual wounds of one character: one per torso region, and up to <see cref="LimbSlots"/> on the limbs, a near hit deepening a wound and the oldest giving way.</summary>
@@ -36,7 +36,7 @@ public sealed class WoundBody
 
     public bool ApplyLimb(int segment, float t, Vector3 side, float tilt, WoundInput input)
     {
-        if (segment is < 0 or > 7 || !float.IsFinite(t)) return false;
+        if (segment is < 0 or > 8 || !float.IsFinite(t)) return false;
         int target = -1;
         for (int i = 0; i < LimbSlots && target < 0; i++)
             if (limbs[i] is { } w && w.Segment == segment && MathF.Abs(w.T - t) < 0.18f && Vector3.Dot(w.Side, side) > 0.5f) target = i;
@@ -92,6 +92,13 @@ public sealed class WoundTracker
             float tilt = (((roll >> 24) & 0xFFFF) / 65535f * 2 - 1) * 0.44f;
             var local = Vector2.Normalize(new Vector2(forward.Y * e.Direction.X - forward.X * e.Direction.Y, Vector2.Dot(forward, e.Direction)) + new Vector2(0, 1e-6f));
             applied = body.ApplyLimb(segment, t, new Vector3(-local.X, 0, -local.Y), tilt, input);
+        }
+        else if (region == WoundRegion.Unknown && e.LimbSlot < 0)
+        {
+            // Not chest or stomach: the head, a ninth segment.
+            ulong roll = Rng.Hash((ulong)e.Tick, (ulong)(uint)e.Victim.Slot, default, (ulong)e.Part);
+            float side = behind ? -1 : 1;
+            applied = body.ApplyLimb(8, 0.3f + ((roll >> 8) & 0xFF) / 255f * 0.5f, new Vector3(0, 0, side), 0, input);
         }
         else applied = body.ApplyTorso(region is WoundRegion.Unknown ? region : behind ? WoundRegion.Back : region, input);
         if (applied) bodies[e.Victim] = body;
