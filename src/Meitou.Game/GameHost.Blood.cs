@@ -123,6 +123,7 @@ sealed partial class GameHost
     readonly ConcurrentQueue<CharacterId> sparkQueue = new();
     readonly ConcurrentQueue<Meitou.Simulation.Combat.CombatEvent> woundQueue = new();
     readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
+    static readonly Meitou.Simulation.Wounds.WoundBody NoWounds = new();
 
     sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; }
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
@@ -181,8 +182,8 @@ sealed partial class GameHost
     /// <summary>The character's open wounds as the renderer places them (segments as <see cref="Meitou.Simulation.Wounds.Wound"/>).</summary>
     IReadOnlyList<Meitou.Rendering.CharacterWoundMark> WoundMarks(CharacterId id)
     {
-        if (wounds.Of(id) is not { } body) return [];
         var marks = new List<Meitou.Rendering.CharacterWoundMark>();
+        var body = wounds.Of(id) ?? NoWounds;
         for (int i = 0; i < body.Torso.Length; i++)
             if (body.Torso[i] is { } w)
                 {

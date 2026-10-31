@@ -23,6 +23,9 @@ public sealed record DebugHeal(IReadOnlyList<CharacterId> Characters) : DebugCom
 public sealed record DebugMaxSkills(IReadOnlyList<CharacterId> Characters) : DebugCommand;
 
 /// <summary>One cut of <see cref="Cut"/> damage to each character, on a part chosen as a blow's is.</summary>
+/// <summary>Cuts off a limb (slot as <c>BodyPartTemplate.LimbSlot</c>).</summary>
+public sealed record DebugSever(CharacterId Character, int LimbSlot) : DebugCommand;
+
 public sealed record DebugDamage(IReadOnlyList<CharacterId> Characters, float Cut) : DebugCommand;
 
 /// <summary>
@@ -88,6 +91,17 @@ static class DebugCheats
                 foreach (var id in max.Characters)
                     if (table.TryResolveNext(id, out int skilled) && table.Cold(skilled)?.Stats is { } stats)
                         for (var s = StatsEnumerated.None + 1; s < StatsEnumerated.End; s++) stats[s] = 100;
+                break;
+            case DebugSever sever when data is not null:
+                if (Body(world, data, sever.Character) is ({ } cut, var cutContext) && table.TryResolveNext(sever.Character, out int cutSlot))
+                    for (int p = 0; p < cut.Parts.Count; p++)
+                        if (cut.Parts[p].Template.LimbSlot == sever.LimbSlot)
+                        {
+                            var severed = new List<MedicalEvent>();
+                            cut.ApplyHit(p, new HitDamage(250, 0, 0), cutContext, severed);
+                            if (severed.Exists(e => e.Kind == MedicalEventKind.PartSevered)) table.LimbsChanged.Enqueue((cutSlot, sever.LimbSlot));
+                            break;
+                        }
                 break;
             case DebugDamage damage when data is not null:
                 // Combat and the body pass read KO and death from the medical state; what they do only on the hit's events is done here.
