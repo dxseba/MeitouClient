@@ -17,10 +17,10 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     /// <summary>The cut chart's unit in UV: a body's UVs give about 0.05 per world unit (<b>Observed</b> tuning value).</summary>
     const float ChartUv = 0.045f;
 
-    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public Vector4[] Spheres = new Vector4[8]; }
+    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public Vector4[] Spheres = new Vector4[16]; }
 
     /// <summary>World units round a wound in which the anatomy shows: a tuning value.</summary>
-    const float SphereRadius = 0.7f;
+    const float SphereRadius = 0.6f;
 
     readonly Dictionary<long, Mask> masks = [];
     readonly byte[] pixels = new byte[Size * Size * 4];
@@ -43,7 +43,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         repaints++;
         Array.Clear(pixels);
         int count = 0;
-        var spheres = new Vector4[8];
+        var spheres = new Vector4[16];
         foreach (var w in wounds)
             if (Paint(w, rig, points) is { } at && count < spheres.Length) spheres[count++] = new Vector4(at, SphereRadius + 10 * BodyGroup(w.BoneA));
         using (var batch = gpu.Uploads.Begin())
@@ -78,7 +78,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points)
     {
         if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return null;
-        var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T);
+        var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T) + w.Side * 1.2f;   // out to the skin, so a slanted side lands off the bone
         float best = float.MaxValue;
         var uv = Vector2.Zero;
         var hit = Vector3.Zero;

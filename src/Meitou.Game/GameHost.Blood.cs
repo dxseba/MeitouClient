@@ -146,9 +146,13 @@ sealed partial class GameHost
         var marks = new List<Meitou.Rendering.CharacterWoundMark>();
         for (int i = 0; i < body.Torso.Length; i++)
             if (body.Torso[i] is { } w)
-                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f, i == 2 ? -Vector3.UnitZ : Vector3.UnitZ, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+                {
+                // Off the centre line: each wound keeps its own slant and height.
+                float off = w.Age * 37 % 7 / 3f - 1;
+                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.06f, Vector3.Normalize(new Vector3(off * 0.6f, 0, i == 2 ? -1 : 1)), w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+            }
         foreach (var slot in body.Limbs)
-            if (slot is { } w && marks.Count < 8)
+            if (slot is { } w && marks.Count < 16)
             {
                 string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";
                 bool lower = (w.Segment & 1) != 0;

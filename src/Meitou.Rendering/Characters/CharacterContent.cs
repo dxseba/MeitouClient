@@ -208,8 +208,8 @@ internal sealed class CharacterContent : IDisposable
     sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null,
         float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0);
 
-    /// <summary>How far anatomy is pulled in along its normals (world units) to stay under the skin; a tuning value.</summary>
-    const float AnatomyInset = 0.16f;
+    /// <summary>How far anatomy is pulled in along its normals (world units). Negative: it sits on top of the darkened skin, and the wound mask alone limits it to the cuts.</summary>
+    const float AnatomyInset = -0.25f;
     readonly string modsDirectory;
 
     public CharacterContent(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)
@@ -351,7 +351,7 @@ internal sealed class CharacterContent : IDisposable
     }
 
     /// <summary>Kenshi Gore Lab's Ecorche file from the install's mods folder, fitted to the rig; null without the file or the bones. Rigid per bone, one mesh per rig, the layer as vertex colour.</summary>
-    LoadedMesh? AnatomyMesh(SkeletonRig rig)
+    LoadedMesh? AnatomyMesh(SkeletonRig rig, WoundPoint[] skin)
     {
         var key = ("anatomy", rig.BoneCount, false, (string?)rig.Skeleton.GetHashCode().ToString());
         if (meshes.TryGetValue(key, out var cached)) return cached;
@@ -361,15 +361,41 @@ internal sealed class CharacterContent : IDisposable
         float scale = (rig.BindPosition[neck] - hip).Length() / 6.1649f;
         if (scale is < 0.5f or > 2f) return null;
         using var stream = File.OpenRead(path);
+        // The skin vertices by unit cell: each anatomy vertex takes its nearest skin UV, so it can read the wound mask.
+        var cells = new Dictionary<(int, int, int), List<WoundPoint>>();
+        static (int, int, int) Cell(Vector3 p) => ((int)MathF.Floor(p.X), (int)MathF.Floor(p.Y), (int)MathF.Floor(p.Z));
+        foreach (var point in skin)
+        {
+            if (!cells.TryGetValue(Cell(point.Position), out var list)) cells[Cell(point.Position)] = list = [];
+            list.Add(point);
+        }
+        Vector2 NearestUv(Vector3 p)
+        {
+            var (x, y, z) = Cell(p);
+            float best = float.MaxValue;
+            var uv = Vector2.Zero;
+            for (int r = 1; r <= 4 && best == float.MaxValue; r++)
+                for (int i = -r; i <= r; i++) for (int j = -r; j <= r; j++) for (int k = -r; k <= r; k++)
+                    if (cells.TryGetValue((x + i, y + j, z + k), out var list))
+                        foreach (var q in list)
+                        {
+                            float d = Vector3.DistanceSquared(q.Position, p);
+                            if (d < best) (best, uv) = (d, q.Uv);
+                        }
+            return uv;
+        }
         var vertices = new List<Vertex>();
         foreach (var batch in Meitou.Data.Characters.EcorcheAsset.Read(stream))
         {
             // Hands, feet and head stay out for now: their anatomy is larger than the skin there.
             if (batch.Bone.Contains("Hand") || batch.Bone.Contains("Foot") || batch.Bone.Contains("Toe") || batch.Bone.Contains("Finger") || batch.Bone.Contains("Head") || batch.Bone.Contains("Jaw")) continue;
             if ((rig.Handle(batch.Bone) ?? (batch.Bone == "Bip01 Jaw" ? rig.Handle("Bip01 Head") : null)) is not { } bone) continue;
-            var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.245f, 0.052f, 0.045f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.35f, 0.06f, 0.06f, 1) };
+            var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.48f, 0.09f, 0.08f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.55f, 0.12f, 0.12f, 1) };
             foreach (var v in batch.Vertices)
-                vertices.Add(new Vertex { Position = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip - v.Normal * AnatomyInset, Normal = v.Normal, Uv = v.Uv, Colour = colour with { W = WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
+            {
+                var fitted = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
+                vertices.Add(new Vertex { Position = fitted - v.Normal * AnatomyInset, Normal = v.Normal, Uv = NearestUv(fitted), Colour = colour with { W = WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
+            }
         }
         var array = vertices.ToArray();
         var indices = new uint[array.Length];
@@ -811,7 +837,7 @@ internal sealed class CharacterContent : IDisposable
             asset.Lamps.Add((bone, Matrix4x4.CreateTranslation(local), asset.AttachCount++, carried.Light));
         }
 
-        if (!asset.Animal && AnatomyMesh(rig) is { } anatomy)
+        if (!asset.Animal && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin) is { } anatomy)
             asset.Parts.Add(new AssetPart
             {
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,

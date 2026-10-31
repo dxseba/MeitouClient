@@ -24,6 +24,7 @@ sealed class GameOptions
     public string? SandboxCharacter;
     public bool SandboxBare;
     public bool SandboxDummy;
+    public float? SandboxYaw;
     /// <summary>The sandbox hero's start state, comma-separated: walk, run or free; a fixed speed in units/s; patrol (a 400-unit line), for pictures.</summary>
     public string? SandboxMode;
     /// <summary><c>--sandbox-races</c>: one character of every person race (a CHARACTER record listing only that race) in rings round the pair, whatever n is.</summary>
@@ -160,6 +161,7 @@ sealed class GameOptions
                     break;
                 case "--sandbox-character": g.SandboxCharacter = Next(); break;
                 case "--sandbox-bare": g.SandboxBare = true; break;
+                case "--sandbox-yaw": g.SandboxYaw = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--sandbox-dummy": g.SandboxDummy = g.SandboxBare = true; break;
                 case "--sandbox-mode": g.SandboxMode = Next(); break;
                 case "--sandbox-races": g.SandboxRaces = true; break;

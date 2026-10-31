@@ -554,7 +554,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 if (l.WoundMask != 0) {
                     var header = (byte*)bonePointer + (l.BoneBase - CharacterShaders.WoundHeaderBones) * 64L;
                     *(uint*)header = l.WoundMask;
-                    l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 64, 8));
+                    l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 64, 16));
                 }
                 state.Attach.CopyTo(attachArray, l.AttachBase);
                 if (motion)
