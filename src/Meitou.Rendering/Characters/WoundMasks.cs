@@ -107,6 +107,24 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         return MathF.Abs(along) >= 1 ? 0 : MathF.Max(0, 1 - MathF.Abs(across) / (0.09f * (1 - along * along) + 0.01f));
     }
 
+    readonly System.Collections.Concurrent.ConcurrentDictionary<SkeletonRig, int[]> chains = new();
+
+    /// <summary>The body group a bone hangs from, walking up to a named limb bone (a hand's prop bones count as its arm).</summary>
+    public int GroupOfBone(SkeletonRig rig, int handle)
+    {
+        var groups = chains.GetOrAdd(rig, static r =>
+        {
+            var names = new string[r.BoneCount];
+            foreach (var bone in r.Skeleton.Bones) if (bone.Handle < names.Length) names[bone.Handle] = bone.Name;
+            var result = new int[r.BoneCount];
+            for (int h = 0; h < result.Length; h++)
+                for (int x = h; x >= 0 && x < names.Length; x = r.Parent[x])
+                    if (names[x] is { } name && BodyGroup(name) != 0) { result[h] = BodyGroup(name); break; }
+            return result;
+        });
+        return handle >= 0 && handle < groups.Length ? groups[handle] : 0;
+    }
+
     /// <summary>The cuts of the character's mask, as the shader draws them: UV, angle, length x 10000 + depth.</summary>
     public Vector4[]? Cuts(long key) => masks.TryGetValue(key, out var mask) ? mask.Cuts : null;
 
