@@ -229,7 +229,7 @@ sealed partial class GameHost
             {
                 if (w.Segment == 8)
                 {
-                    marks.Add(new("Bip01 Neck", "Bip01 Head", 1.5f + w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
+                    marks.Add(new("Bip01 Neck", "Bip01 Head", 2.2f + w.T, new Vector3(w.Age % 2 == 0 ? 0.9f : -0.9f, 0.5f, 0.2f * w.Side.Z), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
                     continue;
                 }
                 string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";

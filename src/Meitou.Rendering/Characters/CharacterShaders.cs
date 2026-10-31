@@ -248,7 +248,7 @@ static class CharacterShaders
         // Open flesh over the albedo, from the character's wound mask.
         void woundSurface(inout vec3 albedo, inout float gloss)
         {
-            vec3 cut = tex(vWounds, vUv).rgb;
+            vec3 cut = tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).rgb;
             if (cut.g > 0.6) discard;   // a real hole: the anatomy and the body's inside show through
             albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.b);
             // Cut edges, outside in: bruise, then a rim of yellow fat just before the hole.
@@ -400,7 +400,7 @@ static class CharacterShaders
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
-                if (vAnatomy == 1u && (vWounds == 0u || tex(vWounds, vUv).g < 0.5)) discard;
+                if (vAnatomy == 1u && (vWounds == 0u || tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g < 0.5)) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);

@@ -13,7 +13,7 @@ readonly record struct WoundPoint(Vector3 Position, Vector3 Normal, Vector2 Uv, 
 /// </summary>
 sealed class WoundMasks(IGpuContext gpu) : IDisposable
 {
-    const int Size = 256, Capacity = 64, RepaintsPerFrame = 4;
+    const int Size = 512, Capacity = 64, RepaintsPerFrame = 4;
     /// <summary>The cut chart's unit in UV: a body's UVs give about 0.05 per world unit (<b>Observed</b> tuning value).</summary>
     const float ChartUv = 0.045f;
 
@@ -87,7 +87,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points)
     {
         // A face takes far more UV per world unit than a body.
-        float chart = w.BoneB.Contains("Head") ? ChartUv * 0.15f : ChartUv;
+        float chart = w.BoneB.Contains("Head") ? ChartUv * 0.5f : ChartUv;
         if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return null;
         var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T) + w.Side * 1.2f;   // out to the skin, so a slanted side lands off the bone
         float best = float.MaxValue;
@@ -100,11 +100,12 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             if (d < best) (best, uv, hit) = (d, p.Uv, p.Position);
         }
         if (best == float.MaxValue) return null;
-        int cx = (int)(uv.X * Size), cy = (int)(uv.Y * Size), reach = (int)(3 * chart * Size);
+        // The head sits in v -1..0, the body in 0..1: each its half of the mask.
+        int cx = (int)(uv.X * Size), cy = (int)((uv.Y + 1) * 0.5f * Size),  reach = (int)(3 * chart * Size);
         for (int y = -reach; y <= reach; y++)
             for (int x = -reach; x <= reach; x++)
             {
-                var s = Sample!(x / (chart * Size), y / (chart * Size), w);
+                var s = Sample!(x / (chart * Size), y * 2 / (chart * Size), w);
                 if (s.Z <= 0) continue;
                 int i = ((((cy + y) % Size + Size) % Size) * Size + ((cx + x) % Size + Size) % Size) * 4;
                 pixels[i] = Math.Max(pixels[i], (byte)(s.X * 255));
