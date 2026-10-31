@@ -5,7 +5,7 @@ using Meitou.Rendering.Gpu;
 namespace Meitou.Rendering.Characters;
 
 /// <summary>A body vertex, for finding where on the skin a wound lands.</summary>
-readonly record struct WoundPoint(Vector3 Position, Vector3 Normal, Vector2 Uv);
+readonly record struct WoundPoint(Vector3 Position, Vector3 Normal, Vector2 Uv, int Bone = 0);
 
 /// <summary>
 /// A small texture per wounded character in its body's UVs: red the cut's core, green its open area, blue the bruised ring. Painted on the CPU when the character's

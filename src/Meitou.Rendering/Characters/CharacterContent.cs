@@ -299,7 +299,7 @@ internal sealed class CharacterContent : IDisposable
             var model = Model.Build(mesh, boneCount, gameBinormals: !icon, tangentSign: icon);
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
             if (limbs is not null || partMap is not null)
-                WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv))];
+                WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv, (int)(v.Bones & 255)))];
             if (limbs is not null || partMap is not null) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
             // Not an icon's: its colour is the mesh's own vertex colour (CharacterShaders.VertexColoured), and icons take no skin.
             if (!icon) MarkCurvature(model);
@@ -371,7 +371,10 @@ internal sealed class CharacterContent : IDisposable
             if (!cells.TryGetValue(Cell(point.Position), out var list)) cells[Cell(point.Position)] = list = [];
             list.Add(point);
         }
-        WoundPoint Nearest(Vector3 p)
+        // Of the same body group: in the bind pose a hand lies beside the hip, and must not read the hip's wounds.
+        var groups = new int[rig.BoneCount];
+        foreach (var boneRecord in rig.Skeleton.Bones) if (boneRecord.Handle < groups.Length) groups[boneRecord.Handle] = WoundMasks.BodyGroup(boneRecord.Name);
+        WoundPoint Nearest(Vector3 p, int group)
         {
             var (x, y, z) = Cell(p);
             float best = float.MaxValue;
@@ -381,6 +384,7 @@ internal sealed class CharacterContent : IDisposable
                     if (cells.TryGetValue((x + i, y + j, z + k), out var list))
                         foreach (var q in list)
                         {
+                            if (groups[Math.Min(q.Bone, groups.Length - 1)] != group) continue;
                             float d = Vector3.DistanceSquared(q.Position, p);
                             if (d < best) (best, found) = (d, q);
                         }
@@ -395,7 +399,7 @@ internal sealed class CharacterContent : IDisposable
             {
                 var fitted = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
-                var over = Nearest(fitted);
+                var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
                 vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
