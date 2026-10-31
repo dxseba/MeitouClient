@@ -104,6 +104,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
             bool hasNormal = limb && (uTextured & 4) != 0;
             float cut = limb ? 0.0 : uAlphaThreshold;
             vec4 base = uTextured != 0 ? texture(uDiffuse, vUv) : vec4(0.78, 0.72, 0.62, 0.3);
+            if (uAlphaThreshold < 0.0) base = vec4(0.46, 0.2, 0.2, 0.8);   // wet bowel
             if (cut > 0.0 && base.a < cut) discard;
             float gloss = cut > 0.0 ? 0.3 : clamp(base.a, 0.0, 1.0);
             if (limb)
@@ -370,7 +371,8 @@ public sealed unsafe class DebrisRenderer : IDisposable
         Mesh? mesh = null;
         try
         {
-            if (find(Path.GetFileName(file.Replace('\\', '/'))) is { } path) mesh = Build(file, materialOf ?? file, OgreMeshReader.ReadFile(path), limb);
+            if (file == Bowel) mesh = BuildBowel();
+            else if (find(Path.GetFileName(file.Replace('\\', '/'))) is { } path) mesh = Build(file, materialOf ?? file, OgreMeshReader.ReadFile(path), limb);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or NotSupportedException)
         {
@@ -378,6 +380,34 @@ public sealed unsafe class DebrisRenderer : IDisposable
         }
         meshes[key] = mesh;
         return mesh;
+    }
+
+    /// <summary>The built-in name of the bowel of <see cref="AnatomyFile"/>: one loose body, as the GTA V FLESH port's guts prop.</summary>
+    public const string Bowel = "@bowel";
+    /// <summary>The user's <c>Ecorche.anatomy</c>, or null.</summary>
+    public string? AnatomyFile { get; set; }
+
+    Mesh? BuildBowel()
+    {
+        if (AnatomyFile is not { } path || !File.Exists(path)) return null;
+        using var stream = File.OpenRead(path);
+        // Organs are told apart by tens of their u (Anatomy.hlsl); 5 is the bowel.
+        var loose = Meitou.Data.Characters.EcorcheAsset.Read(stream).Where(b => b.Layer == 4).SelectMany(b => b.Vertices).Where(v => (int)MathF.Floor(v.Uv.X / 10) == 5).ToArray();
+        if (loose.Length == 0) return null;
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (var v in loose) (min, max) = (Vector3.Min(min, v.Position), Vector3.Max(max, v.Position));
+        var centre = (min + max) / 2;
+        var vertices = loose.Select(v => new Vertex { Position = v.Position - centre, Normal = v.Normal, Uv = v.Uv, Colour = Vector4.One }).ToArray();
+        var indices = Enumerable.Range(0, vertices.Length).Select(i => (uint)i).ToArray();
+        var vb = DeviceBuffer.Create(gpu, (ulong)(vertices.Length * Rendering.Vertex.Size), BufferUse.Vertex, "debris bowel");
+        var ib = DeviceBuffer.Create(gpu, (ulong)indices.Length * sizeof(uint), BufferUse.Index, "debris bowel");
+        using (var batch = gpu.Uploads.Begin())
+        {
+            batch.Write(vb, 0, MemoryMarshal.AsBytes(vertices.AsSpan()));
+            batch.Write(ib, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
+        }
+        return new Mesh(vb, ib, [(0, (uint)indices.Length, 0, null, -1f)], (max - min) / 2);
     }
 
     Mesh? Build(string file, string materialOf, OgreMesh ogre, LimbLook? limb)

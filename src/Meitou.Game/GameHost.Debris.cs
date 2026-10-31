@@ -163,6 +163,7 @@ sealed partial class GameHost
         AddBolts();
         UpdateFalls(world);
         AddRestingLimbs();
+        UpdateGuts(world, dt);
         if (pieces.Count == 0) return;
         int steps = Math.Clamp((int)MathF.Ceiling(dt * 60), 1, 8);
         float h = dt / steps;

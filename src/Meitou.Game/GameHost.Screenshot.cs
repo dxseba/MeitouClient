@@ -125,6 +125,7 @@ sealed partial class GameHost
             if (player is not null) DuelFrame(false);   // the duel's laps run on in a long still too
             BattleFrame();
             UpdateWounds(session.World);
+            UpdateGuts(session.World, (float)session.Ticks.TickSeconds, draw: false);
             SandboxFollowCamera();
             if (g.TitlePreview) titleBattle?.Advance(session.Ticks.TickSeconds);
         }

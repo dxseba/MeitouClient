@@ -63,6 +63,7 @@ sealed partial class GameHost
             gpu.DebrisPieces.Clear();
             AddBolts();   // the bolts are drawn whatever the Blood setting
             UpdateFalls(world);   // and the severed limbs falling
+            UpdateGuts(world, 1f / 60);
             return;
         }
         if (!ReferenceEquals(bloodFor, world)) BloodForNewWorld(null);
@@ -122,6 +123,35 @@ sealed partial class GameHost
     readonly ConcurrentQueue<CharacterId> sparkQueue = new();
     readonly ConcurrentQueue<Meitou.Simulation.Combat.CombatEvent> woundQueue = new();
     readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
+
+    sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor; }
+    readonly Dictionary<CharacterId, GutFall> gutFalls = [];
+
+    /// <summary>A deep belly wound spills the bowel as one loose body, as the GTA V FLESH port's guts prop: it falls from the wound and lies where it lands. Visual only.</summary>
+    void UpdateGuts(World world, float dt, bool draw = true)
+    {
+        if (gpu?.Debris is not { } debris) return;
+        debris.AnatomyFile ??= Meitou.Content.GameInstall.Locate() is { } install ? Path.Combine(install.ModsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy") : null;
+        if (debris.Extent(Meitou.Rendering.DebrisRenderer.Bowel) is null) return;
+        for (int slot = 0; slot < world.Characters.HighWater; slot++)
+        {
+            var hot = world.Characters.Previous[slot];
+            var id = world.Characters.IdOf(slot);
+            if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id)) continue;
+            var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
+            gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 4, Floor = hot.Position.Y };
+        }
+        foreach (var fall in gutFalls.Values)
+        {
+            if (fall.Position.Y > fall.Floor + 0.5f)
+            {
+                fall.Velocity.Y -= 40 * dt;
+                fall.Position += fall.Velocity * dt;
+                fall.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitX, 3 * dt) * fall.Rotation);
+            }
+            if (draw) gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.Bowel, 1, fall.Rotation, fall.Position));
+        }
+    }
 
     void UpdateWounds(World world)
     {
