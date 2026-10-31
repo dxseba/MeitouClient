@@ -15,10 +15,10 @@ public class WoundTrackerTests
         new(kind, tick, CombatHitSource.Melee, CharacterId.None, Victim, 2, limb, default, new Vector2(0, dirZ), new HitDamage(40, 0, 0), 0, cut);
 
     [Fact]
-    public void Each_torso_hit_opens_its_own_wound_and_three_on_the_belly_are_deep()
+    public void Each_torso_hit_opens_its_own_wound_and_ten_heavy_on_the_belly_are_deep()
     {
         var t = new WoundTracker();
-        for (int i = 0; i < 3; i++) Assert.True(t.Apply(Hit(i * 40), WoundRegion.Abdomen, 100));
+        for (int i = 0; i < 10; i++) Assert.True(t.Apply(Hit(i * 40), WoundRegion.Abdomen, 100));
         var body = t.Of(Victim)!;
         Assert.True(body.DeepAbdomen);
         Assert.Contains(body.Limbs.ToArray(), w => w is { Segment: 9 });

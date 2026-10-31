@@ -22,7 +22,7 @@ public sealed class WoundBody
     public ReadOnlySpan<Wound?> Limbs => limbs;
 
     /// <summary>A deep belly wound, the condition for exposed guts.</summary>
-    public bool DeepAbdomen => BellyHits >= 3;
+    public bool DeepAbdomen => BellyHits >= 10;
     public int BellyHits { get; set; }
 
     /// <summary>Closes every wound by <paramref name="dose"/>, shallower as it heals; a closed one goes. True while any is left.</summary>
@@ -175,7 +175,7 @@ public sealed class WoundTracker
             float across = ((roll >> 8) & 0xFFFF) / 65535f * 2 - 1, height = ((roll >> 24) & 0xFFFF) / 65535f;
             float t = region == WoundRegion.Chest ? 0.5f + height * 0.42f : 0.12f + height * 0.42f;
             applied = body.ApplyLimb(9, t, Vector3.Normalize(new Vector3(across * 2.5f, 0, behind ? -1 : 1)), 0, input);
-            if (applied && region == WoundRegion.Abdomen) body.BellyHits++;
+            if (applied && region == WoundRegion.Abdomen && input.Size >= 1.6f) body.BellyHits++;   // only heavy blows count: guts spill rarely
         }
         if (applied) bodies[e.Victim] = body;
         return applied;
