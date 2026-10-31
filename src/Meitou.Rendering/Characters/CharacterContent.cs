@@ -214,7 +214,7 @@ internal sealed class CharacterContent : IDisposable
     static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p)
     {
         int group = WoundMasks.BodyGroup(batch.Bone);
-        if (group == 0 || batch.Layer > 1) return false;
+        if (group == 0 || batch.Layer > 1 || !(batch.Bone.Contains("UpperArm") || batch.Bone.Contains("Thigh"))) return false;   // what stays on the body
         float cut = group < 3 ? 13.83f : 8.6f;
         return p.Y > cut - (batch.Layer == 0 ? 1.3f : -0.2f);
     }
