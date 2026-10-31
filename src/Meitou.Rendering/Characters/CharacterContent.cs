@@ -213,7 +213,7 @@ internal sealed class CharacterContent : IDisposable
         float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null);
 
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
-    const float AnatomyGrid = 0.04f, AnatomyClearance = 0.2f;
+    const float SkullMargin = 0.3f, AnatomyGrid = 0.04f, AnatomyClearance = 0.2f;
     /// <summary>What a stump shows, as Gore Lab's SeverBoneExposure: the limb's bone a little past the skin's cut (LimbHide heights), muscle up to it.</summary>
     static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p, bool female)
     {
@@ -412,7 +412,21 @@ internal sealed class CharacterContent : IDisposable
             return found;
         }
         var vertices = new List<Vertex>();
-        foreach (var batch in Meitou.Data.Characters.EcorcheAsset.Read(stream))
+        var batches = Meitou.Data.Characters.EcorcheAsset.Read(stream);
+        // The skull fitted box to box inside this head's own skin (head UVs sit in v below 0), a margin clear of it on every side.
+        var (skullMin, skullMax, headMin, headMax) = (new Vector3(float.MaxValue), new Vector3(float.MinValue), new Vector3(float.MaxValue), new Vector3(float.MinValue));
+        foreach (var point in skin)
+            if (point.Uv.Y < 0) (headMin, headMax) = (Vector3.Min(headMin, point.Position), Vector3.Max(headMax, point.Position));
+        foreach (var b in batches)
+            if (b.Layer == 0 && b.Bone is "Bip01 Head" or "Bip01 Jaw")
+                foreach (var v in b.Vertices)
+                {
+                    var p = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
+                    (skullMin, skullMax) = (Vector3.Min(skullMin, p), Vector3.Max(skullMax, p));
+                }
+        var skullScale = (headMax - headMin - new Vector3(SkullMargin * 2)) / Vector3.Max(skullMax - skullMin, new Vector3(0.01f));
+        var (skullMiddle, headMiddle) = ((skullMin + skullMax) / 2, (headMin + headMax) / 2);
+        foreach (var batch in batches)
         {
             if (batch.Layer is 2 or 3) continue;   // tendon and fat: the cut's own rim stands for them
             if ((rig.Handle(batch.Bone) ?? (batch.Bone == "Bip01 Jaw" ? rig.Handle("Bip01 Head") : null)) is not { } bone) continue;
@@ -426,12 +440,7 @@ internal sealed class CharacterContent : IDisposable
                     if (MathF.Abs(fitted.X) < 0.75f) fitted = new Vector3(fitted.X * 0.68f, fitted.Y, fitted.Z - 0.1f);
                     else fitted += v.Normal * 0.05f;
                 }
-                // The skull is bigger than this head and would stand out through hair and wounds: scaled in about the head's own middle.
-                if (batch.Layer == 0 && batch.Bone is "Bip01 Head" or "Bip01 Jaw")
-                {
-                    var middle = rig.BindPosition[bone] + new Vector3(0, 1.1f, 0.15f);
-                    fitted = middle + (fitted - middle) * 0.8f;
-                }
+                if (batch.Layer == 0 && batch.Bone is "Bip01 Head" or "Bip01 Jaw") fitted = headMiddle + (fitted - skullMiddle) * skullScale;
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
