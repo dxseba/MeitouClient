@@ -889,8 +889,8 @@ internal sealed class CharacterContent : IDisposable
             asset.Lamps.Add((bone, Matrix4x4.CreateTranslation(local), asset.AttachCount++, carried.Light));
         }
 
-        // Ecorche is a human body, fitted under each human skin.
-        if (!asset.Animal && c.Race.Name is "Greenlander" or "Scorchlander" && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin, c.Female) is { } anatomy)
+        // Ecorche is a human body, fitted under the skin of any person race that has its bones.
+        if (!asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin, c.Female) is { } anatomy)
             asset.Parts.Add(new AssetPart
             {
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,
