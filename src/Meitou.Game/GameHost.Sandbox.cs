@@ -219,7 +219,7 @@ sealed partial class GameHost
         int part = dummyHits % medical.Parts.Count;
         if (g.SandboxTorso)   // the chest and stomach only
             part = medical.Parts.Select((p, i) => (p, i)).Where(x => x.p.Template.StringId is "100-gamedata.quack" or "101-gamedata.quack").ElementAt(dummyHits % 2).i;
-        int cut = (dummyHits++ / medical.Parts.Count) % 2 == 0 ? 1 : 3;
+        int cut = (dummyHits++ * 7 / 3 % 3) switch { 0 => 1, 1 => 2, _ => 3 };   // down, left, right
         float yaw = world.Characters.Previous[sandboxFoe.Slot].Yaw;
         var position = world.Characters.Previous[sandboxFoe.Slot].Position;
         // Travelling against the foe's facing: a hit on its front.

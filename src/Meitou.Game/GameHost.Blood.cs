@@ -211,7 +211,7 @@ sealed partial class GameHost
         }
     }
 
-    /// <summary>A cut's axis, turned by its own golden-angle step: a blow's direction alone gives only a few angles, and the real contact point is unknown.</summary>
+    /// <summary>A cut's axis, the blow's own direction, turned a little (within 20 degrees): the arm's swing is not known exactly.</summary>
     /// <summary>The body groups of a character's stumps (<see cref="Meitou.Rendering.Characters.WoundMasks.BodyGroup"/>: arms 1 and 2, legs 3 and 4).</summary>
     uint LostGroups(CharacterId id)
     {
@@ -224,7 +224,7 @@ sealed partial class GameHost
 
     static Vector2 Turned(in Meitou.Simulation.Wounds.WoundShape shape, int age)
     {
-        float turn = age * 2.399963f, c = MathF.Cos(turn), s = MathF.Sin(turn);
+        float turn = (age * 2.399963f % MathF.Tau - MathF.PI) / MathF.PI * 0.35f, c = MathF.Cos(turn), s = MathF.Sin(turn);
         return new Vector2(shape.Cosine * c - shape.Sine * s, shape.Cosine * s + shape.Sine * c);
     }
 
