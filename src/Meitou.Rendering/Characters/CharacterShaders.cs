@@ -449,6 +449,7 @@ static class CharacterShaders
                 vec2 bc = vec2(vBlood.x * m.colour2.y, (vBlood.w < 0.0 ? vBlood.z : vBlood.y) * m.colour2.x);
                 vec4 blood = tex(m.tex[19], bc) * vec4(m.colour1.rgb, 1.0);
                 float amount = flag(f, 2097152u) ? 1.0 : vBloodAmount;
+                if (vWounds != 0u) amount *= 0.45;   // a wounded body: the cuts carry the gore, not an even coat
                 albedo = mix(albedo, blood.rgb, clamp(blood.a - 1.0 + clamp(amount, 0.0, 1.0), 0.0, 1.0));
             }
             if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.55 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
