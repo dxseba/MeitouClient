@@ -180,7 +180,7 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
-                    if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, mod(c.w, 10.0) * 0.8 - distance(aPosition, c.xyz));
+                    if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.6) * 0.8 - distance(aPosition, c.xyz));
                 }
             }
             if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
@@ -483,7 +483,7 @@ static class CharacterShaders
                 skin = 0.0;
                 nm = vec4(0.5, 0.5, 1.0, 0.5);
             }
-            if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.55 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
+            if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.18 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
