@@ -167,6 +167,7 @@ sealed partial class GameHost
     long woundHealStep;
 
     const string WoundFile = "wounds.meitou";
+    string? woundsFrom;
 
     void UpdateWounds(World world)
     {
@@ -182,7 +183,10 @@ sealed partial class GameHost
             wounds.Clear();
             gutFalls.Clear();
             gutsSpilled.Clear();
-            if (saveInUse is { } folder && File.Exists(Path.Combine(folder, WoundFile)))
+            // Only right after a load: a new game must not take the last save's wounds.
+            string? loadedFrom = woundsFrom;
+            woundsFrom = null;
+            if (loadedFrom is { } folder && File.Exists(Path.Combine(folder, WoundFile)))
                 wounds.Read(File.ReadLines(Path.Combine(folder, WoundFile)), key => Meitou.Simulation.Saving.SaveLoader.LastSpawned.TryGetValue(key, out var who) ? who : null);
             world.CombatEvents = woundQueue;
         }

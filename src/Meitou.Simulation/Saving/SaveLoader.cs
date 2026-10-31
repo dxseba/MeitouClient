@@ -92,6 +92,7 @@ public static class SaveLoader
         world.Fixtures.Items = data.Items;
         var instanceOf = new Dictionary<Meitou.Data.Fcs.FcsRecord, string>(ReferenceEqualityComparer.Instance);
         foreach (var (instance, record) in buildingStates) instanceOf[record] = instance;
+        LastSpawned.Clear();
         var handles = save.BuildHandles();
 
         // The research the player has finished, and the buildings the player made (docs/simulation.md "Buildings").
