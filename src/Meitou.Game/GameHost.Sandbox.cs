@@ -248,7 +248,7 @@ sealed partial class GameHost
             latest = g.SandboxDummy ? foe.Position : (latest + foe.Position) / 2;
         }
         var rig = session.Camera.Strategy;
-        if (g.SandboxBare) rig.Place(new Vector2(latest.X, latest.Z), g.SandboxYaw is { } degrees ? degrees * MathF.PI / 180 : rig.Yaw, rig.Pitch, 30);   // close enough to judge a wound
+        if (g.SandboxBare) rig.Place(new Vector2(latest.X, latest.Z), g.SandboxYaw is { } degrees ? degrees * MathF.PI / 180 : rig.Yaw, rig.Pitch, g.SandboxZoom);   // close enough to judge a wound
         else session.Camera.MovePivot(new Vector2(latest.X, latest.Z));
         camera.Target = drawn;
     }
