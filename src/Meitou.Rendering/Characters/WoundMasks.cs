@@ -20,7 +20,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public long Used; public Vector4[] Spheres = new Vector4[16]; }
 
     /// <summary>World units round a wound in which the anatomy shows: a tuning value.</summary>
-    const float SphereRadius = 2.5f;
+    const float SphereRadius = 1.4f;
 
     readonly Dictionary<long, Mask> masks = [];
     readonly byte[] pixels = new byte[Size * Size * 4];

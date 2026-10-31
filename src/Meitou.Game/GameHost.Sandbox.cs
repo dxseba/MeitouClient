@@ -64,8 +64,8 @@ sealed partial class GameHost
         var world = session.World;
         string record = SandboxRecord(scene.Database!);
         float half = g.Sandbox >= 2 ? 15 : 0;
-        sandboxHero = population!.SpawnSandbox(world, record, new Vector2(-half, 0), player: true, yaw: MathF.PI / 2, maleHuman: g.SandboxDummy);
-        if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2, maleHuman: g.SandboxDummy);
+        sandboxHero = population!.SpawnSandbox(world, record, new Vector2(-half, 0), player: true, yaw: MathF.PI / 2, maleHuman: g.SandboxBare);
+        if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2, maleHuman: g.SandboxBare);
         // n above 2: the rest stand idle in rings round the pair (the player's faction, so they keep out of the fight), 15 units apart, a look each;
         // --sandbox-races: then one of every person race, in the rings after them.
         var extra = Enumerable.Repeat(record, Math.Max(0, g.Sandbox - 2)).ToList();

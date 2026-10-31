@@ -841,7 +841,8 @@ internal sealed class CharacterContent : IDisposable
             asset.Lamps.Add((bone, Matrix4x4.CreateTranslation(local), asset.AttachCount++, carried.Light));
         }
 
-        if (!asset.Animal && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin) is { } anatomy)
+        // Ecorche is fitted to the male body; a female one keeps its cuts and dark inside, without anatomy, until it is fitted.
+        if (!asset.Animal && !c.Female && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin) is { } anatomy)
             asset.Parts.Add(new AssetPart
             {
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,
