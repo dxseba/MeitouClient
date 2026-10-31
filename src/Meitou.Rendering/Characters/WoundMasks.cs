@@ -157,9 +157,11 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             int length = 10 + (int)(random.NextSingle() * random.NextSingle() * 50);
             for (int step = 0; step < length; step++)
             {
+                float head = length * w.Flow - step;   // the run's front, swelling as a drop
+                if (head < 0) { for (; step < length; step++) { random.NextSingle(); } break; }
                 drift = Math.Clamp(drift + (random.NextSingle() - 0.5f) * 0.5f, -0.7f, 0.7f);
                 x += drift;
-                float half = width * (1 - (float)step / length * 0.65f);
+                float half = width * (1 - (float)step / length * 0.65f) * (w.Flow < 1 && head < 4 ? 1.5f : 1);
                 for (int dx = (int)-half; dx <= half; dx++)
                 {
                     int i = (((cy + step) % Size + Size) % Size * Size + (((int)x + dx) % Size + Size) % Size) * 4;

@@ -8,7 +8,7 @@ namespace Meitou.Simulation.Wounds;
 public enum WoundRegion { Unknown = -1, Chest, Abdomen, Back }
 
 /// <summary>One wound. <see cref="Segment"/>: L upper arm 0, L forearm 1, R upper arm 2, R forearm 3, L thigh 4, L calf 5, R thigh 6, R calf 7, head 8, torso 9; -1 for the three region wounds of old saves.</summary>
-public readonly record struct Wound(int Segment, float T, Vector3 Side, WoundShape Shape, float Dose, int Hits, int Age, float Size = 1);
+public readonly record struct Wound(int Segment, float T, Vector3 Side, WoundShape Shape, float Dose, int Hits, int Age, float Size = 1, long Born = 0);
 
 /// <summary>The visual wounds of one character: one per torso region, and up to <see cref="LimbSlots"/> on the limbs, a near hit deepening a wound and the oldest giving way.</summary>
 public sealed class WoundBody
@@ -57,6 +57,9 @@ public sealed class WoundBody
         return true;
     }
 
+    /// <summary>The tick of the hit being applied.</summary>
+    public long Now { get; set; }
+
     public bool ApplyLimb(int segment, float t, Vector3 side, float tilt, WoundInput input)
     {
         if (segment is < 0 or > 9 || !float.IsFinite(t)) return false;
@@ -81,7 +84,7 @@ public sealed class WoundBody
             float c = MathF.Cos(tilt), s = MathF.Sin(tilt);
             shape = shape with { Cosine = shape.Cosine * c - shape.Sine * s, Sine = shape.Cosine * s + shape.Sine * c };
         }
-        limbs[target] = new Wound(segment, old?.T ?? Math.Clamp(t, 0.25f, 0.75f), old?.Side ?? side, shape, r.Dose, r.Hits, ++clock, MathF.Max(old?.Size ?? 0, input.Size));
+        limbs[target] = new Wound(segment, old?.T ?? Math.Clamp(t, 0.25f, 0.75f), old?.Side ?? side, shape, r.Dose, r.Hits, ++clock, MathF.Max(old?.Size ?? 0, input.Size), old?.Born ?? Now);
         return true;
     }
 }
@@ -142,6 +145,7 @@ public sealed class WoundTracker
         // A rear cut (7 down, 9 side, HitOutcomes.Facing) draws as its front direction: the region or side already says where.
         int cut = e.CutDirection switch { 7 => 1, 9 => 3, var d => d };
         var body = bodies.TryGetValue(e.Victim, out var known) ? known : new WoundBody();
+        body.Now = e.Tick;
         // The victim faces (sin yaw, cos yaw); a blow travelling the same way came from behind.
         var forward = new Vector2(MathF.Sin(e.VictimYaw), MathF.Cos(e.VictimYaw));
         bool behind = Vector2.Dot(e.Direction, forward) > 0;
