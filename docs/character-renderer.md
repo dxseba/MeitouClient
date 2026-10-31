@@ -118,3 +118,7 @@ region shows the skin constant and a flat normal until the head maps are residen
 GPU culling, merged far shadow casters (one skinning per frame for every cascade), tail-mip texture stand-ins and
 original animation-update budgets remain incomplete. The `charlod` switch picks the files' own levels instead (Faithful; [characters](characters.md#lod-of-character-meshes)). Tests pin layouts/data; visual parity requires named screenshots across
 races, bodies, gear, animals, attachments, motion and shadow views. [bench](bench.md).
+
+### Wounds
+
+A body with wounds carries `WoundHeaderBones` extra palette entries just before its bones: four vec4 per wound (bind-pose centre and bone length, bone axis, cut shape, side). Instance flag bit 31 turns the fragment term on; portraits have no header. **Observed** in the fight sandbox: cuts draw on the body mesh, not on worn items; Metal does not draw them.

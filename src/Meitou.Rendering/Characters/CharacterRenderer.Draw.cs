@@ -262,7 +262,7 @@ internal sealed unsafe partial class CharacterRenderer
                 }
                 bool twoSided = part.Material.DoubleSided;
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16;
-                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden, MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
+                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part.IsBody, l.Wounds), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass)
                 {
                     var previousWorld = Relative(l.State.PreviousWorld, origin);
@@ -403,7 +403,7 @@ internal sealed unsafe partial class CharacterRenderer
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16;
                 var instance = new CharInstance
                 {
-                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden,
+                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part.IsBody, l.Wounds),
                     MorphBase = part.Morphed ? l.Asset.MorphBase : 0, PreviousModel = motion ? f.PreviousModel : default,
                 };
                 // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
@@ -557,6 +557,27 @@ internal sealed unsafe partial class CharacterRenderer
     /// The matrix with the body's blood amounts in the w of its four rows (the vertex program reads only their xyz): two parts a float, part 2j in the low byte and part 2j + 1 in the next of
     /// row j's w, as an exact integer (CharacterShaders: <c>vBloodAmount</c>).
     /// </summary>
+    static void WriteWounds(Span<Vector4> header, Meitou.Data.Characters.SkeletonRig rig, IReadOnlyList<CharacterWoundMark> wounds)
+    {
+        header.Clear();
+        for (int i = 0, row = 0; i < wounds.Count && i < CharacterShaders.WoundCapacity; i++)
+        {
+            var w = wounds[i];
+            if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) continue;
+            var (start, end) = (rig.BindPosition[a], rig.BindPosition[b]);
+            var along = end - start;
+            float length = along.Length();
+            if (length < 1e-4f) continue;
+            header[row++] = new Vector4(start + along * w.T, length);
+            header[row++] = new Vector4(along / length, 1);
+            header[row++] = new Vector4(w.Cosine, w.Sine, w.Aspect, w.Depth);
+            header[row++] = new Vector4(w.Side, 0);
+        }
+    }
+
+    /// <summary>The instance flag of a body with wounds, off in a portrait, whose palette has no header.</summary>
+    uint WoundFlag(bool body, IReadOnlyList<CharacterWoundMark>? wounds) => body && wounds is { Count: > 0 } && portraitLive < 0 ? CharacterShaders.WoundFlag : 0;
+
     static Matrix4x4 WithBlood(Matrix4x4 m, ulong blood)
     {
         if (blood == 0) return m;

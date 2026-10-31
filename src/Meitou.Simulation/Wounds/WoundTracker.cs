@@ -75,12 +75,14 @@ public sealed class WoundTracker
     public bool Apply(in CombatEvent e, WoundRegion region, float maximum)
     {
         if (e.Kind != CombatEventKind.Hit || e.CutDirection < 0) return false;
+        // A rear cut (7 down, 9 side, HitOutcomes.Facing) draws as its front direction: the region or side already says where.
+        int cut = e.CutDirection switch { 7 => 1, 9 => 3, var d => d };
         var body = bodies.TryGetValue(e.Victim, out var known) ? known : new WoundBody();
         // The victim faces (sin yaw, cos yaw); a blow travelling the same way came from behind.
         var forward = new Vector2(MathF.Sin(e.VictimYaw), MathF.Cos(e.VictimYaw));
         bool behind = Vector2.Dot(e.Direction, forward) > 0;
         // The region picks the chart, so a hit from behind on the Back region is a valid front-of-chart hit.
-        var input = new WoundInput(e.CutDirection, WoundAttack.Front, false, true, e.Damage.Cut, e.Damage.Blunt, e.Damage.Pierce, maximum);
+        var input = new WoundInput(cut, WoundAttack.Front, false, true, e.Damage.Cut, e.Damage.Blunt, e.Damage.Pierce, maximum);
         bool applied;
         if (e.LimbSlot is >= 0 and <= 3)
         {

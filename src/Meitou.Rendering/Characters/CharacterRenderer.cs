@@ -189,6 +189,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public bool Repose, WeaponDrawn, RangedDrawn, BackDrawn;
         /// <summary>The blood of its first 8 body parts, a byte each (<see cref="CharacterInstance.Blood"/>).</summary>
         public ulong Blood;
+        /// <summary>The wounds to write in the palette header.</summary>
+        public IReadOnlyList<CharacterWoundMark>? Wounds;
         /// <summary>Posed this frame whatever the thinning (the player's, a ragdoll, a new asset or a first pose).</summary>
         public bool MustPose;
         /// <summary>How tall it is on screen, in pixels (its diameter over its distance by the view's pixels per radian): the thinning's priority.</summary>
@@ -447,6 +449,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             (l.WeaponDrawn, l.RangedDrawn, l.BackDrawn, l.Shots, l.Bolts) = (inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, inst.Shots, inst.Bolts);
             l.Centre = centre;
             l.Radius = asset.Radius * scale;
+            l.Wounds = inst.Wounds;
+            if (l.Wounds is { Count: > 0 }) boneTotal += CharacterShaders.WoundHeaderBones;
             l.BoneBase = boneTotal;
             boneTotal += asset.Rig.BoneCount;
             l.AttachBase = attachCount;
@@ -542,6 +546,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     state.Posed = stamp;
                 }
                 state.Bones.CopyTo(new Span<Matrix4x4>((byte*)bonePointer + (long)l.BoneBase * 64, rig.BoneCount));
+                if (l.Wounds is { Count: > 0 }) WriteWounds(new Span<Vector4>((byte*)bonePointer + (l.BoneBase - CharacterShaders.WoundHeaderBones) * 64L, CharacterShaders.WoundHeaderBones * 4), rig, l.Wounds);
                 state.Attach.CopyTo(attachArray, l.AttachBase);
                 if (motion)
                 {

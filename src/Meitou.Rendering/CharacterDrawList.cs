@@ -6,6 +6,9 @@ namespace Meitou.Rendering;
 /// <summary>One animation to pose a character with: the skeleton animation's name, its time in seconds and its blend weight.</summary>
 public readonly record struct CharacterPose(string Animation, float Time, float Weight);
 
+/// <summary>A wound placed on the bone from <paramref name="BoneA"/> to <paramref name="BoneB"/>, <paramref name="T"/> along it, on the <paramref name="Side"/> of the bind pose; the rest is its cut shape.</summary>
+public readonly record struct CharacterWoundMark(string BoneA, string BoneB, float T, Vector3 Side, float Cosine, float Sine, float Aspect, float Depth);
+
 /// <summary>
 /// A character to draw this frame, already interpolated by the host. <see cref="Key"/> is stable while the character exists, so
 /// the renderer can keep its GPU resources and last frame's bones (motion vectors) by it; <see cref="Appearance"/> is compared by
@@ -41,6 +44,8 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public Meitou.Data.Characters.BodyBuild? Build { get; init; }
     /// <summary>The blood each of the first 8 body parts shows, a byte each (<c>CharacterSnapshot.BloodAmounts</c>).</summary>
     public ulong Blood { get; init; }
+    /// <summary>Open wounds to draw on the body, at most <see cref="Characters.CharacterShaders.WoundCapacity"/>.</summary>
+    public IReadOnlyList<CharacterWoundMark> Wounds { get; init; } = [];
 }
 
 /// <summary>

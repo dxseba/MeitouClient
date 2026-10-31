@@ -120,6 +120,38 @@ sealed partial class GameHost
     /// <summary>The EFFECT `small- sparks1` (5463-nodes_furniture1_otto.mod) the original throws on a parry: its particle system.</summary>
     const string SparksSystem = "kenshi_sparks";
     readonly ConcurrentQueue<CharacterId> sparkQueue = new();
+    readonly ConcurrentQueue<Meitou.Simulation.Combat.CombatEvent> woundQueue = new();
+    readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
+
+    void UpdateWounds(World world)
+    {
+        if (!ReferenceEquals(world.CombatEvents, woundQueue)) { woundQueue.Clear(); world.CombatEvents = woundQueue; }
+        while (woundQueue.TryDequeue(out var e))
+        {
+            if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot)?.Medical is not { } medical || e.Part >= medical.Parts.Count) continue;
+            var part = medical.Parts[e.Part];
+            wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
+        }
+    }
+
+    /// <summary>The character's open wounds as the renderer places them (segments as <see cref="Meitou.Simulation.Wounds.Wound"/>).</summary>
+    IReadOnlyList<Meitou.Rendering.CharacterWoundMark> WoundMarks(CharacterId id)
+    {
+        if (wounds.Of(id) is not { } body) return [];
+        var marks = new List<Meitou.Rendering.CharacterWoundMark>();
+        for (int i = 0; i < body.Torso.Length; i++)
+            if (body.Torso[i] is { } w)
+                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f, i == 2 ? -Vector3.UnitZ : Vector3.UnitZ, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+        foreach (var slot in body.Limbs)
+            if (slot is { } w && marks.Count < 8)
+            {
+                string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";
+                bool lower = (w.Segment & 1) != 0;
+                var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));
+                marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+            }
+        return marks;
+    }
 
     /// <summary>
     /// Once a frame: the parries of the ticks since the last frame throw <see cref="SparksSystem"/> at the parrying character's <c>Bip01 Prop2</c> (its weapon), 0 or 1 unit higher
@@ -127,6 +159,7 @@ sealed partial class GameHost
     /// </summary>
     void UpdateBlockSparks(World world)
     {
+        UpdateWounds(world);
         if (gpu.Particles is not { } particles || gpu.Characters is not { } characters)
         {
             world.BlockSparks = null;
