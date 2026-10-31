@@ -277,6 +277,9 @@ sealed partial class GameHost
                 var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));
                 marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born)));
             }
+        // A thin race's limbs and trunk take a smaller cut.
+        if (session.World.Characters.Cold(id.Slot)?.Race?.Name is { } race && (race.Contains("Hive", StringComparison.OrdinalIgnoreCase) || race.Contains("Drone", StringComparison.OrdinalIgnoreCase)))
+            for (int i = 0; i < marks.Count; i++) marks[i] = marks[i] with { Size = marks[i].Size * 0.55f };
         // A stump's end stays open: a permanent deep cut on it, so its bone and flesh show.
         if (session.World.Characters.Cold(id.Slot)?.Medical is { } stumps)
             foreach (var part in stumps.Parts)
