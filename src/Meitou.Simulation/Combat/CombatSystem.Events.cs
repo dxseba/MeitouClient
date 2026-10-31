@@ -21,6 +21,9 @@ public sealed partial class CombatSystem
     /// <summary>Publishes a hit and its medical events. Serial, like the hits themselves.</summary>
     internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false)
     {
+        foreach (var ev in events)
+            if (ev.Kind == MedicalEventKind.PartSevered && medical.Parts[ev.Part].Template.LimbSlot is >= 0 and <= 3 and var limb && cutDirection >= 0)
+                Wounds.SeveredLevels.Note(world.Characters.IdOf(victim), limb, cutDirection, lowStrike);
         if (world.CombatEvents is not { } queue) return;
         var id = world.Characters.IdOf(victim);
         var position = world.Characters.Previous[victim].Position;
