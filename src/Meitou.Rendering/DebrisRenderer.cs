@@ -104,7 +104,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
             bool hasNormal = limb && (uTextured & 4) != 0;
             float cut = limb ? 0.0 : uAlphaThreshold;
             vec4 base = uTextured != 0 ? texture(uDiffuse, vUv) : vec4(0.78, 0.72, 0.62, 0.3);
-            if (uAlphaThreshold < -2.5) { float wet = 0.55 + 0.45 * sin(vLocal.x * 31.0 + vLocal.y * 17.0) * sin(vLocal.z * 23.0); base = vec4(mix(base.rgb * 0.6, vec3(0.2, 0.012, 0.014), clamp(wet, 0.0, 1.0)), 0.8); }   // torn out: wet with blood
+            if (uAlphaThreshold < -2.5) { float wet = 0.8 + 0.2 * sin(vLocal.x * 1.7 + vLocal.y * 1.1) * sin(vLocal.z * 2.3); base = vec4(mix(base.rgb * 0.45, vec3(0.13, 0.008, 0.01), clamp(wet, 0.0, 1.0)), 0.85); }   // torn out: wet with blood
             else if (uAlphaThreshold < 0.0) base = vec4(0.46, 0.2, 0.2, 0.8);   // wet bowel
             if (cut > 0.0 && base.a < cut) discard;
             float gloss = cut > 0.0 ? 0.3 : clamp(base.a, 0.0, 1.0);
