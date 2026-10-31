@@ -20,6 +20,8 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public long Used; public Vector4[] Spheres = new Vector4[Spheres16], Cuts = new Vector4[Spheres16]; }
 
     /// <summary>World units round a wound in which the anatomy shows: a tuning value.</summary>
+    /// <summary>The lower jaw's own group, for cutting it off.</summary>
+    public const int JawGroup = 6;
     public const int Spheres16 = 64;
     const float SphereRadius = 1.4f;
 
@@ -96,7 +98,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     {
         var words = new uint[8];
         foreach (var bone in r.Skeleton.Bones)
-            if (bone.Handle < 64) words[bone.Handle / 8] |= (uint)BodyGroup(bone.Name) << (bone.Handle % 8 * 4);
+            if (bone.Handle < 64) words[bone.Handle / 8] |= (uint)(bone.Name == "Bip01 Jaw" ? JawGroup : BodyGroup(bone.Name)) << (bone.Handle % 8 * 4);
         return words;
     });
 

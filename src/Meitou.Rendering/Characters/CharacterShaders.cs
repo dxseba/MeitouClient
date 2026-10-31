@@ -220,6 +220,7 @@ static class CharacterShaders
                 uint cutGroup = (floatBitsToUint(cutHeader[1 + cutBone / 32u][cutBone / 8u % 4u]) >> (cutBone % 8u * 4u)) & 15u;
                 uint only = floatBitsToUint(cutHeader[0][3]);
                 if (only != 0u) { vHidden = cutGroup == (only >> 8) ? 0.0 : 1.0; vCutBand = float(only & 255u) * 0.1 - aPosition.y; }
+                else if (cutGroup == 6u) { if ((floatBitsToUint(cutHeader[0][1]) >> 6u & 1u) != 0u) vHidden = 1.0; }
                 else if (cutGroup >= 1u && cutGroup <= 4u)
                 {
                     uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;

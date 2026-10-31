@@ -75,6 +75,17 @@ sealed partial class GameHost
     void CutLimbs(CharacterSnapshot c)
     {
         if (gpu.Characters is not { } characters || session.World.Characters.Cold(c.Id.Slot)?.Medical is not { } medical) return;
+        if (jawsLost.Contains(c.Id) && limbsCut.Add((c.Id, 7)))
+        {
+            long jawFrom = DrawKey(c.Id), jawKey = jawFrom ^ (1L << 53) ^ (7L << 48);
+            if (characters.LastDrawn(jawFrom, "Bip01 Jaw") is ({ } jawWorld, { } jawLook, var jawAt) && characters.HoldPose(jawKey, jawFrom))
+                heads.Add(new FallingHead
+                {
+                    Key = jawKey, From = jawFrom, Look = jawLook, World = jawWorld, Start = jawAt, Aside = new Vector2(jawAt.X + 2, jawAt.Z - 1.5f), Axis = Vector3.UnitX, Spin = 4,
+                    Flight = MathF.Sqrt(2 * MathF.Max(jawAt.Y - session.World.Walkability.GroundHeight(jawAt.X, jawAt.Z, jawAt.Y) - 0.3f, 0) / FallGravity), Blood = c.BloodAmounts,
+                    PartOnly = (uint)Meitou.Rendering.Characters.WoundMasks.JawGroup << 8 | 255,
+                });
+        }
         foreach (var part in medical.Parts)
         {
             if (part.Limb != Meitou.Simulation.Bodies.LimbState.Stump || part.Template.LimbSlot is not (>= 0 and <= 3 and var limb) || !limbsCut.Add((c.Id, limb))) continue;
