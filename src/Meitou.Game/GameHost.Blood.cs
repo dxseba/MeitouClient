@@ -258,6 +258,14 @@ sealed partial class GameHost
                 var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));
                 marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size));
             }
+        // A stump's end stays open: a permanent deep cut on it, so its bone and flesh show.
+        if (session.World.Characters.Cold(id.Slot)?.Medical is { } stumps)
+            foreach (var part in stumps.Parts)
+                if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb)
+                {
+                    string limbSide = limb % 2 == 0 ? "L" : "R";
+                    marks.Add(new($"Bip01 {limbSide} {(limb < 2 ? "UpperArm" : "Thigh")}", $"Bip01 {limbSide} {(limb < 2 ? "Forearm" : "Calf")}", limb < 2 ? 0.45f : 0.3f, Vector3.Normalize(new Vector3(limb % 2 == 0 ? 1 : -1, -0.6f, 0.3f)), 1, 0, 0.85f, 1, 1.2f));
+                }
         // A stump without a wound still needs the (blank) mask that lets its anatomy draw: a mark on no bone paints nothing.
         if (marks.Count == 0 && LostGroups(id) != 0) marks.Add(new("", "", 0, default, 1, 0, 1, 0));
         return marks;
