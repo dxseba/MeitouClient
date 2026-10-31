@@ -57,7 +57,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         foreach (var w in wounds)
             if (Paint(w, rig, points, out var cutUv) is { } at && count < spheres.Length)
             {
-                float angle = MathF.Atan2(w.Sine, w.Cosine), head = cutUv.Y < 0 ? 0.5f : 1;
+                float angle = MathF.Atan2(w.Sine, w.Cosine), head = cutUv.Y < 0 ? 0.2f : 1;
                 cuts[count] = new Vector4(cutUv, angle, MathF.Floor((0.3f + 0.4f * w.Depth) * w.Size * head * 0.07f * 10000) + Math.Clamp(w.Depth, 0, 0.99f) * 0.99f);
                 spheres[count++] = new Vector4(at, Math.Min(SphereRadius * MathF.Max(1, w.Size * w.Depth), 9.5f) + 10 * BodyGroup(w.BoneA));
             }
@@ -154,7 +154,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         for (int run = 0; run < count; run++)
         {
             float x = cx + (random.NextSingle() - 0.5f) * 14, drift = 0, width = 1.6f + random.NextSingle() * 1.6f;
-            int length = 10 + (int)(random.NextSingle() * random.NextSingle() * 50);
+            int length = 24 + (int)(random.NextSingle() * random.NextSingle() * 80);
             for (int step = 0; step < length; step++)
             {
                 float head = length * w.Flow - step;   // the run's front, swelling as a drop

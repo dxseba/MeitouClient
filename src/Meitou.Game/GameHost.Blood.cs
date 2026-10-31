@@ -125,7 +125,7 @@ sealed partial class GameHost
     readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
     static readonly Meitou.Simulation.Wounds.WoundBody NoWounds = new();
 
-    const float BloodRunSeconds = 8, GutLifeSeconds = 600, StumpBoneOut = 1.1f;
+    const float BloodRunSeconds = 5, GutLifeSeconds = 600, StumpBoneOut = 1.1f;
 
     sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; }
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
