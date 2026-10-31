@@ -93,6 +93,13 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         return words;
     });
 
+    /// <summary>A light cut as one thin unbroken line along its axis, where the ragged profile alone would leave dots.</summary>
+    static float Scratch(float x, float y, in CharacterWoundMark w)
+    {
+        float along = (x * w.Cosine + y * w.Sine) / 1.2f, across = -x * w.Sine + y * w.Cosine;
+        return MathF.Abs(along) >= 1 ? 0 : MathF.Max(0, 1 - MathF.Abs(across) / (0.09f * (1 - along * along) + 0.01f));
+    }
+
     /// <summary>The wound spheres of the character's mask.</summary>
     public Vector4[]? Spheres(long key) => masks.TryGetValue(key, out var mask) ? mask.Spheres : null;
 
@@ -119,12 +126,13 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             for (int x = -reach; x <= reach; x++)
             {
                 var s = Sample!(x / (chart * Size), y * 2 / (chart * Size), w);
+                if (w.Depth < 0.3f) s = Vector3.Max(s, new Vector3(0, Scratch(x / (chart * Size), y * 2 / (chart * Size), w), 0));
                 if (s.Z <= 0) continue;
                 int i = ((((cy + y) % Size + Size) % Size) * Size + ((cx + x) % Size + Size) % Size) * 4;
                 pixels[i] = Math.Max(pixels[i], (byte)(s.X * 255));
                 pixels[i + 1] = Math.Max(pixels[i + 1], (byte)(s.Y * 255));
                 pixels[i + 2] = Math.Max(pixels[i + 2], (byte)(s.Z * 255));
-                pixels[i + 3] = Math.Max(pixels[i + 3], (byte)(w.Depth * s.X * 255));   // alpha: how deep the cut goes here
+                pixels[i + 3] = Math.Max(pixels[i + 3], (byte)(w.Depth * MathF.Min(1, s.Y * 1.3f) * 255));   // alpha: how deep the cut goes here
             }
         return hit;
     }
