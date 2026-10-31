@@ -273,7 +273,9 @@ sealed partial class GameHost
                 float off = w.Age * 37 % 7 / 3f - 1;
                 marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born)));
             }
-        foreach (var slot in body.Limbs)
+        // The newest first: past the shader's 64, the oldest give way, not the newest.
+        var newest = body.Limbs.ToArray().Where(w => w is not null).OrderByDescending(w => w!.Value.Age).ToArray();
+        foreach (var slot in newest)
             if (slot is { } w && marks.Count < Meitou.Simulation.Wounds.WoundBody.LimbSlots + 3)
             {
                 if (w.Segment == 9)
