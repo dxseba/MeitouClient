@@ -46,6 +46,8 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox [n]` | 1 to 1000 | off; 1 when bare | Animation sandbox on a flat wireframe floor. n = 2: two facing each other; more: the rest idle in rings. |
 | `--sandbox-character <name>` | CHARACTER or ANIMAL_CHARACTER name or id | first member of the default start | Character the sandbox spawns. |
 | `--sandbox-mode <list>` | walk, run, free, a speed in u/s, patrol, fight (comma list) | none (idle) | The sandbox hero's start state, e.g. `run,patrol`. |
+| `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
+| `--sandbox-bare` | | off | The hero and foe draw without worn gear; weapons stay. Their armour still protects them. |
 | `--sandbox-races` | | off | Adds one character of every person race in rings round the pair. |
 | `--terrain-sandbox [cliffs] [x,z]` | | flattest spot (38376,-8280); cliffs spot (92164,123124) | Empty world on a field of ground-texture tiles; `cliffs` uses cliff textures on a steep face. |
 | `--duel [x,z]` | | dune crest | Looping two-Samurai duel at sunset, on rails. Time held at 22:00 and weather clear unless `--time` or `--weather` is given. |

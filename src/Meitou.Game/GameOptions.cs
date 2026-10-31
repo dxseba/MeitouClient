@@ -22,6 +22,8 @@ sealed class GameOptions
     public int Sandbox;
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
     public string? SandboxCharacter;
+    public bool SandboxBare;
+    public bool SandboxDummy;
     /// <summary>The sandbox hero's start state, comma-separated: walk, run or free; a fixed speed in units/s; patrol (a 400-unit line), for pictures.</summary>
     public string? SandboxMode;
     /// <summary><c>--sandbox-races</c>: one character of every person race (a CHARACTER record listing only that race) in rings round the pair, whatever n is.</summary>
@@ -157,6 +159,8 @@ sealed class GameOptions
                     if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out _)) i++;
                     break;
                 case "--sandbox-character": g.SandboxCharacter = Next(); break;
+                case "--sandbox-bare": g.SandboxBare = true; break;
+                case "--sandbox-dummy": g.SandboxDummy = g.SandboxBare = true; break;
                 case "--sandbox-mode": g.SandboxMode = Next(); break;
                 case "--sandbox-races": g.SandboxRaces = true; break;
                 case "--terrain-sandbox":

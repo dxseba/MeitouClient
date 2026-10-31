@@ -16,7 +16,9 @@ static class CharacterShaders
     public const int InstanceLocation = 7, DataLocation = 11, PreviousLocation = 12;
     /// <summary>The storage buffers of set 0 after the frame's own (the order of the extra list given to <c>NativeFrame.Prepare</c>): the bone palettes, the materials, the face morph offsets, last frame's palettes (motion pass).</summary>
     /// <summary>A wounded body's palette starts one entry early: that entry's first float holds the bits of its wound mask's bindless index (<see cref="WoundMasks"/>).</summary>
-    public const int WoundHeaderBones = 1;
+    public const int WoundHeaderBones = 3;
+    /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
+    public const uint AnatomyFlag = 1u << 30;
     public const uint WoundFlag = 1u << 31;
     public const uint BonesBinding = 6, MaterialsBinding = 7, MorphsBinding = 8, PreviousBonesBinding = 9;
     /// <summary>The texture slots of a material (<c>uint tex[]</c> in the shader, <see cref="TextureSlots"/>): <see cref="Slots"/> used, the rest hold the stand-in.</summary>
@@ -109,6 +111,7 @@ static class CharacterShaders
         out vec4 vColour;
         out vec4 vBlood;        // the blood mapping of character.hlsl (cylinder projection of the part in its own space), before the race scale
         flat out uint vWounds;  // the wound mask, 0 without wounds
+        out float vClip;        // anatomy: above 0 outside every wound
         out float vBloodAmount; // the blood amount of the vertex's body part (the instance carries the parts': two 8-bit amounts in the w of each matrix row)
 
         void main()
@@ -136,7 +139,18 @@ static class CharacterShaders
             // character.hlsl: x = height along the mesh's Y, y = angle round it (atan2(normal.x, normal.z) / 2pi), z = the angle shifted by half a turn (the wrap), w = normal.z.
             float turn = atan(aNormal.x, aNormal.z) / 3.14159265359 * 0.5;
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
-            vWounds = (aInstanceData.z & 0x80000000u) != 0u ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
+            bool wounded = (aInstanceData.z & 0x80000000u) != 0u, anatomy = (aInstanceData.z & 0x40000000u) != 0u;
+            vWounds = wounded && !anatomy ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
+            vClip = -1.0;
+            if (anatomy)
+            {
+                vClip = 1000.0;
+                for (uint i = 0u; i < 8u; i++)
+                {
+                    vec4 c = skin.bones[aInstanceData.x - 2u + i / 4u][i % 4u];
+                    if (c.w > 0.0 && abs(floor(c.w / 10.0) - aColour.a) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
+                }
+            }
             vMaterial = aInstanceData.y;
             vInterior = aInstanceData.z & 1u;
             // Hidden limbs and parts (docs/characters.md "Hidden body parts"): the body's vertices of a limb whose bit 12 + k the instance carries, or of a part-map part whose
@@ -215,11 +229,13 @@ static class CharacterShaders
         in vec4 vColour;
         in vec4 vBlood;
         flat in uint vWounds;
+        in float vClip;
         in float vBloodAmount;
         // Open flesh over the albedo, from the character's wound mask.
         void woundSurface(inout vec3 albedo, inout float gloss)
         {
             vec3 cut = tex(vWounds, vUv).rgb;
+            if (cut.g > 0.5) discard;   // the hole: the anatomy part shows through
             albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.b);
             albedo = mix(albedo, vec3(0.33, 0.03, 0.03), cut.g);
             albedo = mix(albedo, vec3(0.08, 0.005, 0.005), cut.r);
@@ -362,6 +378,7 @@ static class CharacterShaders
                 float amount = flag(f, 2097152u) ? 1.0 : vBloodAmount;
                 albedo = mix(albedo, blood.rgb, clamp(blood.a - 1.0 + clamp(amount, 0.0, 1.0), 0.0, 1.0));
             }
+            if (vClip > 0.0) discard;
             if (vWounds != 0u) woundSurface(albedo, gloss);
             if (cut) discard;
             // The game writes character albedo darkened: 0.7 for bodies, heads and hair (character.hlsl DARKEN), 0.8 for worn items (skin.hlsl); not its icons (rtticons.hlsl,

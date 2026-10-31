@@ -82,6 +82,7 @@ sealed partial class GameHost
             float r = 25 + 15 * ring, angle = 2 * MathF.PI * placed / perRing;
             population.SpawnSandbox(world, extra[i], new Vector2(r * MathF.Cos(angle), r * MathF.Sin(angle)), player: true, yaw: angle + MathF.PI, variant: i + 1);
         }
+        sandboxFollow |= g.SandboxBare;   // a wound test watches the fighters
         playerSquad = world.Squads.Find(world.Player.Squad);
         world.Commands.Enqueue(new SelectCommand([sandboxHero]) { Tick = world.Tick });
         bool patrol = false, fight = false;
@@ -103,7 +104,7 @@ sealed partial class GameHost
         SandboxSendMovement();
         if (patrol) SandboxTogglePatrol();
         if (fight) SandboxKey(EngineKey.G);
-        session.Ticked += _ => SandboxTick();
+        session.Ticked += _ => { if (g.SandboxBare) SandboxBare(); SandboxTick(); };
         Console.WriteLine($"sandbox   {record}{(g.Sandbox >= 2 ? ", two facing each other 30 units apart (G fights)" : "")}{(g.Sandbox > 2 ? $", {g.Sandbox - 2} more round them" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
         return new Vector3(0, scene.FlatHeight, 0);
     }
@@ -195,6 +196,32 @@ sealed partial class GameHost
 
     /// <summary>Keeps the camera on the hero (the middle of the pair while there is a foe), when following. Only the pivot moves: a cut every frame
     /// (<see cref="CameraRig.Place"/>) would draw the rotation and zoom at the tick rate instead of interpolated.</summary>
+    int dummyHits;
+
+    /// <summary><c>--sandbox-dummy</c>: a test hit on each of the foe's parts in turn, visual only: nobody fights, falls or takes damage.</summary>
+    void SandboxDummyHit()
+    {
+        var world = session.World;
+        if (sandboxFoe.IsNone || world.Tick % 20 != 0 || world.Characters.Cold(sandboxFoe.Slot)?.Medical is not { } medical) return;
+        int part = dummyHits % medical.Parts.Count;
+        int cut = (dummyHits++ / medical.Parts.Count) % 2 == 0 ? 1 : 3;
+        float yaw = world.Characters.Previous[sandboxFoe.Slot].Yaw;
+        var position = world.Characters.Previous[sandboxFoe.Slot].Position;
+        // Travelling against the foe's facing: a hit on its front.
+        var direction = -new Vector2(MathF.Sin(yaw), MathF.Cos(yaw));
+        woundQueue.Enqueue(new Meitou.Simulation.Combat.CombatEvent(Meitou.Simulation.Combat.CombatEventKind.Hit, world.Tick, Meitou.Simulation.Combat.CombatHitSource.Melee, sandboxHero, sandboxFoe,
+            part, medical.Parts[part].Template.LimbSlot, position, direction, new Meitou.Simulation.Bodies.HitDamage(30, 20, 0), yaw, cut));
+    }
+
+    void SandboxBare()
+    {
+        if (g.SandboxDummy) { session.World.CombatEvents = woundQueue; SandboxDummyHit(); }
+        var world = session.World;
+        foreach (var id in new[] { sandboxHero, sandboxFoe })
+            if (!id.IsNone && world.Characters.Cold(id.Slot)?.Appearance is { } look)
+                look.Parts.RemoveAll(p => p.Record.Type != FcsRecordType.WEAPON && p.Mode == Meitou.Data.Characters.AttachMode.SharedSkeleton && p.Record.Type != FcsRecordType.ATTACHMENT);
+    }
+
     /// <summary>The strategy camera on the character the player follows (<see cref="PlayerInterface.Follow"/>), as the sandbox's follow does; a gone character is let go.</summary>
     void FollowCamera()
     {
@@ -213,10 +240,12 @@ sealed partial class GameHost
         var latest = hero.Position;
         if (!sandboxFoe.IsNone && characters.FirstOrDefault(c => c.Id == sandboxFoe) is { } foe)
         {
-            drawn = (drawn + DrawnPosition(foe)) / 2;
-            latest = (latest + foe.Position) / 2;
+            drawn = g.SandboxDummy ? DrawnPosition(foe) : (drawn + DrawnPosition(foe)) / 2;
+            latest = g.SandboxDummy ? foe.Position : (latest + foe.Position) / 2;
         }
-        session.Camera.MovePivot(new Vector2(latest.X, latest.Z));
+        var rig = session.Camera.Strategy;
+        if (g.SandboxBare) rig.Place(new Vector2(latest.X, latest.Z), rig.Yaw, rig.Pitch, 30);   // close enough to judge a wound
+        else session.Camera.MovePivot(new Vector2(latest.X, latest.Z));
         camera.Target = drawn;
     }
 

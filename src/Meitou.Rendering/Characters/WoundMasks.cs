@@ -17,7 +17,10 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     /// <summary>The cut chart's unit in UV: a body's UVs give about 0.05 per world unit (<b>Observed</b> tuning value).</summary>
     const float ChartUv = 0.045f;
 
-    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; }
+    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public Vector4[] Spheres = new Vector4[8]; }
+
+    /// <summary>World units round a wound in which the anatomy shows: a tuning value.</summary>
+    const float SphereRadius = 0.7f;
 
     readonly Dictionary<long, Mask> masks = [];
     readonly byte[] pixels = new byte[Size * Size * 4];
@@ -39,7 +42,10 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         if (repaints >= RepaintsPerFrame || (mask is null && masks.Count >= Capacity)) return mask?.Index ?? 0;
         repaints++;
         Array.Clear(pixels);
-        foreach (var w in wounds) Paint(w, rig, points);
+        int count = 0;
+        var spheres = new Vector4[8];
+        foreach (var w in wounds)
+            if (Paint(w, rig, points) is { } at && count < spheres.Length) spheres[count++] = new Vector4(at, SphereRadius + 10 * BodyGroup(w.BoneA));
         using (var batch = gpu.Uploads.Begin())
         {
             bool created = mask is null;
@@ -53,22 +59,36 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             }
         }
         mask.Hash = code;
+        mask.Spheres = spheres;
         return mask.Index;
     }
 
-    void Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points)
+    /// <summary>0 torso, 1 left arm, 2 right arm, 3 left leg, 4 right leg. In the bind pose the hands hang beside the hips, so a wound opens only its own group's anatomy.</summary>
+    public static int BodyGroup(string bone)
     {
-        if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return;
+        bool left = bone.Contains(" L "), right = bone.Contains(" R ");
+        if (!left && !right || bone.Contains("Clavicle")) return 0;
+        bool leg = bone.Contains("Thigh") || bone.Contains("Calf") || bone.Contains("Foot") || bone.Contains("Toe");
+        return (leg ? 3 : 1) + (right ? 1 : 0);
+    }
+
+    /// <summary>The wound spheres of the character's mask.</summary>
+    public Vector4[]? Spheres(long key) => masks.TryGetValue(key, out var mask) ? mask.Spheres : null;
+
+    Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points)
+    {
+        if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return null;
         var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T);
         float best = float.MaxValue;
         var uv = Vector2.Zero;
+        var hit = Vector3.Zero;
         foreach (ref readonly var p in points.AsSpan())
         {
             if (Vector3.Dot(p.Normal, w.Side) < 0.2f) continue;
             float d = Vector3.DistanceSquared(p.Position, target);
-            if (d < best) (best, uv) = (d, p.Uv);
+            if (d < best) (best, uv, hit) = (d, p.Uv, p.Position);
         }
-        if (best == float.MaxValue) return;
+        if (best == float.MaxValue) return null;
         int cx = (int)(uv.X * Size), cy = (int)(uv.Y * Size), reach = (int)(3 * ChartUv * Size);
         for (int y = -reach; y <= reach; y++)
             for (int x = -reach; x <= reach; x++)
@@ -81,6 +101,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
                 pixels[i + 2] = Math.Max(pixels[i + 2], (byte)(s.Z * 255));
                 pixels[i + 3] = 255;
             }
+        return hit;
     }
 
     public void Dispose()
