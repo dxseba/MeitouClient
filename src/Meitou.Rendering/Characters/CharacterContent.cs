@@ -213,7 +213,7 @@ internal sealed class CharacterContent : IDisposable
         float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null);
 
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
-    const float AnatomyClearance = 0.2f;
+    const float AnatomyGrid = 0.1f, AnatomyClearance = 0.2f;
     /// <summary>What a stump shows, as Gore Lab's SeverBoneExposure: the limb's bone a little past the skin's cut (LimbHide heights), muscle up to it.</summary>
     static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p)
     {
@@ -419,6 +419,17 @@ internal sealed class CharacterContent : IDisposable
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
                 vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted) ? 0.25f : 0) }, Bones = over.Bones, Weights = over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
             }
+        }
+        // Clustered on a fine grid: seen only through cuts, the file's detail is lost, and triangles that collapse go.
+        for (int i = 0; i + 2 < vertices.Count;)
+        {
+            static Vector3 Snap(Vector3 p) => new(MathF.Round(p.X / AnatomyGrid) * AnatomyGrid, MathF.Round(p.Y / AnatomyGrid) * AnatomyGrid, MathF.Round(p.Z / AnatomyGrid) * AnatomyGrid);
+            Vector3 a = Snap(vertices[i].Position), b = Snap(vertices[i + 1].Position), c = Snap(vertices[i + 2].Position);
+            if (a == b || b == c || a == c) { vertices[i] = vertices[^3]; vertices[i + 1] = vertices[^2]; vertices[i + 2] = vertices[^1]; vertices.RemoveRange(vertices.Count - 3, 3); continue; }
+            vertices[i] = vertices[i] with { Position = a };
+            vertices[i + 1] = vertices[i + 1] with { Position = b };
+            vertices[i + 2] = vertices[i + 2] with { Position = c };
+            i += 3;
         }
         var array = vertices.ToArray();
         var indices = new uint[array.Length];
