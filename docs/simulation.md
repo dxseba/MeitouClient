@@ -1804,3 +1804,7 @@ Smuggling and stealing: [trade](#trade). UI: [faithful-ui-parity](faithful-ui-pa
 - `CharacterHot.Animation`/`AnimationTime` (the old movement layers) and the name length are still hashed; removing them moves every hash.
 - `HoursPerTick` is a constant of its own, not derived from `WorldSettings.TickSeconds`.
 - Navmesh: the cache key does not see a changed collision file; a running build is not stopped on unload (it finishes into the cache).
+
+## Combat events
+
+`World.CombatEvents` is an optional queue of `CombatEvent`s: one `Hit` per landed melee, bolt or execution hit, followed by that hit's `PartDown`, `PartSevered`, `KnockedOut` and `Died`. Null by default, it costs nothing. A reader sets it and drains it; nothing bounds it. Each event carries the victim's yaw; melee events add the cut direction and low-strike flag. It is output only: it reads no roll and enters no state hash. Deaths and severed limbs from bleeding, captors or debug commands are not hits and do not appear.

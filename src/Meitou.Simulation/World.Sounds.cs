@@ -70,6 +70,9 @@ public sealed partial class World
     /// </summary>
     public System.Collections.Concurrent.ConcurrentQueue<CharacterId>? BlockSparks { get; set; }
 
+    /// <summary>Landed hits and what they did, when a reader has set a queue; the reader drains it (docs/simulation.md "Combat events").</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<Combat.CombatEvent>? CombatEvents { get; set; }
+
     /// <summary>Queues a sound-worthy happening for the host (nothing while <see cref="Sounds"/> is null); <paramref name="slot"/> is the character it happens to (-1 none). Display only.</summary>
     public void EmitSound(SoundKind kind, int slot, Vector3 at, string? item = null)
     {

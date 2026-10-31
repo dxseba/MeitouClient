@@ -52,6 +52,7 @@ public sealed partial class CombatSystem
                     break;
             }
         }
+        PublishHit(world, CombatHitSource.Execution, table.IdOf(a), d, medical, part, damage, new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z), events);
         if (medical.Incapacitated)
         {
             D.Down = true;

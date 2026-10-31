@@ -120,6 +120,7 @@ public sealed partial class CombatSystem
                     break;
             }
         }
+        PublishHit(world, CombatHitSource.Melee, table.IdOf(a), d, dc.Medical, part, damage, -toAttacker, events, direction, tech.LowStrike);
         // A shackled defender is knocked out instead of staggered a quarter of the time (Character::_startStumble: MedicalSystem::knockout with factor 0.002, the floor of 3 s).
         if (!dc.Medical.Incapacitated && Meitou.Simulation.Locks.LockSystem.WornShackles(dc) is not null
             && CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.Shackled, CombatRolls.BlowCounter(a, seq, blow, 0)) < ShackledKnockout)
