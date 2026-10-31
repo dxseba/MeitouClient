@@ -221,7 +221,10 @@ sealed partial class GameHost
         if (sandboxFoe.IsNone || world.Tick % 20 != 0 || world.Characters.Cold(sandboxFoe.Slot)?.Medical is not { } medical) return;
         int part = dummyHits % medical.Parts.Count;
         if (g.SandboxPart is { } wanted)
-            part = medical.Parts.Select((p, i) => (p, i)).FirstOrDefault(x => x.p.Template.Name.Contains(wanted, StringComparison.OrdinalIgnoreCase), (medical.Parts[part], part)).Item2;
+            {
+            for (int k = 0; k < medical.Parts.Count; k++)
+                if (medical.Parts[k].Template.Name.Contains(wanted, StringComparison.OrdinalIgnoreCase)) { part = k; break; }
+        }
         else if (g.SandboxTorso)   // the chest and stomach only
             part = medical.Parts.Select((p, i) => (p, i)).Where(x => x.p.Template.StringId is "100-gamedata.quack" or "101-gamedata.quack").ElementAt(dummyHits % 2).i;
         int cut = (dummyHits++ * 7 / 3 % 3) switch { 0 => 1, 1 => 2, _ => 3 };   // down, left, right
