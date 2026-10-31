@@ -19,7 +19,7 @@ static class CharacterShaders
     public const int WoundHeaderBones = 5;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
-    public const uint WoundFlag = 1u << 31;
+    public const uint WoundFlag = 1u << 31, TearFlag = 1u << 29;
     public const uint BonesBinding = 6, MaterialsBinding = 7, MorphsBinding = 8, PreviousBonesBinding = 9;
     /// <summary>The texture slots of a material (<c>uint tex[]</c> in the shader, <see cref="TextureSlots"/>): <see cref="Slots"/> used, the rest hold the stand-in.</summary>
     public const int TextureSlotCount = 20;
@@ -144,6 +144,15 @@ static class CharacterShaders
             vAnatomy = anatomy ? 1u : 0u;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
+            if ((aInstanceData.z & 0x20000000u) != 0u)
+            {
+                // Worn on the body: torn where a wound lies under it (the wound spheres are in the same bind space).
+                for (uint i = 0u; i < 16u; i++)
+                {
+                    vec4 c = skin.bones[aInstanceData.x - 4u + i / 4u][i % 4u];
+                    if (c.w > 0.0) vClip = max(vClip, mod(c.w, 10.0) - distance(aPosition, c.xyz));
+                }
+            }
             if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
             else if (anatomy)
             {

@@ -558,7 +558,7 @@ internal sealed unsafe partial class CharacterRenderer
     /// row j's w, as an exact integer (CharacterShaders: <c>vBloodAmount</c>).
     /// </summary>
     /// <summary>The instance flag of a body with wounds, off in a portrait, whose palette has no header.</summary>
-    uint WoundFlag(AssetPart part, uint mask) => mask == 0 || portraitLive >= 0 ? (part.Anatomy ? CharacterShaders.AnatomyFlag : 0) : part.Anatomy ? CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag : part.IsBody ? CharacterShaders.WoundFlag : 0;
+    uint WoundFlag(AssetPart part, uint mask) => mask == 0 || portraitLive >= 0 ? (part.Anatomy ? CharacterShaders.AnatomyFlag : 0) : part.Anatomy ? CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag : part.IsBody ? CharacterShaders.WoundFlag : part.Shared ? CharacterShaders.TearFlag : 0;
 
     static Matrix4x4 WithBlood(Matrix4x4 m, ulong blood)
     {

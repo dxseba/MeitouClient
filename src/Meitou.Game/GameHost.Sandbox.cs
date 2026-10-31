@@ -216,6 +216,7 @@ sealed partial class GameHost
 
     void SandboxBare()
     {
+        if (g.SandboxClothed) { if (g.SandboxDummy) { session.World.CombatEvents = woundQueue; SandboxDummyHit(); } return; }
         if (g.SandboxDummy) { session.World.CombatEvents = woundQueue; SandboxDummyHit(); }
         var world = session.World;
         foreach (var id in new[] { sandboxHero, sandboxFoe })
