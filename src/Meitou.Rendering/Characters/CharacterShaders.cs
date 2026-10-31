@@ -242,7 +242,9 @@ static class CharacterShaders
             albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.b);
             // Cut edges, outside in: bruise, then a rim of yellow fat just before the hole.
             albedo = mix(albedo, vec3(0.33, 0.03, 0.03), cut.g);
-            albedo = mix(albedo, vec3(0.72, 0.56, 0.3), smoothstep(0.3, 0.45, cut.g) * (1.0 - smoothstep(0.5, 0.6, cut.g)));
+            float lump = sin(vUv.x * 310.0 + sin(vUv.y * 190.0) * 2.0) * sin(vUv.y * 270.0 + sin(vUv.x * 150.0) * 2.0);   // uneven, not a drawn outline
+            float fatFrom = 0.34 + 0.16 * lump;
+            albedo = mix(albedo, vec3(0.72, 0.56, 0.3) * (0.85 + 0.15 * lump), smoothstep(fatFrom, fatFrom + 0.1, cut.g) * (1.0 - smoothstep(0.52, 0.6, cut.g)));
             albedo = mix(albedo, vec3(0.08, 0.005, 0.005), cut.r);
             gloss = mix(gloss, 0.6, cut.g);
         }
@@ -397,7 +399,8 @@ static class CharacterShaders
             {
                 // The body's inside, drawn only through a hole: the cavity behind the anatomy.
                 if (vWounds == 0u) discard;
-                albedo = vec3(0.07, 0.008, 0.008);
+                // Wet cavity wall, not a black void.
+                albedo = vec3(0.2, 0.02, 0.025) * (0.65 + 0.35 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));
                 gloss = 0.3;
             }
             else if (vWounds != 0u) woundSurface(albedo, gloss);
