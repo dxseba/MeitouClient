@@ -213,7 +213,7 @@ internal sealed class CharacterContent : IDisposable
         float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null);
 
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
-    const float SkullMargin = 0.3f, AnatomyGrid = 0.04f, AnatomyClearance = 0.2f;
+    const float SkullMargin = 0.5f, AnatomyGrid = 0.04f, AnatomyClearance = 0.2f;
     /// <summary>What a stump shows, as Gore Lab's SeverBoneExposure: the limb's bone a little past the skin's cut (LimbHide heights), muscle up to it.</summary>
     static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p, bool female)
     {

@@ -344,7 +344,7 @@ static class CharacterShaders
             vec3 dx = dFdx(vWorld), dy = dFdy(vWorld), across = cross(dy, normalize(vNormal)), down = cross(normalize(vNormal), dx);
             bend = (across * dFdx(rise) + down * dFdy(rise)) / max(abs(dot(dx, across)), 1e-5) * 0.09;
             vec3 cut = field.rgb;
-            if (field.a > 0.5) discard;   // only the deepest cuts open onto the anatomy
+            if (field.a > (vUv.y < 0.0 ? 0.85 : 0.5) && (vUv.y >= 0.0 || field.r > 0.5)) discard;   // the face opens only at a deep cut's heart: eyes and teeth sit behind it   // only the deepest cuts open onto the anatomy
             // A painted cut, rim to core: bruise, thin fat, wet meat with fine grain, dark bottom.
             // Wet runs from the cuts, thick and glossy where they pool down the middle.
             float run = smoothstep(0.1, 0.55, tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g);
