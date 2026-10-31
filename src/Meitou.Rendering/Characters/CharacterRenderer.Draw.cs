@@ -323,7 +323,7 @@ internal sealed unsafe partial class CharacterRenderer
         {
             var part = parts[p];
             ref var f = ref partFrames[l.PartBase + p];
-            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || l.WoundMask != 0);
+            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels));
             if (!f.Shows) continue;
             f.Model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             f.Scale = part.Shared ? worldScale : f.Model.ScaleLength();
@@ -399,6 +399,7 @@ internal sealed unsafe partial class CharacterRenderer
                 ref readonly var f = ref partFrames[l.PartBase + p];
                 if (!f.Shows) continue;
                 var part = parts[p];
+                if (part.Anatomy) continue;   // under the skin: no shadow of its own
                 var mesh = part.Mesh;
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
@@ -561,6 +562,9 @@ internal sealed unsafe partial class CharacterRenderer
     /// </summary>
     /// <summary>The instance flag of a body with wounds, off in a portrait, whose palette has no header.</summary>
     uint WoundFlag(AssetPart part, uint mask) => mask == 0 || portraitLive >= 0 ? (part.Anatomy ? CharacterShaders.AnatomyFlag : 0) : part.Anatomy ? CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag : part.IsBody ? CharacterShaders.WoundFlag : part.Shared && !part.Plate ? CharacterShaders.TearFlag : 0;
+
+    /// <summary>Height on screen under which a body's anatomy is not drawn: inside a cut it is lost at that size, and each costs 350k triangles.</summary>
+    const float AnatomyPixels = 180;
 
     static Matrix4x4 WithBlood(Matrix4x4 m, ulong blood)
     {
