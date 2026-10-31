@@ -125,6 +125,11 @@ sealed partial class GameHost
 
     void UpdateWounds(World world)
     {
+        Meitou.Rendering.Characters.WoundMasks.Sample ??= static (x, y, w) =>
+        {
+            var p = Meitou.Simulation.Wounds.WoundPolicy.Sample(x, y, new Meitou.Simulation.Wounds.WoundShape(w.Cosine, w.Sine, w.Aspect, w.Depth));
+            return new Vector3(p.Core, p.Area, p.Ring);
+        };
         if (!ReferenceEquals(world.CombatEvents, woundQueue)) { woundQueue.Clear(); world.CombatEvents = woundQueue; }
         while (woundQueue.TryDequeue(out var e))
         {

@@ -121,4 +121,4 @@ races, bodies, gear, animals, attachments, motion and shadow views. [bench](benc
 
 ### Wounds
 
-A body with wounds carries `WoundHeaderBones` extra palette entries just before its bones: four vec4 per wound (bind-pose centre and bone length, bone axis, cut shape, side). Instance flag bit 31 turns the fragment term on; portraits have no header. **Observed** in the fight sandbox: cuts draw on the body mesh, not on worn items; Metal does not draw them.
+`WoundMasks` keeps a 256 x 256 mask per wounded character in the body's UVs (red core, green open area, blue ring), repainted on the CPU when the wounds change, at most 4 a frame and 64 masks. A wound lands at the nearest body vertex facing its side. A wounded palette starts one entry early, holding the mask's bindless index; instance flag bit 31 turns the fragment term on, off in portraits. Cuts draw on the body mesh only and are clipped at UV island edges. Metal does not draw them.

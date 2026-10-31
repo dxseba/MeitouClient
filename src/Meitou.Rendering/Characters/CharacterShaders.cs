@@ -15,8 +15,8 @@ static class CharacterShaders
     /// <summary>The first per-instance input location (the mesh's own inputs, <c>Vertex</c>, are at 0 to 6): four matrix rows, then <see cref="DataLocation"/>.</summary>
     public const int InstanceLocation = 7, DataLocation = 11, PreviousLocation = 12;
     /// <summary>The storage buffers of set 0 after the frame's own (the order of the extra list given to <c>NativeFrame.Prepare</c>): the bone palettes, the materials, the face morph offsets, last frame's palettes (motion pass).</summary>
-    /// <summary>Wounds drawn on a body; their header, four vec4 each, sits in the palette just before its bones, so no layout changes.</summary>
-    public const int WoundCapacity = 8, WoundHeaderBones = WoundCapacity;
+    /// <summary>A wounded body's palette starts one entry early: that entry's first float holds the bits of its wound mask's bindless index (<see cref="WoundMasks"/>).</summary>
+    public const int WoundHeaderBones = 1;
     public const uint WoundFlag = 1u << 31;
     public const uint BonesBinding = 6, MaterialsBinding = 7, MorphsBinding = 8, PreviousBonesBinding = 9;
     /// <summary>The texture slots of a material (<c>uint tex[]</c> in the shader, <see cref="TextureSlots"/>): <see cref="Slots"/> used, the rest hold the stand-in.</summary>
@@ -108,8 +108,7 @@ static class CharacterShaders
         //MOTION_OUT
         out vec4 vColour;
         out vec4 vBlood;        // the blood mapping of character.hlsl (cylinder projection of the part in its own space), before the race scale
-        out vec3 vBind;         // bind-pose position, where wounds are placed
-        flat out uint vWounds;  // first row of the wound header + 1, 0 without wounds
+        flat out uint vWounds;  // the wound mask, 0 without wounds
         out float vBloodAmount; // the blood amount of the vertex's body part (the instance carries the parts': two 8-bit amounts in the w of each matrix row)
 
         void main()
@@ -137,8 +136,7 @@ static class CharacterShaders
             // character.hlsl: x = height along the mesh's Y, y = angle round it (atan2(normal.x, normal.z) / 2pi), z = the angle shifted by half a turn (the wrap), w = normal.z.
             float turn = atan(aNormal.x, aNormal.z) / 3.14159265359 * 0.5;
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
-            vBind = local;
-            vWounds = (aInstanceData.z & 0x80000000u) != 0u ? (aInstanceData.x - {{WoundHeaderBones}}u) * 4u + 1u : 0u;
+            vWounds = (aInstanceData.z & 0x80000000u) != 0u ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vMaterial = aInstanceData.y;
             vInterior = aInstanceData.z & 1u;
             // Hidden limbs and parts (docs/characters.md "Hidden body parts"): the body's vertices of a limb whose bit 12 + k the instance carries, or of a part-map part whose
@@ -216,50 +214,16 @@ static class CharacterShaders
         in float vHidden;
         in vec4 vColour;
         in vec4 vBlood;
-        in vec3 vBind;
         flat in uint vWounds;
         in float vBloodAmount;
-        layout(std430, set = 0, binding = {{BonesBinding}}) readonly buffer WoundRows { vec4 rows[]; } woundRows;
-
-        // WoundPolicy.Sample, at a point of a cut chart: x core, y area, z ring.
-        float woundHash(vec2 p) { vec3 a = fract(vec3(p.x, p.y, p.x) * 0.1031); a += dot(a, a.yzx + 33.33); return fract((a.x + a.y) * a.z); }
-        float woundNoise(vec2 p)
-        {
-            vec2 i = floor(p), f = fract(p);
-            f = f * f * (3.0 - 2.0 * f);
-            return mix(mix(woundHash(i), woundHash(i + vec2(1, 0)), f.x), mix(woundHash(i + vec2(0, 1)), woundHash(i + vec2(1, 1)), f.x), f.y);
-        }
-        vec3 woundProfile(vec2 q, vec4 s)
-        {
-            float tear = woundNoise(q * 6.0) * 0.65 + woundNoise(q * 17.0 + 11.3) * 0.35 - 0.5;
-            float size = max(pow(clamp(s.w, 0.0, 1.0), 0.4), 0.45) * 1.5;
-            float x = (q.x * s.x + q.y * s.y) / (1.25 * size) * (1.0 - tear * 0.18);
-            float y = (-q.x * s.y + q.y * s.x) / (clamp(s.z, 0.08, 1.0) * size);
-            if (abs(x) >= 1.0) return vec3(0.0);
-            float lens = max(1.0 - pow(abs(x), 2.4), 0.025);
-            float d = abs(y) / lens + tear * 0.48;
-            float growth = clamp((s.w - 0.25) * 0.1, 0.0, 0.075);
-            float ends = smoothstep(0.0, 1.0, (1.0 - abs(x)) / 0.08);
-            return clamp((vec3(0.42, 0.82, 1.25) + growth - d) / vec3(0.15, 0.15, 0.40), 0.0, 1.0) * ends;
-        }
-        // Open flesh over the albedo. A chart spans a fifth of its bone either way, on the wounded side only.
+        // Open flesh over the albedo, from the character's wound mask.
         void woundSurface(inout vec3 albedo, inout float gloss)
         {
-            vec3 cut = vec3(0.0);
-            for (uint i = 0u; i < {{WoundCapacity}}u; i++)
-            {
-                uint r = vWounds - 1u + i * 4u;
-                vec4 centre = woundRows.rows[r];
-                if (centre.w <= 0.0) continue;
-                vec3 d = vBind - centre.xyz, along = woundRows.rows[r + 1u].xyz, side = woundRows.rows[r + 3u].xyz;
-                if (dot(d, side) >= 0.0) continue;   // the rig faces -Z, the tracker sides face +Z
-                vec3 across = normalize(cross(along, side));
-                cut = max(cut, woundProfile(vec2(dot(d, along), dot(d, across)) / (centre.w * 0.2), woundRows.rows[r + 2u]));
-            }
-            albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.z);
-            albedo = mix(albedo, vec3(0.33, 0.03, 0.03), cut.y);
-            albedo = mix(albedo, vec3(0.08, 0.005, 0.005), cut.x);
-            gloss = mix(gloss, 0.6, cut.y);
+            vec3 cut = tex(vWounds, vUv).rgb;
+            albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.b);
+            albedo = mix(albedo, vec3(0.33, 0.03, 0.03), cut.g);
+            albedo = mix(albedo, vec3(0.08, 0.005, 0.005), cut.r);
+            gloss = mix(gloss, 0.6, cut.g);
         }
         layout(location = 0) out vec4 fragColour;
 

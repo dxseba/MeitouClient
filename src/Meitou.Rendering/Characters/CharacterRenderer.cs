@@ -90,6 +90,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     /// <summary>Whether the skin shading applies to the race <paramref name="race"/> (RACE string id): the Skin page's choice, else <paramref name="byDefault"/>.</summary>
     public bool SkinOn(string? race, bool byDefault) => race is not null && skinRaces is not null && skinRaces.TryGetValue(race, out bool chosen) ? chosen : byDefault;
     readonly SkinScattering skinScattering;
+    readonly WoundMasks woundMasks;
 
     /// <summary>
     /// The skin per race, chosen against its default (RACE string id to on or off; the settings' Skin page): a race not in it takes <see cref="SkinByDefault"/>.
@@ -189,8 +190,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public bool Repose, WeaponDrawn, RangedDrawn, BackDrawn;
         /// <summary>The blood of its first 8 body parts, a byte each (<see cref="CharacterInstance.Blood"/>).</summary>
         public ulong Blood;
-        /// <summary>The wounds to write in the palette header.</summary>
-        public IReadOnlyList<CharacterWoundMark>? Wounds;
+        /// <summary>The wound mask index for the palette header, 0 without wounds.</summary>
+        public uint WoundMask;
         /// <summary>Posed this frame whatever the thinning (the player's, a ragdoll, a new asset or a first pose).</summary>
         public bool MustPose;
         /// <summary>How tall it is on screen, in pixels (its diameter over its distance by the view's pixels per radian): the thinning's priority.</summary>
@@ -296,6 +297,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         motionProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.MotionVertex(), CharacterShaders.MotionFragment(), "characters motion", CharacterShaders.InstanceLocation);
         content = new CharacterContent(gpu, install, db, assetLocator, rigs);
         skinScattering = new SkinScattering(gpu);
+        woundMasks = new WoundMasks(gpu);
         colourTimer = new PassTimer(gpu);
         depthTimer = new PassTimer(gpu);
     }
@@ -407,6 +409,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         textureBias = Gpu.LodBias;
         textureStandIn = Gpu.StandIn2D;
         updateStamp++;
+        woundMasks.BeginFrame();
         poseSeconds = PoseClock?.Invoke() ?? Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
 
         // 1. Assets and the characters in range, with their layers resolved (the rig's caches are filled here, on this thread).
@@ -449,8 +452,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             (l.WeaponDrawn, l.RangedDrawn, l.BackDrawn, l.Shots, l.Bolts) = (inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, inst.Shots, inst.Bolts);
             l.Centre = centre;
             l.Radius = asset.Radius * scale;
-            l.Wounds = inst.Wounds;
-            if (l.Wounds is { Count: > 0 }) boneTotal += CharacterShaders.WoundHeaderBones;
+            l.WoundMask = woundMasks.Update(inst.Key, asset.Rig, asset.WoundPoints, inst.Wounds);
+            if (l.WoundMask != 0) boneTotal += CharacterShaders.WoundHeaderBones;
             l.BoneBase = boneTotal;
             boneTotal += asset.Rig.BoneCount;
             l.AttachBase = attachCount;
@@ -546,7 +549,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     state.Posed = stamp;
                 }
                 state.Bones.CopyTo(new Span<Matrix4x4>((byte*)bonePointer + (long)l.BoneBase * 64, rig.BoneCount));
-                if (l.Wounds is { Count: > 0 }) WriteWounds(new Span<Vector4>((byte*)bonePointer + (l.BoneBase - CharacterShaders.WoundHeaderBones) * 64L, CharacterShaders.WoundHeaderBones * 4), rig, l.Wounds);
+                if (l.WoundMask != 0) *(uint*)((byte*)bonePointer + (l.BoneBase - CharacterShaders.WoundHeaderBones) * 64L) = l.WoundMask;
                 state.Attach.CopyTo(attachArray, l.AttachBase);
                 if (motion)
                 {
@@ -763,6 +766,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         nativeFrame.Dispose();
         content.Dispose();
         skinScattering.Dispose();
+        woundMasks.Dispose();
         DisposePortraits();
         DisposeStage();
         DisposeHover();

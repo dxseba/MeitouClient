@@ -135,6 +135,7 @@ internal sealed class CharacterAsset
 {
     public required CharacterAppearance Appearance;
     public required SkeletonRig Rig;
+    public WoundPoint[]? WoundPoints;
     public BodyShapeData? Shape;
     /// <summary>The stat-driven body last applied to the shape and the body's normal maps (<see cref="CharacterRenderer"/>), null before the first.</summary>
     public BodyBuild? AppliedBuild;
@@ -277,6 +278,9 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>Reads a mesh file and makes its levels and index buffers (no GPU work, any thread): with its skinning weights for a skeleton of <paramref name="boneCount"/>
     /// bones (null: unskinned); its generated levels start <paramref name="lodScale"/> times farther than the rule gives. A <paramref name="close"/> mesh (the character editor's
     /// close-up) keeps only its full level: generating the others is nearly all of the time a mesh takes (a hair 1 to 2 s), and the editor shows one character up close.</summary>
+    /// <summary>The body meshes' vertices, thinned, by path: where a wound lands on the skin.</summary>
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, WoundPoint[]> WoundPoints = new();
+
     static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs, bool close, bool icon = false, string? partMap = null)
     {
         var messages = new List<string>();
@@ -285,6 +289,8 @@ internal sealed class CharacterContent : IDisposable
             var mesh = OgreMeshReader.ReadFile(path);
             var model = Model.Build(mesh, boneCount, gameBinormals: !icon, tangentSign: icon);
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
+            if (limbs is not null || partMap is not null)
+                WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv))];
             if (limbs is not null || partMap is not null) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
             // Not an icon's: its colour is the mesh's own vertex colour (CharacterShaders.VertexColoured), and icons take no skin.
             if (!icon) MarkCurvature(model);
@@ -698,7 +704,7 @@ internal sealed class CharacterContent : IDisposable
         var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true, limbs: LimbHideOf(c, rig), close: close, partMap: PartMapPath(c));
         if (body is null) return null;
 
-        var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null };
+        var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null, WoundPoints = WoundPoints.GetValueOrDefault(bodyPath.ToLowerInvariant()) };
         if (asset.Animal)
         {
             // An animal's sphere from its body's bounds (a leviathan is 190 units tall): centred above the feet, grown by the bounds' offset across the ground so any heading fits.
