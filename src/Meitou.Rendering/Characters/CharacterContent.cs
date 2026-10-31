@@ -210,6 +210,8 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
     const float AnatomyClearance = 0.2f;
+    /// <summary>A group no wound opens: the bowel is never drawn in the body, the loose body stands for it (<see cref="DebrisRenderer.Bowel"/>).</summary>
+    const int LooseBowelGroup = 5;
     readonly string modsDirectory;
 
     public CharacterContent(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)
@@ -396,7 +398,7 @@ internal sealed class CharacterContent : IDisposable
                 var over = Nearest(fitted);
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
-                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Colour = colour with { W = WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
             }
         }
         var array = vertices.ToArray();

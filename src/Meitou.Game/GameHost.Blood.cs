@@ -124,7 +124,7 @@ sealed partial class GameHost
     readonly ConcurrentQueue<Meitou.Simulation.Combat.CombatEvent> woundQueue = new();
     readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
 
-    sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor; }
+    sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; }
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
 
     /// <summary>A deep belly wound spills the bowel as one loose body, as the GTA V FLESH port's guts prop: it falls from the wound and lies where it lands. Visual only.</summary>
@@ -139,13 +139,15 @@ sealed partial class GameHost
             var id = world.Characters.IdOf(slot);
             if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id)) continue;
             var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
-            gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 4, Floor = hot.Position.Y };
+            gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y };
         }
         foreach (var fall in gutFalls.Values)
         {
-            if (fall.Position.Y > fall.Floor + 0.5f)
+            if (fall.Position.Y > fall.Floor + 0.35f)
             {
-                fall.Velocity.Y -= 40 * dt;
+                // Slow at first, dragged out of the wound, then falling free.
+                fall.Age += dt;
+                fall.Velocity.Y -= (fall.Age < 0.8f ? 8 : 40) * dt;
                 fall.Position += fall.Velocity * dt;
                 fall.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitX, 3 * dt) * fall.Rotation);
             }
