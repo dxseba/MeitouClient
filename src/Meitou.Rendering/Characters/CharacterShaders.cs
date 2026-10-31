@@ -527,7 +527,7 @@ static class CharacterShaders
                     for (uint i = 0u; i < 64u; i++)
                     {
                         vec4 c = cutMats.m[vCuts - 16u + i / 4u][i % 4u];
-                        float reach = max(mod(c.w, 10.0) - 1.3, 0.0) * 1.1;
+                        float reach = max(mod(c.w, 10.0) - 1.6, 0.0) * 1.0;
                         if (c.w > 0.0 && reach > 0.0 && distance(vBindPos, c.xyz) + 0.12 * sin(vBindPos.x * 9.0 + vBindPos.y * 7.0) * sin(vBindPos.z * 8.0) < reach) discard;
                     }
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
