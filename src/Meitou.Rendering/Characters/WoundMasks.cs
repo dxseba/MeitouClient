@@ -81,6 +81,17 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         return (leg ? 3 : 1) + (right ? 1 : 0);
     }
 
+    readonly System.Collections.Concurrent.ConcurrentDictionary<SkeletonRig, uint[]> boneGroups = new();
+
+    /// <summary>Each bone's <see cref="BodyGroup"/>, four bits a bone in 8 words: the palette header's, for a worn vertex to know its group.</summary>
+    public uint[] BoneGroups(SkeletonRig rig) => boneGroups.GetOrAdd(rig, static r =>
+    {
+        var words = new uint[8];
+        foreach (var bone in r.Skeleton.Bones)
+            if (bone.Handle < 64) words[bone.Handle / 8] |= (uint)BodyGroup(bone.Name) << (bone.Handle % 8 * 4);
+        return words;
+    });
+
     /// <summary>The wound spheres of the character's mask.</summary>
     public Vector4[]? Spheres(long key) => masks.TryGetValue(key, out var mask) ? mask.Spheres : null;
 

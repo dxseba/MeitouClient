@@ -146,11 +146,14 @@ static class CharacterShaders
             vClip = -1.0;
             if ((aInstanceData.z & 0x20000000u) != 0u)
             {
-                // Worn on the body: torn where a wound lies under it (the wound spheres are in the same bind space).
+                // Worn on the body: torn where a wound of its own body group lies under it (the wound spheres are in the same bind space; in it a hand hangs by the hip).
+                uint primary = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
+                mat4 first = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
+                uint group = (floatBitsToUint(first[1 + primary / 32u][primary / 8u % 4u]) >> (primary % 8u * 4u)) & 15u;
                 for (uint i = 0u; i < 16u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 4u + i / 4u][i % 4u];
-                    if (c.w > 0.0) vClip = max(vClip, mod(c.w, 10.0) * 0.8 - distance(aPosition, c.xyz));
+                    if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, mod(c.w, 10.0) * 0.8 - distance(aPosition, c.xyz));
                 }
             }
             if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
