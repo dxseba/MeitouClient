@@ -237,6 +237,8 @@ sealed partial class GameHost
                 var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));
                 marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
             }
+        // A stump without a wound still needs the (blank) mask that lets its anatomy draw: a mark on no bone paints nothing.
+        if (marks.Count == 0 && LostGroups(id) != 0) marks.Add(new("", "", 0, default, 1, 0, 1, 0));
         return marks;
     }
 
