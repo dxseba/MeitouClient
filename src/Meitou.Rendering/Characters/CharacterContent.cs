@@ -426,6 +426,12 @@ internal sealed class CharacterContent : IDisposable
                     if (MathF.Abs(fitted.X) < 0.75f) fitted = new Vector3(fitted.X * 0.68f, fitted.Y, fitted.Z - 0.1f);
                     else fitted += v.Normal * 0.05f;
                 }
+                // The skull is bigger than this head and would stand out through hair and wounds: scaled in about the head's own middle.
+                if (batch.Layer == 0 && batch.Bone is "Bip01 Head" or "Bip01 Jaw")
+                {
+                    var middle = rig.BindPosition[bone] + new Vector3(0, 1.1f, 0.15f);
+                    fitted = middle + (fitted - middle) * 0.8f;
+                }
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
