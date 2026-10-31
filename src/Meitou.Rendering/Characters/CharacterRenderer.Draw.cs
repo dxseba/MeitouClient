@@ -262,7 +262,7 @@ internal sealed unsafe partial class CharacterRenderer
                 }
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
-                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
+                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass)
                 {
@@ -323,7 +323,7 @@ internal sealed unsafe partial class CharacterRenderer
         {
             var part = parts[p];
             ref var f = ref partFrames[l.PartBase + p];
-            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels));
+            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal));
             if (!f.Shows) continue;
             f.Model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             f.Scale = part.Shared ? worldScale : f.Model.ScaleLength();
@@ -403,7 +403,7 @@ internal sealed unsafe partial class CharacterRenderer
                 var mesh = part.Mesh;
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
-                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
+                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance
                 {
                     Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask),
@@ -565,6 +565,9 @@ internal sealed unsafe partial class CharacterRenderer
 
     /// <summary>Height on screen under which a body's anatomy is not drawn: inside a cut it is lost at that size, and each costs 350k triangles.</summary>
     const float AnatomyPixels = 180;
+
+    /// <summary>The limb bits a chosen cut height takes over from the game's fixed hide.</summary>
+    static int CutBits(uint cuts) { int bits = 0; for (int k = 0; k < 4; k++) if (((cuts >> (8 * k)) & 255) != 0) bits |= 1 << k; return bits; }
 
     static Matrix4x4 WithBlood(Matrix4x4 m, ulong blood)
     {

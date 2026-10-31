@@ -53,6 +53,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-clothed` | | off | With `--sandbox-dummy`: the fighters keep their clothes. |
 | `--sandbox-zoom <d>` | units | 30 | With `--sandbox-bare`: the camera boom. |
 | `--sandbox-sever` | | off | With `--sandbox-dummy`: the foe loses its left arm at tick 30. |
+| `--sandbox-sever-level <n>` | 0 to 2 | | As `--sandbox-sever`, cut at shoulder, above the elbow or at the forearm. |
 | `--sandbox-yaw <deg>` | degrees | off | With `--sandbox-bare`: the camera yaw round the fighters. |
 | `--sandbox-bare` | | off | The hero and foe draw without worn gear or painted clothing; weapons stay. Their armour still protects them. |
 | `--sandbox-races` | | off | Adds one character of every person race in rings round the pair. |

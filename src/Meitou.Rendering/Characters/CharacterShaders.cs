@@ -203,6 +203,18 @@ static class CharacterShaders
             // bit 18 + p it carries (the vertex's limb bits 0-3, part bits from 4: CharacterContent.MarkBody); the fragments discard where it is above 0.
             uint marks = uint(aColour.y + 0.5);
             vHidden = ((marks & (aInstanceData.z >> 12) & 15u) | ((marks >> 4) & (aInstanceData.z >> 18) & 1023u) | ((marks >> 14) & (aInstanceData.z >> 28) & 1u)) != 0u ? 1.0 : 0.0;
+            if ((aInstanceData.z & 0x8000000Cu) != 0u && !anatomy)
+            {
+                // A limb cut at its own height: everything of that limb below it goes.
+                mat4 cutHeader = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
+                uint cutBone = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
+                uint cutGroup = (floatBitsToUint(cutHeader[1 + cutBone / 32u][cutBone / 8u % 4u]) >> (cutBone % 8u * 4u)) & 15u;
+                if (cutGroup >= 1u && cutGroup <= 4u)
+                {
+                    uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;
+                    if (height != 0u && aPosition.y < float(height) * 0.1) vHidden = 1.0;
+                }
+            }
             if ((aInstanceData.z & {{HeadOnly}}u) != 0u) vHidden = (marks & {{CharacterContent.HeadBit}}u) == 0u ? 1.0 : 0.0;   // a cut-off head: its vertices only
             // The part of the vertex (bits 16-19: its index + 1, CharacterContent.MarkBody) and its blood amount (the instance: part k in byte k & 1 of the w of row k / 2).
             uint bloodPart = (marks >> 16) & 15u;

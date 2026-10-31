@@ -48,6 +48,8 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public IReadOnlyList<CharacterWoundMark> Wounds { get; init; } = [];
     /// <summary>Bits of the <see cref="Characters.WoundMasks.BodyGroup"/>s lost to a cut: their anatomy is not drawn.</summary>
     public uint LostGroups { get; init; }
+    /// <summary>Where each lost limb ends, a byte a limb slot: its bind height x 10; 0: the game's own stump.</summary>
+    public uint LimbCuts { get; init; }
     /// <summary>The whole placement, in place of <see cref="Position"/>, <see cref="Yaw"/> and <see cref="Rotation"/> (a falling head's); <see cref="Position"/> still places it for culling.</summary>
     public Matrix4x4? World { get; init; }
     /// <summary>

@@ -241,6 +241,20 @@ sealed partial class GameHost
     /// <summary>How far a wound's blood has run, in 12 steps over <see cref="BloodRunSeconds"/>: each step repaints the mask.</summary>
     float Flowed(long born) => MathF.Ceiling(Math.Clamp((float)((session.World.Tick - born) * session.World.TickSeconds / BloodRunSeconds), 0, 1) * 12) / 12;
 
+    /// <summary>Each lost limb's own cut (bind heights: shoulder, above the elbow, forearm; thigh, knee, shin), rolled by character and limb, visual: the first keeps the game's stump.</summary>
+    uint LimbCuts(CharacterId id)
+    {
+        uint cuts = 0;
+        if (session.World.Characters.Cold(id.Slot)?.Medical is { } medical)
+            foreach (var part in medical.Parts)
+                if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb)
+                {
+                    int level = g.SandboxSeverLevel ?? (id.Slot * 7 + limb * 3 + id.Generation) % 3;
+                    if (level > 0) cuts |= (uint)((limb < 2 ? (level == 1 ? 12.4f : 11f) : (level == 1 ? 6f : 3.5f)) * 10) << (8 * limb);
+                }
+        return cuts;
+    }
+
     static Vector2 Turned(in Meitou.Simulation.Wounds.WoundShape shape, int age)
     {
         float turn = (age * 2.399963f % MathF.Tau - MathF.PI) / MathF.PI * 0.35f, c = MathF.Cos(turn), s = MathF.Sin(turn);
