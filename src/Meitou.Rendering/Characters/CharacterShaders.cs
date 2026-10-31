@@ -297,7 +297,7 @@ static class CharacterShaders
         }
 
         // Open flesh over the albedo, from the character's wound mask.
-        void woundSurface(inout vec3 albedo, inout float gloss)
+        void woundSurface(inout vec3 albedo, inout float gloss, CharMaterial m)
         {
             vec4 field = woundField(vUv);
             vec3 cut = field.rgb;
@@ -310,8 +310,8 @@ static class CharacterShaders
             float grain = 0.82 + 0.18 * sin((vUv.x + vUv.y) * 900.0 + sin(vUv.x * 310.0) * 2.0);
             albedo = mix(albedo, albedo * vec3(0.8, 0.5, 0.48), cut.b);
             albedo = mix(albedo, vec3(0.55, 0.42, 0.26), cut.g);
-            albedo = mix(albedo, vec3(0.42, 0.05, 0.05) * grain, smoothstep(0.0, 0.35, cut.r + cut.g * 0.25 - 0.2));
-            albedo = mix(albedo, vec3(0.05, 0.003, 0.003), smoothstep(0.3, 1.0, cut.r));
+            albedo = mix(albedo, m.colour1.rgb * 0.6 * grain, smoothstep(0.0, 0.35, cut.r + cut.g * 0.25 - 0.2));
+            albedo = mix(albedo, 0.14 * m.colour1.rgb, smoothstep(0.3, 1.0, cut.r));
             gloss = mix(gloss, 0.75, cut.g);
         }
         layout(location = 0) out vec4 fragColour;
@@ -477,10 +477,10 @@ static class CharacterShaders
             {
                 // The body's inside, drawn only through a hole: the cavity behind the anatomy. An unwounded body keeps its plain colour: a reduced level's flipped triangles must not vanish.
                 // Wet cavity wall, not a black void.
-                albedo = vec3(0.34, 0.05, 0.05) * (0.7 + 0.3 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));   // meat, not a void
+                albedo = m.colour1.rgb * 0.5 * (0.7 + 0.3 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));   // meat, not a void
                 gloss = 0.3;
             }
-            else if (vWounds != 0u) woundSurface(albedo, gloss);
+            else if (vWounds != 0u) woundSurface(albedo, gloss, m);
             if (cut) discard;
             // The game writes character albedo darkened: 0.7 for bodies, heads and hair (character.hlsl DARKEN), 0.8 for worn items (skin.hlsl); not its icons (rtticons.hlsl,
             // a fog distance of -1).

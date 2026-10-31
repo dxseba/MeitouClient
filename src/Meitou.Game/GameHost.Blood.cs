@@ -141,7 +141,7 @@ sealed partial class GameHost
         {
             var hot = world.Characters.Previous[slot];
             var id = world.Characters.IdOf(slot);
-            if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) continue;
+            if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id) || world.Characters.Cold(slot)?.Race?.Name is not ("Greenlander" or "Scorchlander")) continue;
             var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
             gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y };
         }
