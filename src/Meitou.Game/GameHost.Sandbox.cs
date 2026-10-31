@@ -64,8 +64,8 @@ sealed partial class GameHost
         var world = session.World;
         string record = SandboxRecord(scene.Database!);
         float half = g.Sandbox >= 2 ? 15 : 0;
-        sandboxHero = population!.SpawnSandbox(world, record, new Vector2(-half, 0), player: true, yaw: MathF.PI / 2);
-        if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2);
+        sandboxHero = population!.SpawnSandbox(world, record, new Vector2(-half, 0), player: true, yaw: MathF.PI / 2, maleHuman: g.SandboxDummy);
+        if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2, maleHuman: g.SandboxDummy);
         // n above 2: the rest stand idle in rings round the pair (the player's faction, so they keep out of the fight), 15 units apart, a look each;
         // --sandbox-races: then one of every person race, in the rings after them.
         var extra = Enumerable.Repeat(record, Math.Max(0, g.Sandbox - 2)).ToList();
@@ -219,7 +219,10 @@ sealed partial class GameHost
         var world = session.World;
         foreach (var id in new[] { sandboxHero, sandboxFoe })
             if (!id.IsNone && world.Characters.Cold(id.Slot)?.Appearance is { } look)
+            {
+                look.BodyLayers.Clear();   // shirts and shorts painted on the body
                 look.Parts.RemoveAll(p => p.Record.Type != FcsRecordType.WEAPON && p.Mode == Meitou.Data.Characters.AttachMode.SharedSkeleton && p.Record.Type != FcsRecordType.ATTACHMENT);
+            }
     }
 
     /// <summary>The strategy camera on the character the player follows (<see cref="PlayerInterface.Follow"/>), as the sandbox's follow does; a gone character is let go.</summary>

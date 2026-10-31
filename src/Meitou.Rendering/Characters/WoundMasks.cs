@@ -17,7 +17,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     /// <summary>The cut chart's unit in UV: a body's UVs give about 0.05 per world unit (<b>Observed</b> tuning value).</summary>
     const float ChartUv = 0.045f;
 
-    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public Vector4[] Spheres = new Vector4[16]; }
+    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public long Used; public Vector4[] Spheres = new Vector4[16]; }
 
     /// <summary>World units round a wound in which the anatomy shows: a tuning value.</summary>
     const float SphereRadius = 0.6f;
@@ -25,11 +25,12 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     readonly Dictionary<long, Mask> masks = [];
     readonly byte[] pixels = new byte[Size * Size * 4];
     int repaints;
+    long frame;
 
     /// <summary>The cut profile at a chart point (core, area, ring), from the host (<c>WoundPolicy.Sample</c>).</summary>
     public static Func<float, float, CharacterWoundMark, Vector3>? Sample { get; set; }
 
-    public void BeginFrame() => repaints = 0;
+    public void BeginFrame() { repaints = 0; frame++; }
 
     /// <summary>The bindless index of the character's mask, 0 without one.</summary>
     public uint Update(long key, SkeletonRig rig, WoundPoint[]? points, IReadOnlyList<CharacterWoundMark> wounds)
@@ -38,7 +39,14 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         var hash = new HashCode();
         foreach (var w in wounds) hash.Add(w);
         int code = hash.ToHashCode();
-        if (masks.TryGetValue(key, out var mask) && mask.Hash == code) return mask.Index;
+        if (masks.TryGetValue(key, out var mask) && mask.Hash == code) { mask.Used = frame; return mask.Index; }
+        // Full: the mask of a character gone longest makes room.
+        if (mask is null && masks.Count >= Capacity && masks.MinBy(m => m.Value.Used) is { Value.Used: var used, Key: var old, Value: var stale } && used < frame - 600)
+        {
+            gpu.Bindless.Free(BindlessKind.Texture2D, stale.Index);
+            gpu.ReleaseTexture(stale.Texture);
+            masks.Remove(old);
+        }
         if (repaints >= RepaintsPerFrame || (mask is null && masks.Count >= Capacity)) return mask?.Index ?? 0;
         repaints++;
         Array.Clear(pixels);
@@ -59,6 +67,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             }
         }
         mask.Hash = code;
+        mask.Used = frame;
         mask.Spheres = spheres;
         return mask.Index;
     }
@@ -77,6 +86,8 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
 
     Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points)
     {
+        // A face takes far more UV per world unit than a body.
+        float chart = w.BoneB.Contains("Head") ? ChartUv * 0.3f : ChartUv;
         if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return null;
         var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T) + w.Side * 1.2f;   // out to the skin, so a slanted side lands off the bone
         float best = float.MaxValue;
@@ -89,11 +100,11 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             if (d < best) (best, uv, hit) = (d, p.Uv, p.Position);
         }
         if (best == float.MaxValue) return null;
-        int cx = (int)(uv.X * Size), cy = (int)(uv.Y * Size), reach = (int)(3 * ChartUv * Size);
+        int cx = (int)(uv.X * Size), cy = (int)(uv.Y * Size), reach = (int)(3 * chart * Size);
         for (int y = -reach; y <= reach; y++)
             for (int x = -reach; x <= reach; x++)
             {
-                var s = Sample!(x / (ChartUv * Size), y / (ChartUv * Size), w);
+                var s = Sample!(x / (chart * Size), y / (chart * Size), w);
                 if (s.Z <= 0) continue;
                 int i = ((((cy + y) % Size + Size) % Size) * Size + ((cx + x) % Size + Size) % Size) * 4;
                 pixels[i] = Math.Max(pixels[i], (byte)(s.X * 255));

@@ -23,12 +23,14 @@ public sealed partial class PopulationSystem
         return data.Appearances?.Create(recordId, data.Factions[faction].Id, (int)(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.PlayerLook) & 0x7FFFFFFF));
     }
 
-    public CharacterId SpawnSandbox(World world, string recordId, Vector2 at, bool player, float yaw = 0, int variant = 0, int? faction = null)
+    public CharacterId SpawnSandbox(World world, string recordId, Vector2 at, bool player, float yaw = 0, int variant = 0, int? faction = null, bool maleHuman = false)
     {
         int chosen = SandboxFaction(player, faction);
         // An animal (ANIMAL_CHARACTER) has its species' shared look (nothing rolled); it is an adult (age 1).
         bool animal = data.Db.Find(recordId) is { Type: Meitou.Data.Fcs.FcsRecordType.ANIMAL_CHARACTER };
         CharacterAppearance? look = SandboxLook(world.Seed, recordId, player, variant, chosen);
+        // A wound test wants one comparable body: try further looks until one is a man and no robot.
+        for (int v = variant + 1; maleHuman && v < variant + 500 && look is not null && (look.Female || look.Race.GetBool("is robot")); v++) look = SandboxLook(world.Seed, recordId, player, v, chosen);
         var member = new MemberPlan(recordId, SquadRole.Leader, 0, default, animal, 1);
         var template = new SquadTemplate { Id = "sandbox " + recordId, Name = data.Db.Find(recordId)?.Name ?? recordId };
         var plan = new SquadPlan(template, [member], [], []);

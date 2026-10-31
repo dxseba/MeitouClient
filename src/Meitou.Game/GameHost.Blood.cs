@@ -133,7 +133,7 @@ sealed partial class GameHost
         if (!ReferenceEquals(world.CombatEvents, woundQueue)) { woundQueue.Clear(); world.CombatEvents = woundQueue; }
         while (woundQueue.TryDequeue(out var e))
         {
-            if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot)?.Medical is not { } medical || e.Part >= medical.Parts.Count) continue;
+            if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
             var part = medical.Parts[e.Part];
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
         }
@@ -149,14 +149,14 @@ sealed partial class GameHost
                 {
                 // Off the centre line: each wound keeps its own slant and height.
                 float off = w.Age * 37 % 7 / 3f - 1;
-                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.06f, Vector3.Normalize(new Vector3(off * 0.6f, 0, i == 2 ? -1 : 1)), w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
             }
         foreach (var slot in body.Limbs)
             if (slot is { } w && marks.Count < 16)
             {
                 if (w.Segment == 8)
                 {
-                    marks.Add(new("Bip01 Neck", "Bip01 Head", w.T + 0.6f, w.Side, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+                    marks.Add(new("Bip01 Neck", "Bip01 Head", 1.5f + w.T, w.Side, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
                     continue;
                 }
                 string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";
