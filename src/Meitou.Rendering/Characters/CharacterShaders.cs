@@ -329,7 +329,8 @@ static class CharacterShaders
                 float sd = y - half_;
                 vec4 here = vec4(1.0 - smoothstep(-half_ * 0.55 - aa, -half_ * 0.55 + aa, sd), 1.0 - smoothstep(-aa, aa, sd), 1.0 - smoothstep(0.0, len * 0.06 + aa, sd), depth);
                 here.w *= here.y;
-                best = max(best, here);
+                // Crossing cuts join: a smooth maximum, so no sharp cross where they meet.
+                best = max(best, here) + here * best * vec4(0.0, 0.35, 0.35, 0.0) * (1.0 - best);
             }
             return best;
         }
