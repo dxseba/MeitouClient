@@ -238,6 +238,7 @@ static class CharacterShaders
         void woundSurface(inout vec3 albedo, inout float gloss)
         {
             vec3 cut = tex(vWounds, vUv).rgb;
+            if (cut.g > 0.6) discard;   // a real hole: the anatomy and the body's inside show through
             albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.b);
             albedo = mix(albedo, vec3(0.33, 0.03, 0.03), cut.g);
             albedo = mix(albedo, vec3(0.08, 0.005, 0.005), cut.r);
@@ -383,12 +384,19 @@ static class CharacterShaders
             if (vClip > 0.0) discard;
             if (vAnatomy != 0u)
             {
-                float open = vWounds == 0u ? 0.0 : tex(vWounds, vUv).g;
-                if (open < 0.35) discard;   // only inside a cut
-                // Fibres along the mesh height (the fragment's blood mapping), wet and darker towards the cut's edge.
-                float fibre = 0.72 + 0.28 * sin(vBlood.y * 260.0 + sin(vBlood.x * 9.0) * 3.0);
-                albedo *= fibre * mix(0.35, 1.0, smoothstep(0.35, 0.9, open));
+                // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
+                if (vWounds == 0u || tex(vWounds, vUv).g < 0.5) discard;
+                vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
+                grain += dot(grain, grain.yzx + 33.33);
+                albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
                 gloss = 0.5;
+            }
+            else if (m.shading == 1u && !gl_FrontFacing)
+            {
+                // The body's inside, drawn only through a hole: the cavity behind the anatomy.
+                if (vWounds == 0u) discard;
+                albedo = vec3(0.07, 0.008, 0.008);
+                gloss = 0.3;
             }
             else if (vWounds != 0u) woundSurface(albedo, gloss);
             if (cut) discard;

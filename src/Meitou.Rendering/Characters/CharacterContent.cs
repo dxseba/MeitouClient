@@ -208,8 +208,8 @@ internal sealed class CharacterContent : IDisposable
     sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null,
         float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0);
 
-    /// <summary>How far anatomy is pulled in along its normals (world units). Negative: it sits on top of the darkened skin, and the wound mask alone limits it to the cuts.</summary>
-    const float AnatomyInset = -0.12f;
+    /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 12 mm, as the GTA V FLESH fit).</summary>
+    const float AnatomyClearance = 0.12f;
     readonly string modsDirectory;
 
     public CharacterContent(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)
@@ -369,20 +369,20 @@ internal sealed class CharacterContent : IDisposable
             if (!cells.TryGetValue(Cell(point.Position), out var list)) cells[Cell(point.Position)] = list = [];
             list.Add(point);
         }
-        Vector2 NearestUv(Vector3 p)
+        WoundPoint Nearest(Vector3 p)
         {
             var (x, y, z) = Cell(p);
             float best = float.MaxValue;
-            var uv = Vector2.Zero;
+            var found = skin[0];
             for (int r = 1; r <= 4 && best == float.MaxValue; r++)
                 for (int i = -r; i <= r; i++) for (int j = -r; j <= r; j++) for (int k = -r; k <= r; k++)
                     if (cells.TryGetValue((x + i, y + j, z + k), out var list))
                         foreach (var q in list)
                         {
                             float d = Vector3.DistanceSquared(q.Position, p);
-                            if (d < best) (best, uv) = (d, q.Uv);
+                            if (d < best) (best, found) = (d, q);
                         }
-            return uv;
+            return found;
         }
         var vertices = new List<Vertex>();
         foreach (var batch in Meitou.Data.Characters.EcorcheAsset.Read(stream))
@@ -392,7 +392,11 @@ internal sealed class CharacterContent : IDisposable
             foreach (var v in batch.Vertices)
             {
                 var fitted = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
-                vertices.Add(new Vertex { Position = fitted - v.Normal * AnatomyInset, Normal = v.Normal, Uv = NearestUv(fitted), Colour = colour with { W = WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
+                // Kept under the skin: anything above the clearance moves down along the skin's normal.
+                var over = Nearest(fitted);
+                float height = Vector3.Dot(fitted - over.Position, over.Normal);
+                if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Colour = colour with { W = WoundMasks.BodyGroup(batch.Bone) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
             }
         }
         var array = vertices.ToArray();
@@ -878,7 +882,7 @@ internal sealed class CharacterContent : IDisposable
         var colour = c.BodyLayers.Take(3).Select(l => l.Colour).FirstOrDefault(x => x is not null);
         var m = new PartMaterial
         {
-            Shading = CharacterShaders.ShadeBody, Description = $"RACE '{c.Race.Name}' body",
+            DoubleSided = true, Shading = CharacterShaders.ShadeBody, Description = $"RACE '{c.Race.Name}' body",
             SkinTone = c.SkinToneParameter, HairColour = c.HairColour,
             HairAlpha = Channel(c.Hair?.GetInt("head alpha channel" + f, 1) ?? 1), HairMult = Channel(c.Hair?.GetInt("head channel" + f) ?? 0),
             BeardAlpha = Channel(c.Beard?.GetInt("head alpha channel" + f, 1) ?? 1),
