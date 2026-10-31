@@ -17,6 +17,9 @@ public sealed partial class PopulationSystem
     /// Before the first tick or in the serial Inputs phase; only the sandbox, the game's <c>--crowd</c> test, its <c>--duel</c> and the F10 debug menu call it.
     /// </summary>
     /// <summary>The look <see cref="SpawnSandbox"/> gives a character (the same arguments, <paramref name="faction"/> the one it ends up with): the duel picks variants that wear a helmet.</summary>
+    /// <summary>A wound test's body: women in place of men.</summary>
+    public static bool SandboxFemale { get; set; }
+
     public CharacterAppearance? SandboxLook(ulong seed, string recordId, bool player, int variant, int faction)
     {
         ulong key = Rng.Mix(SeedSalts.PlayerStart ^ Rng.StableHash(recordId) ^ (player ? 1UL : 2UL) ^ ((ulong)variant << 8));
@@ -30,7 +33,7 @@ public sealed partial class PopulationSystem
         bool animal = data.Db.Find(recordId) is { Type: Meitou.Data.Fcs.FcsRecordType.ANIMAL_CHARACTER };
         CharacterAppearance? look = SandboxLook(world.Seed, recordId, player, variant, chosen);
         // A wound test wants one comparable body: try further looks until one is a man and no robot.
-        for (int v = variant + 1; maleHuman && v < variant + 500 && look is not null && (look.Female || look.Race.GetBool("is robot")); v++) look = SandboxLook(world.Seed, recordId, player, v, chosen);
+        for (int v = variant + 1; maleHuman && v < variant + 500 && look is not null && (look.Female != SandboxFemale || look.Race.GetBool("is robot")); v++) look = SandboxLook(world.Seed, recordId, player, v, chosen);
         var member = new MemberPlan(recordId, SquadRole.Leader, 0, default, animal, 1);
         var template = new SquadTemplate { Id = "sandbox " + recordId, Name = data.Db.Find(recordId)?.Name ?? recordId };
         var plan = new SquadPlan(template, [member], [], []);

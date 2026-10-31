@@ -364,9 +364,9 @@ internal sealed class CharacterContent : IDisposable
     }
 
     /// <summary>Kenshi Gore Lab's Ecorche file from the install's mods folder, fitted to the rig; null without the file or the bones. Rigid per bone, one mesh per rig, the layer as vertex colour.</summary>
-    LoadedMesh? AnatomyMesh(SkeletonRig rig, WoundPoint[] skin)
+    LoadedMesh? AnatomyMesh(SkeletonRig rig, WoundPoint[] skin, bool female)
     {
-        var key = ("anatomy", rig.BoneCount, false, (string?)rig.Skeleton.GetHashCode().ToString());
+        var key = ("anatomy", rig.BoneCount, female, (string?)rig.Skeleton.GetHashCode().ToString());
         if (meshes.TryGetValue(key, out var cached)) return cached;
         string path = Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy");
         if (!File.Exists(path) || rig.Handle("Bip01 Pelvis") is not { } pelvis || rig.Handle("Bip01 Neck") is not { } neck || Math.Max(pelvis, neck) >= rig.BindPosition.Length) return null;
@@ -856,8 +856,8 @@ internal sealed class CharacterContent : IDisposable
             asset.Lamps.Add((bone, Matrix4x4.CreateTranslation(local), asset.AttachCount++, carried.Light));
         }
 
-        // Ecorche is fitted to the male human body; a female one keeps its cuts and dark inside, without anatomy, until it is fitted.
-        if (!asset.Animal && !c.Female && c.Race.Name is "Greenlander" or "Scorchlander" && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin) is { } anatomy)
+        // Ecorche is a human body, fitted under each human skin.
+        if (!asset.Animal && c.Race.Name is "Greenlander" or "Scorchlander" && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin, c.Female) is { } anatomy)
             asset.Parts.Add(new AssetPart
             {
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,

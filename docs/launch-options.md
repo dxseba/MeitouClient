@@ -47,6 +47,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-character <name>` | CHARACTER or ANIMAL_CHARACTER name or id | first member of the default start | Character the sandbox spawns. |
 | `--sandbox-mode <list>` | walk, run, free, a speed in u/s, patrol, fight (comma list) | none (idle) | The sandbox hero's start state, e.g. `run,patrol`. |
 | `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Fighters are male humans. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
+| `--sandbox-female` | | off | With `--sandbox-bare`: the fighters are women. |
 | `--sandbox-torso` | | off | With `--sandbox-dummy`: test hits only on the chest and stomach. |
 | `--sandbox-clothed` | | off | With `--sandbox-dummy`: the fighters keep their clothes. |
 | `--sandbox-zoom <d>` | units | 30 | With `--sandbox-bare`: the camera boom. |

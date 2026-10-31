@@ -61,6 +61,7 @@ sealed partial class GameHost
     /// <summary>Spawns the hero (and the foe), selects the hero, applies the command-line start state; returns where the camera starts.</summary>
     Vector3 SandboxSpawn()
     {
+        Meitou.Simulation.PopulationSystem.SandboxFemale = g.SandboxFemale;
         var world = session.World;
         string record = SandboxRecord(scene.Database!);
         float half = g.Sandbox >= 2 ? 15 : 0;
