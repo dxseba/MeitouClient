@@ -189,6 +189,18 @@ sealed partial class GameHost
         if (world.Tick / WoundHealTicks != woundHealStep) { woundHealStep = world.Tick / WoundHealTicks; wounds.Heal(WoundHealDose); }
         while (woundQueue.TryDequeue(out var e))
         {
+            // A hit throws real drops along the blow, out of the wound.
+            if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && gpu?.Particles is { } drops)
+            {
+                float force = MathF.Min((e.Damage.Cut + e.Damage.Pierce) / 20, 1);
+                var along = e.Direction.LengthSquared() > 1e-6f ? Vector2.Normalize(e.Direction) : Vector2.UnitX;
+                var from = e.Position + new Vector3(0, 7 + bloodRandom.NextSingle() * 7, 0);
+                for (int i = 0; i < 1 + (int)(force * 3); i++)
+                {
+                    var spray = Vector3.Normalize(new Vector3(along.X + (bloodRandom.NextSingle() - 0.5f), 0.3f + bloodRandom.NextSingle() * 0.6f, along.Y + (bloodRandom.NextSingle() - 0.5f)));
+                    drops.Burst(BurstSpray, from, Turn(Vector3.UnitZ, spray), 0.1f + force * 0.2f, MistSize * 0.5f, MistLife * 0.6f);
+                }
+            }
             if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
             var part = medical.Parts[e.Part];
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
