@@ -285,7 +285,7 @@ static class CharacterShaders
         {
             vec4 field = woundField(vUv);
             vec3 cut = field.rgb;
-            if (field.a > 0.8) discard;   // only the deepest cuts open onto the anatomy
+            if (field.a > 0.5) discard;   // only the deepest cuts open onto the anatomy
             // A painted cut, rim to core: bruise, thin fat, wet meat with fine grain, dark bottom.
             // Wet runs from the cuts, thick and glossy where they pool down the middle.
             float run = smoothstep(0.1, 0.55, tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g);
@@ -442,7 +442,7 @@ static class CharacterShaders
                 if (vAnatomy == 1u && (vWounds == 0u || woundField(vUv).g < 0.5)) discard;
                 if (vAnatomy == 1u && vClipLayer > 1.5 && vClipLayer < 3.5) discard;   // patchy tendon and fat read as holes: the wound's own rim stands for them
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
-                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).a > 0.55) discard;
+                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).a > 0.7) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
