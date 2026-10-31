@@ -87,7 +87,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points)
     {
         // A face takes far more UV per world unit than a body.
-        float chart = w.BoneB.Contains("Head") ? ChartUv * 0.3f : ChartUv;
+        float chart = w.BoneB.Contains("Head") ? ChartUv * 0.15f : ChartUv;
         if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return null;
         var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T) + w.Side * 1.2f;   // out to the skin, so a slanted side lands off the bone
         float best = float.MaxValue;
