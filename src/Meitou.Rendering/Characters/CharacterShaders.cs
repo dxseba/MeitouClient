@@ -257,9 +257,11 @@ static class CharacterShaders
         layout(std430, set = 0, binding = {{BonesBinding}}) readonly buffer CutMats { mat4 m[]; } cutMats;
 
         // The cuts as blade shapes in UV, smooth at any distance: x core, y open area, z ring, w depth.
+        float woundDrip;   // blood run down from the cuts here
         vec4 woundField(vec2 uv)
         {
             vec4 best = vec4(0.0);
+            woundDrip = 0.0;
             float aa = max(fwidth(uv.x) + fwidth(uv.y), 1e-5);
             for (uint i = 0u; i < 64u; i++)
             {
@@ -269,6 +271,14 @@ static class CharacterShaders
                 if (len <= 0.0) continue;
                 vec2 d = uv - c.xy, axis = vec2(cos(c.z), sin(c.z));
                 float x = dot(d, axis) / len, y = abs(dot(d, vec2(-axis.y, axis.x)));
+                if (depth > 0.2 && d.y > 0.0 && d.y < len * 1.6 && abs(d.x) < len)
+                {
+                    // Thin runs below a cut, each its own length; the mask's v grows down the body.
+                    float lane = floor(d.x / (len * 0.13) + c.x * 300.0);
+                    float reach = fract(sin(lane * 12.9898) * 43758.5453);
+                    float centre = abs(fract(d.x / (len * 0.13) + c.x * 300.0) - 0.5);
+                    if (reach > 0.45) woundDrip = max(woundDrip, (1.0 - smoothstep(0.1, 0.3, centre)) * (1.0 - smoothstep(reach * 0.6, reach * 1.1, d.y / (len * 1.6))) * depth);
+                }
                 if (abs(x) >= 1.0) continue;
                 float wobble = sin(x * 9.0 + c.x * 80.0) * 0.06 + sin(x * 23.0 + c.y * 90.0) * 0.03;
                 float half_ = len * (0.1 + 0.16 * depth) * pow(1.0 - x * x, 0.8) * (1.0 + wobble);
@@ -283,9 +293,12 @@ static class CharacterShaders
         // Open flesh over the albedo, from the character's wound mask.
         void woundSurface(inout vec3 albedo, inout float gloss)
         {
-            vec3 cut = tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).rgb;
+            vec3 cut = woundField(vUv).rgb;
             if (cut.g > 0.6) discard;   // a real hole: the anatomy and the body's inside show through
-            albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.b);
+            woundDrip = clamp(woundDrip, 0.0, 1.0);
+            albedo = mix(albedo, vec3(0.2, 0.012, 0.012), woundDrip * 0.9);
+            gloss = mix(gloss, 0.7, woundDrip);
+            albedo = mix(albedo, albedo * vec3(1.05, 0.62, 0.58), cut.b);   // swollen lips
             // Cut edges, outside in: bruise, then a rim of yellow fat just before the hole.
             albedo = mix(albedo, vec3(0.33, 0.03, 0.03), cut.g);
             float lump = sin(vUv.x * 310.0 + sin(vUv.y * 190.0) * 2.0) * sin(vUv.y * 270.0 + sin(vUv.x * 150.0) * 2.0);   // uneven, not a drawn outline
