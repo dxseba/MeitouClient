@@ -131,6 +131,22 @@ static class CharacterShaders
             vec3 local = aPosition;
             uint slot = floatBitsToUint(aColour.x);
             if (aInstanceData.w != 0u && slot != 0u && slot < 0x1000000u) local += morphs.deltas[aInstanceData.w + slot].xyz;
+            if ((aInstanceData.z & 0xC0000000u) == 0x80000000u)
+            {
+                // Flesh gone: skin near a heavy wound of its own body group sinks towards the bone.
+                uint bone = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
+                mat4 words = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
+                uint own = (floatBitsToUint(words[1 + bone / 32u][bone / 8u % 4u]) >> (bone % 8u * 4u)) & 15u;
+                float dent = 0.0;
+                for (uint i = 0u; i < 64u; i++)
+                {
+                    vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
+                    if (c.w <= 0.0 || abs(floor(c.w / 10.0) - float(own)) > 0.5) continue;
+                    float radius = mod(c.w, 10.0), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
+                    dent = max(dent, near * near * (3.0 - 2.0 * near) * max(radius - 1.0, 0.0) * 0.28);
+                }
+                local -= aNormal * min(dent, 0.75);
+            }
             vec4 p = world * vec4(local, 1.0);
             vCurvature = aColour.z;
             vWorld = p.xyz + view.eye;   // the instances are relative to the eye (CharacterRenderer.DrawView)

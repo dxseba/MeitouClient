@@ -59,7 +59,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             {
                 float angle = MathF.Atan2(w.Sine, w.Cosine), head = cutUv.Y < 0 ? 0.5f : 1;
                 cuts[count] = new Vector4(cutUv, angle, MathF.Floor((0.3f + 0.4f * w.Depth) * w.Size * head * 0.07f * 10000) + Math.Clamp(w.Depth, 0, 0.99f) * 0.99f);
-                spheres[count++] = new Vector4(at, SphereRadius + 10 * BodyGroup(w.BoneA));
+                spheres[count++] = new Vector4(at, Math.Min(SphereRadius * MathF.Max(1, w.Size * w.Depth), 9.5f) + 10 * BodyGroup(w.BoneA));
             }
         using (var batch = gpu.Uploads.Begin())
         {
