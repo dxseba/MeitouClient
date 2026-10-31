@@ -139,12 +139,34 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
                 if (w.Depth < 0.3f) s = Vector3.Max(s, new Vector3(0, Scratch(x / (chart * Size), y * 2 / (chart * Size), w), 0));
                 if (s.Z <= 0) continue;
                 int i = ((((cy + y) % Size + Size) % Size) * Size + ((cx + x) % Size + Size) % Size) * 4;
-                pixels[i] = Math.Max(pixels[i], (byte)(s.X * 255));
-                pixels[i + 1] = Math.Max(pixels[i + 1], (byte)(s.Y * 255));
                 pixels[i + 2] = Math.Max(pixels[i + 2], (byte)(s.Z * 255));
                 pixels[i + 3] = Math.Max(pixels[i + 3], (byte)(w.Depth * MathF.Min(1, s.Y * 1.3f) * 255));   // alpha: how deep the cut goes here
             }
+        if (w.Depth > 0.25f) Runs(cx, cy, w);
         return hit;
+    }
+
+    /// <summary>Blood run down the skin from a cut (mask channel: green), meandering, each its own length and thinning to its end: the same every repaint of a wound.</summary>
+    void Runs(int cx, int cy, in CharacterWoundMark w)
+    {
+        var random = new Random(cx * 7919 + cy);
+        int count = 1 + (int)(w.Depth * 2.5f);
+        for (int run = 0; run < count; run++)
+        {
+            float x = cx + (random.NextSingle() - 0.5f) * 14, drift = 0, width = 1.6f + random.NextSingle() * 1.6f;
+            int length = 25 + random.Next(70);
+            for (int step = 0; step < length; step++)
+            {
+                drift = Math.Clamp(drift + (random.NextSingle() - 0.5f) * 0.5f, -0.7f, 0.7f);
+                x += drift;
+                float half = width * (1 - (float)step / length * 0.65f);
+                for (int dx = (int)-half; dx <= half; dx++)
+                {
+                    int i = (((cy + step) % Size + Size) % Size * Size + (((int)x + dx) % Size + Size) % Size) * 4;
+                    pixels[i + 1] = Math.Max(pixels[i + 1], (byte)(255 * (1 - MathF.Abs(dx) / (half + 1)) * (1 - 0.5f * step / length)));
+                }
+            }
+        }
     }
 
     public void Dispose()

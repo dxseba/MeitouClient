@@ -287,6 +287,10 @@ static class CharacterShaders
             vec3 cut = field.rgb;
             if (field.a > 0.8) discard;   // only the deepest cuts open onto the anatomy
             // A painted cut, rim to core: bruise, thin fat, wet meat with fine grain, dark bottom.
+            // Wet runs from the cuts, thick and glossy where they pool down the middle.
+            float run = smoothstep(0.1, 0.55, tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g);
+            albedo = mix(albedo, vec3(0.24, 0.012, 0.014), run * 0.92);
+            gloss = mix(gloss, 0.85, run);
             float grain = 0.82 + 0.18 * sin((vUv.x + vUv.y) * 900.0 + sin(vUv.x * 310.0) * 2.0);
             albedo = mix(albedo, albedo * vec3(0.8, 0.5, 0.48), cut.b);
             albedo = mix(albedo, vec3(0.55, 0.42, 0.26), cut.g);
