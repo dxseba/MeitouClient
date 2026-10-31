@@ -223,6 +223,13 @@ internal sealed class CharacterContent : IDisposable
         return p.Y > cut - (batch.Layer == 0 ? 1.3f : -0.2f);
     }
 
+    /// <summary>Each organ's own colour (Anatomy.hlsl; the organ is the tens of the file's u): an opened body reads as organs, not one red mass.</summary>
+    static Vector4 OrganColour(int organ) => organ switch
+    {
+        1 => new(0.45f, 0.07f, 0.09f, 1), 2 => new(0.62f, 0.3f, 0.33f, 1), 3 => new(0.3f, 0.045f, 0.055f, 1), 4 => new(0.68f, 0.33f, 0.28f, 1), 5 => new(0.72f, 0.42f, 0.36f, 1), 6 => new(0.22f, 0.035f, 0.035f, 1),
+        _ => new(0.4f, 0.1f, 0.1f, 1),
+    };
+
     /// <summary>A group no wound opens: the bowel is never drawn in the body, the loose body stands for it (<see cref="DebrisRenderer.Bowel"/>).</summary>
     const int LooseBowelGroup = 5;
     readonly string modsDirectory;
@@ -417,7 +424,7 @@ internal sealed class CharacterContent : IDisposable
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
-                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) }, Bones = over.Bones, Weights = over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = (batch.Layer == 4 ? OrganColour((int)MathF.Floor(v.Uv.X / 10)) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) }, Bones = over.Bones, Weights = over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
             }
         }
         // The body's back wall (Gore Lab's cavity lining): what a line of sight through the torso ends on. Layer 7, the torso's group.
