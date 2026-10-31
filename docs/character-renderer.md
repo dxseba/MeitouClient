@@ -121,6 +121,8 @@ races, bodies, gear, animals, attachments, motion and shadow views. [bench](benc
 
 ### Wounds
 
+The torso holds Gore Lab's cavity lining (`CavityLiningData`), a back wall in the anatomy mesh, male or female, seen only through holes.
+
 Skin sinks along its normal round heavy wounds of its body group (vertex shader, at most 0.25 units on arms, 0.4 on legs, 0.55 on the torso, to stay over the bone): flesh gone.
 
 Up to 64 cuts are drawn as blade shapes in UV in the fragment shader (`woundField`), from the palette header; the mask only marks that a body has wounds.

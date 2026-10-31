@@ -420,6 +420,20 @@ internal sealed class CharacterContent : IDisposable
                 vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) }, Bones = over.Bones, Weights = over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
             }
         }
+        // The body's back wall (Gore Lab's cavity lining): what a line of sight through the torso ends on. Layer 7, the torso's group.
+        float[] wallX = female ? CavityLiningData.FemaleX : CavityLiningData.MaleX, wallZ = female ? CavityLiningData.FemaleZ : CavityLiningData.MaleZ;
+        Vertex Wall(int row, int column)
+        {
+            var p = new Vector3(wallX[row * CavityLiningData.Columns + column], CavityLiningData.Y0 + (CavityLiningData.Y1 - CavityLiningData.Y0) * row / (CavityLiningData.Rows - 1), wallZ[row * CavityLiningData.Columns + column]);
+            var over = Nearest(p, 0);
+            return new Vertex { Position = p, Normal = Vector3.Normalize(new Vector3(-p.X, 0, 0.5f - p.Z)), Uv = over.Uv, Tangent = new Vector4(0, 0, 0, 7), Colour = new Vector4(0.2f, 0.03f, 0.035f, 0), Bones = over.Bones, Weights = over.Weights };
+        }
+        for (int row = 0; row + 1 < CavityLiningData.Rows; row++)
+            for (int column = 0; column + 1 < CavityLiningData.Columns; column++)
+            {
+                Vertex a = Wall(row, column), b = Wall(row, column + 1), c = Wall(row + 1, column), d = Wall(row + 1, column + 1);
+                vertices.AddRange([a, b, c, b, d, c]);
+            }
         // Clustered on a fine grid: seen only through cuts, the file's detail is lost, and triangles that collapse go.
         for (int i = 0; i + 2 < vertices.Count;)
         {

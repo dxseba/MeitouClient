@@ -185,7 +185,8 @@ static class CharacterShaders
                     if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.1) * 0.75 - distance(aPosition, c.xyz));
                 }
             }
-            if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
+            if (anatomy && aTangent.w > 6.5) vAnatomy = 2u;   // the back wall needs no mask: only a hole in the skin reveals it
+            else if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
             else if (anatomy)
             {
                 vClip = 1000.0;
