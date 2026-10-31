@@ -429,8 +429,8 @@ internal sealed class CharacterContent : IDisposable
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
-                if (batch.Layer != 0 && height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);   // bone keeps its true shape: the depth push hides what stands proud
-                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? OrganColour((int)MathF.Floor(v.Uv.X / 10)) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) }, Bones = batch.Layer == 0 ? (uint)bone : over.Bones, Weights = batch.Layer == 0 ? new Vector4(1, 0, 0, 0) : over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
+                if ((batch.Layer != 0 || WoundMasks.BodyGroup(batch.Bone) != 0) && height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);   // bone keeps its true shape: the depth push hides what stands proud
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? OrganColour((int)MathF.Floor(v.Uv.X / 10)) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) }, Bones = batch.Layer == 0 && WoundMasks.BodyGroup(batch.Bone) == 0 ? (uint)bone : over.Bones, Weights = batch.Layer == 0 && WoundMasks.BodyGroup(batch.Bone) == 0 ? new Vector4(1, 0, 0, 0) : over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
             }
         }
         // The body's back wall (Gore Lab's cavity lining): what a line of sight through the torso ends on. Layer 7, the torso's group.
