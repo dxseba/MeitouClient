@@ -125,7 +125,7 @@ sealed partial class GameHost
     readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
     static readonly Meitou.Simulation.Wounds.WoundBody NoWounds = new();
 
-    const float GutLifeSeconds = 600, StumpBoneAt = 0.5f;
+    const float GutLifeSeconds = 600, StumpBoneOut = 1.1f;
 
     sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; }
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
@@ -155,10 +155,11 @@ sealed partial class GameHost
                 if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb)
                 {
                     string side = limb % 2 == 0 ? "L" : "R";
-                    if (characters.BonePosition(DrawKey(id), $"Bip01 {side} {(limb < 2 ? "UpperArm" : "Thigh")}") is not { } top
-                        || characters.BonePosition(DrawKey(id), $"Bip01 {side} {(limb < 2 ? "Forearm" : "Calf")}") is not { } end) continue;
-                    var along = Vector3.Normalize(end - top);
-                    gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.StumpBone, limb < 2 ? 0.22f : 0.32f, Turn(Vector3.UnitZ, along), Vector3.Lerp(top, end, StumpBoneAt)));
+                    // Anchored to what stays on the body: the lost limb's own bones drift off with the ragdoll.
+                    if (characters.BonePosition(DrawKey(id), $"Bip01 {side} {(limb < 2 ? "Clavicle" : "Thigh")}") is not { } root
+                        || characters.BonePosition(DrawKey(id), limb < 2 ? "Bip01 Neck" : "Bip01 Pelvis") is not { } body) continue;
+                    var along = Vector3.Normalize(root - body);
+                    gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.StumpBone, limb < 2 ? 0.22f : 0.32f, Turn(Vector3.UnitZ, along), root + along * StumpBoneOut));
                 }
         }
         foreach (var (who, gone) in gutFalls.ToArray())
