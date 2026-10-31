@@ -346,7 +346,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
                 push.Model = m;
                 push.Diffuse = part.Diffuse is { } diffuse ? diffuse.CachedIndex : standIn;
                 push.Textured = part.Diffuse is null ? 0 : 1;
-                push.AlphaThreshold = part.AlphaThreshold;
+                push.AlphaThreshold = piece.Bloody ? -3 : part.AlphaThreshold;
                 if (mesh.Limb && piece.Limb is { } look)
                 {
                     // A severed limb (see the fragment): the diffuse map, the mask and the blood map, the colours packed, the mesh's centre x in place of the cut-out.
