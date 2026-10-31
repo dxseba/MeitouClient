@@ -228,6 +228,12 @@ static class CharacterShaders
                 vBloodAmount = float((uint(pair + 0.5) >> (8u * (k & 1u))) & 255u) / 255.0;
             }
             gl_Position = view.viewProjection * p;
+            if ((aInstanceData.z & 0x40000000u) != 0u)
+            {
+                // Anatomy loses every depth test to the skin in front of it, however it pokes through: only a hole shows it.
+                vec4 back = view.viewProjection * vec4(p.xyz + normalize(p.xyz) * 1.0, 1.0);
+                gl_Position.z = back.z / back.w * gl_Position.w;
+            }
             // Boots over one prosthetic leg (COLLAPSE_SIDE): flags bits 16-17, 1 collapses the x >= 0 half, 2 the x < 0 half.
             uint hideSide = (aInstanceData.z >> 16) & 3u;
             if ((hideSide == 1u && aPosition.x >= 0.0) || (hideSide == 2u && aPosition.x < 0.0)) gl_Position *= 0.0;
@@ -511,7 +517,7 @@ static class CharacterShaders
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
-                if (vAnatomy == 1u && (vWounds == 0u || woundField(vUv).g < 0.5)) discard;
+                if (vWounds == 0u) discard;   // the skin's own holes cut it, per pixel (the depth push in the vertex stage)
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
                 if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).r > 0.6 && woundField(vUv).a > 0.75) discard;
                 // Bone snaps under the heaviest blows: a jagged gap across it at the cut's core, with splintered ends left either side.
