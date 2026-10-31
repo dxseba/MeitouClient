@@ -488,7 +488,6 @@ static class CharacterShaders
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
                 if (vAnatomy == 1u && (vWounds == 0u || woundField(vUv).g < 0.5)) discard;
-                if (vAnatomy == 1u && vClipLayer > 1.5 && vClipLayer < 3.5) discard;   // patchy tendon and fat read as holes: the wound's own rim stands for them
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
                 if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).r > 0.6 && woundField(vUv).a > 0.75) discard;
                 // Bone snaps under the heaviest blows: a jagged gap across it at the cut's core, with splintered ends left either side.
