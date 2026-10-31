@@ -323,7 +323,7 @@ internal sealed unsafe partial class CharacterRenderer
         {
             var part = parts[p];
             ref var f = ref partFrames[l.PartBase + p];
-            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) && (l.PartOnly == 0 || part.IsBody) && !(part.Bone >= 0 && l.LostGroups != 0 && (l.LostGroups >> woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) & 1) != 0 && woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) is 1 or 2);
+            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) && (l.PartOnly == 0 || (part.IsBody && l.WoundMask != 0)) && !(part.Bone >= 0 && l.LostGroups != 0 && (l.LostGroups >> woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) & 1) != 0 && woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) is 1 or 2);
             if (!f.Shows) continue;
             f.Model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             f.Scale = part.Shared ? worldScale : f.Model.ScaleLength();
