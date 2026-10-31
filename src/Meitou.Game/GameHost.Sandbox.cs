@@ -213,6 +213,7 @@ sealed partial class GameHost
     void SandboxDummyHit()
     {
         var world = session.World;
+        if (g.SandboxBehead && !sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBehead(sandboxFoe) { Tick = world.Tick });
         if (g.SandboxSever && !sandboxFoe.IsNone && world.Tick == 30) world.Commands.Enqueue(new Meitou.Simulation.DebugSever(sandboxFoe, 0) { Tick = world.Tick });   // a stump to check
         if (sandboxFoe.IsNone || world.Tick % 20 != 0 || world.Characters.Cold(sandboxFoe.Slot)?.Medical is not { } medical) return;
         int part = dummyHits % medical.Parts.Count;

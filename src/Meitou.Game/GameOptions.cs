@@ -23,7 +23,7 @@ sealed class GameOptions
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
     public string? SandboxCharacter;
     public bool SandboxBare;
-    public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale;
+    public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead;
     public float? SandboxYaw;
     public float SandboxZoom = 30;
     /// <summary>The sandbox hero's start state, comma-separated: walk, run or free; a fixed speed in units/s; patrol (a 400-unit line), for pictures.</summary>
@@ -166,6 +166,7 @@ sealed class GameOptions
                 case "--sandbox-clothed": g.SandboxClothed = true; break;
                 case "--sandbox-torso": g.SandboxTorso = true; break;
                 case "--sandbox-female": g.SandboxFemale = true; break;
+                case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever": g.SandboxSever = true; break;
                 case "--sandbox-zoom": g.SandboxZoom = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--sandbox-dummy": g.SandboxDummy = g.SandboxBare = true; break;

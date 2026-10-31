@@ -26,6 +26,9 @@ public sealed record DebugMaxSkills(IReadOnlyList<CharacterId> Characters) : Deb
 /// <summary>Cuts off a limb (slot as <c>BodyPartTemplate.LimbSlot</c>).</summary>
 public sealed record DebugSever(CharacterId Character, int LimbSlot) : DebugCommand;
 
+/// <summary>Kills a character by cutting its head off.</summary>
+public sealed record DebugBehead(CharacterId Character) : DebugCommand;
+
 public sealed record DebugDamage(IReadOnlyList<CharacterId> Characters, float Cut) : DebugCommand;
 
 /// <summary>
@@ -100,6 +103,18 @@ static class DebugCheats
                             var severed = new List<MedicalEvent>();
                             cut.ApplyHit(p, new HitDamage(250, 0, 0), cutContext, severed);
                             if (severed.Exists(e => e.Kind == MedicalEventKind.PartSevered)) table.LimbsChanged.Enqueue((cutSlot, sever.LimbSlot));
+                            break;
+                        }
+                break;
+            case DebugBehead behead when data is not null:
+                if (Body(world, data, behead.Character) is ({ } neck, var neckContext) && table.TryResolveNext(behead.Character, out int neckSlot))
+                    for (int p = 0; p < neck.Parts.Count; p++)
+                        if (neck.Parts[p].Template.Type == BodyPartType.Head)
+                        {
+                            neck.ApplyHit(p, new HitDamage(5000, 0, 0), neckContext);
+                            neck.Decapitate();
+                            TaskStart.Stand(table, neckSlot);
+                            table.LimbsChanged.Enqueue((neckSlot, -1));
                             break;
                         }
                 break;
