@@ -208,8 +208,8 @@ internal sealed class CharacterContent : IDisposable
     sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null,
         float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0);
 
-    /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 12 mm, as the GTA V FLESH fit).</summary>
-    const float AnatomyClearance = 0.12f;
+    /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
+    const float AnatomyClearance = 0.2f;
     readonly string modsDirectory;
 
     public CharacterContent(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)

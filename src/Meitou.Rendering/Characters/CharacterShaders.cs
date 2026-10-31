@@ -240,7 +240,9 @@ static class CharacterShaders
             vec3 cut = tex(vWounds, vUv).rgb;
             if (cut.g > 0.6) discard;   // a real hole: the anatomy and the body's inside show through
             albedo = mix(albedo, albedo * vec3(0.55, 0.22, 0.2), cut.b);
+            // Cut edges, outside in: bruise, then a rim of yellow fat just before the hole.
             albedo = mix(albedo, vec3(0.33, 0.03, 0.03), cut.g);
+            albedo = mix(albedo, vec3(0.72, 0.56, 0.3), smoothstep(0.3, 0.45, cut.g) * (1.0 - smoothstep(0.5, 0.6, cut.g)));
             albedo = mix(albedo, vec3(0.08, 0.005, 0.005), cut.r);
             gloss = mix(gloss, 0.6, cut.g);
         }

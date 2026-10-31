@@ -139,6 +139,13 @@ sealed partial class GameHost
         }
     }
 
+    /// <summary>A cut's axis, turned by its own golden-angle step: a blow's direction alone gives only a few angles, and the real contact point is unknown.</summary>
+    static Vector2 Turned(in Meitou.Simulation.Wounds.WoundShape shape, int age)
+    {
+        float turn = age * 2.399963f, c = MathF.Cos(turn), s = MathF.Sin(turn);
+        return new Vector2(shape.Cosine * c - shape.Sine * s, shape.Cosine * s + shape.Sine * c);
+    }
+
     /// <summary>The character's open wounds as the renderer places them (segments as <see cref="Meitou.Simulation.Wounds.Wound"/>).</summary>
     IReadOnlyList<Meitou.Rendering.CharacterWoundMark> WoundMarks(CharacterId id)
     {
@@ -149,20 +156,20 @@ sealed partial class GameHost
                 {
                 // Off the centre line: each wound keeps its own slant and height.
                 float off = w.Age * 37 % 7 / 3f - 1;
-                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
             }
         foreach (var slot in body.Limbs)
             if (slot is { } w && marks.Count < 16)
             {
                 if (w.Segment == 8)
                 {
-                    marks.Add(new("Bip01 Neck", "Bip01 Head", 1.5f + w.T, w.Side, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+                    marks.Add(new("Bip01 Neck", "Bip01 Head", 1.5f + w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
                     continue;
                 }
                 string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";
                 bool lower = (w.Segment & 1) != 0;
                 var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));
-                marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, w.Shape.Cosine, w.Shape.Sine, w.Shape.Aspect, w.Shape.Depth));
+                marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth));
             }
         return marks;
     }
