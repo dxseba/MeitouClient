@@ -156,6 +156,11 @@ sealed partial class GameHost
         }
     }
 
+    // A deep wound (dose 1.2) closes over about two hours of play at speed 1.
+    const int WoundHealTicks = 3000;
+    const float WoundHealDose = 0.01f;
+    long woundHealStep;
+
     void UpdateWounds(World world)
     {
         Meitou.Rendering.Characters.WoundMasks.Sample ??= static (x, y, w) =>
@@ -163,7 +168,15 @@ sealed partial class GameHost
             var p = Meitou.Simulation.Wounds.WoundPolicy.Sample(x, y, new Meitou.Simulation.Wounds.WoundShape(w.Cosine, w.Sine, w.Aspect, w.Depth));
             return new Vector3(p.Core, p.Area, p.Ring);
         };
-        if (!ReferenceEquals(world.CombatEvents, woundQueue)) { woundQueue.Clear(); world.CombatEvents = woundQueue; }
+        if (!ReferenceEquals(world.CombatEvents, woundQueue))
+        {
+            // Another world: its characters are not these. Wounds are not saved yet.
+            woundQueue.Clear();
+            wounds.Clear();
+            gutFalls.Clear();
+            world.CombatEvents = woundQueue;
+        }
+        if (world.Tick / WoundHealTicks != woundHealStep) { woundHealStep = world.Tick / WoundHealTicks; wounds.Heal(WoundHealDose); }
         while (woundQueue.TryDequeue(out var e))
         {
             if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh

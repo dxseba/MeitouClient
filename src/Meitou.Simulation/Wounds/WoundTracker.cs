@@ -24,6 +24,21 @@ public sealed class WoundBody
     /// <summary>A deep belly wound, the condition for exposed guts.</summary>
     public bool DeepAbdomen => torso[(int)WoundRegion.Abdomen] is { Dose: >= 1.2f, Hits: >= 3 };
 
+    /// <summary>Closes every wound by <paramref name="dose"/>, shallower as it heals; a closed one goes. True while any is left.</summary>
+    public bool Heal(float dose)
+    {
+        bool left = false;
+        foreach (var wounds in new[] { torso, limbs })
+            for (int i = 0; i < wounds.Length; i++)
+                if (wounds[i] is { } w)
+                {
+                    float rest = w.Dose - dose;
+                    wounds[i] = rest <= 0 ? null : w with { Dose = rest, Shape = w.Shape with { Depth = Math.Clamp(rest / 1.2f, 0, 1) } };
+                    left |= rest > 0;
+                }
+        return left;
+    }
+
     public bool ApplyTorso(WoundRegion region, WoundInput input)
     {
         if (region == WoundRegion.Unknown) return false;
@@ -70,6 +85,14 @@ public sealed class WoundTracker
 
     public WoundBody? Of(CharacterId id) => bodies.GetValueOrDefault(id);
     public void Remove(CharacterId id) => bodies.Remove(id);
+    public void Clear() => bodies.Clear();
+
+    /// <summary>Heals everyone by <paramref name="dose"/>; a body with no wound left is forgotten.</summary>
+    public void Heal(float dose)
+    {
+        foreach (var id in bodies.Keys.ToArray())
+            if (!bodies[id].Heal(dose)) bodies.Remove(id);
+    }
 
     /// <summary>Takes a <see cref="CombatEventKind.Hit"/>; anything else, and a bolt or execution without a cut direction, is ignored. <paramref name="region"/> is the part's torso region when it has one; <paramref name="maximum"/> the part's maximum health.</summary>
     public bool Apply(in CombatEvent e, WoundRegion region, float maximum)

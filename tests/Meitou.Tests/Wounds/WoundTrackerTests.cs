@@ -37,6 +37,18 @@ public class WoundTrackerTests
     }
 
     [Fact]
+    public void Wounds_grow_shallower_and_close()
+    {
+        var t = new WoundTracker();
+        t.Apply(Hit(), WoundRegion.Chest, 100);
+        float dose = t.Of(Victim)!.Torso[(int)WoundRegion.Chest]!.Value.Dose;
+        t.Heal(dose / 2);
+        Assert.Equal(dose / 2, t.Of(Victim)!.Torso[(int)WoundRegion.Chest]!.Value.Dose, 4);
+        t.Heal(dose);
+        Assert.Null(t.Of(Victim));
+    }
+
+    [Fact]
     public void Only_melee_hits_open_wounds()
     {
         var t = new WoundTracker();
