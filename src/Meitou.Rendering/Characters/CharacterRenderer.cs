@@ -192,7 +192,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public ulong Blood;
         /// <summary>The wound mask index for the palette header, 0 without wounds.</summary>
         public uint WoundMask, LostGroups;
-        public Vector4[]? WoundSpheres;
+        public Vector4[]? WoundSpheres, WoundCuts;
         /// <summary>Posed this frame whatever the thinning (the player's, a ragdoll, a new asset or a first pose).</summary>
         public bool MustPose;
         /// <summary>How tall it is on screen, in pixels (its diameter over its distance by the view's pixels per radian): the thinning's priority.</summary>
@@ -455,6 +455,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             l.Radius = asset.Radius * scale;
             l.WoundMask = woundMasks.Update(inst.Key, asset.Rig, asset.WoundPoints, inst.Wounds);
             l.WoundSpheres = woundMasks.Spheres(inst.Key);
+            l.WoundCuts = woundMasks.Cuts(inst.Key);
             l.LostGroups = inst.LostGroups;
             if (l.WoundMask != 0) boneTotal += CharacterShaders.WoundHeaderBones;
             l.BoneBase = boneTotal;
@@ -559,6 +560,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     var groups = woundMasks.BoneGroups(rig);
                     groups.AsSpan().CopyTo(new Span<uint>(header + 16, 8));
                     l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 64, WoundMasks.Spheres16));
+                    l.WoundCuts?.CopyTo(new Span<Vector4>(header + 64 * 17, WoundMasks.Spheres16));
                 }
                 state.Attach.CopyTo(attachArray, l.AttachBase);
                 if (motion)

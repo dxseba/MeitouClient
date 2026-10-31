@@ -17,7 +17,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     /// <summary>The cut chart's unit in UV: a body's UVs give about 0.05 per world unit (<b>Observed</b> tuning value).</summary>
     const float ChartUv = 0.045f;
 
-    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public long Used; public Vector4[] Spheres = new Vector4[Spheres16]; }
+    sealed class Mask { public required GpuTexture Texture; public uint Index; public int Hash; public long Used; public Vector4[] Spheres = new Vector4[Spheres16], Cuts = new Vector4[Spheres16]; }
 
     /// <summary>World units round a wound in which the anatomy shows: a tuning value.</summary>
     public const int Spheres16 = 64;
@@ -53,8 +53,14 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         Array.Clear(pixels);
         int count = 0;
         var spheres = new Vector4[Spheres16];
+        var cuts = new Vector4[Spheres16];
         foreach (var w in wounds)
-            if (Paint(w, rig, points) is { } at && count < spheres.Length) spheres[count++] = new Vector4(at, SphereRadius + 10 * BodyGroup(w.BoneA));
+            if (Paint(w, rig, points, out var cutUv) is { } at && count < spheres.Length)
+            {
+                float angle = MathF.Atan2(w.Sine, w.Cosine), head = cutUv.Y < 0 ? 0.5f : 1;
+                cuts[count] = new Vector4(cutUv, angle, MathF.Floor((0.3f + 0.4f * w.Depth) * head * 0.07f * 10000) + Math.Clamp(w.Depth, 0, 0.99f) * 0.99f);
+                spheres[count++] = new Vector4(at, SphereRadius + 10 * BodyGroup(w.BoneA));
+            }
         using (var batch = gpu.Uploads.Begin())
         {
             bool created = mask is null;
@@ -70,6 +76,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         mask.Hash = code;
         mask.Used = frame;
         mask.Spheres = spheres;
+        mask.Cuts = cuts;
         return mask.Index;
     }
 
@@ -100,18 +107,21 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
         return MathF.Abs(along) >= 1 ? 0 : MathF.Max(0, 1 - MathF.Abs(across) / (0.09f * (1 - along * along) + 0.01f));
     }
 
+    /// <summary>The cuts of the character's mask, as the shader draws them: UV, angle, length x 10000 + depth.</summary>
+    public Vector4[]? Cuts(long key) => masks.TryGetValue(key, out var mask) ? mask.Cuts : null;
+
     /// <summary>The wound spheres of the character's mask.</summary>
     public Vector4[]? Spheres(long key) => masks.TryGetValue(key, out var mask) ? mask.Spheres : null;
 
-    Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points)
+    Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points, out Vector2 uv)
     {
+        uv = default;
         // A face takes far more UV per world unit than a body.
         float chart = w.BoneB.Contains("Head") ? ChartUv * 0.5f : ChartUv;
         chart *= 0.3f + 0.4f * w.Depth;   // a light cut stays small, a deep one opens wide
         if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return null;
         var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T) + w.Side * 1.2f;   // out to the skin, so a slanted side lands off the bone
         float best = float.MaxValue;
-        var uv = Vector2.Zero;
         var hit = Vector3.Zero;
         foreach (ref readonly var p in points.AsSpan())
         {

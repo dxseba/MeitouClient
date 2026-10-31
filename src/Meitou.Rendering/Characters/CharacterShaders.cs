@@ -16,7 +16,7 @@ static class CharacterShaders
     public const int InstanceLocation = 7, DataLocation = 11, PreviousLocation = 12;
     /// <summary>The storage buffers of set 0 after the frame's own (the order of the extra list given to <c>NativeFrame.Prepare</c>): the bone palettes, the materials, the face morph offsets, last frame's palettes (motion pass).</summary>
     /// <summary>A wounded body's palette starts one entry early: that entry's first float holds the bits of its wound mask's bindless index (<see cref="WoundMasks"/>).</summary>
-    public const int WoundHeaderBones = 17;
+    public const int WoundHeaderBones = 33;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
     public const uint WoundFlag = 1u << 31, TearFlag = 1u << 29;
@@ -110,6 +110,7 @@ static class CharacterShaders
         //MOTION_OUT
         out vec4 vColour;
         out vec4 vBlood;        // the blood mapping of character.hlsl (cylinder projection of the part in its own space), before the race scale
+        flat out uint vCuts;
         flat out uint vWounds;  // the wound mask, 0 without wounds
         flat out float vClipLayer;
         flat out uint vAnatomy; // 1 on the anatomy part, whose UVs are its nearest skin
@@ -143,6 +144,7 @@ static class CharacterShaders
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
             bool wounded = (aInstanceData.z & 0x80000000u) != 0u, anatomy = (aInstanceData.z & 0x40000000u) != 0u;
             vAnatomy = anatomy ? 1u : 0u;
+            vCuts = aInstanceData.x - 16u;
             vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
@@ -154,7 +156,7 @@ static class CharacterShaders
                 uint group = (floatBitsToUint(first[1 + primary / 32u][primary / 8u % 4u]) >> (primary % 8u * 4u)) & 15u;
                 for (uint i = 0u; i < 64u; i++)
                 {
-                    vec4 c = skin.bones[aInstanceData.x - 16u + i / 4u][i % 4u];
+                    vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
                     if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, mod(c.w, 10.0) * 0.8 - distance(aPosition, c.xyz));
                 }
             }
@@ -165,7 +167,7 @@ static class CharacterShaders
                 uint lost = floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]);
                 for (uint i = 0u; i < 64u; i++)
                 {
-                    vec4 c = skin.bones[aInstanceData.x - 16u + i / 4u][i % 4u];
+                    vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
                     if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - floor(aColour.a + 0.5)) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
                 }
             }
@@ -247,10 +249,37 @@ static class CharacterShaders
         in vec4 vColour;
         in vec4 vBlood;
         flat in uint vWounds;
+        flat in uint vCuts;
         flat in float vClipLayer;
         flat in uint vAnatomy;
         in float vClip;
         in float vBloodAmount;
+        layout(std430, set = 0, binding = {{BonesBinding}}) readonly buffer CutMats { mat4 m[]; } cutMats;
+
+        // The cuts as blade shapes in UV, smooth at any distance: x core, y open area, z ring, w depth.
+        vec4 woundField(vec2 uv)
+        {
+            vec4 best = vec4(0.0);
+            float aa = max(fwidth(uv.x) + fwidth(uv.y), 1e-5);
+            for (uint i = 0u; i < 64u; i++)
+            {
+                vec4 c = cutMats.m[vCuts + i / 4u][i % 4u];
+                if (c.w <= 0.0) continue;
+                float len = floor(c.w) / 10000.0, depth = fract(c.w);
+                if (len <= 0.0) continue;
+                vec2 d = uv - c.xy, axis = vec2(cos(c.z), sin(c.z));
+                float x = dot(d, axis) / len, y = abs(dot(d, vec2(-axis.y, axis.x)));
+                if (abs(x) >= 1.0) continue;
+                float wobble = sin(x * 9.0 + c.x * 80.0) * 0.06 + sin(x * 23.0 + c.y * 90.0) * 0.03;
+                float half_ = len * (0.1 + 0.16 * depth) * pow(1.0 - x * x, 0.8) * (1.0 + wobble);
+                float sd = y - half_;
+                vec4 here = vec4(1.0 - smoothstep(-half_ * 0.55 - aa, -half_ * 0.55 + aa, sd), 1.0 - smoothstep(-aa, aa, sd), 1.0 - smoothstep(0.0, len * 0.06 + aa, sd), depth);
+                here.w *= here.y;
+                best = max(best, here);
+            }
+            return best;
+        }
+
         // Open flesh over the albedo, from the character's wound mask.
         void woundSurface(inout vec3 albedo, inout float gloss)
         {
@@ -406,10 +435,10 @@ static class CharacterShaders
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
-                if (vAnatomy == 1u && (vWounds == 0u || tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g < 0.5)) discard;
+                if (vAnatomy == 1u && (vWounds == 0u || woundField(vUv).g < 0.5)) discard;
                 if (vAnatomy == 1u && vClipLayer > 1.5 && vClipLayer < 3.5) discard;   // patchy tendon and fat read as holes: the wound's own rim stands for them
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
-                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).a > 0.35) discard;
+                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && woundField(vUv).a > 0.55) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
