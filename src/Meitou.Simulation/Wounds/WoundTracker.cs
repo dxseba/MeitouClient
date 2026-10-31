@@ -62,7 +62,7 @@ public sealed class WoundBody
         if (segment is < 0 or > 9 || !float.IsFinite(t)) return false;
         int target = -1;
         for (int i = 0; i < LimbSlots && target < 0; i++)
-            if (limbs[i] is { } w && w.Segment == segment && MathF.Abs(w.T - t) < 0.18f && Vector3.Dot(w.Side, side) > 0.5f) target = i;
+            if (limbs[i] is { } w && w.Segment == segment && MathF.Abs(w.T - t) < 0.03f && Vector3.Dot(w.Side, side) > 0.98f) target = i;
         bool merge = target >= 0;
         if (!merge) target = Array.FindIndex(limbs, w => w is null);
         if (target < 0)
@@ -170,7 +170,7 @@ public sealed class WoundTracker
             ulong roll = Rng.Hash((ulong)e.Tick, (ulong)(uint)e.Victim.Slot, default, (ulong)e.Part + 77);
             float across = ((roll >> 8) & 0xFFFF) / 65535f * 2 - 1, height = ((roll >> 24) & 0xFFFF) / 65535f;
             float t = region == WoundRegion.Chest ? 0.5f + height * 0.42f : 0.12f + height * 0.42f;
-            applied = body.ApplyLimb(9, t, Vector3.Normalize(new Vector3(across * 1.1f, 0, behind ? -1 : 1)), 0, input);
+            applied = body.ApplyLimb(9, t, Vector3.Normalize(new Vector3(across * 2.5f, 0, behind ? -1 : 1)), 0, input);
             if (applied && region == WoundRegion.Abdomen) body.BellyHits++;
         }
         if (applied) bodies[e.Victim] = body;

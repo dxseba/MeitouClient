@@ -100,6 +100,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     {
         // A face takes far more UV per world unit than a body.
         float chart = w.BoneB.Contains("Head") ? ChartUv * 0.5f : ChartUv;
+        chart *= 0.4f + 0.6f * w.Depth;   // a light cut stays small, a deep one opens wide
         if (rig.Handle(w.BoneA) is not { } a || rig.Handle(w.BoneB) is not { } b || a >= rig.BindPosition.Length || b >= rig.BindPosition.Length) return null;
         var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], w.T) + w.Side * 1.2f;   // out to the skin, so a slanted side lands off the bone
         float best = float.MaxValue;
@@ -123,7 +124,7 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
                 pixels[i] = Math.Max(pixels[i], (byte)(s.X * 255));
                 pixels[i + 1] = Math.Max(pixels[i + 1], (byte)(s.Y * 255));
                 pixels[i + 2] = Math.Max(pixels[i + 2], (byte)(s.Z * 255));
-                pixels[i + 3] = 255;
+                pixels[i + 3] = Math.Max(pixels[i + 3], (byte)(w.Depth * s.X * 255));   // alpha: how deep the cut goes here
             }
         return hit;
     }

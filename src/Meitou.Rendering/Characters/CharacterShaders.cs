@@ -407,8 +407,8 @@ static class CharacterShaders
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
                 if (vAnatomy == 1u && (vWounds == 0u || tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g < 0.5)) discard;
-                // By depth, as Gore Lab's RemoveLayer: a cut's core loses its muscle and shows the bone and organs behind; they stay whole.
-                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).r > 0.6) discard;
+                // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
+                if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).a > 0.55) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
                 grain += dot(grain, grain.yzx + 33.33);
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);

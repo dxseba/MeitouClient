@@ -211,7 +211,8 @@ sealed partial class GameHost
         float yaw = world.Characters.Previous[sandboxFoe.Slot].Yaw;
         var position = world.Characters.Previous[sandboxFoe.Slot].Position;
         // Travelling against the foe's facing: a hit on its front.
-        var direction = -new Vector2(MathF.Sin(yaw), MathF.Cos(yaw));
+        float round = yaw + dummyHits * 2.399963f;   // from every side in turn
+        var direction = -new Vector2(MathF.Sin(round), MathF.Cos(round));
         woundQueue.Enqueue(new Meitou.Simulation.Combat.CombatEvent(Meitou.Simulation.Combat.CombatEventKind.Hit, world.Tick, Meitou.Simulation.Combat.CombatHitSource.Melee, sandboxHero, sandboxFoe,
             part, medical.Parts[part].Template.LimbSlot, position, direction, new Meitou.Simulation.Bodies.HitDamage(30, 20, 0), yaw, cut));
     }
