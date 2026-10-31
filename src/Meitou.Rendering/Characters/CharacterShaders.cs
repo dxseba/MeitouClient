@@ -19,6 +19,8 @@ static class CharacterShaders
     public const int WoundHeaderBones = 33;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
+    /// <summary>Bind height of a human face's eyes, a tuning value.</summary>
+    const string EyeHeight = "17.9";
     public const uint WoundFlag = 1u << 31, TearFlag = 1u << 2, PlateFlag = 1u << 3;
     public const uint BonesBinding = 6, MaterialsBinding = 7, MorphsBinding = 8, PreviousBonesBinding = 9;
     /// <summary>The texture slots of a material (<c>uint tex[]</c> in the shader, <see cref="TextureSlots"/>): <see cref="Slots"/> used, the rest hold the stand-in.</summary>
@@ -119,6 +121,7 @@ static class CharacterShaders
         out vec4 vBlood;        // the blood mapping of character.hlsl (cylinder projection of the part in its own space), before the race scale
         flat out uint vCuts;
         out vec3 vBindPos;
+        out vec3 vSkinPos;
         out float vCutBand;     // a cut limb: distance past the cut, below 0 gone
         flat out uint vWounds;  // the wound mask, 0 without wounds
         flat out float vClipLayer;
@@ -173,6 +176,7 @@ static class CharacterShaders
             vPlated = (aInstanceData.z & 8u) != 0u ? 1.0 : 0.0;
             vCuts = aInstanceData.x - 16u;
             vBindPos = aTangent.xyz;
+            vSkinPos = aPosition;
             vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
@@ -303,6 +307,7 @@ static class CharacterShaders
         flat in uint vWounds;
         flat in uint vCuts;
         in vec3 vBindPos;
+        in vec3 vSkinPos;
         flat in float vClipLayer;
         flat in float vPlated;
         flat in uint vAnatomy;
@@ -321,6 +326,13 @@ static class CharacterShaders
                 if (c.w <= 0.0) continue;
                 float len = floor(c.w) / 10000.0, depth = fract(c.w);
                 if (len <= 0.0) continue;
+                if (uv.y < 0.0)
+                {
+                    // The face's texture is mirrored: only the side really struck, and never over the eyes.
+                    vec4 hitAt = cutMats.m[vCuts - 16u + i / 4u][i % 4u];
+                    if (hitAt.x * vSkinPos.x < 0.0 && abs(vSkinPos.x) > 0.08) continue;
+                    if (abs(vSkinPos.y - {{EyeHeight}}) < 0.45 && vSkinPos.z > 0.5) continue;
+                }
                 vec2 d = uv - c.xy, axis = vec2(cos(c.z), sin(c.z));
                 float x = dot(d, axis) / len, y = abs(dot(d, vec2(-axis.y, axis.x)));
                 if (abs(x) >= 1.0) continue;
