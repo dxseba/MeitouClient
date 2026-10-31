@@ -19,7 +19,7 @@ static class CharacterShaders
     public const int WoundHeaderBones = 33;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
-    public const uint WoundFlag = 1u << 31, TearFlag = 1u << 2;
+    public const uint WoundFlag = 1u << 31, TearFlag = 1u << 2, PlateFlag = 1u << 3;
     public const uint BonesBinding = 6, MaterialsBinding = 7, MorphsBinding = 8, PreviousBonesBinding = 9;
     /// <summary>The texture slots of a material (<c>uint tex[]</c> in the shader, <see cref="TextureSlots"/>): <see cref="Slots"/> used, the rest hold the stand-in.</summary>
     public const int TextureSlotCount = 20;
@@ -120,6 +120,7 @@ static class CharacterShaders
         flat out uint vCuts;
         flat out uint vWounds;  // the wound mask, 0 without wounds
         flat out float vClipLayer;
+        flat out float vPlated;
         flat out uint vAnatomy; // 1 on the anatomy part, whose UVs are its nearest skin
         out float vClip;        // anatomy: above 0 outside every wound
         out float vBloodAmount; // the blood amount of the vertex's body part (the instance carries the parts': two 8-bit amounts in the w of each matrix row)
@@ -167,11 +168,12 @@ static class CharacterShaders
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
             bool wounded = (aInstanceData.z & 0x80000000u) != 0u, anatomy = (aInstanceData.z & 0x40000000u) != 0u;
             vAnatomy = anatomy ? 1u : 0u;
+            vPlated = (aInstanceData.z & 8u) != 0u ? 1.0 : 0.0;
             vCuts = aInstanceData.x - 16u;
             vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
-            if ((aInstanceData.z & 4u) != 0u)
+            if ((aInstanceData.z & 12u) != 0u)
             {
                 // Worn on the body: torn where a wound of its own body group lies under it (the wound spheres are in the same bind space; in it a hand hangs by the hip).
                 uint primary = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
@@ -275,6 +277,7 @@ static class CharacterShaders
         flat in uint vWounds;
         flat in uint vCuts;
         flat in float vClipLayer;
+        flat in float vPlated;
         flat in uint vAnatomy;
         in float vClip;
         in float vBloodAmount;
@@ -483,7 +486,9 @@ static class CharacterShaders
                 skin = 0.0;
                 nm = vec4(0.5, 0.5, 1.0, 0.5);
             }
-            if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.18 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
+            // Metal plate does not tear: it takes the wound's blood.
+            if (vPlated > 0.0 && vClip > -0.5) { float smear = smoothstep(-0.5, 0.2, vClip + 0.25 * sin(vBlood.y * 23.0 + vBlood.x * 5.0)); albedo = mix(albedo, vec3(0.16, 0.01, 0.012), smear * 0.9); gloss = mix(gloss, 0.7, smear); }
+            else if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.18 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.

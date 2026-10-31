@@ -561,7 +561,7 @@ internal sealed unsafe partial class CharacterRenderer
     /// row j's w, as an exact integer (CharacterShaders: <c>vBloodAmount</c>).
     /// </summary>
     /// <summary>The instance flag of a body with wounds, off in a portrait, whose palette has no header.</summary>
-    uint WoundFlag(AssetPart part, uint mask) => mask == 0 || portraitLive >= 0 ? (part.Anatomy ? CharacterShaders.AnatomyFlag : 0) : part.Anatomy ? CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag : part.IsBody ? CharacterShaders.WoundFlag : part.Shared && !part.Plate ? CharacterShaders.TearFlag : 0;
+    uint WoundFlag(AssetPart part, uint mask) => mask == 0 || portraitLive >= 0 ? (part.Anatomy ? CharacterShaders.AnatomyFlag : 0) : part.Anatomy ? CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag : part.IsBody ? CharacterShaders.WoundFlag : part.Shared ? (part.Plate ? CharacterShaders.PlateFlag : CharacterShaders.TearFlag) : 0;
 
     /// <summary>Height on screen under which a body's anatomy is not drawn: inside a cut it is lost at that size, and each costs 350k triangles.</summary>
     const float AnatomyPixels = 180;
