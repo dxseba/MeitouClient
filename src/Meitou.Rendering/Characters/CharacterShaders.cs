@@ -158,6 +158,7 @@ static class CharacterShaders
                     float radius = mod(c.w, 10.0), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
                     dent = max(dent, near * near * (3.0 - 2.0 * near) * max(radius - 1.0, 0.0) * 0.28);
                 }
+                if (aPosition.y > 16.0) dent = 0.0;   // the head counts as torso by group: a chest wound must not sink the face
                 local -= aNormal * min(dent, own == 0u ? 0.55 : own < 3u ? 0.25 : 0.4);   // never past the bone: arms are thinnest
             }
             vec4 p = world * vec4(local, 1.0);
