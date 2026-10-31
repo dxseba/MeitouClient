@@ -407,6 +407,7 @@ static class CharacterShaders
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
                 if (vAnatomy == 1u && (vWounds == 0u || tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g < 0.5)) discard;
+                if (vAnatomy == 1u && vClipLayer > 1.5 && vClipLayer < 3.5) discard;   // patchy tendon and fat read as holes: the wound's own rim stands for them
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
                 if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5 && tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).a > 0.55) discard;
                 vec3 grain = fract(vec3(floor(vBlood.xyx * vec3(90.0, 400.0, 90.0))) * 0.1031);
@@ -419,7 +420,7 @@ static class CharacterShaders
             {
                 // The body's inside, drawn only through a hole: the cavity behind the anatomy. An unwounded body keeps its plain colour: a reduced level's flipped triangles must not vanish.
                 // Wet cavity wall, not a black void.
-                albedo = vec3(0.2, 0.02, 0.025) * (0.65 + 0.35 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));
+                albedo = vec3(0.34, 0.05, 0.05) * (0.7 + 0.3 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));   // meat, not a void
                 gloss = 0.3;
             }
             else if (vWounds != 0u) woundSurface(albedo, gloss);
