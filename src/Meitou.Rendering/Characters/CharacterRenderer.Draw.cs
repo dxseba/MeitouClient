@@ -261,7 +261,8 @@ internal sealed unsafe partial class CharacterRenderer
                     if (depthPass && part.ShadowDistances is { } shadowLevels && MeshLod.Select(shadowLevels, value) is int k && k > 0) level = part.ShadowFirst + k - 1;   // the body's shadow-only levels
                 }
                 bool twoSided = part.Material.DoubleSided;
-                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16;
+                bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
+                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass)
                 {
@@ -400,7 +401,8 @@ internal sealed unsafe partial class CharacterRenderer
                 var part = parts[p];
                 var mesh = part.Mesh;
                 bool twoSided = part.Material.DoubleSided;
-                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16;
+                bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
+                uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)look.HiddenLimbs << 12 | (uint)(look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance
                 {
                     Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask),

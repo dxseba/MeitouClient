@@ -80,12 +80,13 @@ sealed partial class GameHost
     void ApplyGameplay()
     {
         var gameplay = Gameplay;
-        if (popData is { } data) data.BodyOptions.Dismemberment = gameplay.Dismemberment;
+        if (popData is { } data) (data.BodyOptions.Dismemberment, data.BodyOptions.Decapitation) = (gameplay.Dismemberment, config.Decapitation);
         foreach (var population in session.World.Systems.OfType<Meitou.Simulation.PopulationSystem>())
             (population.Settings.SquadSizeMultiplier, population.Settings.PopulationMultiplier, population.Settings.RaidSizeMult, population.Settings.RaidFrequencyMult) =
                 (gameplay.SquadSize, gameplay.Population, gameplay.RaidSize, gameplay.RaidFrequency);
         foreach (var ai in session.World.Systems.OfType<Meitou.Simulation.Ai.AiSystem>()) ai.Settings.TownAttacks = gameplay.TownAttacks;
         foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.StuckLimit = gameplay.HarpoonLimit;
+        foreach (var firstAid in session.World.Systems.OfType<Meitou.Simulation.FirstAid.FirstAidSystem>()) firstAid.HealGoodwill = config.HealGoodwillPoints;
     }
 
     /// <summary>The system list and its order are <see cref="StandardSystems"/>'(docs/simulation.md "Threading"); built again for each world.</summary>
@@ -114,6 +115,7 @@ sealed partial class GameHost
             // The duel prints what its measured lap holds (MeasureLap).
             Combat = new Meitou.Simulation.Combat.CombatOptions { SelfApproach = false, TickMedical = false, RecordLog = IsDuel, AttackSlots = Math.Clamp(config.AttackSlots, 1, 5), StuckLimit = Gameplay.HarpoonLimit, LateDefences = config.LateDefences, GunnerFacesBarrel = config.FixGunnerFacing, PunchReachFix = config.FixPunchReach },
             DoorsCloseBehind = config.DoorsCloseBehind,
+            HealGoodwill = config.HealGoodwillPoints,
             AnimationLengths = animationLengths,
             AnimationLibrary = animationLibrary,
             AnimationBlendRate = popData!.Bodies.Constants.AnimationBlendRate,

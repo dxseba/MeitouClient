@@ -19,7 +19,7 @@ static class CharacterShaders
     public const int WoundHeaderBones = 33;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
-    public const uint WoundFlag = 1u << 31, TearFlag = 1u << 29;
+    public const uint WoundFlag = 1u << 31, TearFlag = 1u << 2;
     public const uint BonesBinding = 6, MaterialsBinding = 7, MorphsBinding = 8, PreviousBonesBinding = 9;
     /// <summary>The texture slots of a material (<c>uint tex[]</c> in the shader, <see cref="TextureSlots"/>): <see cref="Slots"/> used, the rest hold the stand-in.</summary>
     public const int TextureSlotCount = 20;
@@ -39,7 +39,14 @@ static class CharacterShaders
         // Blood on the surface (character.hlsl "Bloodyness"): the part is covered at full amount (a severed limb's stump), docs/game/blood-decals.md "On the body".
         Bloody = 1 << 20,
         // With Bloody: the whole mesh at the full amount (a stump) instead of its parts' damage (the instance carries them).
-        BloodFull = 1 << 21;
+        BloodFull = 1 << 21,
+        // A headless body's neck cap (NeckCap, Meitou decapitation): the wound; with Mechanical, a robot race's metal socket.
+        Wound = 1 << 22, Mechanical = 1 << 23;
+    // Instance flag (CharInstance.Flags; bit 0 interior, 12-15 hidden limbs, 16-17 the boots' side, 18-27 hidden parts): a headless body (Meitou decapitation): its head
+    // vertices (CharacterContent.HeadBit) are hidden.
+    public const uint Headless = 1u << 28;
+    // A cut-off head (CharacterAppearance.HeadOnly): only the head vertices are drawn.
+    public const uint HeadOnly = 1u << 29;
     // Shading modes.
     public const uint ShadeItem = 0, ShadeBody = 1, ShadeHair = 2;
     // Texture slots (CharacterMaterialRecord.Tex).
@@ -164,7 +171,7 @@ static class CharacterShaders
             vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
-            if ((aInstanceData.z & 0x20000000u) != 0u)
+            if ((aInstanceData.z & 4u) != 0u)
             {
                 // Worn on the body: torn where a wound of its own body group lies under it (the wound spheres are in the same bind space; in it a hand hangs by the hip).
                 uint primary = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
@@ -192,7 +199,8 @@ static class CharacterShaders
             // Hidden limbs and parts (docs/characters.md "Hidden body parts"): the body's vertices of a limb whose bit 12 + k the instance carries, or of a part-map part whose
             // bit 18 + p it carries (the vertex's limb bits 0-3, part bits from 4: CharacterContent.MarkBody); the fragments discard where it is above 0.
             uint marks = uint(aColour.y + 0.5);
-            vHidden = ((marks & (aInstanceData.z >> 12) & 15u) | ((marks >> 4) & (aInstanceData.z >> 18) & 1023u)) != 0u ? 1.0 : 0.0;
+            vHidden = ((marks & (aInstanceData.z >> 12) & 15u) | ((marks >> 4) & (aInstanceData.z >> 18) & 1023u) | ((marks >> 14) & (aInstanceData.z >> 28) & 1u)) != 0u ? 1.0 : 0.0;
+            if ((aInstanceData.z & {{HeadOnly}}u) != 0u) vHidden = (marks & {{CharacterContent.HeadBit}}u) == 0u ? 1.0 : 0.0;   // a cut-off head: its vertices only
             // The part of the vertex (bits 16-19: its index + 1, CharacterContent.MarkBody) and its blood amount (the instance: part k in byte k & 1 of the w of row k / 2).
             uint bloodPart = (marks >> 16) & 15u;
             vBloodAmount = 0.0;
@@ -451,6 +459,29 @@ static class CharacterShaders
                 float amount = flag(f, 2097152u) ? 1.0 : vBloodAmount;
                 if (vWounds != 0u) amount *= 0.45;   // a wounded body: the cuts carry the gore, not an even coat
                 albedo = mix(albedo, blood.rgb, clamp(blood.a - 1.0 + clamp(amount, 0.0, 1.0), 0.0, 1.0));
+            }
+            // A headless body's neck cap (NeckCap): uv is (0, 0) at its centre and 1 at the rim; colour1 the race's blood colour, the diffuse slot the splatter map.
+            // Flesh: the fluid darkening into the cut, a bone at the centre. Mechanical (a robot race): a dark metal socket, its core darker, the fluid over it.
+            if (flag(f, {{Wound}}u))
+            {
+                float r = length(uv);
+                float splat = flag(f, 1u) ? tex(m.tex[0], uv * 0.5 + 0.5).a : 0.5;
+                vec3 fluid = m.colour1.rgb;
+                if (flag(f, {{Mechanical}}u))
+                {
+                    albedo = mix(vec3(0.17, 0.16, 0.15), vec3(0.05), 1.0 - smoothstep(0.25, 0.45, r));
+                    albedo = mix(albedo, fluid, splat * 0.6 * smoothstep(0.3, 0.9, r));
+                    gloss = 0.6;
+                    metal = 0.85;
+                }
+                else
+                {
+                    albedo = mix(fluid * 0.35, fluid, splat * smoothstep(0.0, 1.0, r));
+                    albedo = mix(vec3(0.75, 0.70, 0.60), albedo, smoothstep(0.12, 0.18, r));
+                    gloss = 0.7;
+                }
+                skin = 0.0;
+                nm = vec4(0.5, 0.5, 1.0, 0.5);
             }
             if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.55 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
             if (vAnatomy != 0u)

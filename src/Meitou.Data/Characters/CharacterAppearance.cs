@@ -256,6 +256,10 @@ public sealed class CharacterAppearance
             worn.RemoveAll(w => w.GetInt("slot", 5) == item.GetInt("slot", 5));
             worn.Add(item);
         }
+        // A cut-off head (Meitou decapitation) takes its hat along; the hat stays in the inventory.
+        bool headless = loadout?.Decapitated == true;
+        result.Headless = headless;
+        if (headless) worn.RemoveAll(w => (AttachSlot)w.GetInt("slot", 5) == AttachSlot.Hat);
         // fcs.def: "hide hair" (default true) is for hats only.
         bool hideHair = worn.Any(w => (AttachSlot)w.GetInt("slot", 5) == AttachSlot.Hat && w.GetBool("hide hair", true));
         bool hideBeard = worn.Any(w => w.GetBool("hide beard"));
@@ -264,8 +268,8 @@ public sealed class CharacterAppearance
         var hair = body?.HairId is { } hairId ? db.Find(hairId) : character is null || body is null ? PickHair(db, race, AttachSlot.Hair, random) : null;
         var beard = body?.BeardId is { } beardId ? db.Find(beardId) : null;
         if (character?.GetBool("shaved") == true) { hair = null; result.Notes.Add("shaved: no hair"); }
-        result.Hair = hideHair ? null : hair;
-        result.Beard = hideBeard ? null : beard;
+        result.Hair = hideHair || headless ? null : hair;
+        result.Beard = hideBeard || headless ? null : beard;
         if (hideHair && hair is not null) result.Notes.Add($"hair '{hair.Name}' hidden by a hat");
 
         foreach (var attachment in new[] { result.Hair, result.Beard })
@@ -354,6 +358,27 @@ public sealed class CharacterAppearance
     /// every limb that is not in its natural state and for every worn LIMB_REPLACEMENT, <c>uses_hide_parts</c>).
     /// </summary>
     public int HiddenLimbs { get; private set; }
+
+    /// <summary>The head was cut off (<see cref="Loadout.Decapitated"/>): the body's head vertices are hidden and its hat, hair and beard left out.</summary>
+    public bool Headless { get; private set; }
+
+    /// <summary>A cut-off head (<see cref="SeveredHead"/>): only the body's head vertices are drawn, with the hair, beard and hat.</summary>
+    public bool HeadOnly { get; private set; }
+
+    /// <summary>The head of this look as it falls when cut off (Meitou decapitation): the body (drawn head only, <see cref="HeadOnly"/>) with its hair, beard and hat.</summary>
+    public CharacterAppearance SeveredHead()
+    {
+        var copy = new CharacterAppearance
+        {
+            Character = Character, Animal = Animal, Race = Race, Female = Female, Body = Body, BodyFile = BodyFile, Loadout = Loadout, Faction = Faction,
+            BodyMesh = BodyMesh, BodyTexture = BodyTexture, BodyNormal = BodyNormal, BodyNormalStrong = BodyNormalStrong, BodyNormalSkinny = BodyNormalSkinny, BodyMask = BodyMask, PartMap = PartMap, Head = Head, Hair = Hair,
+            Shape = Shape, Beard = Beard, SkinToneParameter = SkinToneParameter, HairColour = HairColour, HeadOnly = true,
+        };
+        copy.Parts.AddRange(Parts.Where(p => p.Record == Hair || p.Record == Beard || p.Slot == AttachSlot.Hat));
+        copy.BodyLayers.AddRange(BodyLayers);
+        foreach (var (name, weight) in PoseWeights) copy.PoseWeights[name] = weight;
+        return copy;
+    }
 
     /// <summary>The part-map regions the worn ARMOUR hides: the OR of their <c>hide parts</c> (bit per part-map colour, docs/characters.md "Hidden body parts").</summary>
     public int HiddenParts { get; private set; }
@@ -477,7 +502,7 @@ public sealed class CharacterAppearance
         {
             Character = Character, Animal = Animal, Race = Race, Female = Female, Body = Body, BodyFile = BodyFile, Loadout = Loadout, Faction = Faction,
             BodyMesh = BodyMesh, BodyTexture = BodyTexture, BodyNormal = BodyNormal, BodyNormalStrong = BodyNormalStrong, BodyNormalSkinny = BodyNormalSkinny, BodyMask = BodyMask, PartMap = PartMap, Head = Head, Hair = Hair,
-            Shape = Shape, Beard = Beard, SkinToneParameter = SkinToneParameter, HairColour = HairColour, HiddenLimbs = HiddenLimbs, HiddenParts = HiddenParts,
+            Shape = Shape, Beard = Beard, SkinToneParameter = SkinToneParameter, HairColour = HairColour, HiddenLimbs = HiddenLimbs, HiddenParts = HiddenParts, Headless = Headless,
         };
         copy.Parts.AddRange(Parts);
         copy.Parts.Add(new CharacterPart { Record = item, Mesh = mesh, Field = "mesh", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = "hands" });

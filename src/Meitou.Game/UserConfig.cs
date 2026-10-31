@@ -99,6 +99,17 @@ sealed class UserConfig
     public bool UnloadedProduction { get; set; } = true;
     /// <summary>Doors a walker opened close behind it after 5 s (Advanced settings; Faithful off: they stay open, as in the game; docs/simulation.md "Cages, beds and locks").</summary>
     public bool DoorsCloseBehind { get; set; } = true;
+    /// <summary>
+    /// Healing goodwill (Advanced settings; Faithful off: only the game's small first-aid deed): a player medic that finishes treating a downed character of another faction raises that
+    /// faction's relation to the player by <see cref="HealingGoodwillAmount"/> points, up to the ally line (<see cref="Meitou.Simulation.FirstAid.FirstAidSystem.HealGoodwill"/>).
+    /// </summary>
+    public bool HealingGoodwill { get; set; } = true;
+    public float HealingGoodwillAmount { get; set; } = DefaultHealingGoodwill;
+    public const float DefaultHealingGoodwill = 5, MaxHealingGoodwill = 25;
+    /// <summary>The points the simulation adds per patient: 0 while <see cref="HealingGoodwill"/> is off.</summary>
+    [JsonIgnore] public float HealGoodwillPoints => HealingGoodwill ? Math.Clamp(HealingGoodwillAmount, 1, MaxHealingGoodwill) : 0;
+    /// <summary>A blow that destroys the head cuts it off, under the limbs' rule (Advanced settings; Faithful off: the game never does; docs/game/character-stats.md "Decapitation").</summary>
+    public bool Decapitation { get; set; } = true;
     /// <summary>A loaded or imported save starts paused (Advanced settings, a plain on/off switch outside the Faithful / Meitou sides; off by default: it runs at once, as in the game). <c>--load</c> is not paused.</summary>
     public bool PauseOnLoad { get; set; }
     /// <summary>Fixes of the game's own bugs (Fixes settings; on: fixed, off: as the game does; docs/audio.md): doors and gates sound when they break,
@@ -133,6 +144,8 @@ sealed class UserConfig
     public bool LuckyrenMode { get; set; }
     /// <summary>How many items dropped in play stay on the ground before the oldest goes (Advanced settings; <see cref="Meitou.Simulation.Items.GroundItems.Limit"/>).</summary>
     public int GroundItemLimit { get; set; } = Meitou.Simulation.Items.GroundItems.DefaultLimit;
+    /// <summary>The <c>--sandbox</c> debug panel at the top right is folded to its button (a down arrow); a click on the button toggles it.</summary>
+    public bool SandboxPanelCollapsed { get; set; }
     /// <summary>The audio sliders (Audio settings): the original's six volumes and the music frequency; null until first used, then taken from the install's settings.cfg.</summary>
     public Meitou.Audio.AudioSettings? Audio { get; set; }
     /// <summary>The original's Gameplay options (Gameplay settings); null until first used, then taken from the install's settings.cfg.</summary>

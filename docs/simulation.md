@@ -510,12 +510,14 @@ is not stopped, and an unwalkable result falls back to its own step.
 ## Navmesh
 
 Own DotRecast builder/cache (`Meitou.Navigation`), not Havok runtime. Default cells 2, height 1,
-48-cell tiles, agent height 18/max climb 5; ground/water/door areas. A* checks portal clearance
-(radius per wall end, default radius 4), water factor and doors. `NavAdapter` exposes simulation interfaces;
+48-cell tiles (a building interior is one tile), agent height 18/max climb 5 (two cells connect over a shared free space of 18 − 5); ground/water/door
+areas. A* checks portal clearance (radius per wall end, default radius 4), water factor and doors. `NavAdapter` exposes simulation interfaces;
 `ZoneGate` holds population until ready. Collision and world placement rules:
 [collision.md](formats/collision.md), [pathfinding.md](game/pathfinding.md).
 Cache key: the zone's building hash, the build settings and a content hash (the data files in load order, `seeds.def` and the
-height, blend, biome and overlay maps by size and write time, the DotRecast version). Unloading a zone skips its queued build;
+height, blend, biome and overlay maps by size and write time, the DotRecast version). The cache holds the zone's own pruning; the kept set of every loaded
+zone is resolved again whenever one is published or unloaded (the border rule toward unloaded sides, the neighbours' kept edges, `KeepAt` points;
+[zone borders](game/pathfinding.md#own-builder)). Unloading a zone skips its queued build;
 a running one is still cached but not published, and its task is cancelled.
 
 ## Animation
@@ -1462,7 +1464,8 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   (the medic jobs take allied factions' patients scoring ≥ 0.1), Help Allies (`RetaliationSystem.JoinFight`: the fighters of allied factions count in
   goal 15's finder, their weight squared, [precedence](game/ai-tasks.md#precedence)), Rescue Allies (above), Share Food (`FeedSystem`: a player character with no food takes it from a squad mate's backpack within 200,
   only with the option), Feed Animals (off: the player's animals do not eat), Shoot first (`SquadAiRules.ShootsFirstAt`: with no enemy in its
-  sights a player turret gunner also takes dangerous neutrals at weight 0.6).
+  sights a player turret gunner also takes dangerous neutrals at weight 0.6); Meitou-only Heal Neutrals and Heal All (player medics also treat downed non-hostile
+  strangers, or any downed character; [squad AI options](game/ai-tasks.md#squad-ai-options)).
 - **Saves** (`Saving/MachineSave`, `ResearchSave`). Each building's production and farm keys go into its
   GAMESTATE_BUILDING. Items go into an INVENTORY_STATE `<site>-inventory`, listed first by the building, with sections
   `in<k>`, `out` and `main` (a furnace's grid `in1`).
@@ -1747,6 +1750,7 @@ The panel's **animation** drop-down (top right) forces a clip on the hero: the l
 name, typed letters filter it, the wheel, Up / Down and PageUp / PageDown scroll it, a click or Enter picks, Esc closes. The pick loops by the wall clock
 from the moment it was picked (a technique keeps only its root height, as in the game), drawn by the host in place of the simulation's layers;
 "simulation" gives the hero back. Nothing is sent to the simulation.
+The panel's corner button (^) folds it to a lone down-arrow button that opens it again; the state is `sandboxPanelCollapsed` in `meitou.user.json`.
 
 ## Duel
 

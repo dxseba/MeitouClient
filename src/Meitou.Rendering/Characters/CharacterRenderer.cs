@@ -206,6 +206,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public bool PortraitOnly;
         /// <summary>In a loaded building's interior (<see cref="WorldObjectRenderer.InteriorAt"/>), found once a frame for every view.</summary>
         public bool Interior;
+        /// <summary>Holds bones taken from another character (<see cref="CharacterInstance.FreezeFrom"/>): never posed.</summary>
+        public bool Frozen;
     }
 
     /// <summary>What the renderer keeps of a character between frames (by <see cref="CharacterInstance.Key"/>): its last posed palette and the one before.</summary>
@@ -226,6 +228,33 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public float Radius;
         /// <summary>Its last indoors answer (<see cref="Live.Interior"/>), asked again once it has moved.</summary>
         public WorldObjectRenderer.InteriorMemo Interior;
+        /// <summary>Its bones were taken from another character (<see cref="Freeze"/>) and are never posed.</summary>
+        public bool Frozen;
+        /// <summary>The ragdoll bones it was last posed with: the same object again (a frozen ragdoll) needs no pose every frame.</summary>
+        public BonePose? PosedRagdoll;
+    }
+
+    /// <summary>
+    /// Gives the character <paramref name="key"/> the bones of <paramref name="from"/> as last posed, held from now on and never posed (a cut-off head keeps the pose of the
+    /// moment it was cut, taken before its own look is ready). False when <paramref name="from"/> has no posed bones. Render thread, between updates.
+    /// </summary>
+    public bool HoldPose(long key, long from)
+    {
+        if (!states.TryGetValue(from, out var source) || source.Posed < 0 || source.Bones.Length == 0) return false;
+        states[key] = new CharState { Bones = [.. source.Bones], Previous = [.. source.Bones], Posed = updateStamp, Seen = updateStamp, Frozen = true };
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="CharacterInstance.FreezeFrom"/>: the held bones (<see cref="HoldPose"/>, taken now if they were not), sized for <paramref name="asset"/>; false while there are none
+    /// for its skeleton, and the character is not drawn.
+    /// </summary>
+    bool Freeze(long key, long from, CharacterAsset asset)
+    {
+        if ((!states.TryGetValue(key, out var own) || !own.Frozen) && (!HoldPose(key, from) || !states.TryGetValue(key, out own))) return false;
+        if (own.Bones.Length != asset.Rig.BoneCount) return false;
+        if (own.Attach.Length != asset.AttachCount) (own.Attach, own.PreviousAttach) = (new Matrix4x4[asset.AttachCount], new Matrix4x4[asset.AttachCount]);
+        return true;
     }
 
     readonly Dictionary<long, CharState> states = [];
@@ -433,6 +462,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 built++;
             }
             if (asset is null) continue;
+            if (inst.FreezeFrom is { } freezeFrom && !Freeze(inst.Key, freezeFrom, asset)) continue;
             if (inst.Build is { } build) ApplyBuild(asset, build);
             if (inst.BlendFrom is { } blendFrom && inst.Blend < 1 && assets.TryGetValue(blendFrom, out var fromAsset) && fromAsset is not null) ApplyBlend(asset, fromAsset, inst.Blend);
             else RestoreBlend(asset);
@@ -446,10 +476,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             (l.Key, l.PortraitOnly) = (inst.Key, far);
             // Lowered by the body shape's lift, so a short body's feet stay on the ground (CharacterAsset.GroundOffset); an animal scaled by its size (its node's scale).
             // A carried body's whole rotation lowers it in its own frame (CharacterRigs.Placement, as the simulation poses its ragdoll).
-            l.World = inst.Rotation is { } rotation
+            l.World = inst.World ?? (inst.Rotation is { } rotation
                 ? Matrix4x4.CreateTranslation(0, -asset.GroundOffset, 0) * Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(inst.Position)
-                : Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0));
-            if (scale != 1) l.World = Matrix4x4.CreateScale(scale) * l.World;
+                : Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0)));
+            if (scale != 1 && inst.World is null) l.World = Matrix4x4.CreateScale(scale) * l.World;
             (l.WeaponDrawn, l.RangedDrawn, l.BackDrawn, l.Shots, l.Bolts) = (inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, inst.Shots, inst.Bolts);
             l.Centre = centre;
             l.Radius = asset.Radius * scale;
@@ -474,9 +504,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             (state.World, state.HasWorld) = (l.World, true);
             l.Bones = inst.Bones;
             l.Blood = inst.Blood;
-            // A ragdoll is posed every frame: its bones move by physics, not by a clip the thinning could thin out. A new asset (other gear, another rig) is posed at
+            // A moving ragdoll is posed every frame: its bones move by physics, not by a clip the thinning could thin out (a frozen one hands over the same bones). A new asset (other gear, another rig) is posed at
             // once: its parts' attach matrices and its arrays' sizes come from it. The rest are thinned by their size on screen after the gather (below).
-            l.MustPose = inst.FullRateAnimation || inst.Bones is not null || state.Posed < 0 || newAsset;
+            l.Frozen = state.Frozen;
+            l.MustPose = !l.Frozen && (inst.FullRateAnimation || inst.Bones is not null && !ReferenceEquals(inst.Bones, state.PosedRagdoll) || state.Posed < 0 || newAsset);
             l.Pixels = 2 * l.Radius * viewPixelsPerRadian / MathF.Max(1, Vector3.Distance(eye, centre));
             l.LayerStart = layerCount;
             var rig = asset.Rig;
@@ -489,7 +520,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         int inWorld = 0;
         for (int i = 0; i < liveCount; i++) if (!live[i].PortraitOnly) inWorld++;
         if (inWorld < ThinFromCharacters)
-            for (int i = 0; i < liveCount; i++) live[i].Repose = true;
+            for (int i = 0; i < liveCount; i++) live[i].Repose = !live[i].Frozen;
         else
         {
             // The largest on screen first: they keep the full rate up to the budget, the rest at least the second rate.
@@ -506,7 +537,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 if (interval == 1 && full++ >= FullRateBudget) interval = 2;
                 // In time, not frames (a slow frame rate must not thin the poses out further): a new pose each time the character's own clock enters a new period.
                 long bucket = interval == 1 ? updateStamp : (long)Math.Floor(poseSeconds * PoseRateHz / interval + unchecked((ulong)l.Key * 0x9E3779B97F4A7C15UL) / 18446744073709551616.0);
-                l.Repose = l.MustPose || bucket != l.State.PoseBucket;
+                l.Repose = !l.Frozen && (l.MustPose || bucket != l.State.PoseBucket);
                 l.State.PoseBucket = bucket;
             }
         }
@@ -551,6 +582,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     rig.Return(scratch);
                     if (state.Posed < 0) { state.Bones.CopyTo(state.Previous, 0); state.Attach.CopyTo(state.PreviousAttach, 0); }
                     state.Posed = stamp;
+                    state.PosedRagdoll = l.Bones;
                 }
                 state.Bones.CopyTo(new Span<Matrix4x4>((byte*)bonePointer + (long)l.BoneBase * 64, rig.BoneCount));
                 if (l.WoundMask != 0) {
@@ -644,7 +676,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     {
         staleKeys.Clear();
         foreach (var (key, state) in states)
-            if (updateStamp - state.Seen > 60) staleKeys.Add(key);
+            if (updateStamp - state.Seen > (state.Frozen ? 600 : 60)) staleKeys.Add(key);   // a held pose waits longer for its look to be ready
         foreach (var key in staleKeys) states.Remove(key);
     }
 
@@ -721,6 +753,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         if (m.Skin && SkinFor(m)) flags |= CharacterShaders.Skin;
         if (m.VertexColoured) flags |= CharacterShaders.VertexColoured;
         if (m.Bloody && has[CharacterShaders.SlotBlood]) flags |= CharacterShaders.Bloody | (m.BloodFull ? CharacterShaders.BloodFull : 0);
+        if (m.Wound) flags |= CharacterShaders.Wound | (m.Mechanical ? CharacterShaders.Mechanical : 0);
         // Textures assigned but not resident yet: a hair's diffuse (its cut-out), a clipped item's normal map, the head's maps.
         if (m.Shading == CharacterShaders.ShadeHair && m.Tex[CharacterShaders.SlotDiffuse] is not null && !has[CharacterShaders.SlotDiffuse]
             || m.ClipOnNormalAlpha && m.Tex[CharacterShaders.SlotNormal] is not null && !has[CharacterShaders.SlotNormal])
