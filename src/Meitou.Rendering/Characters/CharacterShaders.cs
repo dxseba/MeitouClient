@@ -196,7 +196,7 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
-                    if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - floor(aColour.a + 0.5)) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
+                    if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - (aColour.a > 4.5 ? 0.0 : floor(aColour.a + 0.5))) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
                 }
             }
             vMaterial = aInstanceData.y;

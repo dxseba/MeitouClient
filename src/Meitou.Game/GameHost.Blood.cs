@@ -235,6 +235,7 @@ sealed partial class GameHost
         if (session.World.Characters.Cold(id.Slot)?.Medical is { } medical)
             foreach (var part in medical.Parts)
                 if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb) lost |= 1u << (limb < 2 ? 1 + limb : 1 + limb);
+        if (gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) lost |= 1u << 5;   // the bowel has left the body
         return lost;
     }
 

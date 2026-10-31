@@ -230,7 +230,7 @@ internal sealed class CharacterContent : IDisposable
         _ => new(0.4f, 0.1f, 0.1f, 1),
     };
 
-    /// <summary>A group no wound opens: the bowel is never drawn in the body, the loose body stands for it (<see cref="DebrisRenderer.Bowel"/>).</summary>
+    /// <summary>The bowel's group: with the torso's until it spills, then gone (<see cref="DebrisRenderer.Bowel"/>).</summary>
     const int LooseBowelGroup = 5;
     readonly string modsDirectory;
 
@@ -420,6 +420,12 @@ internal sealed class CharacterContent : IDisposable
             foreach (var v in batch.Vertices)
             {
                 var fitted = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
+                // The file's rib cage against this body: a narrower sternum, stouter ribs.
+                if (batch.Layer == 0 && WoundMasks.BodyGroup(batch.Bone) == 0 && fitted.Y is > 11f and < 16f && fitted.Z > 0)
+                {
+                    if (MathF.Abs(fitted.X) < 0.75f) fitted = new Vector3(fitted.X * 0.68f, fitted.Y, fitted.Z - 0.1f);
+                    else fitted += v.Normal * 0.05f;
+                }
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
