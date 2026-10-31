@@ -86,7 +86,7 @@ sealed partial class GameHost
             uint group = (uint)(limb < 2 ? 1 + limb : 1 + limb);
             heads.Add(new FallingHead
             {
-                Key = key, From = from, Look = look, World = world, Start = start, Aside = new Vector2(start.X + 3, start.Z + 2), Axis = Vector3.UnitX, Spin = 3,
+                Key = key, From = from, Look = look, World = world, Start = start, Aside = new Vector2(start.X + MathF.Cos(from * 0.7f + limb) * 4, start.Z + MathF.Sin(from * 0.7f + limb) * 4), Axis = Vector3.Normalize(new Vector3(MathF.Sin(from * 0.7f + limb), 0.3f, -MathF.Cos(from * 0.7f + limb))), Spin = 3,
                 Flight = MathF.Sqrt(2 * MathF.Max(start.Y - session.World.Walkability.GroundHeight(start.X, start.Z, start.Y) - 0.6f, 0) / FallGravity), Blood = c.BloodAmounts,
                 PartOnly = group << 8 | (uint)(Meitou.Simulation.Wounds.SeveredLevels.Height(level, limb) * 10),
             });

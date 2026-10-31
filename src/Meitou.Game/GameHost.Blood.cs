@@ -301,7 +301,7 @@ sealed partial class GameHost
                     string limbSide = limb % 2 == 0 ? "L" : "R";
                     int cutLevel = Meitou.Simulation.Wounds.SeveredLevels.Of(id, limb);
                     (string upper, string lower, float along) = (limb < 2, cutLevel) switch { (true, 0) => ("UpperArm", "Forearm", 0.45f), (true, 1) => ("UpperArm", "Forearm", 0.95f), (true, _) => ("Forearm", "Hand", 0.5f), (false, 0) => ("Thigh", "Calf", 0.3f), (false, 1) => ("Thigh", "Calf", 0.87f), _ => ("Calf", "Foot", 0.42f) };
-                    marks.Add(new($"Bip01 {limbSide} {upper}", $"Bip01 {limbSide} {lower}", along, Vector3.Normalize(new Vector3(limb % 2 == 0 ? 1 : -1, -0.6f, 0.3f)), 1, 0, 0.85f, 1, 1.2f));
+                    marks.Add(new($"Bip01 {limbSide} {upper}", $"Bip01 {limbSide} {lower}", along, Vector3.Normalize(new Vector3(limb % 2 == 0 ? 1 : -1, -0.6f, 0.3f)), 1, 0, 0.35f, 0.5f, 0.5f));
                 }
         // A stump without a wound still needs the (blank) mask that lets its anatomy draw: a mark on no bone paints nothing.
         if (marks.Count == 0 && LostGroups(id) != 0) marks.Add(new("", "", 0, default, 1, 0, 1, 0));
