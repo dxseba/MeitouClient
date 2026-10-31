@@ -147,10 +147,11 @@ static class CharacterShaders
             if (anatomy)
             {
                 vClip = 1000.0;
+                uint lost = floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]);
                 for (uint i = 0u; i < 16u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 4u + i / 4u][i % 4u];
-                    if (c.w > 0.0 && abs(floor(c.w / 10.0) - aColour.a) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
+                    if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - aColour.a) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
                 }
             }
             vMaterial = aInstanceData.y;
@@ -395,10 +396,9 @@ static class CharacterShaders
                 albedo *= 0.9 + 0.1 * fract((grain.x + grain.y) * grain.z);
                 gloss = 0.5;
             }
-            else if (m.shading == 1u && !gl_FrontFacing)
+            else if (m.shading == 1u && !gl_FrontFacing && vWounds != 0u)
             {
-                // The body's inside, drawn only through a hole: the cavity behind the anatomy.
-                if (vWounds == 0u) discard;
+                // The body's inside, drawn only through a hole: the cavity behind the anatomy. An unwounded body keeps its plain colour: a reduced level's flipped triangles must not vanish.
                 // Wet cavity wall, not a black void.
                 albedo = vec3(0.2, 0.02, 0.025) * (0.65 + 0.35 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));
                 gloss = 0.3;

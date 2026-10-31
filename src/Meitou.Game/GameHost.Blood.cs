@@ -125,7 +125,7 @@ sealed partial class GameHost
     readonly Meitou.Simulation.Wounds.WoundTracker wounds = new();
     static readonly Meitou.Simulation.Wounds.WoundBody NoWounds = new();
 
-    const float GutLifeSeconds = 600;
+    const float GutLifeSeconds = 600, StumpBoneAt = 0.5f;
 
     sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; }
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
@@ -144,6 +144,22 @@ sealed partial class GameHost
             if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) continue;
             var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
             gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y };
+        }
+        // A stump shows its cut bone (Gore Lab's SeverBoneExposure): on the upper arm or thigh, pointing down the lost limb.
+        debris.Extent(Meitou.Rendering.DebrisRenderer.StumpBone);
+        for (int slot = 0; draw && gpu.Characters is { } characters && slot < world.Characters.HighWater; slot++)
+        {
+            if (!world.Characters.Previous[slot].Alive || world.Characters.Cold(slot)?.Medical is not { } medical) continue;
+            var id = world.Characters.IdOf(slot);
+            foreach (var part in medical.Parts)
+                if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb)
+                {
+                    string side = limb % 2 == 0 ? "L" : "R";
+                    if (characters.BonePosition(DrawKey(id), $"Bip01 {side} {(limb < 2 ? "UpperArm" : "Thigh")}") is not { } top
+                        || characters.BonePosition(DrawKey(id), $"Bip01 {side} {(limb < 2 ? "Forearm" : "Calf")}") is not { } end) continue;
+                    var along = Vector3.Normalize(end - top);
+                    gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.StumpBone, limb < 2 ? 0.22f : 0.32f, Turn(Vector3.UnitZ, along), Vector3.Lerp(top, end, StumpBoneAt)));
+                }
         }
         foreach (var (who, gone) in gutFalls.ToArray())
             if (gone.Age > GutLifeSeconds) { gutFalls.Remove(who); gutsSpilled.Add(who); }   // spilled once: the wound stays and does not spill again
@@ -192,6 +208,16 @@ sealed partial class GameHost
     }
 
     /// <summary>A cut's axis, turned by its own golden-angle step: a blow's direction alone gives only a few angles, and the real contact point is unknown.</summary>
+    /// <summary>The body groups of a character's stumps (<see cref="Meitou.Rendering.Characters.WoundMasks.BodyGroup"/>: arms 1 and 2, legs 3 and 4).</summary>
+    uint LostGroups(CharacterId id)
+    {
+        uint lost = 0;
+        if (session.World.Characters.Cold(id.Slot)?.Medical is { } medical)
+            foreach (var part in medical.Parts)
+                if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb) lost |= 1u << (limb < 2 ? 1 + limb : 1 + limb);
+        return lost;
+    }
+
     static Vector2 Turned(in Meitou.Simulation.Wounds.WoundShape shape, int age)
     {
         float turn = age * 2.399963f, c = MathF.Cos(turn), s = MathF.Sin(turn);

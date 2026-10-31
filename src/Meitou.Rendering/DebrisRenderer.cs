@@ -105,6 +105,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
             float cut = limb ? 0.0 : uAlphaThreshold;
             vec4 base = uTextured != 0 ? texture(uDiffuse, vUv) : vec4(0.78, 0.72, 0.62, 0.3);
             if (uAlphaThreshold < 0.0) base = vec4(0.46, 0.2, 0.2, 0.8);   // wet bowel
+            if (uAlphaThreshold < -1.5) base = vec4(mix(vec3(0.82, 0.76, 0.62), vec3(0.3, 0.05, 0.05), step(0.5, vUv.x)), 0.5);   // bone and marrow
             if (cut > 0.0 && base.a < cut) discard;
             float gloss = cut > 0.0 ? 0.3 : clamp(base.a, 0.0, 1.0);
             if (limb)
@@ -372,6 +373,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
         try
         {
             if (file == Bowel) mesh = BuildBowel();
+            else if (file == StumpBone) mesh = BuildStumpBone();
             else if (find(Path.GetFileName(file.Replace('\\', '/'))) is { } path) mesh = Build(file, materialOf ?? file, OgreMeshReader.ReadFile(path), limb);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or NotSupportedException)
@@ -386,6 +388,41 @@ public sealed unsafe class DebrisRenderer : IDisposable
     public const string Bowel = "@bowel";
     /// <summary>The user's <c>Ecorche.anatomy</c>, or null.</summary>
     public string? AnatomyFile { get; set; }
+
+    /// <summary>The built-in name of a cut bone end along z, radius 1 and length 1: pale cortex round dark marrow, as Gore Lab's sever exposure.</summary>
+    public const string StumpBone = "@stumpbone";
+
+    Mesh BuildStumpBone()
+    {
+        const int Sides = 12;
+        var vertices = new List<Vertex>();
+        var indices = new List<uint>();
+        void Add(Vector3 p, Vector3 n, float marrow) => vertices.Add(new Vertex { Position = p, Normal = n, Uv = new Vector2(marrow, 0), Colour = Vector4.One });
+        for (int i = 0; i <= Sides; i++)
+        {
+            float a = i * MathF.Tau / Sides;
+            var n = new Vector3(MathF.Cos(a), MathF.Sin(a), 0);
+            Add(n + new Vector3(0, 0, -0.5f), n, 0);
+            Add(n + new Vector3(0, 0, 0.5f), n, 0);
+            Add(n + new Vector3(0, 0, 0.5f), Vector3.UnitZ, 0);
+            Add(n * 0.55f + new Vector3(0, 0, 0.5f), Vector3.UnitZ, 1);
+        }
+        Add(new Vector3(0, 0, 0.5f), Vector3.UnitZ, 1);
+        uint centre = (uint)vertices.Count - 1;
+        for (uint i = 0; i < Sides; i++)
+        {
+            uint a = i * 4, b = a + 4;
+            indices.AddRange([a, b, a + 1, a + 1, b, b + 1, a + 2, b + 2, a + 3, a + 3, b + 2, b + 3, a + 3, b + 3, centre]);
+        }
+        var vb = DeviceBuffer.Create(gpu, (ulong)(vertices.Count * Rendering.Vertex.Size), BufferUse.Vertex, "debris stump bone");
+        var ib = DeviceBuffer.Create(gpu, (ulong)indices.Count * sizeof(uint), BufferUse.Index, "debris stump bone");
+        using (var batch = gpu.Uploads.Begin())
+        {
+            batch.Write(vb, 0, MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(vertices)));
+            batch.Write(ib, 0, MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(indices)));
+        }
+        return new Mesh(vb, ib, [(0, (uint)indices.Count, 0, null, -2f)], Vector3.One);
+    }
 
     Mesh? BuildBowel()
     {

@@ -46,6 +46,8 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public ulong Blood { get; init; }
     /// <summary>Open wounds to draw on the body, at most <see cref="Characters.CharacterShaders.WoundCapacity"/>.</summary>
     public IReadOnlyList<CharacterWoundMark> Wounds { get; init; } = [];
+    /// <summary>Bits of the <see cref="Characters.WoundMasks.BodyGroup"/>s lost to a cut: their anatomy is not drawn.</summary>
+    public uint LostGroups { get; init; }
 }
 
 /// <summary>
