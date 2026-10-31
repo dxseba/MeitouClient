@@ -226,7 +226,7 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>Each organ's own colour (Anatomy.hlsl; the organ is the tens of the file's u): an opened body reads as organs, not one red mass.</summary>
     static Vector4 OrganColour(int organ) => organ switch
     {
-        1 => new(0.45f, 0.07f, 0.09f, 1), 2 => new(0.62f, 0.3f, 0.33f, 1), 3 => new(0.3f, 0.045f, 0.055f, 1), 4 => new(0.68f, 0.33f, 0.28f, 1), 5 => new(0.72f, 0.42f, 0.36f, 1), 6 => new(0.22f, 0.035f, 0.035f, 1),
+        1 => new(0.45f, 0.07f, 0.09f, 1), 2 => new(0.34f, 0.12f, 0.14f, 1), 3 => new(0.3f, 0.045f, 0.055f, 1), 4 => new(0.4f, 0.15f, 0.13f, 1), 5 => new(0.42f, 0.19f, 0.17f, 1), 6 => new(0.22f, 0.035f, 0.035f, 1),
         _ => new(0.4f, 0.1f, 0.1f, 1),
     };
 
