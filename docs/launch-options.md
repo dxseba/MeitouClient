@@ -48,6 +48,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-mode <list>` | walk, run, free, a speed in u/s, patrol, fight (comma list) | none (idle) | The sandbox hero's start state, e.g. `run,patrol`. |
 | `--sandbox-power <n>` | number | off | The hero's melee damage, 100 being normal: 1000 hits ten times as hard. |
 | `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Fighters are male humans. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
+| `--sandbox-part <name>` | head, chest, stomach, left arm... | off | With `--sandbox-dummy`: test hits only on that body part. |
 | `--sandbox-behead` | | off | With `--sandbox-dummy`: the foe loses its head at tick 120. |
 | `--sandbox-female` | | off | With `--sandbox-bare`: the fighters are women. |
 | `--sandbox-torso` | | off | With `--sandbox-dummy`: test hits only on the chest and stomach. |

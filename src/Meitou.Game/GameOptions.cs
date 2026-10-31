@@ -21,7 +21,7 @@ sealed class GameOptions
     /// <summary>The animation sandbox (<c>--sandbox [n]</c>): 0 off, else the number of characters (1 or 2) on a flat wireframe floor.</summary>
     public int Sandbox;
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
-    public string? SandboxCharacter;
+    public string? SandboxCharacter, SandboxPart;
     public bool SandboxBare;
     public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead;
     public float? SandboxYaw, SandboxPower;
@@ -170,6 +170,7 @@ sealed class GameOptions
                 case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever-level": g.SandboxSever = true; g.SandboxSeverLevel = int.Parse(Next()); break;
                 case "--sandbox-power": g.SandboxPower = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
+                case "--sandbox-part": g.SandboxPart = Next(); break;
                 case "--sandbox-sever": g.SandboxSever = true; break;
                 case "--sandbox-zoom": g.SandboxZoom = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--sandbox-dummy": g.SandboxDummy = g.SandboxBare = true; break;
