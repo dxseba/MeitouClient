@@ -36,7 +36,7 @@ sealed partial class GameHost
         public Vector3 Extent;
         public float Scale;
         public float Floor;
-        public bool Resting, Landed, Flesh;
+        public bool Resting, Landed, Flesh, Bloody;
         public long Born;
         public uint Colour;
     }
@@ -170,7 +170,7 @@ sealed partial class GameHost
         foreach (var p in pieces)
         {
             for (int s = 0; s < steps && !p.Resting && h > 0; s++) Step(p, h);
-            gpu.DebrisPieces.Add(new DebrisPiece(p.Mesh, p.Scale, p.Rotation, p.Position));
+            gpu.DebrisPieces.Add(new DebrisPiece(p.Mesh, p.Scale, p.Rotation, p.Position, Bloody: p.Bloody));
         }
     }
 

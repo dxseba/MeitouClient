@@ -11,7 +11,7 @@ namespace Meitou.Rendering;
 /// One loose mesh in the world: its file, its size and where it is (rotation and translation, the mesh's middle at the translation); <paramref name="Stretch"/> lengthens
 /// it along its own z (a bolt in flight).
 /// </summary>
-public readonly record struct DebrisPiece(string Mesh, float Scale, Quaternion Rotation, Vector3 Position, float Stretch = 1, LimbLook? Limb = null);
+public readonly record struct DebrisPiece(string Mesh, float Scale, Quaternion Rotation, Vector3 Position, float Stretch = 1, LimbLook? Limb = null, bool Bloody = false);
 
 /// <summary>
 /// How a severed limb is drawn (the original's <c>SeveredLimb</c> material, docs/game/blood-decals.md "On the body and on severed limbs"): the item's MATERIAL record's texture map and
@@ -104,7 +104,8 @@ public sealed unsafe class DebrisRenderer : IDisposable
             bool hasNormal = limb && (uTextured & 4) != 0;
             float cut = limb ? 0.0 : uAlphaThreshold;
             vec4 base = uTextured != 0 ? texture(uDiffuse, vUv) : vec4(0.78, 0.72, 0.62, 0.3);
-            if (uAlphaThreshold < 0.0) base = vec4(0.46, 0.2, 0.2, 0.8);   // wet bowel
+            if (uAlphaThreshold < -2.5) { float wet = 0.55 + 0.45 * sin(vLocal.x * 31.0 + vLocal.y * 17.0) * sin(vLocal.z * 23.0); base = vec4(mix(base.rgb * 0.6, vec3(0.2, 0.012, 0.014), clamp(wet, 0.0, 1.0)), 0.8); }   // torn out: wet with blood
+            else if (uAlphaThreshold < 0.0) base = vec4(0.46, 0.2, 0.2, 0.8);   // wet bowel
             if (cut > 0.0 && base.a < cut) discard;
             float gloss = cut > 0.0 ? 0.3 : clamp(base.a, 0.0, 1.0);
             if (limb)

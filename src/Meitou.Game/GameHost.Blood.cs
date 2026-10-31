@@ -205,6 +205,22 @@ sealed partial class GameHost
                     drops.Burst(BurstSpray, from, Turn(Vector3.UnitZ, spray), 0.1f + force * 0.2f, MistSize * 0.5f, MistLife * 0.6f);
                 }
             }
+            // A heavy blow knocks a splinter of bone and a scrap of flesh out of the wound.
+            if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && gpu?.Debris is { } shards)
+                foreach (bool flesh in new[] { false, true })
+                {
+                    string mesh = flesh ? MeatMesh : BoneMeshes[bloodRandom.Next(BoneMeshes.Length)];
+                    if (shards.Extent(mesh, flesh ? null : BoneMeshes[0]) is not { } size) continue;
+                    float scale = flesh ? 0.16f : 0.035f;
+                    var along = e.Direction.LengthSquared() > 1e-6f ? Vector2.Normalize(e.Direction) : Vector2.UnitX;
+                    pieces.Add(new Piece
+                    {
+                        Mesh = mesh, Scale = scale, Extent = size * scale, Floor = float.NaN, Born = world.Tick, Flesh = flesh, Colour = 0, Bloody = true,
+                        Position = e.Position + new Vector3(0, 6 + bloodRandom.NextSingle() * 8, 0),
+                        Velocity = new Vector3(along.X * 18 + bloodRandom.NextSingle() * 12 - 6, 18 + bloodRandom.NextSingle() * 16, along.Y * 18 + bloodRandom.NextSingle() * 12 - 6),
+                        Rotation = Quaternion.Identity, Spin = new Vector3(5, 3, 7),
+                    });
+                }
             if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
             var part = medical.Parts[e.Part];
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
