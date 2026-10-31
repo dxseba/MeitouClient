@@ -310,7 +310,7 @@ internal sealed class CharacterContent : IDisposable
             var model = Model.Build(mesh, boneCount, gameBinormals: !icon, tangentSign: icon);
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
             if (limbs is not null || partMap is not null)
-                WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv, (int)(v.Bones & 255)))];
+                WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv, (int)(v.Bones & 255), v.Bones, v.Weights))];
             if (limbs is not null || partMap is not null) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
             // Not an icon's: its colour is the mesh's own vertex colour (CharacterShaders.VertexColoured), and icons take no skin.
             if (!icon) MarkCurvature(model);
@@ -405,7 +405,7 @@ internal sealed class CharacterContent : IDisposable
         foreach (var batch in Meitou.Data.Characters.EcorcheAsset.Read(stream))
         {
             if ((rig.Handle(batch.Bone) ?? (batch.Bone == "Bip01 Jaw" ? rig.Handle("Bip01 Head") : null)) is not { } bone) continue;
-            var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.48f, 0.09f, 0.08f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.55f, 0.12f, 0.12f, 1) };
+            var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.36f, 0.075f, 0.07f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.55f, 0.12f, 0.12f, 1) };
             foreach (var v in batch.Vertices)
             {
                 var fitted = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
@@ -413,7 +413,7 @@ internal sealed class CharacterContent : IDisposable
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if (height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);
-                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted) ? 0.25f : 0) }, Bones = (uint)bone, Weights = new Vector4(1, 0, 0, 0) });
+                vertices.Add(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(0, 0, 0, batch.Layer), Colour = colour with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted) ? 0.25f : 0) }, Bones = over.Bones, Weights = over.Weights });   // moves as the skin over it does, so no flap leaves the body in a pose
             }
         }
         var array = vertices.ToArray();
