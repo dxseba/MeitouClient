@@ -468,6 +468,7 @@ internal sealed class CharacterContent : IDisposable
         for (int i = 0; i + 2 < vertices.Count;)
         {
             static Vector3 Snap(Vector3 p) => new(MathF.Round(p.X / AnatomyGrid) * AnatomyGrid, MathF.Round(p.Y / AnatomyGrid) * AnatomyGrid, MathF.Round(p.Z / AnatomyGrid) * AnatomyGrid);
+            if (vertices[i].Position.Y > 16.9f && vertices[i].Tangent.W == 0) { i += 3; continue; }   // the skull keeps its detail: teeth do not survive the grid
             Vector3 a = Snap(vertices[i].Position), b = Snap(vertices[i + 1].Position), c = Snap(vertices[i + 2].Position);
             if (a == b || b == c || a == c) { vertices[i] = vertices[^3]; vertices[i + 1] = vertices[^2]; vertices[i + 2] = vertices[^1]; vertices.RemoveRange(vertices.Count - 3, 3); continue; }
             vertices[i] = vertices[i] with { Position = a };

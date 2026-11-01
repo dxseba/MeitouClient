@@ -122,6 +122,7 @@ static class CharacterShaders
         flat out uint vCuts;
         out vec3 vBindPos;
         out vec3 vSkinPos;
+        out float vJawCut;      // the lost jaw's vertices at 1: its edge falls between them, per pixel
         out float vCutBand;     // a cut limb: distance past the cut, below 0 gone
         flat out uint vWounds;  // the wound mask, 0 without wounds
         flat out float vClipLayer;
@@ -199,6 +200,7 @@ static class CharacterShaders
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
             vClip = -1.0;
             vCutBand = 1000.0;
+            vJawCut = 0.0;
             if ((aInstanceData.z & 12u) != 0u)
             {
                 // Worn on the body: torn where a wound of its own body group lies under it (the wound spheres are in the same bind space; in it a hand hangs by the hip).
@@ -238,7 +240,7 @@ static class CharacterShaders
                 uint cutGroup = (floatBitsToUint(cutHeader[1 + cutBone / 32u][cutBone / 8u % 4u]) >> (cutBone % 8u * 4u)) & 15u;
                 uint only = floatBitsToUint(cutHeader[0][3]);
                 if (only != 0u) { vHidden = (only >> 8) == 6u ? (JawVertex(cutHeader) ? 0.0 : 1.0) : cutGroup == (only >> 8) ? 0.0 : 1.0; vCutBand = float(only & 255u) * 0.1 - aPosition.y; }
-                else if ((floatBitsToUint(cutHeader[0][1]) >> 6u & 1u) != 0u && JawVertex(cutHeader)) vHidden = 1.0;
+                else if ((floatBitsToUint(cutHeader[0][1]) >> 6u & 1u) != 0u && JawVertex(cutHeader)) vJawCut = 1.0;
                 else if (cutGroup >= 1u && cutGroup <= 4u)
                 {
                     uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;
@@ -323,6 +325,7 @@ static class CharacterShaders
         in float vHidden;
         in vec4 vColour;
         in vec4 vBlood;
+        in float vJawCut;
         in float vCutBand;
         flat in uint vWounds;
         flat in uint vCuts;
@@ -557,6 +560,14 @@ static class CharacterShaders
             // Metal plate does not tear: it takes the wound's blood.
             vec3 woundBend = vec3(0.0);
             // A cut limb's end: a clean edge, then a ragged band of flesh with bone at its heart.
+            if (vJawCut > 0.0)
+            {
+                float tornLip = vJawCut + 0.1 * sin(vUv.x * 240.0 + sin(vUv.y * 170.0) * 2.0) + 0.06 * sin(vUv.x * 610.0);
+                if (tornLip > 0.6) discard;
+                float wet = smoothstep(0.15, 0.5, tornLip);
+                albedo = mix(albedo, m.colour1.rgb * 0.55, wet);
+                gloss = mix(gloss, 0.75, wet);
+            }
             if (vCutBand < 1000.0)
             {
                 float edge = vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0);
