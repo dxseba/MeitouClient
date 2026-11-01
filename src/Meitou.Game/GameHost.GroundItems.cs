@@ -14,6 +14,7 @@ sealed partial class GameHost
 {
     long groundRevision = -1;
     readonly HashSet<int> shownGround = [];
+    readonly HashSet<int> physicalGround = [];
 
     static string GroundId(int id) => "ground:" + id.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
@@ -21,7 +22,12 @@ sealed partial class GameHost
     void UpdateGroundItems(WorldSnapshot snapshot)
     {
         session.World.GroundItems.Limit = config.GroundItemLimit;   // the setting, applied at the next drop
-        if (snapshot.GroundItemsRevision == groundRevision) return;
+        var physicalLimbs = snapshot.Characters.SelectMany(c => c.DetachedRagdolls).Where(p => p.GroundItemId > 0).Select(p => p.GroundItemId).ToHashSet();
+        bool samePhysics = physicalGround.SetEquals(physicalLimbs);
+        if (snapshot.GroundItemsRevision == groundRevision && samePhysics) return;
+        foreach (int id in physicalGround.Except(physicalLimbs)) shownGround.Remove(id);
+        physicalGround.Clear();
+        physicalGround.UnionWith(physicalLimbs);
         groundRevision = snapshot.GroundItemsRevision;
         var current = snapshot.GroundItems.Select(g => g.Id).ToHashSet();
         foreach (int id in shownGround.Where(id => !current.Contains(id)).ToArray())
@@ -37,6 +43,15 @@ sealed partial class GameHost
         }
         foreach (var g in snapshot.GroundItems)
         {
+            if (physicalLimbs.Contains(g.Id))
+            {
+                shownGround.Add(g.Id);
+                ActiveObjects?.RemoveRuntime(GroundId(g.Id));
+                restLimbs.Remove(g.Id);
+                falls.RemoveAll(f => f.Ground.Id == g.Id);
+                groundPoses[g.Id] = (g.Position, g.Rotation, GroundId(g.Id));
+                continue;
+            }
             if (!shownGround.Add(g.Id)) continue;
             var (rotation, y) = g.Dropped ? LaidFlat(g) : (g.Rotation, g.Position.Y);
             groundPoses[g.Id] = (new Vector3(g.Position.X, y, g.Position.Z), rotation, GroundId(g.Id));

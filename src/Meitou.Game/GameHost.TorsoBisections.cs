@@ -12,6 +12,7 @@ sealed partial class GameHost
     readonly TorsoBisections torsoCuts = new();
     readonly Dictionary<CharacterId, (long Tick, Vector2 Direction)> torsoBirths = [];
     readonly Dictionary<CharacterId, TorsoFall> torsoFalls = [];
+    Meitou.Data.Characters.BonePose?[] torsoPositivePoses = [], torsoPositiveSpare = [], torsoNegativePoses = [], torsoNegativeSpare = [];
 
     sealed class TorsoFall
     {
@@ -71,6 +72,26 @@ sealed partial class GameHost
             return;
         }
         long lower = instance.Key, upper = lower ^ (1L << 52);
+        if (c.TorsoRagdoll is { } ragdoll)
+        {
+            torsoFalls.Remove(c.Id);
+            IndexPrevious();
+            previousById.TryGetValue(c.Id, out var before);
+            var previous = before is not null && !Reanchored(before, c) ? before.TorsoRagdoll : null;
+            var positive = Blend(previous?.Positive, ragdoll.Positive, session.SimulationAlpha,
+                ref Slot(ref torsoPositivePoses, c.Id.Slot), ref Slot(ref torsoPositiveSpare, c.Id.Slot));
+            var negative = Blend(previous?.Negative, ragdoll.Negative, session.SimulationAlpha,
+                ref Slot(ref torsoNegativePoses, c.Id.Slot), ref Slot(ref torsoNegativeSpare, c.Id.Slot));
+            list.Add(instance with { Key = lower, Bones = negative, FreezeFrom = null, TorsoCut = new(cut.Plane, -1, cut.FullBody) });
+            list.Add(instance with { Key = upper, Bones = positive, FreezeFrom = null, TorsoCut = new(cut.Plane, 1, cut.FullBody) });
+            if (!gutFalls.ContainsKey(c.Id) && !gutsSpilled.Contains(c.Id)
+                && renderer.TorsoCutPosition(lower, new CharacterTorsoCut(cut.Plane, -1, cut.FullBody)) is { } cutAt)
+            {
+                var normal = renderer.TorsoCutNormal(lower, new(cut.Plane, 1, cut.FullBody)) ?? Vector3.UnitX;
+                SpillTorsoGuts(c.Id, cutAt, TorsoFragmentMotion.Across(normal), TorsoAge(c.Id));
+            }
+            return;
+        }
         // Renderer poses age out when a corpse stays offscreen. Re-prepare a clipped corpse instead of freezing from a missing key.
         if (torsoFalls.ContainsKey(c.Id) && renderer.LastDrawn(lower, "Bip01 Spine1") is null)
         {
@@ -186,13 +207,15 @@ sealed partial class GameHost
         return Quaternion.Normalize(new Quaternion(Vector3.Cross(from, to), 1 + dot));
     }
 
-    void SpillTorsoGuts(CharacterId id, TorsoFall fall, float age)
+    void SpillTorsoGuts(CharacterId id, TorsoFall fall, float age) => SpillTorsoGuts(id, fall.CutAt, fall.Along, age);
+
+    void SpillTorsoGuts(CharacterId id, Vector3 cutAt, Vector3 along, float age)
     {
         if (gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) return;
         var gut = new GutFall
         {
-            Position = fall.CutAt + fall.Along * 0.6f, Velocity = fall.Along * 2 + Vector3.UnitY,
-            Floor = session.World.Walkability.GroundHeight(fall.CutAt.X, fall.CutAt.Z, fall.CutAt.Y)
+            Position = cutAt + along * 0.6f, Velocity = along * 2 + Vector3.UnitY,
+            Floor = session.World.Walkability.GroundHeight(cutAt.X, cutAt.Z, cutAt.Y)
                 + (gpu.Debris?.Extent(DebrisRenderer.Bowel)?.Y ?? 0.35f) - 0.35f,
         };
         // A still may advance the hit before any render. Match the loose bowel to the halves' event-time clock.

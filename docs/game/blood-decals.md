@@ -123,7 +123,8 @@ characters carry blood on their skin, not only on the ground.
   nearest named ancestor (as the hidden limbs are, `LimbHideOf`), numbered in the health parts' order (`BodyPartTemplate.MedicalOrder`, the order `bloodAmount` is indexed in). The
   race's `combat anatomy` order is a different one: numbering by it put the left arm's blood on the head (sandbox render).
 - Stump: a limb-replacement item without a material wears the body material at the full amount (`BloodFull`): a severed part is far below its health.
-- Fallen limb: `GameHost.SeveredLimbs` draws a race's `severed limbs` items with the debris renderer, falling and at rest, instead of as a world object: the MATERIAL record's
+- Advanced detached limbs use the natural body mesh with live physical bone positions and the race's body blood. A linked severed-limb item remains lootable at the physical piece; its old debris visual is suppressed. Heads follow an independent physical body. Jaw scraps and loose bowel retain their visual falls.
+- Fallen limb fallback (advanced physics unavailable, or a saved loose item): `GameHost.SeveredLimbs` draws a race's `severed limbs` items with the debris renderer, falling and at rest, instead of as a world object: the MATERIAL record's
   texture map, the race's blood colour, blood with the cut end solid, and the Meitou skin's scattering (the same table and rule per race as the body; the curvature baked by
   `CharacterContent.MarkCurvature`), the cut character's skin tone through the colour map (`FallSource.SkinTone`, set in `PopulationSystem.DropSeveredLimb`, not saved: a limb read from a
   save has none) and the MATERIAL's normal map on the mesh's own tangents (`Model.Build` `tangentSign`). A limb piece sits at its mesh's origin and keeps the mesh's own space (the blood

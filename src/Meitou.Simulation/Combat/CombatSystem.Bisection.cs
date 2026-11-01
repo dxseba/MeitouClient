@@ -56,6 +56,7 @@ public sealed partial class CombatSystem
         var source = attackerSlot >= 0 ? table.IdOf(attackerSlot) : CharacterId.None;
         ulong variation = visualSeed ?? TorsoBisectionPolicy.VisualSeedFor(world.Seed, victimId, source, (ulong)world.Tick);
         if (!TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, direction, events, variation, travel, yaw, style)) return false;
+        Knockdown(world, victimSlot, victim, travel, cut);
         TaskStart.Stand(table, victimSlot);
         table.Next[victimSlot].Velocity = Vector3.Zero;
         PublishHit(world, CombatHitSource.Melee, source,

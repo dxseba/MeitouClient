@@ -68,7 +68,7 @@ internal sealed partial class CharacterRenderer
         if (!states.TryGetValue(key, out var state) || state.Asset is not { IsIcon: false, BodySource: { } source } asset || state.Posed < 0)
             return BonePosition(key, "Bip01 Spine1");
         var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
-        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), cut, morphs);
+        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), cut, morphs, state.PosedRagdoll?.Components);
         if (cap is null) return BonePosition(key, "Bip01 Spine1");
         var centre = Vector3.Zero;
         int count = 0;
@@ -100,7 +100,7 @@ internal sealed partial class CharacterRenderer
     {
         if (!states.TryGetValue(key, out var state) || state.Asset is not { IsIcon: false, BodySource: { } source } asset || state.Posed < 0) return null;
         var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
-        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), cut, morphs);
+        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), cut, morphs, state.PosedRagdoll?.Components);
         var normal = Vector3.Zero;
         if (cap is not null)
             for (int i = 0; i + 2 < cap.Length; i += 3)

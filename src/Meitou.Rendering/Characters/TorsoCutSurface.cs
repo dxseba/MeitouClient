@@ -68,7 +68,7 @@ static class TorsoCutSurface
 
     static float Ragged(Vector3 p) => 0.018f * MathF.Sin(p.X * 13 + p.Y * 7 + p.Z * 11) + 0.012f * MathF.Sin(p.X * 29 + p.Z * 17);
     static Vector3 Round(Vector3 p) => new(MathF.Round(p.X, 4), MathF.Round(p.Y, 4), MathF.Round(p.Z, 4));
-    readonly record struct Point(Vector3 Position, Vector3 Morph, uint Bones, Vector4 Weights);
+    readonly record struct Point(Vector3 Position, Vector3 Morph, uint Bones, Vector4 Weights, int Component = -1);
 
     static Point Interpolate(Point a, Point b, float t)
     {
@@ -84,7 +84,7 @@ static class TorsoCutSurface
         uint bones = 0;
         var w = Vector4.Zero;
         for (int k = 0; k < top.Length; k++) { bones |= top[k].Key << (k * 8); w[k] = top[k].Value / sum; }
-        return new(Vector3.Lerp(a.Position, b.Position, t), Vector3.Lerp(a.Morph, b.Morph, t), bones, w);
+        return new(Vector3.Lerp(a.Position, b.Position, t), Vector3.Lerp(a.Morph, b.Morph, t), bones, w, a.Component == b.Component ? a.Component : -1);
     }
 
     /// <summary>Kept body samples and exact cut-edge samples, with the body morph applied once before skinning.</summary>
@@ -122,7 +122,7 @@ static class TorsoCutSurface
     }
 
     /// <summary>Intersects torso triangles, or every closed body contour in full-body mode, preserving weights and one interpolated body morph.</summary>
-    public static Vertex[]? Build(Vertex[] source, uint[] groups, in CharacterTorsoCut cut, Vector4[]? morphs = null)
+    public static Vertex[]? Build(Vertex[] source, uint[] groups, in CharacterTorsoCut cut, Vector4[]? morphs = null, int[]? components = null)
     {
         if (!TryNormalize(cut, out var normalized)) return null;
         var n = new Vector3(normalized.Plane.X, normalized.Plane.Y, normalized.Plane.Z);
@@ -137,7 +137,7 @@ static class TorsoCutSurface
                 for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++)
                     if (weld.TryGetValue((cell.Item1 + x, cell.Item2 + y, cell.Item3 + z), out var candidates))
                         foreach (int candidate in candidates)
-                            if (Vector3.DistanceSquared(points[candidate].Position, point.Position) <= 1e-8f) return candidate;
+                            if (points[candidate].Component == point.Component && Vector3.DistanceSquared(points[candidate].Position, point.Position) <= 1e-8f) return candidate;
             var key = Round(point.Position);
             if (!normalized.FullBody && byPosition.TryGetValue(key, out int existing)) return existing;
             int index = points.Count;
@@ -151,20 +151,56 @@ static class TorsoCutSurface
             uint slot = BitConverter.SingleToUInt32Bits(vertex.Colour.X);
             return morphs is not null && slot > 0 && slot <= morphs.Length ? new(morphs[slot - 1].X, morphs[slot - 1].Y, morphs[slot - 1].Z) : default;
         }
-        Point Edge(in Vertex a, in Vertex b, float t)
+        (int Component, uint Bone) Component(in Vertex a, in Vertex b, in Vertex c)
         {
-            return Interpolate(new(a.Position, Delta(a), a.Bones, a.Weights), new(b.Position, Delta(b), b.Bones, b.Weights), t);
+            if (!normalized.FullBody || components is not { Length: > 0 }) return (-1, 0);
+            var votes = new Dictionary<int, float>();
+            foreach (var vertex in new[] { a, b, c })
+                for (int k = 0; k < 4; k++)
+                {
+                    int bone = (int)(vertex.Bones >> (8 * k) & 255);
+                    if (vertex.Weights[k] <= 0 || (uint)bone >= (uint)components.Length) continue;
+                    int component = components[bone];
+                    votes[component] = votes.GetValueOrDefault(component) + vertex.Weights[k];
+                }
+            if (votes.Count == 0) return (-1, 0);
+            int selected = votes.OrderByDescending(v => v.Value).ThenBy(v => v.Key).First().Key;
+            uint fallback = 0;
+            float strongest = -1;
+            foreach (var vertex in new[] { a, b, c })
+                for (int k = 0; k < 4; k++)
+                {
+                    uint bone = vertex.Bones >> (8 * k) & 255;
+                    if (bone < components.Length && components[bone] == selected && vertex.Weights[k] > strongest)
+                        (fallback, strongest) = (bone, vertex.Weights[k]);
+                }
+            return (selected, fallback);
+        }
+        Point Edge(in Vertex a, in Vertex b, float t, int component, uint fallbackBone)
+        {
+            var point = Interpolate(new(a.Position, Delta(a), a.Bones, a.Weights), new(b.Position, Delta(b), b.Bones, b.Weights), t);
+            if (component < 0 || components is null) return point;
+            var weights = point.Weights;
+            for (int k = 0; k < 4; k++)
+            {
+                uint bone = point.Bones >> (8 * k) & 255;
+                if (bone >= components.Length || components[bone] != component) weights[k] = 0;
+            }
+            float sum = weights.X + weights.Y + weights.Z + weights.W;
+            return sum > 1e-8f ? point with { Weights = weights / sum, Component = component }
+                : point with { Bones = fallbackBone, Weights = Vector4.UnitX, Component = component };
         }
         for (int triangle = 0; triangle + 2 < source.Length; triangle += 3)
         {
             var a = source[triangle]; var b = source[triangle + 1]; var c = source[triangle + 2];
             if (!normalized.FullBody && (Group(a, groups) != 0 || Group(b, groups) != 0 || Group(c, groups) != 0)) continue;
+            var (component, fallbackBone) = Component(a, b, c);
             var hit = new List<int>(3);
             void Intersect(Vertex p, Vertex q)
             {
                 float dp = Vector3.Dot(n, p.Position) + normalized.Plane.W, dq = Vector3.Dot(n, q.Position) + normalized.Plane.W;
-                if (MathF.Abs(dp) < 1e-5f) hit.Add(Add(Edge(p, q, 0)));
-                else if ((dp < 0) != (dq < 0)) hit.Add(Add(Edge(p, q, dp / (dp - dq))));
+                if (MathF.Abs(dp) < 1e-5f) hit.Add(Add(Edge(p, q, 0, component, fallbackBone)));
+                else if ((dp < 0) != (dq < 0)) hit.Add(Add(Edge(p, q, dp / (dp - dq), component, fallbackBone)));
             }
             Intersect(a, b); Intersect(b, c); Intersect(c, a);
             var unique = hit.Distinct().ToArray();
@@ -190,6 +226,7 @@ static class TorsoCutSurface
                 for (int second = first + 1; second < segments.Length; second++)
                 {
                     var a = segments[first]; var b = segments[second];
+                    if (points[a.A].Component != points[b.A].Component) continue;
                     if (a.A == b.A || a.A == b.B || a.B == b.A || a.B == b.B
                         || MathF.Max(a.From.X, a.To.X) + 1e-5f < MathF.Min(b.From.X, b.To.X) || MathF.Max(b.From.X, b.To.X) + 1e-5f < MathF.Min(a.From.X, a.To.X)
                         || MathF.Max(a.From.Y, a.To.Y) + 1e-5f < MathF.Min(b.From.Y, b.To.Y) || MathF.Max(b.From.Y, b.To.Y) + 1e-5f < MathF.Min(a.From.Y, a.To.Y)) continue;

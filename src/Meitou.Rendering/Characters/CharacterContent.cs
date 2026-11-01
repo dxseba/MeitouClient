@@ -548,8 +548,8 @@ internal sealed class CharacterContent : IDisposable
     public HeadWoundView HeadPlacement(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp) =>
         headWoundPool.Resolve(key, asset, placement, headState, stamp);
 
-    public IReadOnlyList<AssetPart> TorsoParts(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp) =>
-        torsoCutPool.Resolve(key, asset, parts, cut, groups, stamp);
+    public IReadOnlyList<AssetPart> TorsoParts(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp, int[]? components = null) =>
+        torsoCutPool.Resolve(key, asset, parts, cut, groups, stamp, components);
 
     LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase)
     {

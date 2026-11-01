@@ -32,6 +32,10 @@ public interface IRagdollSource
 {
     /// <summary>The bones the ragdoll sets, in the model space of the character's drawn placement; null without a ragdoll.</summary>
     BonePose? Publish(CharacterId id);
+    /// <summary>The independently articulated sides of a torso cut, in the owner's drawn model space.</summary>
+    TorsoRagdollPose? PublishTorso(CharacterId id) => null;
+    /// <summary>Detached head and limbs, each with its own independently simulated bones.</summary>
+    IReadOnlyList<DetachedRagdollPose> PublishDetached(CharacterId id) => [];
 }
 
 /// <summary>
@@ -40,7 +44,7 @@ public interface IRagdollSource
 /// part mask does not simulate are pinned to the animation (kinematic). While the whole body is a ragdoll the character's position follows the root body. Runs serially in the
 /// slow-world step after carrying and animation, and steps one Bepu scene on the calling thread, so the state hash does not depend on the thread count.
 /// </summary>
-public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IRagdollSource, IDisposable
+public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IRagdollSource, IDisposable
 {
     /// <summary>Getting up blends from the ragdoll's pose to the animation over this many seconds (<b>Observed</b>, <c>FUN_1407d3130</c>).</summary>
     public const float GetUpBlend = 0.75f;
@@ -54,6 +58,8 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
     const float SinkDepth = 1, MaxLift = 8;
 
     readonly CharacterRigs rigs;
+    readonly Func<CharacterAppearance, CharacterPoseSetup?>? setupSource;
+    readonly Func<CharacterAppearance, SkeletonRig, float, RagdollDefinition?>? definitionSource;
     IRagdollEnvironment? environment;
     readonly Bodies.BodyOptions? options;
     readonly RagdollPhysics physics = new();
@@ -76,7 +82,7 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
     }
 
     /// <summary>Ragdolls in play (frozen ones included) and how many are moving.</summary>
-    public int Count => ragdolls.Count;
+    public int Count => ragdolls.Count + torsoRagdolls.Count * 2 + DetachedCount;
     public int Moving { get; private set; }
     public int Tiles => physics.TileCount;
 
@@ -107,16 +113,25 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
         /// <summary>The published bones and the placement they were made in: a frozen ragdoll still in it hands over the same object (the renderer poses it again only for new bones).</summary>
         public BonePose? Published;
         public Matrix4x4 PublishedIn;
+        /// <summary>Immutable bone-to-connected-component map for a clipped topology.</summary>
+        public int[]? Components;
         public bool InScene => Bodies.Any(b => b is not null);
     }
 
     // ---- what the animation system asks ----
 
-    public bool HasRagdoll(CharacterCold cold) => cold.Appearance is { } look && FileOf(look) is not null && rigs.For(look) is not null;
+    internal RagdollSystem(CharacterRigs rigs, IRagdollEnvironment? environment, Bodies.BodyOptions? options,
+        Func<CharacterAppearance, CharacterPoseSetup?> setup, Func<CharacterAppearance, SkeletonRig, float, RagdollDefinition?> definition)
+        : this(rigs, environment, options) => (setupSource, definitionSource) = (setup, definition);
 
-    public bool WasWhole(CharacterId id) => ragdolls.TryGetValue(id, out var r) && (r.Mask & RagdollPart.Whole) != 0;
+    CharacterPoseSetup? SetupOf(CharacterAppearance look) => setupSource is null ? rigs.For(look) : setupSource(look);
 
-    public BonePose? Publish(CharacterId id) => ragdolls.TryGetValue(id, out var r) ? r.Published : null;
+    public bool HasRagdoll(CharacterCold cold) => cold.Appearance is { } look && SetupOf(look) is { } setup
+        && (definitionSource is null ? FileOf(look) is not null : definitionSource(look, setup.Rig, 1) is not null);
+
+    public bool WasWhole(CharacterId id) => torsoRagdolls.ContainsKey(id) || ragdolls.TryGetValue(id, out var r) && (r.Mask & RagdollPart.Whole) != 0;
+
+    public BonePose? Publish(CharacterId id) => torsoRagdolls.TryGetValue(id, out var cut) ? cut.Published?.Negative : ragdolls.TryGetValue(id, out var r) ? r.Published : null;
 
     // A static factory given the rigs: nothing allocated on a hit.
     (PhysicsFile File, string Path)? FileOf(CharacterAppearance look) => files.GetOrAdd(look, static (a, rigs) => new(() =>
@@ -130,6 +145,7 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
 
     RagdollDefinition? DefinitionOf(CharacterAppearance look, SkeletonRig rig, float scale)
     {
+        if (definitionSource is not null) return definitionSource(look, rig, scale);
         if (FileOf(look) is not { } file) return null;
         int key = (int)MathF.Round(scale * 100);
         return definitions.GetOrAdd((file.Path, rig, key), _ => new(() => RagdollDefinition.Build(file.File, rig, key / 100f, Hull))).Value;
@@ -175,6 +191,9 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
         float dt = world.TickSeconds, stepDt = RagdollPhysics.StepOf(dt, world.PhysicsSpeed);   // the timers run in game time, the physics in real time
         long tick = world.Tick;
 
+        PruneTorsoRagdolls(world);
+        PruneDetached(world);
+
         // Ragdolls of characters that are gone.
         foreach (var id in order)
             if (!table.TryResolveNext(id, out _)) Destroy(ragdolls[id]);
@@ -185,13 +204,19 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
         for (int i = 0; i < next.Length; i++)
         {
             if (!next[i].Alive || table.Cold(i) is not { } cold) continue;
+            // The physical save embeds its cut so the simulation can restore before the host's wound sidecar is read.
+            if (cold.TorsoBisection is null && cold.Medical is { Dead: true }
+                && cold.Save?.Ragdoll?.Torso is { Cut: { IsValid: true } savedCut }) cold.TorsoBisection = savedCut;
             // Meitou (BodyOptions.AdvancedRagdolls): a new whole-body ragdoll goes on as the character moved, pushed by the blow that put it down (CombatSystem.Knockdown), else as it moved last tick.
             bool advanced = options is { AdvancedRagdolls: true };
             var (launch, push) = !advanced ? default : cold.Blow ?? (table.Previous[i].Velocity, Vector3.Zero);
             cold.Blow = null;
             cold.CarryAttach = cold.CarriedBy.IsNone ? null : AttachOf(table, cold);
             var id = table.IdOf(i);
+            PrepareDetached(world, id, cold, ref next[i], (launch, push), advanced);
             ragdolls.TryGetValue(id, out var r);
+            if (advanced && cold.TorsoBisection is { IsValid: true } cut && cold.Medical is { Dead: true }
+                && PrepareTorsoRagdoll(world, id, cold, ref next[i], cut, (launch, push), env)) continue;
             // The look's ragdoll file asked only of a character that wants one (two cache lookups per standing character every tick were most of this loop in a big battle).
             var wanted = cold.Appearance is null ? RagdollPart.None : Wanted(cold);
             if (wanted != RagdollPart.None && !HasRagdoll(cold)) wanted = RagdollPart.None;
@@ -206,8 +231,9 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
             if (r is null)
             {
                 float scale = cold is { Fighter.IsAnimal: true, Medical: { } size } ? size.ScaleK : 1;
-                var setup = rigs.For(cold.Appearance!)!;
-                if (DefinitionOf(cold.Appearance!, setup.Rig, scale) is not { } definition) continue;
+                var setup = SetupOf(cold.Appearance!)!;
+                if (DefinitionOf(cold.Appearance!, setup.Rig, scale) is not { } sourceDefinition) continue;
+                var definition = RemainingDefinition(id, sourceDefinition);
                 var carryBone = cold.Appearance!.Race.GetString("carry bone");
                 if (string.IsNullOrEmpty(carryBone) || setup.Rig.Handle(carryBone) is null) carryBone = setup.Rig.Skeleton.Bones.FirstOrDefault(b => b.Parent is null)?.Name ?? "";
                 r = new Ragdoll { Id = id, Definition = definition, Setup = setup, Scale = scale, CarryBone = carryBone };
@@ -239,15 +265,19 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
             if (!r.Frozen) physics.Cover(r.Pose[r.Definition.Root].Position, 12 * r.Scale, env, tick);
         }
 
+        CoverDetached(env, tick);
         world.Profile.Part("rag setup");   // F12: the masks, the builds, the pins and the ground tiles
         // 2. The step.
         Moving = 0;
         foreach (var id in order) if (ragdolls[id] is { Frozen: false, Mask: not RagdollPart.None }) Moving++;
+        Moving += MovingTorsoRagdolls + MovingDetached;
         // The physics on the world's thread count (its own workers: the world's pool is idle in this serial phase).
         if (Moving > 0 && threads is null && world.Settings.Threads > 1) threads = new BepuUtilities.ThreadDispatcher(world.Settings.Threads);
         if (Moving > 0)
         {
             foreach (var id in order) if (ragdolls[id] is { Frozen: false, Mask: not RagdollPart.None } floating) Buoy(world, floating, stepDt);
+            BuoyTorsoRagdolls(world, stepDt);
+            BuoyDetached(world, stepDt);
             physics.Step(stepDt, threads);
         }
         world.Profile.Part("rag step");
@@ -279,9 +309,11 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
             if (r.BlendLeft > 0) r.BlendLeft = MathF.Max(0, r.BlendLeft - dt);
             if (r.Mask == RagdollPart.None && r.BlendLeft <= 0) { Destroy(r); continue; }
             var placement = Placement(r, cold, hot);
-            if (!r.Frozen || r.BlendLeft > 0 || r.Published is null || placement != r.PublishedIn) (r.Published, r.PublishedIn) = (Build(r, placement), placement);
+            if (!r.Frozen || r.BlendLeft > 0 || r.Published is null || placement != r.PublishedIn) (r.Published, r.PublishedIn) = (BuildRemaining(r, cold, placement) ?? Build(r, placement), placement);
         }
         order.RemoveAll(id => !ragdolls.ContainsKey(id));
+        FinishTorsoRagdolls(world, env, dt);
+        FinishDetached(world, env, dt);
         world.Profile.Part("rag back");
         physics.Sweep(tick);
         world.Profile.Part("rag sweep");
@@ -330,9 +362,9 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
 
     /// <summary>A whole-body ragdoll's state for a save (<see cref="RagdollSave"/>); null when the character has none or only a carried or limb ragdoll.</summary>
     public SavedRagdoll? SaveState(CharacterId id) =>
-        ragdolls.TryGetValue(id, out var r) && (r.Mask & RagdollPart.Whole) != 0 && (r.Mask & RagdollPart.CarryMode) == 0 && r.Pose.Length > 0
+        SaveTorsoRagdoll(id) ?? (ragdolls.TryGetValue(id, out var r) && (r.Mask & RagdollPart.Whole) != 0 && (r.Mask & RagdollPart.CarryMode) == 0 && r.Pose.Length > 0
             ? new SavedRagdoll(r.Frozen, r.Age, (RigidTransform[])r.Pose.Clone())
-            : null;
+            : null);
 
     /// <summary>Every body's pose where the character's animation puts its bone now, in world space.</summary>
     RigidTransform[] Animated(Ragdoll r, CharacterCold cold, Matrix4x4 placement)
@@ -780,6 +812,8 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
 
     public void Hash(ref StateHasher hasher)
     {
+        HashTorsoRagdolls(ref hasher);
+        HashDetached(ref hasher);
         if (ragdolls.Count == 0) return;
         hasher.Add(0x52616764);
         foreach (var id in order)
@@ -802,6 +836,7 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
 
     public void Dispose()
     {
+        DisposeDetached();
         physics.Dispose();
         threads?.Dispose();
     }

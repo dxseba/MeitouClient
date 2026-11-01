@@ -343,6 +343,10 @@ public sealed class CharacterSnapshot
     /// carried body's <see cref="Carry"/>, facing, size: <see cref="CharacterRigs.Placement"/>), to pose over the animation; null without a ragdoll. Immutable.
     /// </summary>
     public BonePose? Ragdoll { get; internal set; }
+    /// <summary>Independent articulated torso-cut halves; null when Advanced Ragdolls is off or no physical cut is available.</summary>
+    public Ragdolls.TorsoRagdollPose? TorsoRagdoll { get; internal set; }
+    /// <summary>Independent physical head/limb pieces, in this snapshot owner's drawn model space.</summary>
+    public IReadOnlyList<Ragdolls.DetachedRagdollPose> DetachedRagdolls { get; internal set; } = [];
 }
 
 /// <summary>

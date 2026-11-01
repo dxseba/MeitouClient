@@ -502,8 +502,32 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (inst.BlendFrom is { } blendFrom && inst.Blend < 1 && assets.TryGetValue(blendFrom, out var fromAsset) && fromAsset is not null) ApplyBlend(asset, fromAsset, inst.Blend);
             else RestoreBlend(asset);
             float scale = inst.Scale > 0 ? inst.Scale : 1;
+            var world = inst.World ?? (inst.Rotation is { } rotation
+                ? Matrix4x4.CreateTranslation(0, -asset.GroundOffset, 0) * Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(inst.Position)
+                : Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0)));
+            if (scale != 1 && inst.World is null) world = Matrix4x4.CreateScale(scale) * world;
             var centre = inst.Position + new Vector3(0, asset.Height * 0.5f * scale, 0);
-            bool far = inst.Hidden || Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance;
+            float radius = asset.Radius * scale;
+            if (inst.Bones is { AbsolutePositions: true } detachedBones)
+            {
+                var minimum = new Vector3(float.PositiveInfinity);
+                var maximum = new Vector3(float.NegativeInfinity);
+                bool any = false;
+                for (int h = 0; h < detachedBones.Set.Length; h++)
+                {
+                    if (!detachedBones.Set[h]) continue;
+                    var point = Vector3.Transform(detachedBones.Position[h], world);
+                    minimum = Vector3.Min(minimum, point);
+                    maximum = Vector3.Max(maximum, point);
+                    any = true;
+                }
+                if (any)
+                {
+                    centre = (minimum + maximum) * 0.5f;
+                    radius += Vector3.Distance(minimum, maximum) * 0.5f;
+                }
+            }
+            bool far = inst.Hidden || Vector3.Distance(eye, centre) - radius > DrawDistance;
             if (far && !portraitKeys.Contains(inst.Key)) continue;
             if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
             ref var l = ref live[liveCount++];
@@ -511,14 +535,11 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             (l.Key, l.PortraitOnly) = (inst.Key, far);
             // Lowered by the body shape's lift, so a short body's feet stay on the ground (CharacterAsset.GroundOffset); an animal scaled by its size (its node's scale).
             // A carried body's whole rotation lowers it in its own frame (CharacterRigs.Placement, as the simulation poses its ragdoll).
-            l.World = inst.World ?? (inst.Rotation is { } rotation
-                ? Matrix4x4.CreateTranslation(0, -asset.GroundOffset, 0) * Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(inst.Position)
-                : Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0)));
-            if (scale != 1 && inst.World is null) l.World = Matrix4x4.CreateScale(scale) * l.World;
+            l.World = world;
             (l.WeaponDrawn, l.RangedDrawn, l.BackDrawn, l.Shots, l.Bolts) = (inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, inst.Shots, inst.Bolts);
             (l.HipWeaponBlood, l.BackWeaponBlood) = (inst.HipWeaponBlood, inst.BackWeaponBlood);
             l.Centre = centre;
-            l.Radius = asset.Radius * scale;
+            l.Radius = radius;
             l.WoundMask = woundMasks.Update(inst.Key, asset.Rig, asset.WoundPoints, inst.Wounds);
             l.WoundSpheres = l.WoundMask != 0 ? woundMasks.Spheres(inst.Key) : null;
             l.WoundCuts = l.WoundMask != 0 ? woundMasks.Cuts(inst.Key) : null;
@@ -531,7 +552,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             var headView = l.HasWounds && inst.HeadWoundPlacement is { } placement
                 ? content.HeadPlacement(inst.Key, asset, placement, inst.LostGroups, updateStamp)
                 : CharacterHeadWoundPool.Fallback(asset, inst.LostGroups);
-            l.DrawParts = l.TorsoCut is { } capCut ? content.TorsoParts(inst.Key, asset, headView.Parts, capCut, woundMasks.BoneGroups(asset.Rig), updateStamp) : headView.Parts;
+            l.DrawParts = l.TorsoCut is { } capCut ? content.TorsoParts(inst.Key, asset, headView.Parts, capCut, woundMasks.BoneGroups(asset.Rig), updateStamp, inst.Bones?.Components) : headView.Parts;
             l.HeadFrame = headView.Frame;
             l.HeadReliefReady = headView.ReliefReady;
             if (l.HasWounds) boneTotal += CharacterShaders.WoundHeaderBones;
@@ -543,6 +564,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             partTotal += l.DrawParts.Count;
             if (!states.TryGetValue(inst.Key, out var state)) states[inst.Key] = state = new CharState();
             state.Seen = updateStamp;
+            if (inst.FreezeFrom is null && inst.Bones is not null) state.Frozen = false;
             l.State = state;
             state.TorsoCut = l.TorsoCut;
             l.Interior = !far && InteriorObjects?.InteriorAt(centre, ref state.Interior) is not null;

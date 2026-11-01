@@ -146,6 +146,7 @@ sealed partial class GameHost
                 Bones = Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),
             });
         }
+        AddDetachedRagdolls(list);
     }
 
 
@@ -323,7 +324,8 @@ sealed partial class GameHost
     /// hip height into the ground for a frame (or hopped up as it rose).
     /// </summary>
     static bool Reanchored(CharacterSnapshot before, CharacterSnapshot now) =>
-        (before.Ragdoll is null) != (now.Ragdoll is null) || before.Ragdoll is { Weight: >= 1 } && now.Ragdoll is { Weight: < 1 };
+        (before.Ragdoll is null) != (now.Ragdoll is null) || (before.TorsoRagdoll is null) != (now.TorsoRagdoll is null)
+        || before.Ragdoll is { Weight: >= 1 } && now.Ragdoll is { Weight: < 1 };
 
     /// <summary>
     /// A ragdoll's bones between the last two ticks: rotations by nlerp, root positions and the get-up weight linearly; a bone only in the newer one as it is. Written into
@@ -332,11 +334,13 @@ sealed partial class GameHost
     static Meitou.Data.Characters.BonePose? Blend(Meitou.Data.Characters.BonePose? from, Meitou.Data.Characters.BonePose? to, float alpha, ref Meitou.Data.Characters.BonePose? kept,
         ref Meitou.Data.Characters.BonePose? spare)
     {
-        if (to is null || from is null || ReferenceEquals(from, to) || from.Set.Length != to.Set.Length) return to;
+        if (to is null || from is null || ReferenceEquals(from, to) || from.Set.Length != to.Set.Length || from.AbsolutePositions != to.AbsolutePositions) return to;
         (kept, spare) = (spare, kept);
         if (kept is null || kept.Set.Length != to.Set.Length) kept = new Meitou.Data.Characters.BonePose(to.Set.Length);
         var pose = kept;
         pose.Weight = from.Weight + (to.Weight - from.Weight) * alpha;
+        pose.AbsolutePositions = to.AbsolutePositions;
+        pose.Components = to.Components;
         for (int h = 0; h < to.Set.Length; h++)
         {
             pose.Set[h] = to.Set[h];

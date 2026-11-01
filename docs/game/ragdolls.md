@@ -242,6 +242,10 @@ Engine feature behind the same switch (`BodyOptions.AdvancedRagdolls`; Faithful:
 - **Spin on impact**: a new ragdoll started by a blow (`CharacterCold.Blow`'s push) spins its upper arms along the push and its thighs against it (the feet held the ground),
   0.15 rad/s per unit/s of push, at most 6, each limb by its own roll of 0.6 to 1.4 (`RngPurpose.RagdollSpin`).
 
+Cut pieces use the same Bepu scene and Advanced ragdolls switch (Meitou): torso planes clip collision shapes in bind space, while ordinary amputations remove the corresponding head/limb actors from the remaining body. Crossed spheres/capsules use sampled convex hulls; retained primitives stay native. Clipped hulls require positive-definite inertia and a stable reconstructed centre; unstable point clouds are welded or reduced to validated inscribed hulls. Disconnected joint chains fall independently, with the existing soft limits, relaxed pull, impact momentum and terrain/building contacts. Retained body triangles determine material connections: physical actors dominating different vertices of a finite-area clipped polygon can keep their joint. Its old centre anchor is projected into the kept volume when needed; joints across removed material stay severed. Only the negative fragment's root component follows a carrier; loose arms stay free. All components must settle before early freezing.
+
+`BonePose.AbsolutePositions` publishes every retained and inherited bone's physical position, allowing a detached arm to leave its former parent. Missing central influences follow a retained axial body; limb influences prefer their own retained chain. `Components` identifies actual joint-connected chains so wound caps cannot join a free arm to the torso. Remnant whole-body ragdolls also publish absolute positions; ordinary conscious, partial and get-up posing retain their original contract. Detached limb looks retain natural bone sizes rather than the stump's zero scales. A linked severed-limb loot item follows the physical piece and removes it when picked up; standalone detached parts are transient. **Verified** (`RagdollCutTests`, `RagdollSeveranceTests`, `RagdollTorsoPhysicsTests`, `RagdollInstalledSkinTests`, `RagdollInstalledRaceTests`, `RagdollLimbAppearanceTests`): independent ground contact, same-part skin offsets, carrying, pickup, deletion, snapshot stability, installed human/Worker body and cap deformation, retained foot clearance, and finite positive collider inertia on the installed Worker rig at eight incoming angles.
+
 ## Per frame
 
 Driver `FUN_1405b8180` (AnimationClass), update `FUN_1407d3c00`:
@@ -303,6 +307,8 @@ WHOLE from the loaded animated pose.
 Meitou adds GAMESTATE_CHARACTER string `meitou ragdoll` for a whole-body (not carried) ragdoll: `frozen age n`, then per body (definition order)
 position x y z and rotation x y z w, invariant floats; absent otherwise (a world without ragdolls keeps the loaded key); the original ignores it. **Observed** (headless, real data, a knocked-out
 human frozen after 61 ticks): save → load gives the same 13 body poses (offset 0), frozen flag and age; without the key it falls again from the clip.
+
+Torso fragments extend the same character key with `T2 nx ny nz offset fullBody | positive | negative`; each side uses the existing `frozen age n` and body transforms. The cut identifies the clipped collider topology; poses and ages survive loading, velocities do not. The saved cut is hydrated before ordinary ragdoll restoration, even before the host reads wound sidecars. Legacy whole-body rows remain unchanged. **Verified** (`RagdollFragmentSaveTests`, `RagdollTorsoPhysicsTests`): invariant FCS round trips, malformed input rejection, exact settled reconstruction and restoration before sidecar state arrives.
 
 ## Unknowns
 

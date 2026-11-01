@@ -380,6 +380,24 @@ public sealed class CharacterAppearance
         return copy;
     }
 
+    /// <summary>The natural body for drawing one detached limb, without the remnant's hidden-limb flags or rigid attachments.</summary>
+    public CharacterAppearance SeveredLimb(GameDatabase db)
+    {
+        var naturalShape = (Shape ?? CharacterShape.InputFor(db, this)) with
+        {
+            Missing = new HashSet<Limb>(), HideStump = HideStump.None, NarrowLeftThigh = false, NarrowRightThigh = false,
+        };
+        var copy = new CharacterAppearance
+        {
+            Character = Character, Animal = Animal, Race = Race, Female = Female, Body = Body, BodyFile = BodyFile, Loadout = Loadout, Faction = Faction,
+            BodyMesh = BodyMesh, BodyTexture = BodyTexture, BodyNormal = BodyNormal, BodyNormalStrong = BodyNormalStrong, BodyNormalSkinny = BodyNormalSkinny, BodyMask = BodyMask, PartMap = PartMap, Head = Head,
+            Shape = naturalShape, SkinToneParameter = SkinToneParameter, HairColour = HairColour,
+        };
+        copy.BodyLayers.AddRange(BodyLayers);
+        foreach (var (name, weight) in PoseWeights) copy.PoseWeights[name] = weight;
+        return copy;
+    }
+
     /// <summary>The part-map regions the worn ARMOUR hides: the OR of their <c>hide parts</c> (bit per part-map colour, docs/characters.md "Hidden body parts").</summary>
     public int HiddenParts { get; private set; }
 

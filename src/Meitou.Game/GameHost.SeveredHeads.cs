@@ -53,6 +53,7 @@ sealed partial class GameHost
     /// <summary>A headless character listed this frame: its head falls if the renderer drew it with one in its last update.</summary>
     void CutHead(CharacterSnapshot c, CharacterAppearance look)
     {
+        if (c.DetachedRagdolls.Any(p => p.Part == -1)) return;
         if (!look.Headless || gpu.Characters is not { } characters || !headsSeen.Add(c.Id)) return;
         long from = DrawKey(c.Id), key = from ^ (1L << 54);
         if (characters.LastDrawn(from, "Bip01 Head") is not ({ } world, { Headless: false } before, var start) || !characters.HoldPose(key, from)) return;
@@ -96,6 +97,7 @@ sealed partial class GameHost
         foreach (var part in medical.Parts)
         {
             if (part.Limb != Meitou.Simulation.Bodies.LimbState.Stump || part.Template.LimbSlot is not (>= 0 and <= 3 and var limb) || !limbsCut.Add((c.Id, limb))) continue;
+            if (c.DetachedRagdolls.Any(p => p.Part == limb)) continue;
             int level = Meitou.Simulation.Wounds.SeveredLevels.Of(c.Id, limb);
             if (level == 0) continue;
             string side = limb % 2 == 0 ? "L" : "R";
@@ -116,11 +118,13 @@ sealed partial class GameHost
     {
         if (headsEpoch != worldEpoch) { heads.Clear(); headsSeen.Clear(); spurts.Clear(); limbsCut.Clear(); headsEpoch = worldEpoch; }
         UpdateSpurts();
+        AddDetachedRagdolls(list);
         if (heads.Count == 0 || gpu.Characters is not { } characters) return;
         double clock = session.ShownTick + session.SimulationAlpha;
         float tick = session.World.TickSeconds;
         foreach (var h in heads)
         {
+            if (liveDetachedKeys.Contains(h.Key)) continue;
             // Its clock starts with the first frame its look is drawn; until then it is listed (so it gets ready) where it was cut.
             if (double.IsNaN(h.Tick) && characters.IsPrepared(h.Look)) h.Tick = clock;
             float t = double.IsNaN(h.Tick) ? 0 : MathF.Max(0, (float)((clock - h.Tick) * tick));

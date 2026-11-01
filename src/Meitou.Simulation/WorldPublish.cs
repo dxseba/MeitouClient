@@ -234,6 +234,8 @@ public sealed partial class World
             s.Prison = cold is { IsImprisoned: true } ? new PrisonView(!(cold.InWhat is { } cageId && Fixtures.Find(cageId) is { } cage && cage.Lock is not { EffectivelyLocked: true }), cold.SentenceLength, cold.SentenceStart + cold.SentenceLength - GameHours) { CageOwner = cold.InWhat is { } owned && Fixtures.Find(owned) is { } jail ? jail.Owner : -1, CageId = cold.InWhat,
                 LockLevel = cold.InWhat is { } locked && Fixtures.Find(locked)?.Lock is { } cageLock ? cageLock.Level : -1 } : null;
             s.Ragdoll = ragdolls?.Publish(id);
+            s.TorsoRagdoll = ragdolls?.PublishTorso(id);
+            s.DetachedRagdolls = ragdolls?.PublishDetached(id) ?? [];
             s.StealthKoChance = koSlot >= 0 && i != koSlot && cold is { IsPlayer: false } && Carrying.CarrySystem.CanBeKnockedOut(cold)
                 ? Carrying.CarrySystem.StealthKoChance(table.Cold(koSlot)!, cold, aggro?.Spotted(i, table.IdOf(koSlot)) == true) : null;
             s.Asleep = Carrying.CarrySystem.Asleep(table, i);

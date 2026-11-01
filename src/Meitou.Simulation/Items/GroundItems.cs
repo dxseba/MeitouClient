@@ -98,6 +98,17 @@ public sealed class GroundItems
 
     public GroundItem? Find(int id) => items.Find(i => i.Id == id);
 
+    /// <summary>Moves an existing loot item with its simulated severed limb, preserving its item and ownership.</summary>
+    public void Move(int id, Vector3 position, Quaternion rotation)
+    {
+        int k = items.FindIndex(i => i.Id == id);
+        if (k < 0) return;
+        var item = items[k];
+        if (item.Position == position && item.Rotation == rotation && !item.Dropped) return;
+        items[k] = item with { Position = position, Rotation = rotation, Dropped = false };
+        Revision++;
+    }
+
     /// <summary>Takes an item off the ground (null when it is gone).</summary>
     public GroundItem? Take(int id)
     {

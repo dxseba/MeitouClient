@@ -14,6 +14,7 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
         public CharacterAsset? Asset;
         public CharacterTorsoCut Cut;
         public uint MorphBase;
+        public int[]? Components;
         public AssetPart? Cap;
         public IReadOnlyList<AssetPart>? SourceParts, View;
         public bool Ready;
@@ -22,7 +23,7 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
     readonly Dictionary<long, Slot> byKey = [];
     readonly PartMaterial material = new() { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "torso cut flesh" };
 
-    public IReadOnlyList<AssetPart> Resolve(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp)
+    public IReadOnlyList<AssetPart> Resolve(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp, int[]? components = null)
     {
         if (asset.Blending || asset.BodySource is not { Length: > 0 } source) return parts;
         if (!byKey.TryGetValue(key, out var slot))
@@ -37,12 +38,14 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
             slot.Key = key; byKey[key] = slot;
         }
         slot.Seen = stamp;
-        if (!ReferenceEquals(slot.Asset, asset) || slot.Cut != cut || slot.MorphBase != asset.MorphBase)
+        bool sameComponents = ReferenceEquals(slot.Components, components) || slot.Components is { } prior && components is { } currentComponents && prior.AsSpan().SequenceEqual(currentComponents);
+        if (!ReferenceEquals(slot.Asset, asset) || slot.Cut != cut || slot.MorphBase != asset.MorphBase || !sameComponents)
         {
             (slot.Asset, slot.Cut, slot.MorphBase) = (asset, cut, asset.MorphBase);
             slot.SourceParts = null;
+            slot.Components = components;
             var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
-            var vertices = TorsoCutSurface.Build(source, groups, cut, morphs);
+            var vertices = TorsoCutSurface.Build(source, groups, cut, morphs, components);
             slot.Ready = vertices is { Length: > 0 and <= VertexCapacity };
             if (slot.Ready)
             {
