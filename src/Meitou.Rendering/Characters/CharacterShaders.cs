@@ -216,6 +216,7 @@ static class CharacterShaders
             else if (anatomy)
             {
                 vClip = 1000.0;
+                if ((floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 6u & 1u) != 0u && JawVertex(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u])) vAnatomy = 3u;
                 uint lost = floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]);
                 for (uint i = 0u; i < 64u; i++)
                 {
@@ -566,6 +567,7 @@ static class CharacterShaders
             }
             if (vPlated > 0.0 && vClip > -0.5) { float smear = smoothstep(-0.5, 0.2, vClip + 0.25 * sin(vBlood.y * 23.0 + vBlood.x * 5.0)); albedo = mix(albedo, vec3(0.16, 0.01, 0.012), smear * 0.9); gloss = mix(gloss, 0.7, smear); }
             else if (vClip > 0.0 && (vAnatomy != 0u || vClip + 0.18 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
+            if (vAnatomy == 3u) discard;   // the lower teeth left with the jaw
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.

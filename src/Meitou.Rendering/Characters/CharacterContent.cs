@@ -440,6 +440,8 @@ internal sealed class CharacterContent : IDisposable
                     if (MathF.Abs(fitted.X) < 0.75f) fitted = new Vector3(fitted.X * 0.68f, fitted.Y, fitted.Z - 0.1f);
                     else fitted += v.Normal * 0.05f;
                 }
+                // Soft tissue crumples in the thin space of a face: the head shows skull, teeth and its dark inside, as the GTA V fit's mouth work found.
+                if (batch.Layer != 0 && fitted.Y > 16.9f) continue;
                 if (batch.Layer == 0 && batch.Bone is "Bip01 Head" or "Bip01 Jaw") fitted = headMiddle + (fitted - skullMiddle) * skullScale;
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
