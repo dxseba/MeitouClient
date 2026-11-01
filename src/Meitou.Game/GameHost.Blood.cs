@@ -167,7 +167,7 @@ sealed partial class GameHost
     long woundHealStep;
 
     const string WoundFile = "wounds.meitou";
-    const int JawHangs = 2, JawBlows = 4;
+    const int JawBlows = 4;
     readonly Dictionary<CharacterId, int> jawBlows = [];
     readonly HashSet<CharacterId> jawsLost = [];
     string? woundsFrom;
@@ -228,7 +228,7 @@ sealed partial class GameHost
                 }
             if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
             var part = medical.Parts[e.Part];
-            // Heavy blows to the head: the second leaves the jaw hanging, the fourth takes it.
+            // Heavy blows to the head: the fourth takes the jaw.
             if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
             {
                 jawBlows[e.Victim] = jawBlows.GetValueOrDefault(e.Victim) + 1;
@@ -246,7 +246,6 @@ sealed partial class GameHost
         if (session.World.Characters.Cold(id.Slot)?.Medical is { } medical)
             foreach (var part in medical.Parts)
                 if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb) lost |= 1u << (limb < 2 ? 1 + limb : 1 + limb);
-        if (jawBlows.GetValueOrDefault(id) >= JawHangs) lost |= 1u << 7;
         if (jawsLost.Contains(id)) lost |= 1u << Meitou.Rendering.Characters.WoundMasks.JawGroup;
         if (gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) lost |= 1u << 5;   // the bowel has left the body
         return lost;
