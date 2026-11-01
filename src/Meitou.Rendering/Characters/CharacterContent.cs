@@ -22,6 +22,7 @@ internal sealed class AssetPart
     public required GpuObjectMesh Mesh;
     /// <summary>Skinned by the body's bone palette (clothing, hair, beards); else placed by <see cref="Bone"/> and <see cref="Offset"/>.</summary>
     public required bool Shared;
+    public bool HeadRelief;
     public int Bone = -1;
     public Matrix4x4 Offset = Matrix4x4.Identity;
     /// <summary>Index among the character's bone-attached parts (the matrices <see cref="CharacterRenderer"/> keeps per frame); -1 for shared parts.</summary>
@@ -309,6 +310,7 @@ internal sealed class CharacterContent : IDisposable
     /// close-up) keeps only its full level: generating the others is nearly all of the time a mesh takes (a hair 1 to 2 s), and the editor shows one character up close.</summary>
     /// <summary>The body meshes' vertices, thinned, by path: where a wound lands on the skin.</summary>
     static readonly System.Collections.Concurrent.ConcurrentDictionary<string, WoundPoint[]> WoundPoints = new();
+    static readonly ConcurrentDictionary<string, Vertex[]> HeadSurfaces = new();
 
     static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs, bool close, bool icon = false, string? partMap = null)
     {
@@ -320,6 +322,7 @@ internal sealed class CharacterContent : IDisposable
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
             if (limbs is not null || partMap is not null)
                 WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv, (int)(v.Bones & 255), v.Bones, v.Weights))];
+            if (limbs is not null || partMap is not null) HeadSurfaces[path.ToLowerInvariant()] = HeadWoundSurface.Source(model);
             if (limbs is not null || partMap is not null) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
             // Not an icon's: its colour is the mesh's own vertex colour (CharacterShaders.VertexColoured), and icons take no skin.
             if (!icon) MarkCurvature(model);
@@ -519,6 +522,21 @@ internal sealed class CharacterContent : IDisposable
             vertices[i + 2] = vertices[i + 2] with { Position = c };
             i += 3;
         }
+        return meshes[key] = UploadAnatomy(vertices);
+    }
+
+    LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase)
+    {
+        var key = ("head-relief@" + bodyPath.ToLowerInvariant() + "@" + morphBase, rig.BoneCount, false, (string?)rig.Skeleton.GetHashCode().ToString());
+        if (meshes.TryGetValue(key, out var cached)) return cached;
+        if (rig.Handle("Bip01 Head") is not { } head || !HeadSurfaces.TryGetValue(bodyPath.ToLowerInvariant(), out var surface)) return null;
+        var vertices = new List<Vertex>();
+        HeadWoundSurface.Append(vertices, surface, head, shapeDeltas);
+        return meshes[key] = vertices.Count == 0 ? null : UploadAnatomy(vertices);
+    }
+
+    LoadedMesh UploadAnatomy(List<Vertex> vertices)
+    {
         var array = vertices.ToArray();
         var indices = new uint[array.Length];
         for (uint i = 0; i < indices.Length; i++) indices[i] = i;
@@ -533,7 +551,7 @@ internal sealed class CharacterContent : IDisposable
             uploads.Write(ib, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
             mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "anatomy", HasTangents = false, HasColours = true, Vertices = vb, Indices = ib, Offset = [0], Count = [indices.Length], Attributes = ObjectMeshCache.VertexAttributes(vb) });
         }
-        return meshes[key] = new LoadedMesh(mesh, null, centre, 12);
+        return new LoadedMesh(mesh, null, centre, 12);
     }
 
     LoadedMesh Upload(PreparedMesh ready)
@@ -919,6 +937,7 @@ internal sealed class CharacterContent : IDisposable
         asset.Shape = setup?.Shape;
         asset.GroundOffset = setup?.GroundOffset ?? 0;
         asset.HeadBone = rig.Handle("Bip01 Head") ?? -1;
+        Vector4[]? shapeDeltas = null;
         if (body.Morphs is { } bodyMorphs)
         {
             asset.Morph = new MorphSource(bodyMorphs, c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns);
@@ -926,6 +945,7 @@ internal sealed class CharacterContent : IDisposable
             {
                 var key = string.Join(';', c.PoseWeights.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => FormattableString.Invariant($"{p.Key}={p.Value}"))) + "@" + bodyPath + (c.Character?.GetBool("shaved") == true);
                 asset.MorphBase = Morphs.Add(key, deltas);
+                shapeDeltas = deltas;
             }
         }
         asset.Parts.Add(new AssetPart
@@ -984,6 +1004,17 @@ internal sealed class CharacterContent : IDisposable
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,
                 Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "anatomy" },
             });
+
+        // Face relief is small and per morph; keep the much larger internal anatomy shared between faces.
+        if (!asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase) is { } relief)
+        {
+            asset.Parts.First(p => p.IsBody).HeadRelief = true;
+            asset.Parts.Add(new AssetPart
+            {
+                Label = "head wound relief", Mesh = relief.Gpu, Shared = true, Anatomy = true, BoundsCentre = relief.Centre, BoundsRadius = relief.Radius,
+                Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "head wound relief" },
+            });
+        }
 
         if (setup is not null)
         {
