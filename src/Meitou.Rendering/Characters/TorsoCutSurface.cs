@@ -15,14 +15,14 @@ static class TorsoCutSurface
         float length = n.Length();
         if (cut.KeepSide is not (-1 or 1) || !float.IsFinite(length) || length < 1e-5f || !float.IsFinite(cut.Plane.W)) return false;
         var plane = cut.Plane / length;
-        if (plane.Y < 0.5f) return false;
-        normalized = new(plane, cut.KeepSide);
+        if (!cut.FullBody && plane.Y < 0.5f) return false;
+        normalized = new(plane, cut.KeepSide, cut.FullBody);
         return true;
     }
 
     public static Matrix4x4 Packed(in CharacterTorsoCut cut) => new(
         cut.Plane.X, cut.Plane.Y, cut.Plane.Z, cut.Plane.W,
-        cut.KeepSide, ExposureDepth, 0, 0,
+        cut.KeepSide, ExposureDepth, cut.FullBody ? 1 : 0, 0,
         0, 0, 0, 0,
         0, 0, 0, 0);
 
@@ -34,7 +34,7 @@ static class TorsoCutSurface
         return bone / 8 < groups.Length ? (int)(groups[bone / 8] >> (bone % 8 * 4) & 15) : 0;
     }
 
-    public static float Band(Vector3 position, int group, in CharacterTorsoCut cut) => group switch
+    public static float Band(Vector3 position, int group, in CharacterTorsoCut cut) => (cut.FullBody ? 0 : group) switch
     {
         1 or 2 or 6 => cut.KeepSide * 1000,
         3 or 4 => -cut.KeepSide * 1000,
@@ -57,7 +57,7 @@ static class TorsoCutSurface
             near = MathF.Max(near, a); far = MathF.Min(far, b);
             if (near > far) return null;
         }
-        if (group != 0) return Band(default, group, cut) >= 0 ? near : null;
+        if (group != 0 && !cut.FullBody) return Band(default, group, cut) >= 0 ? near : null;
         var normal = new Vector3(cut.Plane.X, cut.Plane.Y, cut.Plane.Z);
         float at = Band(origin, group, cut), slope = Vector3.Dot(normal, direction) * cut.KeepSide;
         if (MathF.Abs(slope) < 1e-9f) return at >= 0 ? near : null;
@@ -70,20 +70,63 @@ static class TorsoCutSurface
     static Vector3 Round(Vector3 p) => new(MathF.Round(p.X, 4), MathF.Round(p.Y, 4), MathF.Round(p.Z, 4));
     readonly record struct Point(Vector3 Position, Vector3 Morph, uint Bones, Vector4 Weights);
 
-    /// <summary>Intersects only torso triangles, preserving edge skin weights and one interpolated body morph.</summary>
+    /// <summary>Kept body samples and exact cut-edge samples, with the body morph applied once before skinning.</summary>
+    public static IEnumerable<Vertex> KeptVertices(Vertex[] source, uint[] groups, CharacterTorsoCut cut, Vector4[]? morphs = null)
+    {
+        if (!TryNormalize(cut, out var normalized)) yield break;
+        cut = normalized;
+        Vector3 Delta(in Vertex vertex)
+        {
+            uint slot = BitConverter.SingleToUInt32Bits(vertex.Colour.X);
+            return morphs is not null && slot > 0 && slot <= morphs.Length ? new(morphs[slot - 1].X, morphs[slot - 1].Y, morphs[slot - 1].Z) : default;
+        }
+        for (int i = 0; i + 2 < source.Length; i += 3)
+            for (int k = 0; k < 3; k++)
+            {
+                var a = source[i + k]; var b = source[i + (k + 1) % 3];
+                float da = Band(a.Position, Group(a, groups), cut), db = Band(b.Position, Group(b, groups), cut);
+                if (da >= 0) yield return a with { Position = a.Position + Delta(a) };
+                if ((da < 0) == (db < 0)) continue;
+                float t = da / (da - db);
+                var weights = new Dictionary<uint, float>();
+                for (int influence = 0; influence < 4; influence++)
+                {
+                    uint ba = a.Bones >> (8 * influence) & 255, bb = b.Bones >> (8 * influence) & 255;
+                    weights[ba] = weights.GetValueOrDefault(ba) + a.Weights[influence] * (1 - t);
+                    weights[bb] = weights.GetValueOrDefault(bb) + b.Weights[influence] * t;
+                }
+                var top = weights.Where(p => p.Value > 0).OrderByDescending(p => p.Value).Take(4).ToArray();
+                float sum = top.Sum(p => p.Value);
+                uint bones = 0;
+                var w = Vector4.Zero;
+                for (int influence = 0; influence < top.Length; influence++) { bones |= top[influence].Key << (influence * 8); w[influence] = top[influence].Value / sum; }
+                yield return new() { Position = Vector3.Lerp(a.Position + Delta(a), b.Position + Delta(b), t), Bones = bones, Weights = w };
+            }
+    }
+
+    /// <summary>Intersects torso triangles, or every closed body contour in full-body mode, preserving weights and one interpolated body morph.</summary>
     public static Vertex[]? Build(Vertex[] source, uint[] groups, in CharacterTorsoCut cut, Vector4[]? morphs = null)
     {
         if (!TryNormalize(cut, out var normalized)) return null;
         var n = new Vector3(normalized.Plane.X, normalized.Plane.Y, normalized.Plane.Z);
         var points = new List<Point>();
         var byPosition = new Dictionary<Vector3, int>();
+        var weld = new Dictionary<(int X, int Y, int Z), List<int>>();
         var adjacent = new List<HashSet<int>>();
         int Add(Point point)
         {
+            var cell = ((int)MathF.Floor(point.Position.X * 10000), (int)MathF.Floor(point.Position.Y * 10000), (int)MathF.Floor(point.Position.Z * 10000));
+            if (normalized.FullBody)
+                for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++)
+                    if (weld.TryGetValue((cell.Item1 + x, cell.Item2 + y, cell.Item3 + z), out var candidates))
+                        foreach (int candidate in candidates)
+                            if (Vector3.DistanceSquared(points[candidate].Position, point.Position) <= 1e-8f) return candidate;
             var key = Round(point.Position);
-            if (byPosition.TryGetValue(key, out int existing)) return existing;
+            if (!normalized.FullBody && byPosition.TryGetValue(key, out int existing)) return existing;
             int index = points.Count;
             points.Add(point); adjacent.Add([]); byPosition[key] = index;
+            if (!weld.TryGetValue(cell, out var own)) weld[cell] = own = [];
+            own.Add(index);
             return index;
         }
         Vector3 Delta(in Vertex vertex)
@@ -110,7 +153,7 @@ static class TorsoCutSurface
         for (int triangle = 0; triangle + 2 < source.Length; triangle += 3)
         {
             var a = source[triangle]; var b = source[triangle + 1]; var c = source[triangle + 2];
-            if (Group(a, groups) != 0 || Group(b, groups) != 0 || Group(c, groups) != 0) continue;
+            if (!normalized.FullBody && (Group(a, groups) != 0 || Group(b, groups) != 0 || Group(c, groups) != 0)) continue;
             var hit = new List<int>(3);
             void Intersect(Vertex p, Vertex q)
             {
@@ -124,13 +167,56 @@ static class TorsoCutSurface
             adjacent[unique[0]].Add(unique[1]); adjacent[unique[1]].Add(unique[0]);
         }
         if (points.Count < 3) return null;
-        var u = Vector3.Normalize(Vector3.UnitX - n * n.X);
+        var reference = MathF.Abs(n.X) < 0.8f ? Vector3.UnitX : Vector3.UnitZ;
+        var u = Vector3.Normalize(reference - n * Vector3.Dot(reference, n));
         var v = Vector3.Cross(n, u);
         var visited = new HashSet<int>();
-        List<Point>? rim = null;
-        float largest = 0;
+        var rims = new List<(List<Point> Points, float Area)>();
+        if (normalized.FullBody)
+        {
+            // Open mouth/eyelid edges can touch a valid skin loop. Remove only their dangling chains, then
+            // walk the bounded faces of the remaining planar graph; a shared seam need not have degree two.
+            var dangling = new Queue<int>(Enumerable.Range(0, points.Count).Where(i => adjacent[i].Count < 2));
+            while (dangling.TryDequeue(out int at))
+            {
+                foreach (int other in adjacent[at].ToArray())
+                {
+                    adjacent[other].Remove(at);
+                    if (adjacent[other].Count == 1) dangling.Enqueue(other);
+                }
+                adjacent[at].Clear();
+            }
+            var edges = new HashSet<(int From, int To)>();
+            for (int from = 0; from < points.Count; from++)
+                foreach (int to in adjacent[from])
+                {
+                    if (edges.Contains((from, to))) continue;
+                    var path = new List<int>();
+                    int a = from, b = to;
+                    do
+                    {
+                        if (!edges.Add((a, b))) break;
+                        path.Add(a);
+                        var reverse = points[a].Position - points[b].Position;
+                        float incoming = MathF.Atan2(Vector3.Dot(reverse, v), Vector3.Dot(reverse, u));
+                        int next = adjacent[b].Where(i => i != a).MinBy(i =>
+                        {
+                            var step = points[i].Position - points[b].Position;
+                            float turn = incoming - MathF.Atan2(Vector3.Dot(step, v), Vector3.Dot(step, u));
+                            return turn > 0 ? turn : turn + MathF.Tau;
+                        });
+                        a = b; b = next;
+                    } while ((a != from || b != to) && path.Count <= points.Count * 2);
+                    if (a != from || b != to || path.Count < 3) continue;
+                    var centre = path.Aggregate(Vector3.Zero, (sum, i) => sum + points[i].Position) / path.Count;
+                    float area = 0;
+                    for (int i = 0; i < path.Count; i++) area += Vector3.Dot(Vector3.Cross(points[path[i]].Position - centre, points[path[(i + 1) % path.Count]].Position - centre), n);
+                    if (area > 1e-4f) rims.Add((path.Select(i => points[i]).ToList(), area));
+                }
+        }
         for (int start = 0; start < points.Count; start++)
         {
+            if (normalized.FullBody) break;
             if (!visited.Add(start)) continue;
             var component = new List<int>();
             var queue = new Queue<int>(); queue.Enqueue(start);
@@ -144,27 +230,40 @@ static class TorsoCutSurface
             var ordered = component.Select(i => points[i]).OrderBy(p => MathF.Atan2(Vector3.Dot(p.Position - centre, v), Vector3.Dot(p.Position - centre, u))).ToList();
             float area = 0;
             for (int i = 0; i < ordered.Count; i++) area += Vector3.Dot(Vector3.Cross(ordered[i].Position - centre, ordered[(i + 1) % ordered.Count].Position - centre), n);
-            if (MathF.Abs(area) > largest) { largest = MathF.Abs(area); rim = ordered; }
+            if (MathF.Abs(area) < 1e-4f) continue;
+            rims.Add((ordered, MathF.Abs(area)));
         }
-        if (rim is not { Count: >= 3 } || largest < 1e-4f) return null;
-        if (rim.Count > 512)
+        if (rims.Count == 0) return null;
+        rims = rims.OrderByDescending(r => r.Area).Take(normalized.FullBody ? 128 : 1).ToList();
+        int total = rims.Sum(r => r.Points.Count), budget = normalized.FullBody ? 2048 : 512;
+        var outward = n * -normalized.KeepSide;
+        var result = new List<Vertex>();
+        for (int contour = 0; contour < rims.Count; contour++)
+        {
+        var rim = rims[contour].Points;
+        int allotted = normalized.FullBody ? Math.Max(3, Math.Min(budget - 3 * (rims.Count - contour - 1), 2048 * rim.Count / total)) : 512;
+        if (rim.Count > allotted)
         {
             var original = rim;
-            rim = Enumerable.Range(0, 512).Select(i => original[i * original.Count / 512]).ToList();
+            rim = Enumerable.Range(0, allotted).Select(i => original[i * original.Count / allotted]).ToList();
         }
+        budget -= rim.Count;
         var middle = rim.Aggregate(Vector3.Zero, (sum, p) => sum + p.Position) / rim.Count;
         var middleMorph = rim.Aggregate(Vector3.Zero, (sum, p) => sum + p.Morph) / rim.Count;
-        var outward = n * -normalized.KeepSide;
-        Vertex At(Point point, int band)
+        var inset = normalized.FullBody ? Insets(rim, n, u, v) : null;
+        Vertex At(int index, int band)
         {
+            var point = rim[index];
             float radius = band switch { 0 => 1.005f, 1 => 0.90f, _ => 0.72f };
             float depth = band switch { 0 => Ragged(point.Position), 1 => 0.025f, _ => 0.20f };
-            var p = middle + (point.Position - middle) * radius + middleMorph + (point.Morph - middleMorph) * radius + n * (depth * normalized.KeepSide);
+            if (inset is not null && band > 0) depth = MathF.Min(depth, MathF.Max(0.01f, inset[index].Length() * 1.2f));
+            var p = inset is null ? middle + (point.Position - middle) * radius + middleMorph + (point.Morph - middleMorph) * radius
+                : point.Position + point.Morph + inset[index] * (band == 0 ? 0 : band == 1 ? 0.45f : 1);
+            p += n * (depth * normalized.KeepSide);
             float grain = 0.90f + 0.10f * MathF.Sin(point.Position.X * 31 + point.Position.Z * 23);
             var colour = (band == 1 ? new Vector4(0.43f, 0.17f, 0.10f, 0) : new Vector4(0.29f, 0.018f, 0.025f, 0)) * grain;
-            return new() { Position = p, Normal = outward, Uv = new(band, 0), Tangent = new(p, Layer), Colour = colour, Bones = point.Bones, Weights = point.Weights };
+            return new() { Position = p, Normal = outward, Uv = new(band, contour), Tangent = new(p, Layer), Colour = colour, Bones = point.Bones, Weights = point.Weights };
         }
-        var result = new List<Vertex>(rim.Count * 12);
         void Triangle(Vertex a, Vertex b, Vertex c)
         {
             var cross = Vector3.Cross(b.Position - a.Position, c.Position - a.Position);
@@ -176,11 +275,53 @@ static class TorsoCutSurface
         for (int i = 0; i < rim.Count; i++)
             for (int band = 0; band < 2; band++)
             {
-                var next = rim[(i + 1) % rim.Count];
-                var a = At(rim[i], band); var b = At(next, band); var c = At(rim[i], band + 1); var d = At(next, band + 1);
+                int next = (i + 1) % rim.Count;
+                var a = At(i, band); var b = At(next, band); var c = At(i, band + 1); var d = At(next, band + 1);
                 Triangle(a, b, c); Triangle(b, d, c);
             }
+        }
         return result.Count > 0 ? result.ToArray() : null;
+    }
+
+    static Vector3[] Insets(List<Point> rim, Vector3 normal, Vector3 u, Vector3 v)
+    {
+        var polygon = rim.Select(p => new Vector2(Vector3.Dot(p.Position, u), Vector3.Dot(p.Position, v))).ToArray();
+        static float Cross(Vector2 a, Vector2 b) => a.X * b.Y - a.Y * b.X;
+        bool Inside(Vector2 point)
+        {
+            bool inside = false;
+            for (int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i++)
+                if ((polygon[i].Y > point.Y) != (polygon[j].Y > point.Y)
+                    && point.X < (polygon[j].X - polygon[i].X) * (point.Y - polygon[i].Y) / (polygon[j].Y - polygon[i].Y) + polygon[i].X) inside = !inside;
+            return inside;
+        }
+        var result = new Vector3[rim.Count];
+        for (int i = 0; i < rim.Count; i++)
+        {
+            int previous = (i + rim.Count - 1) % rim.Count, next = (i + 1) % rim.Count;
+            var before = Vector3.Normalize(rim[i].Position - rim[previous].Position);
+            var after = Vector3.Normalize(rim[next].Position - rim[i].Position);
+            var first = Vector3.Cross(normal, before);
+            var inward = first + Vector3.Cross(normal, after);
+            inward = inward.LengthSquared() > 1e-8f ? Vector3.Normalize(inward) : first;
+            float amount = MathF.Min(0.28f, 0.14f / MathF.Max(0.5f, Vector3.Dot(inward, first)));
+            var direction = new Vector2(Vector3.Dot(inward, u), Vector3.Dot(inward, v));
+            var start = polygon[i] + direction * 0.0001f;
+            for (int edge = 0; edge < polygon.Length; edge++)
+            {
+                int end = (edge + 1) % polygon.Length;
+                if (edge == i || end == i) continue;
+                var step = polygon[end] - polygon[edge];
+                float denominator = Cross(direction, step);
+                if (MathF.Abs(denominator) < 1e-8f) continue;
+                float along = Cross(polygon[edge] - start, step) / denominator;
+                float onEdge = Cross(polygon[edge] - start, direction) / denominator;
+                if (along > 0.001f && onEdge is >= 0 and <= 1) amount = MathF.Min(amount, along * 0.30f);
+            }
+            while (amount > 0.0005f && !Inside(polygon[i] + direction * amount)) amount *= 0.5f;
+            result[i] = amount > 0.0005f ? inward * amount : default;
+        }
+        return result;
     }
 
     public static string ShaderField => "const float torsoExposureDepth = " + ExposureDepth.ToString("0.0########", System.Globalization.CultureInfo.InvariantCulture) + ";\n" + """

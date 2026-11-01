@@ -16,9 +16,9 @@ sealed partial class GameHost
     sealed class TorsoFall
     {
         public required Matrix4x4 World;
-        public required Vector3 Pivot, Origin, Along;
-        public required Quaternion UpperTurn, LowerTurn;
-        public required (Vector3 Point, float Radius)[] UpperBounds, LowerBounds;
+        public required Vector3 PositivePivot, NegativePivot, CutAt, Origin, Along;
+        public required Quaternion PositiveTurn, NegativeTurn;
+        public required (Vector3 Point, float Radius)[] PositiveBounds, NegativeBounds;
     }
 
     void ClearTorsoCuts()
@@ -83,10 +83,11 @@ sealed partial class GameHost
             {
                 // Prepare an unseen corpse from animation: ragdoll overrides stretched facial/hair vertices in the scripted capture.
                 // A previously visible impact still holds its actual last pose; a restored corpse never flashes whole.
-                list.Add(instance with { TorsoCut = new(cut.Plane, -1), Bones = null });
+                list.Add(instance with { TorsoCut = new(cut.Plane, -1, cut.FullBody), Bones = null });
                 return;
             }
-            pivot = renderer.TorsoCutPosition(lower, cut.Plane) ?? pivot;
+            var positiveCut = new CharacterTorsoCut(cut.Plane, 1, cut.FullBody);
+            pivot = renderer.TorsoCutPosition(lower, positiveCut) ?? pivot;
             Vector3 head = renderer.BonePosition(lower, "Bip01 Head") ?? pivot + Vector3.UnitY * 5;
             Vector3 feet = ((renderer.BonePosition(lower, "Bip01 L Foot") ?? pivot - Vector3.UnitY * 10)
                 + (renderer.BonePosition(lower, "Bip01 R Foot") ?? pivot - Vector3.UnitY * 10)) / 2;
@@ -96,18 +97,39 @@ sealed partial class GameHost
                 .Where(b => top == !(b.Bone.Contains("Thigh", StringComparison.Ordinal) || b.Bone.Contains("Calf", StringComparison.Ordinal) || b.Bone == "Bip01 Pelvis"))
                 .Select(b => (Point: renderer.BonePosition(lower, b.Bone), b.Radius))
                 .Where(b => b.Point.HasValue).Select(b => (b.Point!.Value - pivot, b.Radius * 0.8f)).ToArray();
-            var upperBounds = Bounds(true);
-            var lowerBounds = Bounds(false).Concat(new[] { (feet - pivot, 0.6f) }).ToArray();
+            var positivePivot = pivot;
+            var negativePivot = pivot;
+            var positiveBounds = Bounds(true);
+            var negativeBounds = Bounds(false).Concat(new[] { (feet - pivot, 0.6f) }).ToArray();
+            var positiveTurn = TorsoTurn(head - pivot, along);
+            var negativeTurn = TorsoTurn(feet - pivot, -along);
+            if (cut.FullBody)
+            {
+                var normal = renderer.TorsoCutNormal(lower, positiveCut)
+                    ?? Vector3.Normalize(Vector3.TransformNormal(new(cut.Plane.X, cut.Plane.Y, cut.Plane.Z), world));
+                along = TorsoFragmentMotion.Across(normal);
+                Vector3[] FallbackPoints() => [.. BodyBones.Select(b => renderer.BonePosition(lower, b.Bone)).Where(p => p.HasValue).Select(p => p!.Value)];
+                var positivePoints = renderer.TorsoCutBounds(lower, positiveCut);
+                var negativePoints = renderer.TorsoCutBounds(lower, positiveCut with { KeepSide = -1 });
+                if (positivePoints is not { Length: > 0 }) positivePoints = FallbackPoints();
+                if (negativePoints is not { Length: > 0 }) negativePoints = FallbackPoints();
+                positivePivot = TorsoFragmentMotion.LowestPivot(positivePoints, feet);
+                negativePivot = TorsoFragmentMotion.LowestPivot(negativePoints, feet);
+                positiveBounds = [.. positivePoints.Select(p => (p - positivePivot, 0.15f))];
+                negativeBounds = [.. negativePoints.Select(p => (p - negativePivot, 0.15f))];
+                positiveTurn = TorsoFragmentMotion.OutwardTurn(head - feet, normal, 1);
+                negativeTurn = TorsoFragmentMotion.OutwardTurn(head - feet, normal, -1);
+            }
             if (!renderer.HoldPose(lower, lower) || !renderer.HoldPose(upper, lower))
             {
-                list.Add(instance with { TorsoCut = new(cut.Plane, -1), Bones = null });
+                list.Add(instance with { TorsoCut = new(cut.Plane, -1, cut.FullBody), Bones = null });
                 return;
             }
             fall = new TorsoFall
             {
-                World = world, Pivot = pivot, Origin = c.Position, Along = along,
-                UpperTurn = TorsoTurn(head - pivot, along), LowerTurn = TorsoTurn(feet - pivot, -along),
-                UpperBounds = upperBounds, LowerBounds = lowerBounds,
+                World = world, CutAt = pivot, PositivePivot = positivePivot, NegativePivot = negativePivot, Origin = c.Position, Along = along,
+                PositiveTurn = positiveTurn, NegativeTurn = negativeTurn,
+                PositiveBounds = positiveBounds, NegativeBounds = negativeBounds,
             };
             torsoFalls[c.Id] = fall;
             SpillTorsoGuts(c.Id, fall, TorsoAge(c.Id));
@@ -118,19 +140,19 @@ sealed partial class GameHost
         Vector3 delta = c.Position - fall.Origin;
         for (int side = -1; side <= 1; side += 2)
         {
-            var turn = Quaternion.Slerp(Quaternion.Identity, side > 0 ? fall.UpperTurn : fall.LowerTurn, ease);
+            var turn = Quaternion.Slerp(Quaternion.Identity, side > 0 ? fall.PositiveTurn : fall.NegativeTurn, ease);
             var rotation = Matrix4x4.CreateFromQuaternion(turn);
-            var at = fall.Pivot + delta + fall.Along * (side > 0 ? 4.8f : -2.8f) * ease;
-            float bottom = 0;
-            foreach (var (point, radius) in side > 0 ? fall.UpperBounds : fall.LowerBounds)
-                bottom = MathF.Min(bottom, Vector3.TransformNormal(point, rotation).Y - radius);
-            float floor = session.World.Walkability.GroundHeight(at.X, at.Z, fall.Pivot.Y + delta.Y);
-            at.Y = MathF.Max(fall.Pivot.Y + delta.Y + 1.5f * MathF.Min(age, 0.8f) - 0.5f * FallGravity * MathF.Min(age * age, 9), floor - bottom + 0.1f);
-            var placement = fall.World * Matrix4x4.CreateTranslation(-fall.Pivot) * rotation * Matrix4x4.CreateTranslation(at);
+            var piecePivot = side > 0 ? fall.PositivePivot : fall.NegativePivot;
+            float reach = cut.FullBody ? side * 4.5f : side > 0 ? 4.8f : -2.8f;
+            var at = piecePivot + delta + fall.Along * reach * ease;
+            float bottom = TorsoFragmentMotion.Bottom(side > 0 ? fall.PositiveBounds : fall.NegativeBounds, turn);
+            float floor = session.World.Walkability.GroundHeight(at.X, at.Z, piecePivot.Y + delta.Y);
+            at.Y = MathF.Max(piecePivot.Y + delta.Y + 1.5f * MathF.Min(age, 0.8f) - 0.5f * FallGravity * MathF.Min(age * age, 9), floor - bottom + 0.1f);
+            var placement = fall.World * Matrix4x4.CreateTranslation(-piecePivot) * rotation * Matrix4x4.CreateTranslation(at);
             list.Add(instance with
             {
                 Key = side > 0 ? upper : lower, Position = at, World = placement,
-                FreezeFrom = lower, Bones = null, Rotation = null, TorsoCut = new(cut.Plane, side),
+                FreezeFrom = lower, Bones = null, Rotation = null, TorsoCut = new(cut.Plane, side, cut.FullBody),
             });
         }
     }
@@ -168,8 +190,8 @@ sealed partial class GameHost
         if (gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) return;
         var gut = new GutFall
         {
-            Position = fall.Pivot + fall.Along * 0.6f, Velocity = fall.Along * 2 + Vector3.UnitY,
-            Floor = session.World.Walkability.GroundHeight(fall.Pivot.X, fall.Pivot.Z, fall.Pivot.Y)
+            Position = fall.CutAt + fall.Along * 0.6f, Velocity = fall.Along * 2 + Vector3.UnitY,
+            Floor = session.World.Walkability.GroundHeight(fall.CutAt.X, fall.CutAt.Z, fall.CutAt.Y)
                 + (gpu.Debris?.Extent(DebrisRenderer.Bowel)?.Y ?? 0.35f) - 0.35f,
         };
         // A still may advance the hit before any render. Match the loose bowel to the halves' event-time clock.

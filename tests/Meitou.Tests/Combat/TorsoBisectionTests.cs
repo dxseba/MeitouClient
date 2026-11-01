@@ -44,22 +44,23 @@ public class TorsoBisectionTests
     }
 
     [Fact]
-    public void The_mechanism_sideways_axis_chest_and_living_organic_target_are_all_required()
+    public void The_mechanism_supported_cleave_axis_chest_and_living_organic_target_are_all_required()
     {
         TorsoBisectionInput[] excluded =
         [
             Eligible with { Source = CombatHitSource.Bolt }, Eligible with { Source = CombatHitSource.Execution },
             Eligible with { Mechanism = CombatWoundMechanism.Unspecified }, Eligible with { Mechanism = CombatWoundMechanism.Thrust },
             Eligible with { Mechanism = CombatWoundMechanism.Crush }, Eligible with { CutDirection = 0 },
-            Eligible with { CutDirection = 1 }, Eligible with { CutDirection = 4 }, Eligible with { CutDirection = 5 },
-            Eligible with { CutDirection = 7 }, Eligible with { Part = Stomach }, Eligible with { Part = Head },
+            Eligible with { CutDirection = 4 }, Eligible with { CutDirection = 5 }, Eligible with { CutDirection = 6 },
+            Eligible with { Part = Stomach }, Eligible with { Part = Head },
             Eligible with { Part = CanonicalChest with { Type = BodyPartType.Arm } },
             Eligible with { AliveBeforeHit = false }, Eligible with { AlreadyBisected = true },
             Eligible with { Robot = true }, Eligible with { Animal = true },
         ];
         foreach (var input in excluded) Assert.False(TorsoBisectionPolicy.ShouldBisect(input, 0));
-        foreach (int direction in new[] { 2, 3, 9 })
+        foreach (int direction in new[] { 1, 2, 3, 7, 9 })
             Assert.True(TorsoBisectionPolicy.ShouldBisect(Eligible with { CutDirection = direction }, 0));
+        Assert.False(TorsoBisectionPolicy.ShouldBisect(Eligible with { CutDirection = 1, Cut = 74.99f }, 0));
     }
 
     [Theory]
@@ -137,13 +138,67 @@ public class TorsoBisectionTests
     }
 
     [Fact]
+    public void Downward_cleaves_choose_vertical_or_long_diagonal_modes_without_changing_sideways_planes()
+    {
+        bool vertical = false, diagonal = false;
+        foreach (ulong seed in Enumerable.Range(0, 64).Select(i => (ulong)i))
+        {
+            foreach (int direction in new[] { 1, 7 })
+            {
+                var state = TorsoBisectionPolicy.StateForDirection(direction, seed, new(0, -1));
+                Assert.True(state.FullBody);
+                Assert.True(state.IsValid);
+                vertical |= state.Plane.Y == 0;
+                diagonal |= MathF.Abs(state.Plane.Y) > 0.1f;
+            }
+            foreach (int direction in new[] { 2, 3, 9 })
+            {
+                var state = TorsoBisectionPolicy.StateForDirection(direction, seed, Vector2.UnitX);
+                Assert.False(state.FullBody);
+                Assert.Equal(TorsoBisectionPolicy.PlaneForDirection(direction, seed, Vector2.UnitX), state.Plane);
+            }
+        }
+        Assert.True(vertical);
+        Assert.True(diagonal);
+        Assert.False(TorsoBisectionPolicy.StateForDirection(5, 1).IsValid);
+        Assert.False(TorsoBisectionPolicy.StateForDirection(1, 1, style: TorsoBisectionStyle.Transverse).IsValid);
+    }
+
+    [Fact]
+    public void Longitudinal_planes_stay_through_the_centre_and_diagonal_planes_continue_towards_one_leg()
+    {
+        foreach (ulong seed in Enumerable.Range(0, 64).Select(i => (ulong)i))
+            foreach (var travel in new[] { Vector2.UnitX, Vector2.UnitY, -Vector2.UnitY })
+                foreach (var style in new[] { TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal })
+                {
+                    var state = TorsoBisectionPolicy.StateForDirection(1, seed, travel, 0.4f, style);
+                    Assert.Equal(state, TorsoBisectionPolicy.StateForDirection(1, seed, travel, 0.4f, style));
+                    Assert.True(state.IsValid);
+                    Assert.True(state.FullBody);
+                    var p = state.Plane;
+                    Assert.True(MathF.Abs(p.X) > 0.9f);
+                    float At(float y) => (-p.W - p.Y * y) / p.X;
+                    Assert.InRange(MathF.Abs(At(14)), 0, 1.5f);
+                    Assert.InRange(MathF.Abs(At(10.5f)), 0, 0.5f);
+                    if (style == TorsoBisectionStyle.Vertical)
+                    {
+                        Assert.Equal(0, p.Y);
+                        Assert.InRange(MathF.Abs(At(5)), 0, 0.25f);
+                    }
+                    else Assert.InRange(MathF.Abs(At(5)), 0.5f, 1.8f);
+                }
+    }
+
+    [Fact]
     public void Each_opening_plane_survives_save_load_exactly_and_cannot_be_moved_by_a_later_hit()
     {
         foreach (ulong seed in new ulong[] { 0, 1, 3, 123456789 })
+        foreach (var style in new[] { TorsoBisectionStyle.Transverse, TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal })
         {
             var victim = Victim(out int chest);
             var events = new List<MedicalEvent>();
-            Assert.True(CombatSystem.TryBisect(victim, chest, new(200, 0, 0), CombatWoundMechanism.Slash, true, 0, 3, events, seed, Vector2.UnitX, 0.4f));
+            int axis = style == TorsoBisectionStyle.Transverse ? 3 : 1;
+            Assert.True(CombatSystem.TryBisect(victim, chest, new(200, 0, 0), CombatWoundMechanism.Slash, true, 0, axis, events, seed, Vector2.UnitX, 0.4f, style));
             var fixedPlane = victim.TorsoBisection!.Value;
             Assert.False(CombatSystem.TryBisect(victim, chest, new(500, 0, 0), CombatWoundMechanism.Slash, true, 0, 2, events, seed + 1, Vector2.UnitY, 2));
             Assert.Equal(fixedPlane, victim.TorsoBisection);
@@ -156,10 +211,12 @@ public class TorsoBisectionTests
         }
     }
 
-    [Fact]
-    public void An_actual_melee_hit_uses_its_own_visual_hash_and_preserves_the_existing_chance_roll()
+    [Theory]
+    [InlineData(2)]
+    [InlineData(1)]
+    public void An_actual_melee_hit_uses_its_own_visual_hash_and_preserves_the_existing_chance_roll(int direction)
     {
-        using var world = NewWorld(7, 1, out var combat, techniques: [CombatFixtures.Cut("cut left", direction: 2)]);
+        using var world = NewWorld(7, 1, out var combat, techniques: [CombatFixtures.Cut("cut left", direction: direction)]);
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;
         var (attacker, defender) = Pair(world,
@@ -180,7 +237,9 @@ public class TorsoBisectionTests
             hit.CutDirection, hit.Damage.Cut, victim.Medical.Parts[0].MaxHp), chance));
         Assert.NotNull(victim.TorsoBisection);
         ulong visual = TorsoBisectionPolicy.VisualSeedFor(world.Seed, defender, attacker, counter);
-        Assert.Equal(TorsoBisectionPolicy.PlaneForDirection(hit.CutDirection, visual, hit.Direction, hit.VictimYaw), victim.TorsoBisection!.Value.Plane);
+        Assert.Equal(TorsoBisectionPolicy.StateForDirection(hit.CutDirection, visual, hit.Direction, hit.VictimYaw), victim.TorsoBisection!.Value);
+        Assert.Equal(direction == 1, victim.TorsoBisection!.Value.FullBody);
+        Assert.Single(queue, e => e.Kind == CombatEventKind.Died && e.Victim == defender);
         Assert.Equal(chance, CombatRolls.Float(world.Seed, Rng.Key(defender), CombatRoll.BodyBisection, counter));
     }
 
@@ -324,10 +383,20 @@ public class TorsoBisectionTests
     }
 
     [Theory]
-    [InlineData(true, false, 2)]
-    [InlineData(false, true, 2)]
-    [InlineData(false, false, 1)]
-    public void The_debug_command_rejects_ineligible_targets_and_vertical_cuts_before_applying_damage(bool robot, bool animal, int direction)
+    [InlineData(TorsoBisectionStyle.Vertical)]
+    [InlineData(TorsoBisectionStyle.Diagonal)]
+    public void Explicit_debug_styles_choose_a_downward_cut_with_a_repeatable_full_body_plane(TorsoBisectionStyle style)
+    {
+        var first = DebugPlane(11, 1, style: style);
+        Assert.Equal(first, DebugPlane(31, 1, style: style));
+        Assert.True(style == TorsoBisectionStyle.Vertical ? first.Y == 0 : MathF.Abs(first.Y) > 0.1f);
+    }
+
+    [Theory]
+    [InlineData(true, false, 2, TorsoBisectionStyle.Auto)]
+    [InlineData(false, true, 2, TorsoBisectionStyle.Auto)]
+    [InlineData(false, false, 1, TorsoBisectionStyle.Transverse)]
+    public void The_debug_command_rejects_ineligible_targets_and_style_axis_mismatches_before_applying_damage(bool robot, bool animal, int direction, TorsoBisectionStyle style)
     {
         using var world = NewWorld(11, 1, out _);
         world.AddSystem(new PlayerSystem());
@@ -340,7 +409,7 @@ public class TorsoBisectionTests
         cold.Medical = setup.Medical;
         cold.Fighter = new Fighter(null) { IsAnimal = animal };
         float flesh = cold.Medical!.Parts[chest].Flesh, blood = cold.Medical.Blood;
-        world.Commands.Enqueue(new DebugBisect(defender) { Tick = 0, Attacker = attacker, CutDirection = direction });
+        world.Commands.Enqueue(new DebugBisect(defender) { Tick = 0, Attacker = attacker, CutDirection = direction, Style = style });
         world.RunTick();
         Assert.Equal(flesh, cold.Medical.Parts[chest].Flesh);
         Assert.Equal(blood, cold.Medical.Blood);
@@ -349,7 +418,7 @@ public class TorsoBisectionTests
         Assert.Empty(queue);
     }
 
-    static Vector4 DebugPlane(ulong worldSeed, ulong? visualSeed, int direction = 2)
+    static Vector4 DebugPlane(ulong worldSeed, ulong? visualSeed, int direction = 2, TorsoBisectionStyle style = TorsoBisectionStyle.Auto)
     {
         using var world = NewWorld(worldSeed, 1, out _);
         world.AddSystem(new PlayerSystem());
@@ -360,14 +429,15 @@ public class TorsoBisectionTests
         var setup = Victim(out _);
         cold.Race = setup.Race;
         cold.Medical = setup.Medical;
-        world.Commands.Enqueue(new DebugBisect(defender) { Tick = 0, Attacker = attacker, VisualSeed = visualSeed, CutDirection = direction });
+        world.Commands.Enqueue(new DebugBisect(defender) { Tick = 0, Attacker = attacker, VisualSeed = visualSeed, CutDirection = direction, Style = style });
         world.RunTick();
         var hit = Assert.Single(queue, e => e.Kind == CombatEventKind.Hit);
         Assert.True(cold.Medical!.Dead);
-        var plane = cold.TorsoBisection!.Value.Plane;
+        var state = cold.TorsoBisection!.Value;
         ulong variation = visualSeed ?? TorsoBisectionPolicy.VisualSeedFor(worldSeed, defender, attacker, 0);
-        Assert.Equal(TorsoBisectionPolicy.PlaneForDirection(hit.CutDirection, variation, hit.Direction, hit.VictimYaw), plane);
-        return plane;
+        Assert.Equal(TorsoBisectionPolicy.StateForDirection(hit.CutDirection, variation, hit.Direction, hit.VictimYaw, style), state);
+        if (style is TorsoBisectionStyle.Vertical or TorsoBisectionStyle.Diagonal) Assert.True(state.FullBody && hit.CutDirection is 1 or 7);
+        return state.Plane;
     }
 
     static CharacterCold Victim(out int chest)

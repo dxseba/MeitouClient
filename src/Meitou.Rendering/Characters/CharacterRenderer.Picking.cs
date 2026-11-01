@@ -60,31 +60,83 @@ internal sealed partial class CharacterRenderer
     }
 
     /// <summary>The fitted torso cut's outer-rim centre in its current posed world frame; null if neither the section nor spine is available.</summary>
-    public Vector3? TorsoCutPosition(long key, Vector4 plane)
+    public Vector3? TorsoCutPosition(long key, Vector4 plane) => TorsoCutPosition(key, new CharacterTorsoCut(plane, 1));
+
+    /// <summary>The largest fitted contour's outer-rim centre, normally the trunk, in world space.</summary>
+    public Vector3? TorsoCutPosition(long key, in CharacterTorsoCut cut)
     {
         if (!states.TryGetValue(key, out var state) || state.Asset is not { IsIcon: false, BodySource: { } source } asset || state.Posed < 0)
             return BonePosition(key, "Bip01 Spine1");
         var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
-        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), new(plane, 1), morphs);
+        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), cut, morphs);
         if (cap is null) return BonePosition(key, "Bip01 Spine1");
         var centre = Vector3.Zero;
         int count = 0;
         foreach (var vertex in cap)
         {
-            if (vertex.Uv.X > 0.5f) continue;
-            var posed = Vector3.Zero;
-            float sum = 0;
-            for (int k = 0; k < 4; k++)
-            {
-                uint bone = vertex.Bones >> (k * 8) & 255;
-                if (bone >= state.Bones.Length || vertex.Weights[k] <= 0) continue;
-                posed += Vector3.Transform(vertex.Position, state.Bones[bone]) * vertex.Weights[k];
-                sum += vertex.Weights[k];
-            }
-            centre += sum > 0 ? posed / sum : vertex.Position;
+            if (vertex.Uv.X > 0.5f || vertex.Uv.Y > 0.5f) continue;
+            centre += PoseCutVertex(vertex, state);
             count++;
         }
-        return count > 0 ? Vector3.Transform(centre / count, state.World) : BonePosition(key, "Bip01 Spine1");
+        return count > 0 ? centre / count : BonePosition(key, "Bip01 Spine1");
+    }
+
+    static Vector3 PoseCutVertex(in Vertex vertex, CharState state)
+    {
+        var posed = Vector3.Zero;
+        float sum = 0;
+        for (int k = 0; k < 4; k++)
+        {
+            uint bone = vertex.Bones >> (k * 8) & 255;
+            if (bone >= state.Bones.Length || vertex.Weights[k] <= 0) continue;
+            posed += Vector3.Transform(vertex.Position, state.Bones[bone]) * vertex.Weights[k];
+            sum += vertex.Weights[k];
+        }
+        return Vector3.Transform(sum > 0 ? posed / sum : vertex.Position, state.World);
+    }
+
+    /// <summary>The posed plane normal toward the positive half, regardless of this cut's KeepSide.</summary>
+    public Vector3? TorsoCutNormal(long key, in CharacterTorsoCut cut)
+    {
+        if (!states.TryGetValue(key, out var state) || state.Asset is not { IsIcon: false, BodySource: { } source } asset || state.Posed < 0) return null;
+        var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
+        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), cut, morphs);
+        var normal = Vector3.Zero;
+        if (cap is not null)
+            for (int i = 0; i + 2 < cap.Length; i += 3)
+                normal += Vector3.Cross(PoseCutVertex(cap[i + 1], state) - PoseCutVertex(cap[i], state), PoseCutVertex(cap[i + 2], state) - PoseCutVertex(cap[i], state)) * -cut.KeepSide;
+        if (normal.LengthSquared() < 1e-8f) normal = Vector3.TransformNormal(new(cut.Plane.X, cut.Plane.Y, cut.Plane.Z), state.World);
+        return float.IsFinite(normal.LengthSquared()) && normal.LengthSquared() > 1e-8f ? Vector3.Normalize(normal) : null;
+    }
+
+    /// <summary>At most 256 support samples from the kept posed body and cut edges, in world space.</summary>
+    public Vector3[]? TorsoCutBounds(long key, in CharacterTorsoCut cut)
+    {
+        if (!states.TryGetValue(key, out var state) || state.Asset is not { IsIcon: false, BodySource: { } source } asset || state.Posed < 0) return null;
+        var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
+        var candidates = TorsoCutSurface.KeptVertices(source, woundMasks.BoneGroups(asset.Rig), cut, morphs).Select(v => PoseCutVertex(v, state)).Distinct().ToArray();
+        if (candidates.Length <= 256) return candidates;
+        var samples = new HashSet<Vector3>();
+        for (int i = 0; i < 256; i++)
+        {
+            Vector3 direction;
+            if (i < 6) { direction = default; direction[i / 2] = i % 2 == 0 ? 1 : -1; }
+            else
+            {
+                float y = 1 - 2 * (i - 6 + 0.5f) / 250, angle = (i - 6) * 2.39996323f;
+                float radius = MathF.Sqrt(1 - y * y);
+                direction = new(MathF.Cos(angle) * radius, y, MathF.Sin(angle) * radius);
+            }
+            float maximum = float.MinValue;
+            var best = candidates[0];
+            foreach (var point in candidates)
+            {
+                float support = Vector3.Dot(point, direction);
+                if (support > maximum) { maximum = support; best = point; }
+            }
+            samples.Add(best);
+        }
+        return [.. samples];
     }
 
     /// <summary>

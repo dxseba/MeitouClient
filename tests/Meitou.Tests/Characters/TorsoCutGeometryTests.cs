@@ -102,6 +102,39 @@ public class TorsoCutGeometryTests
     }
 
     [Fact]
+    public void Full_body_planes_split_every_group_and_keep_disconnected_caps_separate()
+    {
+        Vertex[] source = [.. Box(new(-1, 0, -0.6f), new(1, 2, 0.6f)), .. Box(new(-0.4f, 4, -0.3f), new(0.4f, 5, 0.3f), 1)];
+        uint[] groups = [3u << 4];
+        foreach (int side in new[] { -1, 1 })
+        {
+            Assert.True(TorsoCutSurface.TryNormalize(new(new(2, 0, 0, 0), side, true), out var cut));
+            Assert.Equal(new Vector4(1, 0, 0, 0), cut.Plane);
+            Assert.Equal(1, TorsoCutSurface.Packed(cut).M23);
+            for (int group = 0; group <= 6; group++)
+            {
+                Assert.True(TorsoCutSurface.Band(new(side, 1, 0), group, cut) > 0);
+                Assert.True(TorsoCutSurface.Band(new(-side, 1, 0), group, cut) < 0);
+                Assert.Null(TorsoCutSurface.RayBox(new(-side * 0.5f, 1, -3), Vector3.UnitZ, new(-1, 0, -1), new(1, 2, 1), group, cut));
+            }
+            var cap = TorsoCutSurface.Build(source, groups, cut)!;
+            Assert.NotNull(cap);
+            Assert.Equal(2, cap.Select(v => v.Uv.Y).Distinct().Count());
+            Assert.All(cap, v => Assert.True(float.IsFinite(v.Position.LengthSquared()) && v.Normal.X * side <= 1e-5f));
+            for (int i = 0; i < cap.Length; i += 3)
+            {
+                Assert.Equal(cap[i].Uv.Y, cap[i + 1].Uv.Y);
+                Assert.Equal(cap[i].Uv.Y, cap[i + 2].Uv.Y);
+                Assert.InRange(MathF.Max(cap[i].Position.Y, MathF.Max(cap[i + 1].Position.Y, cap[i + 2].Position.Y))
+                    - MathF.Min(cap[i].Position.Y, MathF.Min(cap[i + 1].Position.Y, cap[i + 2].Position.Y)), 0, 2.01f);
+            }
+            var samples = TorsoCutSurface.KeptVertices(source, groups, cut).ToArray();
+            Assert.All(samples, v => Assert.True(v.Position.X * side >= -1e-6f));
+            Assert.Contains(samples, v => v.Position.X == 0 && v.Position.Y >= 4);
+        }
+    }
+
+    [Fact]
     public void Soft_tissue_cutoff_keeps_complete_triangles_without_joining_later_organ_faces()
     {
         static EcorcheVertex V(float x, float y) => new(new(x, y, 0), Vector3.UnitZ, default);
@@ -194,5 +227,34 @@ public class TorsoCutGeometryTests
                 });
             }
         }
+        CheckInstalledFullBody(source, groups, file);
+    }
+
+    static void CheckInstalledFullBody(Vertex[] source, uint[] groups, string file)
+    {
+        foreach (var style in new[] { TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal })
+            for (ulong seed = 0; seed < 4; seed++)
+            {
+                var state = TorsoBisectionPolicy.StateForDirection(seed % 2 == 0 ? 1 : 7, seed, new(0.4f, -0.9f), 0.3f, style);
+                Assert.True(state.FullBody);
+                foreach (int side in new[] { -1, 1 })
+                {
+                    string sample = $"{file}: {style} seed {seed} side {side}";
+                    var cap = TorsoCutSurface.Build(source, groups, new(state.Plane, side, true));
+                    Assert.True(cap is { Length: >= 12 and <= 32768 }, sample + " did not fit a bounded full-body cap");
+                    Assert.All(cap!, v => Assert.True(float.IsFinite(v.Position.LengthSquared()), sample + " produced a nonfinite cap"));
+                    var rim = cap!.Where(v => v.Uv.X < 0.5f).ToArray();
+                    Assert.True(rim.Min(v => v.Position.Y) < 10, sample + " did not continue through the pelvis into a leg");
+                    Assert.True(rim.Max(v => v.Position.Y) > 13.5f, sample + " did not reach the chest");
+                    if (style == TorsoBisectionStyle.Vertical) Assert.True(rim.Max(v => v.Position.Y) > 17.5f, sample + " did not cap the sliced head");
+                    foreach (var v in rim)
+                        Assert.InRange(MathF.Abs(Vector3.Dot(new(state.Plane.X, state.Plane.Y, state.Plane.Z), v.Position) + state.Plane.W), 0, 0.04f);
+                    for (int i = 0; i < cap.Length; i += 3)
+                    {
+                        Assert.Equal(cap[i].Uv.Y, cap[i + 1].Uv.Y);
+                        Assert.Equal(cap[i].Uv.Y, cap[i + 2].Uv.Y);
+                    }
+                }
+            }
     }
 }

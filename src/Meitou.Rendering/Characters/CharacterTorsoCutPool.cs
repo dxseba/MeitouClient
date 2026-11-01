@@ -7,7 +7,7 @@ namespace Meitou.Rendering.Characters;
 /// <summary>At most 64 live half-body cap buffers, reused without growing renderer batch identities.</summary>
 sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
 {
-    const int Capacity = 64, VertexCapacity = 8192;
+    const int Capacity = 64, VertexCapacity = 32768;
     sealed class Slot
     {
         public long Key, Seen;

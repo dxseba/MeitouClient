@@ -12,8 +12,8 @@ public readonly record struct CharacterWoundMark(string BoneA, string BoneB, flo
 /// <summary>An estimated surface anchor in the original body bind space; not a measured blade collision.</summary>
 public readonly record struct CharacterHeadWoundPlacement(Vector3 Point, Vector3 Normal, Vector3 Tangent, float LengthScale = 1, float WidthScale = 1);
 
-/// <summary>A torso separation in original bind space: dot(Plane.xyz, position) + Plane.w = 0; +1 keeps the upper half, -1 the lower.</summary>
-public readonly record struct CharacterTorsoCut(Vector4 Plane, int KeepSide);
+/// <summary>A separation in original bind space: dot(Plane.xyz, position) + Plane.w = 0; KeepSide selects its positive or negative half. FullBody clips every group; otherwise arms/head stay upper and legs lower.</summary>
+public readonly record struct CharacterTorsoCut(Vector4 Plane, int KeepSide, bool FullBody = false);
 
 /// <summary>
 /// A character to draw this frame, already interpolated by the host. <see cref="Key"/> is stable while the character exists, so
@@ -56,7 +56,7 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public uint LostGroups { get; init; }
     /// <summary>Optional inferred head surface anchor; null keeps the legacy forehead profile.</summary>
     public CharacterHeadWoundPlacement? HeadWoundPlacement { get; init; }
-    /// <summary>Optional permanent torso separation; arms/head belong to the upper half and legs to the lower.</summary>
+    /// <summary>Optional permanent plane separation, with fixed limb ownership only for transverse cuts.</summary>
     public CharacterTorsoCut? TorsoCut { get; init; }
     /// <summary>Where each lost limb ends, a byte a limb slot: its bind height x 10; 0: the game's own stump.</summary>
     public uint LimbCuts { get; init; }

@@ -5,6 +5,7 @@ using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Gameplay.Construction;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Combat;
+using Meitou.Simulation.Wounds;
 
 namespace Meitou.Simulation;
 
@@ -30,15 +31,17 @@ public sealed record DebugSever(CharacterId Character, int LimbSlot) : DebugComm
 /// <summary>Kills a character by cutting its head off.</summary>
 public sealed record DebugBehead(CharacterId Character) : DebugCommand;
 
-/// <summary>One deterministic, very strong sideways chest cleave; an optional attacker supplies the real incoming direction.</summary>
+/// <summary>One deterministic, very strong chest cleave; an optional attacker supplies the real incoming direction.</summary>
 public sealed record DebugBisect(CharacterId Character) : DebugCommand
 {
     /// <summary>None selects a living selected character, then the nearest living character.</summary>
     public CharacterId Attacker { get; init; } = CharacterId.None;
     /// <summary>Explicit repeatable visual variation; null derives it from the world and this command's source, victim and tick.</summary>
     public ulong? VisualSeed { get; init; }
-    /// <summary>The cleave's technique axis: 2 left, 3 right; other axes remain subject to the normal bisection policy.</summary>
+    /// <summary>The cleave's technique axis: 1 down, 2 left, 3 right; explicit styles and the normal policy constrain the accepted axes.</summary>
     public int CutDirection { get; init; } = 2;
+    /// <summary>Auto follows the technique axis; explicit vertical/diagonal scenes use a downward cleave.</summary>
+    public TorsoBisectionStyle Style { get; init; } = TorsoBisectionStyle.Auto;
 }
 
 public sealed record DebugDamage(IReadOnlyList<CharacterId> Characters, float Cut) : DebugCommand;
@@ -147,7 +150,7 @@ static class DebugCheats
                 }
                 break;
             case DebugBisect bisect when world.SystemOf<CombatSystem>() is { } combat:
-                combat.DebugBisect(world, bisect.Character, bisect.Attacker, bisect.VisualSeed, bisect.CutDirection);
+                combat.DebugBisect(world, bisect.Character, bisect.Attacker, bisect.VisualSeed, bisect.CutDirection, bisect.Style);
                 break;
             case DebugUnlockResearch when data is not null:
                 world.Post($"Research unlocked: {world.Research.CompleteAll(data.Db)} finished.");

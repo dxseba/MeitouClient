@@ -3,8 +3,8 @@ using System.Numerics;
 
 namespace Meitou.Simulation.Wounds;
 
-/// <summary>A fixed plane in the original body bind space: dot(Plane.xyz, position) + Plane.W = 0; the upper half is positive.</summary>
-public readonly record struct TorsoBisectionState(Vector4 Plane)
+/// <summary>A fixed plane in the original body bind space: dot(Plane.xyz, position) + Plane.W = 0; positive and negative halves follow the plane. FullBody permits cuts through limbs.</summary>
+public readonly record struct TorsoBisectionState(Vector4 Plane, bool FullBody = false)
 {
     public bool IsValid
     {
@@ -12,8 +12,8 @@ public readonly record struct TorsoBisectionState(Vector4 Plane)
         {
             if (!float.IsFinite(Plane.X) || !float.IsFinite(Plane.Y) || !float.IsFinite(Plane.Z) || !float.IsFinite(Plane.W)) return false;
             float length = new Vector3(Plane.X, Plane.Y, Plane.Z).LengthSquared();
-            // The renderer supports an upward torso cross-section, with the same normalized-Y limit.
-            return float.IsFinite(length) && MathF.Abs(length - 1) <= 0.001f && Plane.Y / MathF.Sqrt(length) >= 0.5f;
+            // Transverse cuts retain the legacy upward limit; full-body planes may be vertical or steep.
+            return float.IsFinite(length) && MathF.Abs(length - 1) <= 0.001f && (FullBody || Plane.Y / MathF.Sqrt(length) >= 0.5f);
         }
     }
 }
@@ -24,7 +24,8 @@ public readonly record struct TorsoBisectionReadResult(bool SupportedVersion, in
 public sealed class TorsoBisections
 {
     public const string FileName = "torso-wounds.meitou";
-    public const string Header = "MEITOU-TORSO-WOUNDS 1";
+    public const string Header = "MEITOU-TORSO-WOUNDS 2";
+    const string LegacyHeader = "MEITOU-TORSO-WOUNDS 1";
     static readonly CultureInfo Culture = CultureInfo.InvariantCulture;
     readonly Dictionary<CharacterId, TorsoBisectionState> live = [];
     readonly Dictionary<(int C, int I), TorsoBisectionState> pending = [];
@@ -137,7 +138,7 @@ public sealed class TorsoBisections
         foreach (var (saved, state) in records.OrderBy(p => p.Key.C).ThenBy(p => p.Key.I))
         {
             var p = state.Plane;
-            yield return string.Create(Culture, $"T {saved.C} {saved.I} {p.X:R} {p.Y:R} {p.Z:R} {p.W:R}");
+            yield return string.Create(Culture, $"T {saved.C} {saved.I} {p.X:R} {p.Y:R} {p.Z:R} {p.W:R} {(state.FullBody ? 1 : 0)}");
         }
     }
 
@@ -145,39 +146,45 @@ public sealed class TorsoBisections
     public TorsoBisectionReadResult Read(IEnumerable<string> lines, Func<(int C, int I), CharacterId?> character, Func<(int C, int I), bool>? exists = null)
     {
         Clear();
-        bool header = false;
+        int version = 0;
         int rejected = 0;
         foreach (var line in lines)
         {
             string text = line.Trim().TrimStart('\uFEFF');
             if (text.Length == 0 || text.StartsWith('#')) continue;
-            if (!header)
+            if (version == 0)
             {
-                if (text != Header) return new(false, 0, 0, 0);
-                header = true;
+                version = text switch { Header => 2, LegacyHeader => 1, _ => 0 };
+                if (version == 0) return new(false, 0, 0, 0);
                 continue;
             }
-            if (!TryRow(text, out var handle, out var state)) { rejected++; continue; }
+            if (!TryRow(text, version, out var handle, out var state)) { rejected++; continue; }
             if (exists?.Invoke(handle) == false) continue;
             pending[handle] = state;
         }
-        if (!header) return new(false, 0, 0, 0);
+        if (version == 0) return new(false, 0, 0, 0);
         int restored = Resolve(character);
         return new(true, restored, pending.Count, rejected);
     }
 
-    static bool TryRow(string line, out (int C, int I) handle, out TorsoBisectionState state)
+    static bool TryRow(string line, int version, out (int C, int I) handle, out TorsoBisectionState state)
     {
         handle = default;
         state = default;
         var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (fields.Length != 7 || fields[0] != "T"
+        if (fields.Length != (version == 1 ? 7 : 8) || fields[0] != "T"
             || !int.TryParse(fields[1], NumberStyles.Integer, Culture, out int container) || container < 0
             || !int.TryParse(fields[2], NumberStyles.Integer, Culture, out int instance) || instance < 0) return false;
         Span<float> values = stackalloc float[4];
         for (int i = 0; i < values.Length; i++)
             if (!float.TryParse(fields[i + 3], NumberStyles.Float, Culture, out values[i]) || !float.IsFinite(values[i])) return false;
-        state = new(new(values[0], values[1], values[2], values[3]));
+        bool fullBody = false;
+        if (version == 2)
+        {
+            if (!int.TryParse(fields[7], NumberStyles.Integer, Culture, out int flag) || flag is < 0 or > 1) return false;
+            fullBody = flag == 1;
+        }
+        state = new(new(values[0], values[1], values[2], values[3]), fullBody);
         if (!state.IsValid) return false;
         handle = (container, instance);
         return true;

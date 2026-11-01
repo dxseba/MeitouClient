@@ -218,7 +218,7 @@ sealed partial class GameHost
         var world = session.World;
         if (g.SandboxBisect)
         {
-            if (!sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBisect(sandboxFoe) { Tick = world.Tick, Attacker = sandboxHero, VisualSeed = g.SandboxBisectVariant, CutDirection = g.SandboxCutDirection ?? 2 });
+            if (!sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBisect(sandboxFoe) { Tick = world.Tick, Attacker = sandboxHero, VisualSeed = g.SandboxBisectVariant, CutDirection = g.SandboxCutDirection ?? 2, Style = g.SandboxBisectStyle });
             return;
         }
         if (g.SandboxBehead && !sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBehead(sandboxFoe) { Tick = world.Tick });
