@@ -84,7 +84,7 @@ public class SevereHeadWoundsTests
         [
             [],
             ["7 9 -1 8 0.5 0 0 1 1 0 0.2 1 1.2 4 4 1 120"],
-            ["MEITOU-HEAD-WOUNDS 3", "H 1 1 4 3 5 1"],
+            ["MEITOU-HEAD-WOUNDS 4", "H 1 1 4 3 5 1"],
         ];
         foreach (var lines in inputs)
         {
@@ -108,9 +108,9 @@ public class SevereHeadWoundsTests
             "H 8 2 4 3 6 1",
             "H 8 3 4 9 0 1",
             "H 8 4 4 1 2 1",
-            "H 8 5 4 3 2 1 NaN 1 2 0 0 1 1 0 0",
-            "H 8 6 4 3 2 1 1 2 3 0 0 0 1 0 0",
-            "H 8 7 4 3 2 1 1 2 3 0 0 1 0 0 1", // Parallel frame vectors.
+            "H 8 5 4 3 2 1 NaN 1 2 0 0 1 1 0 0 1 1",
+            "H 8 6 4 3 2 1 1 2 3 0 0 0 1 0 0 1 1",
+            "H 8 7 4 3 2 1 1 2 3 0 0 1 0 0 1 1 1", // Parallel frame vectors.
             "H 8 8 many 3 2 1",
             "H 8 9 4 2 1 1",
         ];
@@ -312,7 +312,7 @@ public class SevereHeadWoundsTests
         Assert.Equal(1, result.Pending);
         Assert.Equal(new SevereHeadWoundState(3), store.Of(Original));
         var upgraded = store.Write(_ => (5, 1)).ToArray();
-        Assert.Equal("MEITOU-HEAD-WOUNDS 2", upgraded[0]);
+        Assert.Equal("MEITOU-HEAD-WOUNDS 3", upgraded[0]);
         Assert.Equal("H 5 1 3 0 0 1", upgraded[1]);
         var after = new SevereHeadWounds();
         var restored = after.Read(upgraded, h => h.I == 1 ? Original : Reloaded);
@@ -324,7 +324,7 @@ public class SevereHeadWoundsTests
     public void Version_two_rejects_unspecified_unknown_and_noninteger_mechanisms_without_erasing_valid_damage()
     {
         var store = new SevereHeadWounds();
-        var result = store.Read([SevereHeadWounds.Header,
+        var result = store.Read(["MEITOU-HEAD-WOUNDS 2",
             "H 3 1 4 2 3 2", "H 3 1 4 2 3 0", "H 3 2 4 2 3 -1", "H 3 3 4 2 3 4", "H 3 4 4 2 3 Slash", "H 3 5 4 2 3 2147483648"],
             _ => Original);
         Assert.Equal(1, result.Restored);
@@ -338,17 +338,76 @@ public class SevereHeadWoundsTests
     public void Each_sidecar_version_accepts_only_its_own_plain_and_placed_record_shapes()
     {
         var legacy = new SevereHeadWounds();
-        var oldResult = legacy.Read(["MEITOU-HEAD-WOUNDS 1", "H 5 1 4 2 2 1", "H 5 2 4 3 2 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 3 4 2 2"],
+        var oldResult = legacy.Read(["MEITOU-HEAD-WOUNDS 1", "H 5 1 4 2 2 1", "H 5 2 4 3 2 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 4 4 3 2 2 0.37 18.72 0.91 0 0 1 1 0 0 1 1", "H 5 3 4 2 2"],
             _ => Original);
         Assert.Equal(1, oldResult.Restored);
-        Assert.Equal(2, oldResult.Rejected);
+        Assert.Equal(3, oldResult.Rejected);
+        var version2 = new SevereHeadWounds();
+        var version2Result = version2.Read(["MEITOU-HEAD-WOUNDS 2", "H 5 1 4 2 2", "H 5 2 4 3 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 4 4 3 2 2 0.37 18.72 0.91 0 0 1 1 0 0 1 1", "H 5 3 4 2 2 3"],
+            _ => Reloaded);
+        Assert.Equal(1, version2Result.Restored);
+        Assert.Equal(3, version2Result.Rejected);
         var current = new SevereHeadWounds();
-        var newResult = current.Read([SevereHeadWounds.Header, "H 5 1 4 2 2", "H 5 2 4 3 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 3 4 2 2 3"],
+        var newResult = current.Read([SevereHeadWounds.Header, "H 5 1 4 2 2", "H 5 2 4 3 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 4 4 3 2 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 3 4 2 2 3"],
             _ => Reloaded);
         Assert.Equal(1, newResult.Restored);
-        Assert.Equal(2, newResult.Rejected);
+        Assert.Equal(3, newResult.Rejected);
         Assert.Equal(CombatWoundMechanism.Slash, legacy.Of(Original)!.Value.Mechanism);
         Assert.Equal(CombatWoundMechanism.Crush, current.Of(Reloaded)!.Value.Mechanism);
+    }
+
+    [Fact]
+    public void Version_three_size_scales_keep_float_precision_through_pending_resave_and_runtime_rebinding()
+    {
+        var placement = Placement with { LengthScale = 1.1734568f, WidthScale = 0.8234567f };
+        var state = new SevereHeadWoundState(5, SevereHeadWoundKind.BrokenSkull, 3, placement, CombatWoundMechanism.Crush);
+        var source = new SevereHeadWounds();
+        Assert.True(source.Set(Original, state));
+        var first = source.Write(_ => (8, 9)).ToArray();
+        Assert.Equal("MEITOU-HEAD-WOUNDS 3", first[0]);
+        Assert.Equal(18, first[1].Split(' ').Length);
+        var pending = new SevereHeadWounds();
+        Assert.Equal(1, pending.Read(first, _ => null).Pending);
+        var second = pending.Write(_ => null).ToArray();
+        Assert.Equal(first, second);
+        Assert.Equal(1, pending.Resolve(_ => Reloaded));
+        Assert.Equal(state, pending.Of(Reloaded));
+    }
+
+    [Fact]
+    public void Version_two_placed_wounds_keep_their_mechanism_and_default_both_size_scales_on_upgrade()
+    {
+        var source = new SevereHeadWounds();
+        var loaded = source.Read(["MEITOU-HEAD-WOUNDS 2", "H 2 1 3 0 0 1", "H 2 2 5 3 4 3 0.37 18.72 0.91 0 0 1 1 0 0"],
+            h => h.I == 1 ? Original : Reloaded);
+        Assert.True(loaded.SupportedVersion);
+        Assert.Equal(2, loaded.Restored);
+        var expected = new SevereHeadWoundState(5, SevereHeadWoundKind.BrokenSkull, 4, Placement, CombatWoundMechanism.Crush);
+        Assert.Equal(expected, source.Of(Reloaded));
+        var written = source.Write(id => id == Original ? (2, 1) : (2, 2)).ToArray();
+        Assert.Equal("MEITOU-HEAD-WOUNDS 3", written[0]);
+        Assert.Equal(7, written[1].Split(' ').Length);
+        Assert.Equal(18, written[2].Split(' ').Length);
+        var after = new SevereHeadWounds();
+        Assert.Equal(2, after.Read(written, h => h.I == 1 ? Original : Reloaded).Restored);
+        Assert.Equal(expected, after.Of(Reloaded));
+    }
+
+    [Fact]
+    public void Invalid_placement_size_scales_are_rejected_while_inclusive_range_edges_survive_save_load()
+    {
+        string[] badScales = ["NaN 1", "1 Infinity", "-Infinity 1", "0.499 1", "2.001 1", "1 0.499", "1 2.001"];
+        var rows = badScales.Select((scales, i) => $"H 4 {i + 2} 5 3 4 3 0.37 18.72 0.91 0 0 1 1 0 0 {scales}");
+        var source = new SevereHeadWounds();
+        var loaded = source.Read([SevereHeadWounds.Header, "H 4 1 5 3 4 3 0.37 18.72 0.91 0 0 1 1 0 0 0.5 2", .. rows], _ => Original);
+        Assert.Equal(1, loaded.Restored);
+        Assert.Equal(badScales.Length, loaded.Rejected);
+        var expected = new SevereHeadWoundState(5, SevereHeadWoundKind.BrokenSkull, 4, Placement with { LengthScale = 0.5f, WidthScale = 2 }, CombatWoundMechanism.Crush);
+        Assert.Equal(expected, source.Of(Original));
+        Assert.False(source.Set(Reloaded, expected with { Placement = Placement with { LengthScale = float.NaN } }));
+        var after = new SevereHeadWounds();
+        Assert.Equal(1, after.Read(source.Write(_ => (4, 1)), _ => Reloaded).Restored);
+        Assert.Equal(expected, after.Of(Reloaded));
     }
 }
 

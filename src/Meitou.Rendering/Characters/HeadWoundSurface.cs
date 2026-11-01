@@ -74,6 +74,10 @@ static partial class HeadWoundSurface
                     // Raised strands and braids project back onto this cut; the opposite scalp stays outside it.
                     return headSwordWound(p - normal * max(depth, 0.0), profile, placement);
                 }
+                bool headBrainVisible(vec3 p, uint profile, mat4 placement, uint open)
+                {
+                    return open >= 2u && headSwordWound(p, profile, placement) < headSwordCleft(p, profile, placement);
+                }
                 """;
         }
     }

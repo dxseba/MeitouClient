@@ -10,7 +10,7 @@ public readonly record struct CharacterPose(string Animation, float Time, float 
 public readonly record struct CharacterWoundMark(string BoneA, string BoneB, float T, Vector3 Side, float Cosine, float Sine, float Aspect, float Depth, float Size = 1, float Flow = 1);
 
 /// <summary>An estimated surface anchor in the original body bind space; not a measured blade collision.</summary>
-public readonly record struct CharacterHeadWoundPlacement(Vector3 Point, Vector3 Normal, Vector3 Tangent);
+public readonly record struct CharacterHeadWoundPlacement(Vector3 Point, Vector3 Normal, Vector3 Tangent, float LengthScale = 1, float WidthScale = 1);
 
 /// <summary>
 /// A character to draw this frame, already interpolated by the host. <see cref="Key"/> is stable while the character exists, so

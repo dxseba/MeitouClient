@@ -24,6 +24,36 @@ static partial class HeadWoundSurface
         return valid && Finite(unit);
     }
 
+    /// <summary>Internal head bounds exclude torso charts and articulated horns, without imposing human proportions on other person races.</summary>
+    public static bool TryAnatomyBounds(Vertex[] source, int headBone, int jawBone, MeshMorphs? morphs, out Vector3 min, out Vector3 max)
+    {
+        min = new(float.MaxValue);
+        max = new(float.MinValue);
+        if (headBone < 0) return false;
+        var hornSlots = new HashSet<uint>();
+        if (morphs is not null)
+            foreach (var (name, pose) in morphs.Poses)
+                if (name.Contains("horn", StringComparison.OrdinalIgnoreCase))
+                    for (int i = 0; i < pose.Slots.Length; i++)
+                        if (pose.Offsets[i].LengthSquared() > 0) hornSlots.Add((uint)pose.Slots[i]);
+        int count = 0;
+        foreach (var vertex in source)
+        {
+            if (vertex.Uv.Y >= 0 || !Finite(vertex.Position) || hornSlots.Contains(BitConverter.SingleToUInt32Bits(vertex.Colour.X))) continue;
+            float weight = 0;
+            for (int k = 0; k < 4; k++)
+            {
+                int bone = (int)(vertex.Bones >> (k * 8) & 255);
+                if (bone == headBone || bone == jawBone) weight += vertex.Weights[k];
+            }
+            if (!float.IsFinite(weight) || weight < 0.5f) continue;
+            min = Vector3.Min(min, vertex.Position);
+            max = Vector3.Max(max, vertex.Position);
+            count++;
+        }
+        return count >= 3 && Finite(min) && Finite(max) && max.X > min.X && max.Y > min.Y && max.Z > min.Z;
+    }
+
     /// <summary>A small triangle subset; an AABB intersection keeps a large triangle spanning the cut.</summary>
     static Vertex[] Nearby(Vertex[] source, Vector3 point, float reach)
     {
@@ -83,11 +113,13 @@ static partial class HeadWoundSurface
     public static bool TryProjectPlacement(Vertex[] source, in CharacterHeadWoundPlacement placement, int profile, out HeadWoundFrame frame, int mechanism = 0)
     {
         frame = default;
-        if (!Finite(placement.Point) || !Unit(placement.Normal, out var normal) || !Finite(placement.Tangent) || source.Length == 0) return false;
+        if (!Finite(placement.Point) || !Unit(placement.Normal, out var normal) || !Finite(placement.Tangent) || source.Length == 0
+            || !float.IsFinite(placement.LengthScale) || placement.LengthScale is < 0.5f or > 2
+            || !float.IsFinite(placement.WidthScale) || placement.WidthScale is < 0.5f or > 2) return false;
         if (Project(source, placement.Point, normal, placement.Point, 2, null) is not { } hit) return false;
         if (!Unit(placement.Tangent - hit.Normal * Vector3.Dot(placement.Tangent, hit.Normal), out var along)) return false;
         var dimensions = Dimensions(Math.Clamp(profile, 0, Profiles - 1), mechanism);
-        frame = new(hit.Position, hit.Normal, along, dimensions.HalfLength, dimensions.HalfWidth, mechanism);
+        frame = new(hit.Position, hit.Normal, along, dimensions.HalfLength * placement.LengthScale, dimensions.HalfWidth * placement.WidthScale, mechanism);
         return true;
     }
 

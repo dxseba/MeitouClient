@@ -383,10 +383,10 @@ internal sealed class CharacterContent : IDisposable
         return meshes[key] = ready is null ? null : Upload(ready);
     }
 
-    /// <summary>Kenshi Gore Lab's Ecorche file from the install's mods folder, fitted to the rig; null without the file or the bones. Rigid per bone, one mesh per rig, the layer as vertex colour.</summary>
-    LoadedMesh? AnatomyMesh(SkeletonRig rig, WoundPoint[] skin, bool female)
+    /// <summary>Kenshi Gore Lab's Ecorche file from the install's mods folder, fitted to this body's skin; null without the file or the bones. Shared per body mesh/rig/gender.</summary>
+    LoadedMesh? AnatomyMesh(SkeletonRig rig, string bodyPath, WoundPoint[] skin, bool female, MeshMorphs? morphs)
     {
-        var key = ("anatomy", rig.BoneCount, female, (string?)rig.Skeleton.GetHashCode().ToString());
+        var key = ("anatomy@" + bodyPath.ToLowerInvariant(), rig.BoneCount, female, (string?)rig.Skeleton.GetHashCode().ToString());
         if (meshes.TryGetValue(key, out var cached)) return cached;
         string path = Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy");
         if (!File.Exists(path) || rig.Handle("Bip01 Pelvis") is not { } pelvis || rig.Handle("Bip01 Neck") is not { } neck || Math.Max(pelvis, neck) >= rig.BindPosition.Length) return null;
@@ -423,10 +423,10 @@ internal sealed class CharacterContent : IDisposable
         }
         var vertices = new List<Vertex>();
         var batches = Meitou.Data.Characters.EcorcheAsset.Read(stream);
-        // The skull fitted box to box inside this head's own skin (head UVs sit in v below 0), a margin clear of it on every side.
-        var (skullMin, skullMax, headMin, headMax) = (new Vector3(float.MaxValue), new Vector3(float.MinValue), new Vector3(float.MaxValue), new Vector3(float.MinValue));
-        foreach (var point in skin)
-            if (point.Uv.Y < 0) (headMin, headMax) = (Vector3.Min(headMin, point.Position), Vector3.Max(headMax, point.Position));
+        // Negative V also includes Shek torso spikes. Head/jaw skin influence and horn-pose slots identify the actual head volume.
+        bool headSupported = HeadWoundSurface.TryAnatomyBounds(HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [],
+            rig.Handle("Bip01 Head") ?? -1, rig.Handle("Bip01 Jaw") ?? -1, morphs, out var headMin, out var headMax);
+        var (skullMin, skullMax) = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
         foreach (var b in batches)
             if (b.Layer == 0 && b.Bone is "Bip01 Head" or "Bip01 Jaw")
                 foreach (var v in b.Vertices)
@@ -434,11 +434,12 @@ internal sealed class CharacterContent : IDisposable
                     var p = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
                     (skullMin, skullMax) = (Vector3.Min(skullMin, p), Vector3.Max(skullMax, p));
                 }
-        var skullScale = (headMax - headMin - new Vector3(SkullMargin * 2)) / Vector3.Max(skullMax - skullMin, new Vector3(0.01f));
+        var skullScale = headSupported ? Vector3.Max(headMax - headMin - new Vector3(SkullMargin * 2), new Vector3(0.05f)) / Vector3.Max(skullMax - skullMin, new Vector3(0.01f)) : Vector3.One;
         var (skullMiddle, headMiddle) = ((skullMin + skullMax) / 2, (headMin + headMax) / 2);
         foreach (var batch in batches)
         {
             if (batch.Layer is 2 or 3) continue;   // tendon and fat: the cut's own rim stands for them
+            if (!headSupported && batch.Bone is "Bip01 Head" or "Bip01 Jaw") continue;
             if ((rig.Handle(batch.Bone) ?? (batch.Bone == "Bip01 Jaw" ? rig.Handle("Bip01 Head") : null)) is not { } bone) continue;
             var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.36f, 0.075f, 0.07f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.55f, 0.12f, 0.12f, 1) };
             foreach (var v in batch.Vertices)
@@ -475,7 +476,7 @@ internal sealed class CharacterContent : IDisposable
                 vertices.AddRange([a, b, c, b, d, c]);
             }
         // The mouth behind a lost jaw (Z-Anatomy, the user's Mouth.anatomy): placed as one piece, box to box, in the head's lower part. Rigid on the head bone.
-        if (File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy")) && rig.Handle("Bip01 Head") is { } mouthBone)
+        if (headSupported && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy")) && rig.Handle("Bip01 Head") is { } mouthBone)
         {
             using var mouthStream = File.OpenRead(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy"));
             var mouth = Meitou.Data.Characters.EcorcheAsset.Read(mouthStream);
@@ -502,7 +503,7 @@ internal sealed class CharacterContent : IDisposable
             }
         }
         // The brain behind a broken skull (Z-Anatomy, the user's Brain.anatomy): box to box inside the skull. Rigid on the head bone.
-        if (File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Brain.anatomy")) && rig.Handle("Bip01 Head") is { } brainBone)
+        if (headSupported && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Brain.anatomy")) && rig.Handle("Bip01 Head") is { } brainBone)
         {
             using var brainStream = File.OpenRead(Path.Combine(Path.GetDirectoryName(path)!, "Brain.anatomy"));
             var brain = Meitou.Data.Characters.EcorcheAsset.Read(brainStream);
@@ -1009,7 +1010,7 @@ internal sealed class CharacterContent : IDisposable
         }
 
         // Ecorche is a human body, fitted under the skin of any person race that has its bones.
-        if (!asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin && AnatomyMesh(rig, skin, c.Female) is { } anatomy)
+        if (!asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin && AnatomyMesh(rig, bodyPath, skin, c.Female, body.Morphs) is { } anatomy)
             asset.Parts.Add(new AssetPart
             {
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,

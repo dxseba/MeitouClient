@@ -61,4 +61,62 @@ public class HeadWoundPlacementPolicyTests
         Assert.Null(HeadWoundPlacementPolicy.Estimate(new(1, 0), float.PositiveInfinity, 3));
         Assert.Null(HeadWoundPlacementPolicy.Estimate(new(float.MaxValue, float.MaxValue), 0, 3));
     }
+    [Fact]
+    public void Footprint_scales_grow_smoothly_with_force_and_preserve_the_surface_frame()
+    {
+        var approved = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3)!.Value;
+        Assert.Equal(1, approved.LengthScale);
+        Assert.Equal(1, approved.WidthScale);
+        float length = 0, width = 0;
+        foreach (float force in new[] { 15f, 20, 30, 34.99f, 35, 35.01f, 45, 60, 100 })
+        {
+            var frame = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3, force)!.Value;
+            Assert.True(frame.IsValid);
+            Assert.Equal(approved.Point, frame.Point);
+            Assert.Equal(approved.Normal, frame.Normal);
+            Assert.Equal(approved.Tangent, frame.Tangent);
+            Assert.InRange(frame.LengthScale, 0.9f, 1.2f);
+            Assert.InRange(frame.WidthScale, 0.85f, 1.3f);
+            Assert.True(frame.LengthScale >= length && frame.WidthScale >= width);
+            (length, width) = (frame.LengthScale, frame.WidthScale);
+        }
+        var before = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3, 34.99f)!.Value;
+        var after = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3, 35.01f)!.Value;
+        Assert.InRange(after.LengthScale - before.LengthScale, 0, 0.001f);
+        Assert.InRange(after.WidthScale - before.WidthScale, 0, 0.001f);
+        Assert.Null(HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3, float.NaN));
+    }
+
+    [Fact]
+    public void Later_impact_enlarges_the_footprint_without_moving_or_rotating_the_opening()
+    {
+        var opening = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3, 20, 1234)!.Value;
+        var larger = HeadWoundPlacementPolicy.Enlarge(opening, 60);
+        Assert.Equal(opening.Point, larger.Point);
+        Assert.Equal(opening.Normal, larger.Normal);
+        Assert.Equal(opening.Tangent, larger.Tangent);
+        Assert.True(larger.LengthScale > opening.LengthScale && larger.WidthScale > opening.WidthScale);
+        Assert.Equal(larger, HeadWoundPlacementPolicy.Enlarge(larger, 15));
+        Assert.Equal(larger, HeadWoundPlacementPolicy.Enlarge(larger, float.PositiveInfinity));
+    }
+
+    [Fact]
+    public void Opening_variation_is_repeatable_bounded_and_fixed_in_victim_space()
+    {
+        var baseline = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3)!.Value;
+        foreach (ulong variation in new[] { 1UL, 987654321UL, ulong.MaxValue })
+        {
+            var frame = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3, 30, variation)!.Value;
+            Assert.Equal(frame, HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3, 30, variation));
+            Assert.True(frame.IsValid);
+            Assert.InRange(MathF.Abs(frame.Point.Y - baseline.Point.Y), 0, 0.06001f);
+            Assert.True(Vector3.Dot(frame.Tangent, baseline.Tangent) >= MathF.Cos(MathF.PI / 18) - 1e-6f);
+            Assert.InRange(MathF.Abs(Vector3.Dot(frame.Normal, frame.Tangent)), 0, 1e-6f);
+            var turned = HeadWoundPlacementPolicy.Estimate(new(-1, 0), MathF.PI / 2, 3, 30, variation)!.Value;
+            Assert.InRange(Vector3.Distance(frame.Normal, turned.Normal), 0, 1e-6f);
+            Assert.InRange(Vector3.Distance(frame.Tangent, turned.Tangent), 0, 1e-6f);
+            Assert.Equal(frame.Point, turned.Point);
+        }
+    }
+
 }

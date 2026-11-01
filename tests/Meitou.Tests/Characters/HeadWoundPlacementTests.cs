@@ -45,6 +45,10 @@ public class HeadWoundPlacementTests
         Assert.False(HeadWoundSurface.TryProjectPlacement(source, valid with { Point = new(20, 20, 0) }, 0, out _));
         Assert.False(HeadWoundSurface.TryProjectPlacement(source, valid with { Tangent = Vector3.UnitZ }, 0, out _));
         Assert.False(HeadWoundSurface.TryProjectPlacement(source, valid with { Tangent = new(float.MaxValue, float.MaxValue, float.MaxValue) }, 0, out _));
+        Assert.False(HeadWoundSurface.TryProjectPlacement(source, valid with { LengthScale = float.NaN }, 0, out _));
+        Assert.False(HeadWoundSurface.TryProjectPlacement(source, valid with { WidthScale = float.PositiveInfinity }, 0, out _));
+        Assert.False(HeadWoundSurface.TryProjectPlacement(source, valid with { LengthScale = 0.49f }, 0, out _));
+        Assert.False(HeadWoundSurface.TryProjectPlacement(source, valid with { WidthScale = 2.01f }, 0, out _));
         Assert.False(HeadWoundSurface.TryProjectPlacement([], valid, 0, out _));
     }
 
@@ -63,6 +67,33 @@ public class HeadWoundPlacementTests
         Assert.InRange(plain.Length, 1, 4096);
         for (int i = 0; i < plain.Length; i++) Near(new(0.1f, -0.2f, 0.3f), moved[i].Position - plain[i].Position);
         Near(new(0, 0, 1), frame.Centre);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Placement_scales_dimensions_without_moving_the_fixed_anchor_or_axis(int mechanism)
+    {
+        var source = Wall(1, Vector3.UnitZ);
+        var placement = new CharacterHeadWoundPlacement(default, Vector3.UnitZ, Vector3.UnitX);
+        Assert.True(HeadWoundSurface.TryProjectPlacement(source, placement, 0, out var original, mechanism));
+        Assert.True(HeadWoundSurface.TryProjectPlacement(source, placement with { LengthScale = 1, WidthScale = 1 }, 0, out var legacy, mechanism));
+        Assert.Equal(original, legacy);
+        var scaled = placement with { LengthScale = 1.2f, WidthScale = 1.3f };
+        Assert.True(HeadWoundSurface.TryProjectPlacement(source, scaled, 0, out var frame, mechanism));
+        Near(original.Centre, frame.Centre);
+        Near(original.Along, frame.Along);
+        Near(original.Normal, frame.Normal);
+        Assert.Equal(original.HalfLength * 1.2f, frame.HalfLength);
+        Assert.Equal(original.HalfWidth * 1.3f, frame.HalfWidth);
+        var vertices = HeadWoundSurface.FitPlacementVertices(source, frame, 0, null, 0, true, out var fitted);
+        Assert.NotNull(vertices);
+        Near(frame.Centre, fitted.Centre);
+        Near(frame.Along, fitted.Along);
+        Assert.Equal(frame.HalfWidth, fitted.HalfWidth);
+        Assert.Equal(frame.HalfLength, fitted.Packed.M14);
+        Assert.Equal(frame.HalfWidth, fitted.Packed.M24);
     }
 
     [Fact]
@@ -145,18 +176,59 @@ public class HeadWoundPlacementTests
             var up = Vector3.Normalize(Vector3.Cross(normal, across));
             for (int mechanism = 1; mechanism <= 3; mechanism++)
                 for (int profile = 0; profile < 6; profile++)
-            {
-                var along = (profile % 3) switch { 1 => Vector3.Normalize(-across * 0.83f + up * 0.55f), 2 => up, _ => Vector3.Normalize(across * 0.83f + up * 0.55f) };
-                var placement = new CharacterHeadWoundPlacement(new(0, 18.65f, 0), normal, along);
-                Assert.True(HeadWoundSurface.TryProjectPlacement(source, placement, profile, out var frame, mechanism), $"{file}: side {side}, profile {profile}, mechanism {mechanism} did not project to head skin");
-                Assert.True(Vector3.Dot(frame.Normal, normal) > 0, $"{file}: side {side}, profile {profile}, mechanism {mechanism} selected the opposite wall");
-                var vertices = HeadWoundSurface.FitPlacementVertices(source, frame, 0, null, profile, true, out var fitted);
-                Assert.True(vertices is { Length: > 0 and <= 4096 }, $"{file}: side {side}, profile {profile}, mechanism {mechanism} could not fit the cut");
-                Near(frame.Centre, fitted.Centre);
-                Near(frame.Along, fitted.Along);
-                Assert.Equal(mechanism, fitted.Packed.M42);
-                Assert.InRange(fitted.HalfLength, frame.HalfLength * 0.85f, frame.HalfLength);
-            }
+                {
+                    var along = (profile % 3) switch { 1 => Vector3.Normalize(-across * 0.83f + up * 0.55f), 2 => up, _ => Vector3.Normalize(across * 0.83f + up * 0.55f) };
+                    var placement = new CharacterHeadWoundPlacement(new(0, 18.65f, 0), normal, along);
+                    (float Length, float Width)[] scales = profile < 3 ? [(1, 1), (0.9f, 0.85f), (1.2f, 1.3f)] : [(1, 1)];
+                    foreach (var (length, width) in scales)
+                    {
+                        var scaled = placement with { LengthScale = length, WidthScale = width };
+                        string sample = $"{file}: side {side}, profile {profile}, mechanism {mechanism}, scales {length}/{width}";
+                        Assert.True(HeadWoundSurface.TryProjectPlacement(source, scaled, profile, out var frame, mechanism), sample + " did not project to head skin");
+                        Assert.True(Vector3.Dot(frame.Normal, normal) > 0, sample + " selected the opposite wall");
+                        var vertices = HeadWoundSurface.FitPlacementVertices(source, frame, 0, null, profile, true, out var fitted);
+                        Assert.True(vertices is { Length: > 0 and <= 4096 }, sample + " could not fit the cut");
+                        Near(frame.Centre, fitted.Centre);
+                        Near(frame.Along, fitted.Along);
+                        Assert.Equal(mechanism, fitted.Packed.M42);
+                        Assert.InRange(fitted.HalfLength, frame.HalfLength * 0.85f, frame.HalfLength);
+                    }
+                }
         }
+    }
+}
+
+public class HeadWoundAnatomyBoundsTests
+{
+    [Fact]
+    public void Internal_head_bounds_reject_torso_spikes_and_horn_morph_slots_while_retaining_tall_heads()
+    {
+        const int head = 21, neck = 20, jaw = 23;
+        static Vertex V(Vector3 point, uint bones, Vector4 weights, uint slot = 0, float v = -0.5f) => new()
+        {
+            Position = point, Uv = new(0.5f, v), Bones = bones, Weights = weights,
+            Colour = new(BitConverter.UInt32BitsToSingle(slot), 0, 0, 1),
+        };
+        Vertex[] source =
+        [
+            V(new(-1, 17, -1), head, new(1, 0, 0, 0)),
+            V(new(1, 20, 1), head, new(1, 0, 0, 0), 4),
+            V(new(0, 22, 0), head, new(1, 0, 0, 0), 3),
+            V(new(0, 16.8f, 0), head | jaw << 8 | neck << 16, new(0.3f, 0.3f, 0.4f, 0)),
+            V(new(-12, 5, -9), neck, new(1, 0, 0, 0)),
+            V(new(-5, 18, -8), head, new(1, 0, 0, 0), 1),
+            V(new(5, 21, -7), head, new(1, 0, 0, 0), 2),
+            V(new(100), head, new(1, 0, 0, 0), v: 0.5f),
+        ];
+        var morphs = new MeshMorphs
+        {
+            SlotCount = 4, SubMeshIndex = 0,
+            Poses = new() { ["bone_horns_top_short"] = ([1, 4], [Vector3.UnitX, Vector3.Zero]), ["stick_long_horns"] = ([2], [Vector3.UnitZ]), ["head_height"] = ([3], [Vector3.UnitY]) },
+        };
+        Assert.True(HeadWoundSurface.TryAnatomyBounds(source, head, jaw, morphs, out var min, out var max));
+        Assert.Equal(new Vector3(-1, 16.8f, -1), min);
+        Assert.Equal(new Vector3(1, 22, 1), max);
+        Assert.False(HeadWoundSurface.TryAnatomyBounds(source, -1, jaw, morphs, out _, out _));
+        Assert.False(HeadWoundSurface.TryAnatomyBounds([source[4]], head, jaw, morphs, out _, out _));
     }
 }

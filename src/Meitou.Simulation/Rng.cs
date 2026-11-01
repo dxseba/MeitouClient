@@ -55,6 +55,8 @@ public enum RngPurpose : uint
     Kidnap = 27,
     /// <summary>The steal roll (<see cref="Crime.CrimeSystem.StealChance"/>) and its in-bed coin flip.</summary>
     Steal = 28,
+    /// <summary>Severe head wound placement variation at its opening hit (display only).</summary>
+    HeadWoundVisual = 29,
 }
 
 /// <summary>

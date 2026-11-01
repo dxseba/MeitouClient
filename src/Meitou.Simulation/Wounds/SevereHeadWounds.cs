@@ -7,7 +7,7 @@ namespace Meitou.Simulation.Wounds;
 public enum SevereHeadWoundKind { None, JawLost, Scalp, BrokenSkull }
 
 /// <summary>The fixed wound frame in the body's bind space, independent of its later world position or pose.</summary>
-public readonly record struct HeadWoundPlacement(Vector3 Point, Vector3 Normal, Vector3 Tangent)
+public readonly record struct HeadWoundPlacement(Vector3 Point, Vector3 Normal, Vector3 Tangent, float LengthScale = 1, float WidthScale = 1)
 {
     public bool IsValid
     {
@@ -15,6 +15,7 @@ public readonly record struct HeadWoundPlacement(Vector3 Point, Vector3 Normal, 
         {
             static bool Finite(Vector3 p) => float.IsFinite(p.X) && float.IsFinite(p.Y) && float.IsFinite(p.Z);
             if (!Finite(Point) || !Finite(Normal) || !Finite(Tangent)) return false;
+            if (!float.IsFinite(LengthScale) || !float.IsFinite(WidthScale) || LengthScale is < 0.5f or > 2 || WidthScale is < 0.5f or > 2) return false;
             float normal = Normal.LengthSquared(), tangent = Tangent.LengthSquared();
             if (!float.IsFinite(normal) || !float.IsFinite(tangent) || normal < 1e-8f || tangent < 1e-8f) return false;
             // A parallel tangent cannot define the surface frame.
@@ -62,7 +63,8 @@ public readonly record struct HeadWoundReadResult(bool SupportedVersion, int Res
 public sealed class SevereHeadWounds
 {
     public const string FileName = "head-wounds.meitou";
-    public const string Header = "MEITOU-HEAD-WOUNDS 2";
+    public const string Header = "MEITOU-HEAD-WOUNDS 3";
+    const string Version2Header = "MEITOU-HEAD-WOUNDS 2";
     const string LegacyHeader = "MEITOU-HEAD-WOUNDS 1";
     static readonly CultureInfo Culture = CultureInfo.InvariantCulture;
     readonly Dictionary<CharacterId, SevereHeadWoundState> live = [];
@@ -182,14 +184,14 @@ public sealed class SevereHeadWounds
         {
             string line = string.Create(Culture, $"H {saved.C} {saved.I} {state.HeavyHits} {(int)state.Kind} {state.Profile} {(int)state.Mechanism}");
             if (state.Placement is { } p)
-                line += string.Create(Culture, $" {p.Point.X:R} {p.Point.Y:R} {p.Point.Z:R} {p.Normal.X:R} {p.Normal.Y:R} {p.Normal.Z:R} {p.Tangent.X:R} {p.Tangent.Y:R} {p.Tangent.Z:R}");
+                line += string.Create(Culture, $" {p.Point.X:R} {p.Point.Y:R} {p.Point.Z:R} {p.Normal.X:R} {p.Normal.Y:R} {p.Normal.Z:R} {p.Tangent.X:R} {p.Tangent.Y:R} {p.Tangent.Z:R} {p.LengthScale:R} {p.WidthScale:R}");
             yield return line;
         }
     }
 
     /// <summary>
     /// Replaces this store from a supported sidecar. Missing/old generic-wound data and unknown versions produce no severe states.
-    /// Version 1 defaults to slash; version 2 requires an explicit slash, thrust or crush mechanism.
+    /// Version 1 defaults to slash; versions 2/3 require an explicit mechanism. Legacy placed wounds default both size scales to 1.
     /// Malformed rows are rejected independently so one damaged record cannot lose other characters' wounds.
     /// </summary>
     public HeadWoundReadResult Read(IEnumerable<string> lines, Func<(int C, int I), CharacterId?> character, Func<(int C, int I), bool>? exists = null)
@@ -203,7 +205,7 @@ public sealed class SevereHeadWounds
             if (text.Length == 0 || text.StartsWith('#')) continue;
             if (version == 0)
             {
-                version = text switch { Header => 2, LegacyHeader => 1, _ => 0 };
+                version = text switch { Header => 3, Version2Header => 2, LegacyHeader => 1, _ => 0 };
                 if (version == 0) return new(false, 0, 0, 0);
                 continue;
             }
@@ -222,23 +224,25 @@ public sealed class SevereHeadWounds
         state = default;
         var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         int fixedFields = version == 1 ? 6 : 7;
-        if ((fields.Length != fixedFields && fields.Length != fixedFields + 9) || fields[0] != "H") return false;
+        int placementFields = version == 3 ? 11 : 9;
+        if ((fields.Length != fixedFields && fields.Length != fixedFields + placementFields) || fields[0] != "H") return false;
         bool Integer(int i, out int value) => int.TryParse(fields[i], NumberStyles.Integer, Culture, out value);
         if (!Integer(1, out int container) || !Integer(2, out int instance) || container < 0 || instance < 0
             || !Integer(3, out int hits) || !Integer(4, out int kind) || !Integer(5, out int profile)) return false;
         var mechanism = CombatWoundMechanism.Slash;
-        if (version == 2)
+        if (version >= 2)
         {
             if (!Integer(6, out int encodedMechanism) || encodedMechanism is < 1 or > 3) return false;
             mechanism = (CombatWoundMechanism)encodedMechanism;
         }
         HeadWoundPlacement? placement = null;
-        if (fields.Length == fixedFields + 9)
+        if (fields.Length == fixedFields + placementFields)
         {
-            Span<float> values = stackalloc float[9];
-            for (int i = 0; i < values.Length; i++)
+            Span<float> values = stackalloc float[11];
+            values[9] = values[10] = 1;
+            for (int i = 0; i < placementFields; i++)
                 if (!float.TryParse(fields[i + fixedFields], NumberStyles.Float, Culture, out values[i]) || !float.IsFinite(values[i])) return false;
-            placement = new(new(values[0], values[1], values[2]), new(values[3], values[4], values[5]), new(values[6], values[7], values[8]));
+            placement = new(new(values[0], values[1], values[2]), new(values[3], values[4], values[5]), new(values[6], values[7], values[8]), values[9], values[10]);
         }
         state = new(hits, (SevereHeadWoundKind)kind, profile, placement, mechanism);
         if (!state.IsValid) return false;

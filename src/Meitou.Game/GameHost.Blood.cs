@@ -252,8 +252,11 @@ sealed partial class GameHost
                 var head = severeHeads.Of(e.Victim) ?? new SevereHeadWoundState(0);
                 head = head with { HeavyHits = head.HeavyHits < int.MaxValue ? head.HeavyHits + 1 : int.MaxValue };
                 // The opening hit fixes the direction; later force can enlarge it without rotating it.
-                if (head.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull && headForce >= 35 && head.Profile < 3)
-                    head = head with { Profile = head.Profile + 3 };
+                if (head.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull && head.Profile < 3)
+                {
+                    if (head.Placement is { } fixedPlacement) head = head with { Placement = HeadWoundPlacementPolicy.Enlarge(fixedPlacement, headForce) };
+                    else if (headForce >= 35) head = head with { Profile = head.Profile + 3 }; // old preset-only saves
+                }
                 if (head.HeavyHits == JawBlows && head.Kind == SevereHeadWoundKind.None)
                 {
                     var kind = (g.SandboxHeadWound ?? e.Victim.Slot % 3) switch
@@ -262,12 +265,14 @@ sealed partial class GameHost
                         2 => SevereHeadWoundKind.BrokenSkull,
                         _ => SevereHeadWoundKind.JawLost,
                     };
+                    var placement = kind == SevereHeadWoundKind.JawLost ? null : HeadWoundPlacementPolicy.Estimate(e.Direction, e.VictimYaw, e.CutDirection,
+                        headForce, Rng.Hash(world.Seed, Rng.Key(e.Victim), RngPurpose.HeadWoundVisual, (ulong)e.Tick));
                     head = head with
                     {
                         Kind = kind,
                         Mechanism = mechanism,
-                        Profile = kind == SevereHeadWoundKind.JawLost ? 0 : (int)HeadProfile(e.CutDirection, headForce),
-                        Placement = kind == SevereHeadWoundKind.JawLost ? null : HeadWoundPlacementPolicy.Estimate(e.Direction, e.VictimYaw, e.CutDirection),
+                        Profile = kind == SevereHeadWoundKind.JawLost ? 0 : (int)HeadProfile(e.CutDirection, placement is null ? headForce : 0),
+                        Placement = placement,
                     };
                 }
                 severeHeads.Set(e.Victim, head);

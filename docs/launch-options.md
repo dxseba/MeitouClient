@@ -55,7 +55,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-severe-only` | | off | With `--sandbox-dummy`: hide generic marks and falling jaw to verify permanent head rendering without a generic wound mask. |
 | `--sandbox-hit-mechanism <kind>` | slash, thrust, crush | slash | With `--sandbox-dummy`: compare cutting, puncture and blunt head wounds with corresponding synthetic damage channels. |
 | `--sandbox-hit-side <side>` | front, left, right, back | cycling | With `--sandbox-dummy`: fix the incoming side in the victim's local frame for reproducible head placement. |
-| `--sandbox-hit-damage <n>` | positive number | 30 | With `--sandbox-dummy`: damage of every third test hit in the selected mechanism's channel. Head profiles grow at 35 or more; a head opening still needs four hits of at least 15 in its severity channel. |
+| `--sandbox-hit-damage <n>` | positive number | 30 | With `--sandbox-dummy`: damage of every third test hit in the selected mechanism's channel. Projected openings scale smoothly from 15 to 60; an opening still needs four hits of at least 15 in its severity channel. Older preset profiles grow at 35. |
 | `--sandbox-female` | | off | With `--sandbox-bare`: the fighters are women. |
 | `--sandbox-torso` | | off | With `--sandbox-dummy`: test hits only on the chest and stomach. |
 | `--sandbox-clothed` | | off | With `--sandbox-dummy`: the fighters keep their clothes. |
