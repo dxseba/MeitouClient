@@ -117,6 +117,7 @@ sealed partial class GameHost
         SandboxSendMovement();
         if (patrol) SandboxTogglePatrol();
         if (fight) SandboxKey(EngineKey.G);
+        if (g.SandboxBare) SandboxBare();   // before the first draw: the renderer keeps the look it first drew
         session.Ticked += _ => { if (g.SandboxBare) SandboxBare(); SandboxTick(); };
         Console.WriteLine($"sandbox   {record}{(g.Sandbox >= 2 ? ", two facing each other 30 units apart (G fights)" : "")}{(g.Sandbox > 2 ? $", {g.Sandbox - 2} more round them" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
         return new Vector3(0, scene.FlatHeight, 0);
