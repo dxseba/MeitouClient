@@ -653,6 +653,21 @@ public sealed class MetalCommandList : IGpuCommandList
             ctx.TextureAt(dst), (ulong)layer, (ulong)level, new MTLOrigin());
     }
 
+    /// <summary>Copies the first layers of every level of a texture into another of the same format and size (the blit encoder's texture copy, a slice at a time).</summary>
+    public void CopyLayers(GpuTexture src, GpuTexture dst, int layers)
+    {
+        var d = src.Desc;
+        int levels = Math.Min(d.Levels, dst.Desc.Levels);
+        if (layers <= 0 || levels <= 0) return;
+        var blit = OpenBlit();
+        for (uint layer = 0; layer < (uint)layers; layer++)
+            for (int level = 0; level < levels; level++)
+                blit.CopyFromTexture(ctx.TextureAt(src), layer, (ulong)level, new MTLOrigin(),
+                    new MTLSize { width = (ulong)Math.Max(d.Width >> level, 1), height = (ulong)Math.Max(d.Height >> level, 1), depth = 1 },
+                    ctx.TextureAt(dst), layer, (ulong)level, new MTLOrigin());
+        EndBlit();
+    }
+
     /// <summary>Resolves a multisample texture into a single-sample one: a render pass whose only work is its resolve attachment.</summary>
     public void Resolve(GpuTexture src, GpuTexture dst)
     {
@@ -674,13 +689,13 @@ public sealed class MetalCommandList : IGpuCommandList
         encoder.EndEncoding();
     }
 
-    /// <summary>Copies a texture into another (scaled: the impostor bake halves its supersampled row): a fullscreen sampling pass.</summary>
+    /// <summary>Copies a texture into another: depth by a native copy, colour by a sampling pass that can scale (the impostor bake).</summary>
     public void Blit(GpuTexture src, GpuTexture dst, TextureMinFilter filter)
     {
         EndCompute();
         EndBlit();
         if (render.NativePtr != IntPtr.Zero) EndRendering();
-        ctx.BlitScaled(command, src, dst, filter);
+        ctx.Blit(command, src, dst, filter);
     }
 
     /// <summary>Copies a tightly packed region of a texture's level and layer into a buffer (the impostor bakes' readback).</summary>

@@ -79,6 +79,8 @@ public sealed class WorldTexture
     internal Residency State;
     /// <summary>The image (null until resident), the levels and the swizzle it is sampled with.</summary>
     internal GpuTexture? Native;
+    /// <summary>The <see cref="TextureShare"/> entry <see cref="Native"/> is, when the cache shares its images.</summary>
+    internal TextureShare.Image? Shared;
     internal int ViewLevels;
     internal GpuSwizzle ViewSwizzle;
     /// <summary>The bindless entries for the last two LOD biases (the upscaler's, and 0 where a pass runs without it).</summary>
@@ -96,8 +98,8 @@ public sealed class WorldTexture
 /// textures (through the <see cref="Uploader"/>), so loading a town's few hundred textures uses every core and never stalls a frame for long.
 /// Same lookup, sampling and swizzle detection as <see cref="Renderer"/>, and the images, levels, views and samplers the GL textures had
 /// through VkGl (docs/renderer-native.md 8, phase 8 stage 1).
-/// Textures nobody has read the key of for <see cref="IdleSeconds"/> are deleted (<see cref="Trim"/>), earlier when the cache holds more than
-/// <see cref="HighWaterMb"/>: the least recently used go first, down to three quarters of it. A deleted texture comes back by itself
+/// Textures nobody has read the key of for <see cref="IdleSeconds"/> are deleted (<see cref="Trim"/>), earlier when the cache, with the caches it shares
+/// images with (<see cref="TextureShare"/>), holds more than <see cref="HighWaterMb"/>: the least recently used go first, down to three quarters of it. A deleted texture comes back by itself
 /// (decode and upload again) the next time something asks for its key.
 /// </summary>
 public sealed unsafe class WorldTextureCache : IDisposable
@@ -107,7 +109,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
     readonly List<WorldTexture> pending = [];
     readonly IGpuContext gpu;
     readonly AssetLocator assets;
-    /// <summary>The images' allocation name (the F12 VRAM pie groups by it).</summary>
+    /// <summary>The images' owner in their allocation names (the F12 VRAM pie groups by it).</summary>
     readonly string allocationName;
     long lastTrim;
 
@@ -139,7 +141,16 @@ public sealed unsafe class WorldTextureCache : IDisposable
     }
 
     /// <summary>GPU memory of the resident textures (all levels, RGBA8) and how many there are.</summary>
-    public long ResidentBytes { get; private set; }
+    public long ResidentBytes
+    {
+        get => residentBytes;
+        private set
+        {
+            if (Share is { } share) share.ResidentBytes += value - residentBytes;
+            residentBytes = value;
+        }
+    }
+    long residentBytes;
     public int ResidentCount { get; private set; }
     /// <summary>Changes whenever a texture's image comes or goes (a load, a swap, an unload), so its key and bindless index may differ: what a user that keeps them checks.</summary>
     public int Version { get; private set; }
@@ -164,8 +175,9 @@ public sealed unsafe class WorldTextureCache : IDisposable
     public long UnstreamedBytes { get; private set; }
 
     /// <summary>Unused for this long: unloaded.</summary>
-    public double IdleSeconds { get; set; } = 60;
-    /// <summary>Above this the least recently used textures that were unused for <see cref="PressureIdleSeconds"/> go too.</summary>
+    public double IdleSeconds { get; set; } = 20;
+    /// <summary>Above this the least recently used textures that were unused for <see cref="PressureIdleSeconds"/> go too. With a <see cref="Share"/> the mark is for
+    /// all the sharing caches together (<see cref="TextureShare.ResidentBytes"/>), not for each.</summary>
     public double HighWaterMb { get; set; } = TextureQuality.MemoryBudgetMb(TextureQuality.Level);
     public double PressureIdleSeconds { get; set; } = 8;
     /// <summary>The high-water mark as a share of the driver's video memory budget: the mark is the smaller of <see cref="HighWaterMb"/> and this share (the default share is what
@@ -183,9 +195,30 @@ public sealed unsafe class WorldTextureCache : IDisposable
     /// unloaded, drawn with the stand-in, until it ends) and textures idle for <see cref="GuardIdleSeconds"/> are evicted, least recently used
     /// first, whatever the high-water mark.</summary>
     public VramGuard? Guard { get; set; }
+    /// <summary>Images shared with the other caches on the same GPU (<see cref="TextureShare"/>); null: this cache's images are its own.</summary>
+    public TextureShare? Share { get; init; }
     public double GuardIdleSeconds { get; set; } = 2;
 
-    public string Describe() => $"{ResidentCount} textures {ResidentBytes / 1048576.0:0} MB ({Unloads} unloaded, {Reloads} reloaded so far" +
+    /// <summary>
+    /// The resident textures for the VRAM dump (Ctrl+Shift+F12), largest first: MB, seconds since anything read the key, top levels dropped now,
+    /// what mip streaming would drop at the last need (the quality setting's drop included), the need, the file's size and the file.
+    /// </summary>
+    public void WriteReport(TextWriter w)
+    {
+        long now = Environment.TickCount64;
+        w.WriteLine($"{allocationName}: {Describe()}; mark {MarkMb:0} MB");
+        w.WriteLine("        MB   idle s  dropped  target      need       file size  flags  file");
+        foreach (var t in cache.Values.Where(t => t.State == WorldTexture.Residency.Resident).OrderByDescending(t => t.Bytes))
+        {
+            int target = t.KeepAllMips || t.FileWidth == 0 || !float.IsFinite(t.Need) ? t.QualityDrop : Math.Max(Mips.Drop(t.FileWidth, t.FileHeight, t.Need), t.QualityDrop);
+            string flags = (t.KeepAllMips ? "k" : "") + (t.CannotDrop ? "c" : "") + (t.Replacing ? "r" : "") + (t.TooFineSince != 0 ? "f" : "") + (t.Shared is { Refs: > 1 } ? "s" : "");
+            w.WriteLine($"{t.Bytes / 1048576.0,10:0.000} {(now - t.LastUsed) / 1000.0,8:0.0} {t.Dropped,8} {target,7} {t.Need,9:0.###} {t.FileWidth,9}x{t.FileHeight,-5} {flags,-5}  {t.Name}");
+        }
+        w.WriteLine("flags: k keeps every level, c cannot drop levels, r a replacement is loading, f finer than needed (waiting to coarsen), s the image is shared with another cache");
+        w.WriteLine();
+    }
+
+    public string Describe() => $"{ResidentCount} textures {ResidentBytes / 1048576.0:0} MB ({Unloads} unloaded, {Reloads} reloaded so far{(Shares > 0 ? $", {Shares} taken from another cache" : "")}" +
         (Mips.Enabled ? $"; mip streaming: {Math.Max(UnstreamedBytes - ResidentBytes, 0) / 1048576.0:0} MB less than every mip, {Refined} refined, {Coarsened} coarsened)" : ")");
 
     /// <param name="deferred">The texture is not loaded now: it stays <see cref="WorldTexture.Residency.Unloaded"/> until something reads its
@@ -283,6 +316,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
         t.QualityDrop = quality;
         t.QualityLevel = TextureQuality.Level;
         float need = t.KeepAllMips ? float.PositiveInfinity : t.Need;
+        if (!replacing && Shared(t, need, exact: false) is { } shared) { Adopt(t, shared); return; }
         bool enabled = Mips.Enabled;
         float perDistance = Mips.PixelsPerDistance, bias = Mips.Bias;
         int extra = Mips.Extra;
@@ -290,15 +324,77 @@ public sealed unsafe class WorldTextureCache : IDisposable
         else t.State = WorldTexture.Residency.Loading;
         Func<TextureData?> load = () =>
         {
-            try { return Load(path, quality, need, enabled, perDistance, bias, extra); }
+            TextureData data;
+            try { data = Load(path, quality, need, enabled, perDistance, bias, extra); }
             catch (Exception e) when (e is DdsFormatException or InvalidOperationException or IOException or ArgumentException)
             {
                 lock (Messages) Messages.Add($"texture {name}: {e.Message}");
                 return null;
             }
+            // The image is made here too: a large one gets memory of its own (given back the moment it is unloaded, so it leaves no hole), and
+            // vkAllocateMemory takes from 0.3 ms to 50, which on the render thread would be a frame's.
+            try { data.Image = gpu.CreateTextureOffThread(DescOf(path, data)); }
+            catch (VulkanException) { }   // no memory now: the render thread makes it (or fails) as it did
+            return data;
         };
         t.Pending = Urgent ? BackgroundWork.RunUrgent(load) : BackgroundWork.Run(load);
         pending.Add(t);
+    }
+
+    /// <summary>
+    /// An image of <paramref name="t"/>'s file another user already holds at the current quality level, with no more top levels dropped than mip streaming
+    /// would drop at <paramref name="need"/> (exactly as many when <paramref name="exact"/>), the one with the most dropped of those; null when none (or no <see cref="Share"/>).
+    /// </summary>
+    TextureShare.Image? Shared(WorldTexture t, float need, bool exact)
+    {
+        if (Share is null) return null;
+        TextureShare.Image? best = null;
+        foreach (var e in Share.Of(t.Path!))
+        {
+            if (e.QualityLevel != TextureQuality.Level || e == t.Shared) continue;
+            int target = Math.Max(Mips.Drop(e.FileWidth, e.FileHeight, need), t.QualityDrop);
+            if (exact ? e.Dropped == target : e.Dropped <= target && (best is null || e.Dropped > best.Dropped)) best = e;
+        }
+        return best;
+    }
+
+    /// <summary><paramref name="t"/> draws the shared image <paramref name="e"/> (in place of the one it has, if any): resident at once, nothing loaded.</summary>
+    void Adopt(WorldTexture t, TextureShare.Image e, bool replaced = false)
+    {
+        e.Refs++;
+        BeginSwap(t, e.Dropped, e.Droppable, e.FileWidth, e.FileHeight, replaced);
+        (t.Native, t.Shared, t.ViewLevels, t.ViewSwizzle, t.Swizzled) = (e.Texture, e, e.ViewLevels, e.ViewSwizzle, e.Swizzled);
+        Resident(t, e.Bytes);
+        Shares++;
+    }
+
+    /// <summary>Images taken from another cache instead of loaded (<see cref="Share"/>).</summary>
+    public int Shares { get; private set; }
+
+    /// <summary>
+    /// A loaded image becomes <paramref name="t"/>'s: when another user already holds the same file at the same levels (both loaded it at once), that
+    /// one is taken and the new one goes; else the new one is offered to the others.
+    /// </summary>
+    void Publish(WorldTexture t, GpuTexture texture, TextureData data, int viewLevels, GpuSwizzle swizzle, long bytes)
+    {
+        if (Share?.Of(t.Path!).FirstOrDefault(o => o != t.Shared && o.QualityLevel == t.QualityLevel && o.Dropped == data.Dropped && o.ViewLevels == viewLevels) is { } same)
+        {
+            texture.Dispose();
+            Adopt(t, same, replaced: t.Replacing);
+            return;
+        }
+        BeginSwap(t, data.Dropped, data.Droppable, data.FileWidth, data.FileHeight, replaced: t.Replacing);
+        if (Share is not null)
+        {
+            t.Shared = new TextureShare.Image
+            {
+                Path = t.Path!, Texture = texture, ViewLevels = viewLevels, ViewSwizzle = swizzle, Swizzled = data.Swizzled, Bytes = bytes,
+                Dropped = data.Dropped, QualityLevel = t.QualityLevel, FileWidth = data.FileWidth, FileHeight = data.FileHeight, Droppable = data.Droppable,
+            };
+            Share.Add(t.Shared);
+        }
+        (t.Native, t.ViewLevels, t.ViewSwizzle) = (texture, viewLevels, swizzle);
+        Resident(t, bytes);
     }
 
     internal void Reload(WorldTexture t)
@@ -389,7 +485,8 @@ public sealed unsafe class WorldTextureCache : IDisposable
         if (now - lastTrim < 1000) return;
         lastTrim = now;
         bool guarded = Guard?.Pressure ?? false;
-        bool pressure = ResidentBytes > MarkMb * 1048576;
+        long held = Share?.ResidentBytes ?? ResidentBytes;
+        bool pressure = held > MarkMb * 1048576;
         List<WorldTexture>? victims = null;
         foreach (var t in cache.Values)
         {
@@ -403,8 +500,10 @@ public sealed unsafe class WorldTextureCache : IDisposable
         foreach (var t in victims.Take(guarded ? 120 : 40))
         {
             bool old = (now - t.LastUsed) / 1000.0 > IdleSeconds;
-            if (!old && !guarded && ResidentBytes <= lowWater) break;
+            if (!old && !guarded && held <= lowWater) break;
+            long before = ResidentBytes;
             Unload(t);
+            held -= before - ResidentBytes;
         }
     }
 
@@ -438,6 +537,9 @@ public sealed unsafe class WorldTextureCache : IDisposable
             unstreamed += t.Bytes << (2 * Math.Max(t.Dropped - t.QualityDrop, 0));
             if (t.Replacing || t.Pending is not null || t.KeepAllMips || t.CannotDrop || t.FileWidth == 0 || !float.IsFinite(t.Need)) continue;
             int target = Math.Max(Mips.Drop(t.FileWidth, t.FileHeight, t.Need), t.QualityDrop);
+            // Another cache holds the file at the target levels: taken (a coarser one after the same wait as a load), nothing loaded.
+            if ((target < t.Dropped || target > t.Dropped && (pressure || t.TooFineSince != 0 && now - t.TooFineSince >= CoarsenAfterSeconds * 1000))
+                && Shared(t, t.Need, exact: true) is { } shared) { Adopt(t, shared); continue; }
             if (target < t.Dropped)
             {
                 if (replacing >= MaxRefines || !MayStart(t)) continue;
@@ -476,7 +578,8 @@ public sealed unsafe class WorldTextureCache : IDisposable
         if (t.HasA) gpu.Bindless.Free(BindlessKind.Texture2D, t.IndexA);
         if (t.HasB) gpu.Bindless.Free(BindlessKind.Texture2D, t.IndexB);
         t.HasA = t.HasB = false;
-        t.Native?.Dispose();
+        if (t.Shared is { } shared) { Share!.Release(shared); t.Shared = null; }
+        else t.Native?.Dispose();
         t.Native = null;
         Version++;
     }
@@ -527,10 +630,48 @@ public sealed unsafe class WorldTextureCache : IDisposable
     /// <summary>The number of levels down to 1 × 1 (the chain VkGl allocated for a texture's level 0).</summary>
     static int FullChain(int w, int h) => 1 + (int)Math.Floor(Math.Log2(Math.Max(Math.Max(w, h), 1)));
 
-    /// <summary>A new image with <paramref name="levels"/> levels in GENERAL layout (the transition in the frame's upload commands, before the copies).</summary>
-    GpuTexture Create(InternalFormat format, int width, int height, int levels, bool mipmaps) =>
-        gpu.Frame.PreFrame.CreateTexture(new TextureDesc(format, width, height, levels,
-            Use: TextureUse.Sampled | TextureUse.TransferDst | (mipmaps ? TextureUse.TransferSrc : 0), Name: allocationName));
+    /// <summary>
+    /// The image a decoded file is uploaded into: a stored (S3TC) one with its format and full chain; an RGBA8 one with the full chain, its levels
+    /// made by blits when the file's do not reach 1 × 1. Named "owner | file" (the VRAM pie groups by the owner, the VRAM dump lists the file). Any thread.
+    /// </summary>
+    TextureDesc DescOf(string path, TextureData data)
+    {
+        string name = $"{allocationName} | {System.IO.Path.GetFileName(path)}";
+        if (data.Compressed is { } dds)
+            return new TextureDesc(FormatOf(dds.Format), dds.Width, dds.Height, FullChain(dds.Width, dds.Height), Use: TextureUse.Sampled | TextureUse.TransferDst, Name: name, Streamed: true);
+        var levels = data.Rgba.Levels;
+        var top = levels[0];
+        return new TextureDesc(InternalFormat.Rgba8, top.Width, top.Height, FullChain(top.Width, top.Height),
+            Use: TextureUse.Sampled | TextureUse.TransferDst | (GeneratesMips(data.Rgba) ? TextureUse.TransferSrc : 0), Name: name, Streamed: true);
+    }
+
+    /// <summary>The RGBA8 levels do not reach 1 × 1: the chain is made from level 0 by blits.</summary>
+    static bool GeneratesMips(LoadedTexture tex) => tex.Levels.Count == 1 || tex.Levels[^1].Width > 1 || tex.Levels[^1].Height > 1;
+
+    static InternalFormat FormatOf(DdsFormat format) => format switch
+    {
+        DdsFormat.Bc1 => InternalFormat.CompressedRgbaS3TCDxt1Ext,
+        DdsFormat.Bc2 => InternalFormat.CompressedRgbaS3TCDxt3Ext,
+        DdsFormat.Bc4 => InternalFormat.CompressedRedRgtc1,
+        DdsFormat.Bc5 => InternalFormat.CompressedRGRgtc2,
+        DdsFormat.Bc7 => InternalFormat.CompressedRgbaBptcUnorm,
+        _ => InternalFormat.CompressedRgbaS3TCDxt5Ext,
+    };
+
+    /// <summary>
+    /// The image for <paramref name="t"/>'s upload in GENERAL layout (the transition in the frame's upload commands, before the copies): the one the worker
+    /// made (<see cref="IGpuContext.CreateTextureOffThread"/>), else a new one.
+    /// </summary>
+    GpuTexture Create(WorldTexture t, TextureData data)
+    {
+        if (data.Image is { } image)
+        {
+            data.Image = null;
+            gpu.Frame.PreFrame.InitTexture(image);
+            return image;
+        }
+        return gpu.Frame.PreFrame.CreateTexture(DescOf(t.Path!, data));
+    }
 
     /// <summary>
     /// A stored (S3TC) texture's upload: the image is made with its full chain, each level is filled whole (up to about 512 KB) or in slabs of
@@ -540,18 +681,9 @@ public sealed unsafe class WorldTextureCache : IDisposable
     {
         var dds = data.Compressed!;
         t.Swizzled = data.Swizzled;
-        var format = dds.Format switch
-        {
-            DdsFormat.Bc1 => InternalFormat.CompressedRgbaS3TCDxt1Ext,
-            DdsFormat.Bc2 => InternalFormat.CompressedRgbaS3TCDxt3Ext,
-            DdsFormat.Bc4 => InternalFormat.CompressedRedRgtc1,
-            DdsFormat.Bc5 => InternalFormat.CompressedRGRgtc2,
-            DdsFormat.Bc7 => InternalFormat.CompressedRgbaBptcUnorm,
-            _ => InternalFormat.CompressedRgbaS3TCDxt5Ext,
-        };
         int blockBytes = BlockCompression.BlockBytes(dds.Format);
         GpuTexture? texture = null;
-        steps.Enqueue(() => texture = Create(format, dds.Width, dds.Height, FullChain(dds.Width, dds.Height), mipmaps: false));
+        steps.Enqueue(() => texture = Create(t, data));
         foreach (var surface in dds.Surfaces)
         {
             var s = surface;
@@ -573,13 +705,8 @@ public sealed unsafe class WorldTextureCache : IDisposable
         }
         steps.Enqueue(() =>
         {
-            BeginSwap(t, data);
-            t.Native = texture;
-            t.ViewLevels = Math.Min(dds.MipCount, texture!.Desc.Levels);
             // BC4 is one channel; the decoder (and so the RGBA8 path) shows it as grey with alpha 1.
-            t.ViewSwizzle = dds.Format == DdsFormat.Bc4 ? GpuSwizzle.RrrOne : default;
-            long bytes = dds.Surfaces.Sum(s => (long)s.Length);
-            Resident(t, bytes);
+            Publish(t, texture!, data, Math.Min(dds.MipCount, texture!.Desc.Levels), dds.Format == DdsFormat.Bc4 ? GpuSwizzle.RrrOne : default, dds.Surfaces.Sum(s => (long)s.Length));
             ArrayPool<byte>.Shared.Return(dds.Data);   // rented by Load; every slab above has been copied to staging
         });
     }
@@ -594,10 +721,10 @@ public sealed unsafe class WorldTextureCache : IDisposable
         t.Swizzled = swizzled;
         var top = tex.Levels[0];
         int chain = FullChain(top.Width, top.Height);
-        bool generate = tex.Levels.Count == 1 || tex.Levels[^1].Width > 1 || tex.Levels[^1].Height > 1;
+        bool generate = GeneratesMips(tex);
         int uploaded = generate ? 1 : Math.Min(tex.Levels.Count, chain);
         GpuTexture? texture = null;
-        steps.Enqueue(() => texture = Create(InternalFormat.Rgba8, top.Width, top.Height, chain, mipmaps: generate));
+        steps.Enqueue(() => texture = Create(t, data));
         for (int level = 0; level < uploaded; level++)
         {
             var img = tex.Levels[level];
@@ -622,11 +749,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
                 GenerateMipmaps(gpu, texture!);
                 bytes = bytes * 4 / 3;   // the full chain the blits made
             }
-            BeginSwap(t, data);
-            t.Native = texture;
-            t.ViewLevels = generate ? chain : uploaded;
-            t.ViewSwizzle = default;
-            Resident(t, bytes);
+            Publish(t, texture!, data, generate ? chain : uploaded, default, bytes);
         });
     }
 
@@ -668,7 +791,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
     /// <summary>The new image is about to replace the one the texture has (a reload with another number of top levels, <see cref="Rebalance"/>): the old
     /// one goes (its bindless entries after the frames in flight, as an unload) and its bytes leave the count; <see cref="Resident"/> adds the new.
     /// Records the levels the new image lacks.</summary>
-    void BeginSwap(WorldTexture t, TextureData data)
+    void BeginSwap(WorldTexture t, int dropped, bool droppable, int fileWidth, int fileHeight, bool replaced = false)
     {
         if (t.Native is not null)
         {
@@ -678,14 +801,14 @@ public sealed unsafe class WorldTextureCache : IDisposable
             t.Bytes = 0;
             if (t.State == WorldTexture.Residency.Resident) Swaps++;
         }
-        if (t.Replacing && data.Dropped == t.Dropped) t.CannotDrop = true;   // nothing changed: do not ask again
-        t.CannotDrop |= !data.Droppable;
+        if (replaced && dropped == t.Dropped) t.CannotDrop = true;   // nothing changed: do not ask again
+        t.CannotDrop |= !droppable;
         if (t.Refine) { t.Refine = false; Refining--; }
         t.Replacing = false;
         t.TooFineSince = 0;
-        t.Dropped = data.Dropped;
-        t.FileWidth = data.FileWidth;
-        t.FileHeight = data.FileHeight;
+        t.Dropped = dropped;
+        t.FileWidth = fileWidth;
+        t.FileHeight = fileHeight;
     }
 
     internal static bool LooksSwizzled(RgbaImage image)
@@ -699,14 +822,64 @@ public sealed unsafe class WorldTextureCache : IDisposable
 
     public void Dispose()
     {
-        foreach (var t in pending) t.Pending?.Wait();
+        foreach (var t in pending)
+        {
+            t.Pending?.Wait();
+            if (t.Pending is { IsCompletedSuccessfully: true, Result.Image: { } unused }) unused.Dispose();   // made on the worker, never uploaded
+        }
         foreach (var t in cache.Values) Release(t);
+        ResidentBytes = 0;
     }
 }
 
 /// <summary>A decoded texture file: the RGBA8 levels (all of them, or for a stored S3TC texture only the one the swizzle test needs), and the DDS when its blocks are uploaded as they are.</summary>
 sealed record TextureData(LoadedTexture Rgba, DdsFile? Compressed, int Dropped = 0, int FileWidth = 0, int FileHeight = 0, bool Droppable = false)
 {
+    /// <summary>The image the worker made for it (<see cref="IGpuContext.CreateTextureOffThread"/>), until the upload takes it; null: made on the render thread.</summary>
+    public GpuTexture? Image { get; set; }
     /// <summary>Whether it looks like a "DXT5 normal" (X in alpha), tested on the worker: the full image can be megabytes.</summary>
     public bool Swizzled { get; } = WorldTextureCache.LooksSwizzled(Rgba.Levels.FirstOrDefault(l => l.Width <= 256 && l.Height <= 256) ?? Rgba.Levels[0]);
+}
+
+/// <summary>
+/// The images the world's texture caches share (<see cref="WorldTextureCache.Share"/>): a file the objects, the foliage and the characters all draw is
+/// in video memory once at a given number of dropped levels (the VRAM dump of 2026-11-01 held about 150 MB of such copies). An image goes when its
+/// last user releases it. Each cache still counts the image's bytes as its own. Render thread only.
+/// </summary>
+public sealed class TextureShare
+{
+    internal sealed class Image
+    {
+        public required string Path;
+        public required GpuTexture Texture;
+        public int Refs = 1;
+        public int ViewLevels, Dropped, QualityLevel, FileWidth, FileHeight;
+        public GpuSwizzle ViewSwizzle;
+        public bool Swizzled, Droppable;
+        public long Bytes;
+    }
+
+    readonly Dictionary<string, List<Image>> byPath = new(StringComparer.OrdinalIgnoreCase);
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IGpuContext, TextureShare> shares = new();
+
+    /// <summary>The share of the caches on <paramref name="gpu"/>.</summary>
+    public static TextureShare For(IGpuContext gpu) => shares.GetValue(gpu, _ => new TextureShare());
+
+    /// <summary>What the sharing caches hold together (each counts a shared image as its own), against which their one high-water mark is kept.</summary>
+    public long ResidentBytes { get; internal set; }
+
+    internal IReadOnlyList<Image> Of(string path) => byPath.TryGetValue(path, out var list) ? list : [];
+
+    internal void Add(Image e)
+    {
+        if (!byPath.TryGetValue(e.Path, out var list)) byPath[e.Path] = list = [];
+        list.Add(e);
+    }
+
+    internal void Release(Image e)
+    {
+        if (--e.Refs > 0) return;
+        e.Texture.Dispose();
+        if (byPath.TryGetValue(e.Path, out var list) && list.Remove(e) && list.Count == 0) byPath.Remove(e.Path);
+    }
 }

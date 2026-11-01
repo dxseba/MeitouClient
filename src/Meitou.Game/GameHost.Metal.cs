@@ -548,11 +548,11 @@ sealed partial class GameHost
                 "VSync", "Full screen", SettingsMenu.MetalPresetSlider, WorldFrame.UpscalerSliders[1],
             };
             foreach (var slider in settingsValues.Sliders)
-                if (!SessionSliders.Contains(slider.Label) && !metalDisplayKeys.Contains(slider.Label) &&
+                if (!RunOnlyKeys().Contains(slider.Label) && !metalDisplayKeys.Contains(slider.Label) &&
                     config.Graphics.TryGetValue(slider.Label, out float value))
                     slider.Set(Math.Clamp(value, slider.Min, slider.Max));
             foreach (var toggle in settingsValues.Toggles)
-                if (config.Graphics.TryGetValue(SettingsMenu.SwitchKeyPrefix + toggle.Label, out float value) && (value >= 0.5f) != toggle.Get())
+                if (!SettingsMenu.HiddenSwitch(toggle.Label) && !RunOnlyKeys().Contains(SettingsMenu.SwitchKeyPrefix + toggle.Label) && config.Graphics.TryGetValue(SettingsMenu.SwitchKeyPrefix + toggle.Label, out float value) && (value >= 0.5f) != toggle.Get())
                     toggle.Set(value >= 0.5f);
             settings.ApplySavedPreset();
             // The impostor atlas path is re-enabled after the frame-slot fence. Keep the diagnostic off switch as a
@@ -756,7 +756,7 @@ sealed partial class GameHost
 
             // Effects: the composite already supports the game's exposure/tone-map/grading path, even before the rest of
             // the Vulkan post chain is ported.
-            sliders.Add(new Slider("Tone map (0 = game)", 0, 3, () => (int)o.Post.ToneMap,
+            sliders.Add(new Slider("Tone map (0 = game)", 1, 3, () => (int)o.Post.ToneMap,
                 v => o.Post.ToneMap = (ToneMapOperator)(int)MathF.Round(v), "0",
                 Text: v => (ToneMapOperator)(int)MathF.Round(v) switch
                 {
@@ -858,7 +858,7 @@ sealed partial class GameHost
                     if ((key == SilkKey.KeypadEnter ? EngineKey.Enter : KeyMap.Map(key)) is { } pickerKey) sandboxPicker.KeyDown(pickerKey);
                     return;
                 }
-                if (hud is not null && DebugToggle(key)) { debugMenuOpen = !debugMenuOpen; return; }
+                if (hud is not null && DebugToggle(key)) { debugMenuOpen = !debugMenuOpen; debugParts = null; return; }
                 if (debugMenuOpen)
                 {
                     if ((key == SilkKey.KeypadEnter ? EngineKey.Enter : KeyMap.Map(key)) is { } menuKey) DebugMenuKey(menuKey);
@@ -1184,7 +1184,7 @@ sealed partial class GameHost
                 // The merged character editor is shared with Vulkan: a new game opens it once the squad is in the snapshot, and the world resumes when it closes.
                 OpenPendingEditor();
                 ResumeAfterCreation();
-                if (hud is not { EditorOpen: true }) ClearEditorStage();
+                if (hud is not { EditorOpen: true }) { ClearEditorStage(); ClearEditorBar(); }
                 if (!tourHolds && hud is not null) ApplyTitleCamera();
                 // A flight puts the focus where it lands, so the towns there populate during the flight; otherwise the
                 // followed character's pivot is already in the rig.
@@ -1299,8 +1299,9 @@ sealed partial class GameHost
             double drawableWait = display.LastDrawableWaitMilliseconds;
             long recordStart = Stopwatch.GetTimestamp();
             var backbuffer = ctx.Backbuffer;
-            // The editor's own scene replaces the world picture: the shared host draws the character and its platform into the stage texture the interface shows.
-            if (hud is { EditorOpen: true }) DrawEditorStage(size.X, size.Y);
+            // The editor's scene: in the Meitou UI the bar, drawn by the world pass below from the editor's camera (GameHost.EditorBar.cs); else the original's stage, the
+            // character and its platform drawn into the stage texture the interface shows over the world.
+            var editorBarFrame = hud is { EditorOpen: true } ? BeginEditorBar(size.X, size.Y) : null;
             // The still's objects are all resident before the first picture, as the Vulkan screenshot path settles them (its Settle
             // opens its own frame; here the frame is the first one's).
             if (frames == 0) { objects?.Settle(camera.Eye); foliage?.Settle(camera.Eye); }
@@ -1328,7 +1329,7 @@ sealed partial class GameHost
             // The frame's inputs, as WorldFrame.Draw prepares them: the weather at the camera, the atmosphere's tables for the sun and the
             // eye's height, the fog distance the light ends at, and the view distance that keeps the haze complete before the far plane.
             bool titleLook = hud is not null && TitleVisible;
-            float hour = presentationHour ?? (titleLook ? TitleHour : (float)session.Clock.HourOfDay);
+            float hour = editorBarFrame is not null ? EditorBarHour : presentationHour ?? (titleLook ? TitleHour : (float)session.Clock.HourOfDay);
             var aspect = size.X / (float)Math.Max(size.Y, 1);
             var eye = camera.Eye;
             var view = camera.View;
@@ -1394,6 +1395,7 @@ sealed partial class GameHost
                     fogVolumes.HidePlaced = savedHidePlaced;
                 }
             }
+            if (editorBarFrame is { } barFrame) EndEditorBar(barFrame, size.X, size.Y);
             // The feedback screenshot: the frame without the menus, the settings, the debug overlays and the pointer (GameHost.Feedback.cs).
             bool feedbackShot = feedbackShotRequested && hud is not null && !still;
             if (hud is not null) hud.ShotWithoutMenus = feedbackShot;
@@ -1413,7 +1415,6 @@ sealed partial class GameHost
                     hud.Steer();
                     if (hud.UiVisible)
                     {
-                        hud.SelectionRings = config.SelectionRings;
                         hud.Draw(overlay, size.X, size.Y, overlayPass);
                         if (IsSandbox && !g.UiShowcase) DrawSandbox(overlay, size.X, size.Y);
                     }
@@ -1569,19 +1570,19 @@ sealed partial class GameHost
             config.FullScreen = BorderlessFullScreen.IsOn(window);
             config.MetalUpscaler = mode;
             config.MetalRenderScale = ctx.RenderScale;
-            if (hud is not null) config.UiMode = hud.UiMode;
+            if (hud is not null && (!g.LowEnd || hud.UiMode != Meitou.Data.Ui.UiMode.Faithful)) config.UiMode = hud.UiMode;   // --low-end's Faithful UI is for the run
             config.Bindings = session.Bindings.ToDictionary();
             if (settingsValues is not null)
             {
                 foreach (var slider in settingsValues.Sliders)
                 {
                     // These have their own config fields; the rest use the same graphics keys as the Vulkan settings.
-                    if (SessionSliders.Contains(slider.Label) || slider.Label is SettingsMenu.MetalPresetSlider ||
+                    if (RunOnlyKeys().Contains(slider.Label) || slider.Label is SettingsMenu.MetalPresetSlider ||
                         slider.Label == WorldFrame.UpscalerSliders[1]) continue;
                     config.Graphics[slider.Label] = slider.Get();
                 }
                 foreach (var toggle in settingsValues.Toggles)
-                    config.Graphics[SettingsMenu.SwitchKeyPrefix + toggle.Label] = toggle.Get() ? 1 : 0;
+                    if (!RunOnlyKeys().Contains(SettingsMenu.SwitchKeyPrefix + toggle.Label)) config.Graphics[SettingsMenu.SwitchKeyPrefix + toggle.Label] = toggle.Get() ? 1 : 0;
                 settings?.SavePreset();
             }
             config.Save();

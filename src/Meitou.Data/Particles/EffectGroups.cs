@@ -694,7 +694,7 @@ public sealed class GlobalPointEffectGroup : EffectGroup
 }
 
 /// <summary>
-/// The map-feature placers (docs/formats/weather.md "Effect placers on the map"): effects that belong to a hidden MAP_FEATURES record and are
+/// The map-feature placers (docs/formats/zones.md): effects that belong to a MAP_FEATURES record (hidden or not) and are
 /// always on, at fixed places. Not a weather group: they are made once from <c>features.dat</c> (<see cref="MapEffectPlacers"/>) and live as
 /// static POINT effects (Observed: the game's handler lives <c>min..max time to live</c> and is made again; the viewer keeps it).
 /// A unit is simulated while the camera is within <see cref="EffectWorld.ActiveRadius"/> plus the effect's <c>maximum view distance</c> of it.
@@ -737,9 +737,11 @@ public sealed class BurstEffectGroup(PuSystemDef system, int seed, EffectWorld w
     : EffectGroup(new EffectRecord(system.Name, EffectType.Point, system.Name, false, false, 1, 0, 0, Vector3.One, 1, false, 0, 0, 0, 0, 0), null, system, seed, world)
 {
     /// <summary>A unit at <paramref name="position"/>, turned by <paramref name="orientation"/>, emitting for <paramref name="seconds"/>, its particles <paramref name="size"/> times as big and <paramref name="lifeScale"/> times as long-lived.</summary>
-    public void Spawn(Vector3 position, Quaternion orientation, float seconds, float size, float lifeScale)
+    /// <param name="recolour">A colour the particles take in place of their texture's hue: kept as a negative tint, which the renderer's fragment program reads as that.</param>
+    public void Spawn(Vector3 position, Quaternion orientation, float seconds, float size, float lifeScale, Vector3? recolour = null)
     {
         var u = NewUnit(position);
+        if (recolour is { } colour) u.Tint = -Vector3.Max(colour, new Vector3(1e-4f));
         u.Orientation = orientation;
         u.Life = seconds;
         u.Size = size;

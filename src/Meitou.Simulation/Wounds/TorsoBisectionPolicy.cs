@@ -21,8 +21,11 @@ public static class TorsoBisectionPolicy
     // Conservative junction bounds measured on installed human/Shek male/female and worker/soldier/prince meshes.
     public const float LegJunctionCeiling = 11.35f, ShoulderJunctionFloor = 14.10f;
     public const float JunctionHalfWidth = 3, JunctionHalfDepth = 1.51f;
-    public const float FullBodyAzimuthDegrees = 18, VerticalOffset = 0.20f, DiagonalOffset = 0.18f;
-    public const float DiagonalPivotMinimum = 10.6f, DiagonalPivotMaximum = 11.2f, DiagonalSlopeMinimum = 0.16f, DiagonalSlopeMaximum = 0.24f;
+    public const float FullBodyAzimuthDegrees = 22.5f, FullBodyOffsetX = 0.70f, FullBodyOffsetZ = 0.40f;
+    public const float LongDiagonalMinimumTiltDegrees = 8, LongDiagonalMaximumTiltDegrees = 16;
+    public const float ObliqueDiagonalMinimumTiltDegrees = 18, ObliqueDiagonalMaximumTiltDegrees = 35;
+    public const float LongDiagonalPivotMinimum = 10.2f, LongDiagonalPivotMaximum = 11.5f, LongDiagonalOffsetScale = 0.8f;
+    public const float ObliqueDiagonalPivotMinimum = 11.8f, ObliqueDiagonalPivotMaximum = 14, ObliqueDiagonalOffsetScale = 1.1f;
 
     public static float Chance(in TorsoBisectionInput input)
     {
@@ -52,7 +55,7 @@ public static class TorsoBisectionPolicy
         _ => false,
     };
 
-    /// <summary>Sideways blows retain the transverse fit; a downward blow chooses a longitudinal or long diagonal plane through the body and legs.</summary>
+    /// <summary>Sideways blows retain the transverse fit; downward planes turn with the incoming blow and vary between vertical, long diagonal and oblique cuts.</summary>
     public static TorsoBisectionState StateForDirection(int cutDirection, ulong visualSeed = 0, Vector2 travel = default,
         float victimYaw = 0, TorsoBisectionStyle style = TorsoBisectionStyle.Auto)
     {
@@ -74,16 +77,26 @@ public static class TorsoBisectionPolicy
             local = new(cosine * travel.X - sine * travel.Y, sine * travel.X + cosine * travel.Y);
         }
         var across = new Vector2(local.Y, -local.X);
-        float side = MathF.Abs(across.X) > 0.05f ? MathF.Sign(across.X) : Rng.Float(pivotBits) < 0.5f ? -1 : 1;
-        // Keep a longitudinal cut near the body's centre so its continuation reaches a leg rather than leaving through the back.
-        float bias = Math.Clamp(MathF.Atan2(across.Y, MathF.Abs(across.X)), -10 * MathF.PI / 180, 10 * MathF.PI / 180);
-        float azimuth = bias + (Rng.Float(angleBits) * 2 - 1) * (FullBodyAzimuthDegrees - 10) * MathF.PI / 180;
-        var horizontal = new Vector2(side * MathF.Cos(azimuth), MathF.Sin(azimuth));
-        bool diagonal = style == TorsoBisectionStyle.Diagonal;
-        float offset = (Rng.Float(offsetBits) * 2 - 1) * (diagonal ? DiagonalOffset : VerticalOffset);
-        float pivot = DiagonalPivotMinimum + (DiagonalPivotMaximum - DiagonalPivotMinimum) * Rng.Float(pivotBits);
-        float slope = diagonal ? DiagonalSlopeMinimum + (DiagonalSlopeMaximum - DiagonalSlopeMinimum) * Rng.Float(slopeBits) : 0;
-        if (Rng.Float(Rng.Mix(slopeBits)) < 0.5f) slope = -slope;
+        float azimuth = (Rng.Float(angleBits) * 2 - 1) * FullBodyAzimuthDegrees * MathF.PI / 180;
+        var horizontal = new Vector2(across.X * MathF.Cos(azimuth) - across.Y * MathF.Sin(azimuth),
+            across.X * MathF.Sin(azimuth) + across.Y * MathF.Cos(azimuth));
+        // Allow more lateral displacement than depth, without preferring any incoming direction.
+        float radius = 1 / MathF.Sqrt(horizontal.X * horizontal.X / (FullBodyOffsetX * FullBodyOffsetX)
+            + horizontal.Y * horizontal.Y / (FullBodyOffsetZ * FullBodyOffsetZ));
+        float pivot = 0, slope = 0, offsetScale = 1;
+        if (style == TorsoBisectionStyle.Diagonal)
+        {
+            bool oblique = Rng.Float(Rng.Mix(slopeBits ^ 0x4F424C4951554544UL)) >= 0.5f;
+            float minimumTilt = oblique ? ObliqueDiagonalMinimumTiltDegrees : LongDiagonalMinimumTiltDegrees;
+            float maximumTilt = oblique ? ObliqueDiagonalMaximumTiltDegrees : LongDiagonalMaximumTiltDegrees;
+            float minimumPivot = oblique ? ObliqueDiagonalPivotMinimum : LongDiagonalPivotMinimum;
+            float maximumPivot = oblique ? ObliqueDiagonalPivotMaximum : LongDiagonalPivotMaximum;
+            pivot = minimumPivot + (maximumPivot - minimumPivot) * Rng.Float(pivotBits);
+            slope = MathF.Tan((minimumTilt + (maximumTilt - minimumTilt) * Rng.Float(slopeBits)) * MathF.PI / 180);
+            if (Rng.Float(Rng.Mix(slopeBits)) < 0.5f) slope = -slope;
+            offsetScale = oblique ? ObliqueDiagonalOffsetScale : LongDiagonalOffsetScale;
+        }
+        float offset = (Rng.Float(offsetBits) * 2 - 1) * radius * offsetScale;
         var normal = Vector3.Normalize(new Vector3(horizontal.X, slope, horizontal.Y));
         var anchor = new Vector3(horizontal.X * offset, pivot, horizontal.Y * offset);
         return new(new Vector4(normal, -Vector3.Dot(normal, anchor)), FullBody: true);

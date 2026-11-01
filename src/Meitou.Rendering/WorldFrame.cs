@@ -108,9 +108,12 @@ sealed class WorldOptions
     public bool MeitouBlood = true;
     /// <summary>The <c>bloodsurfaces</c> switch's Meitou side: blood also on walls, buildings, floors and other static objects (<c>TerrainDecalRenderer.Surfaces</c>); false: the terrain only, as the game.</summary>
     public bool MeitouBloodSurfaces = true;
+    /// <summary>The <c>tracers</c> switch's Meitou side: a semi-transparent streak behind each bolt in flight (the game's <c>GameHost.AddTracers</c>); false: the bolt alone, as the game.</summary>
+    public bool MeitouTracers = true;
     public float? ImpostorDistance, LargeImpostorDistance;
     public double? ImpostorBudgetMb;
-    public float HazeStrength = Enhancements.MeitouHazeStrength; // the Meitou haze switch (default); 1 = the game's haze
+    public bool MeitouHaze = true; // the Meitou haze switch (default): the haze at HazeStrength; Faithful: the game's (1)
+    public float HazeStrength = Enhancements.MeitouHazeStrength; // the Meitou haze's strength (a Tab slider), kept while the switch is Faithful
     public bool NightAir = true; // the Meitou night switch (default): the night air, a faint glow the haze fades into and the sky shows above the horizon (SkyRenderer.NightAir)
     public bool Planetshine = true; // the Meitou planetshine switch (default): the big planet lights the night (SkyRenderer.Planetshine)
     public float PlanetshineStrength = Enhancements.MeitouPlanetshineStrength; // x the physical value (a Tab slider)
@@ -143,6 +146,8 @@ sealed class WorldOptions
     public float FlyRadius = 12000, FlySpeed = 150;
     /// <summary>The benchmark without a wait for the GPU each frame and without the 60 fps pacing: up to two frames in flight (both backends), frame time = the interval between frames.</summary>
     public bool FlyPipelined;
+    /// <summary><c>--fly-csv &lt;file&gt;</c>: the benchmark writes one row per frame there (frame times, video memory) and the allocator owners every 30 frames to <c>&lt;file&gt;.owners.csv</c>.</summary>
+    public string? FlyCsv;
     /// <summary>
     /// The benchmark harness (docs/bench.md "Benchmark harness"): <c>--view</c> the named view, <c>--ab</c> the switch to alternate (<see cref="AbToggles"/>) with
     /// <c>--ab-period</c> frames per side, <c>--bench-frames</c> measured frames (default 600 with <c>--ab</c>), <c>--bench-out</c> the JSON, <c>--bench-motion</c>
@@ -217,7 +222,7 @@ sealed class WorldOptions
           --windowed                                     a bordered window: the --size asked, else maximized (default: borderless full screen; Alt+Enter toggles)
           --no-objects             skip buildings and map features
           --no-foliage             no trees, bushes, rocks or grass (F toggles)
-          --no-load-cache          do not read or write the load caches (the foliage layout and character LOD caches)
+          --no-load-cache          do not read or write the load caches (foliage layout, character LOD and terrain colour caches)
           --range-large <u>        foliage draw range of the large size class (the range switch, F6; default 50000; the medium and small ranges follow at 12000 : 3500 of it; Tab sliders)
           --impostor-budget <MB>   fixes the most video memory the resident impostor atlases may use (default: 8% of the card's budget, 5% on an integrated GPU, 48-1024 MB; docs/impostors.md section 10; atlases that do not fit are held at coarser mips, then stay meshes)
           --object-distance <u>    draw placed objects at full detail up to this distance (the reach switch, F8: default 20000 in Meitou, 12000 in Faithful); Meitou draws huge placed objects (world radius 2000 and up: the giant wrecks, skeletons, towers) 7.5 times as far
@@ -248,7 +253,7 @@ sealed class WorldOptions
           --no-vsync               start with vsync off (uncapped; Tab slider)
           --grass-density <x>      grass blades x this (0.1-2, default 1; Tab slider)
           --camera-code <hex>      start at a camera code (Ctrl+C in the viewer copies one), the world loaded round it
-          --faithful <all|ao,dither,haze,aa,shadows,range,impostors,reach,water,particles,lod,gi,tonemap,shafts,heathaze,night,planetshine,stars,nightgrade,clouds,cloudshadows,cloudfog,interiorgi,charlod,skin,interiorlamps,icons,blood,bloodsurfaces,parallax,displace>   the game's look instead of Meitou's enhancements (default: all Meitou; --meitou <...> turns them back on; these ids also name the --ab switches)
+          --faithful <all|ao,dither,haze,aa,shadows,range,impostors,reach,water,particles,lod,gi,tonemap,shafts,heathaze,night,planetshine,stars,nightgrade,clouds,cloudshadows,cloudfog,interiorgi,charlod,skin,interiorlamps,icons,blood,bloodsurfaces,parallax,displace,weld,tracers,fog>   the game's look instead of Meitou's enhancements (default: all Meitou; --meitou <...> turns them back on; these ids also name the --ab switches)
           --show-keys              start with the key list overlay open (toggle with F10)
           --play-shots             start flying the saved camera keys (the F2 timeline) on a loop
           --log-spikes             print a line for every frame whose GPU time is over 1.5 x the median: stage times (GPU, render thread) and what it uploaded or rebuilt
@@ -256,6 +261,7 @@ sealed class WorldOptions
           --fly-benchmark <frames> offscreen, no window: fly the camera round a circle at 60 frames per second of wall time, print frame-time
                                    percentiles, the worst frames with their stage times and resident memory   --fly-radius <u> (12000)   --fly-speed <u per frame> (150)
                                    --fly-pipelined: no GPU wait per frame and no pacing, two frames in flight; reports the interval between frames
+                                   --fly-csv <file>: per-frame times and video memory as CSV, the allocator owners every 30 frames in <file>.owners.csv
           --view <name>            a named camera/world/weather (swamp, swamp-rain, dust, hub): options after it override its own
           --bench-frames <n>       offscreen: measure n frames after warm-up and write per-stage statistics as JSON (--bench-out, default in %TEMP%)
           --ab <name>              with it: alternate side A (Meitou, on) and side B (Faithful, off) of a switch (ao, shadows, lod, particles, ... or occlusion, fog-cull), per frame
@@ -291,7 +297,7 @@ sealed class WorldOptions
         """;
 
     /// <summary>The Faithful / Meitou switches over the options (for <c>--meitou</c> / <c>--faithful</c>).</summary>
-    internal static IReadOnlyList<Enhancement> Switches(WorldOptions o) => Enhancements.Create(o.Post, () => o.HazeStrength, v => o.HazeStrength = v,
+    internal static IReadOnlyList<Enhancement> Switches(WorldOptions o) => Enhancements.Create(o.Post, () => o.MeitouHaze, v => o.MeitouHaze = v,
         () => o.MeitouShadows, v => o.MeitouShadows = v, () => o.MeitouRange, v => o.MeitouRange = v, () => o.Impostors, v => o.Impostors = v, () => o.MeitouReach, v => o.MeitouReach = v,
         () => o.MeitouWater, v => o.MeitouWater = v, () => o.FoliageLod, v => o.FoliageLod = v, () => o.GiProbes, v => o.GiProbes = v,
         () => o.NightAir, v => o.NightAir = v, () => o.Planetshine, v => o.Planetshine = v,
@@ -305,7 +311,8 @@ sealed class WorldOptions
         () => o.InteriorLamps, v => o.InteriorLamps = v,
         () => o.MeitouIcons, v => o.MeitouIcons = v,
         () => o.MeitouBlood, v => o.MeitouBlood = v,
-        () => o.MeitouBloodSurfaces, v => o.MeitouBloodSurfaces = v);
+        () => o.MeitouBloodSurfaces, v => o.MeitouBloodSurfaces = v,
+        () => o.MeitouTracers, v => o.MeitouTracers = v);
 
     public static WorldOptions? Parse(string[] args)
     {
@@ -405,6 +412,7 @@ sealed class WorldOptions
                 case "--fly-radius": o.FlyRadius = F(); break;
                 case "--fly-speed": o.FlySpeed = F(); break;
                 case "--fly-pipelined": o.FlyPipelined = true; break;
+                case "--fly-csv": o.FlyCsv = Next(); break;
                 case "--ab": o.Ab = Next(); break;
                 case "--ab-period": o.AbPeriod = Math.Max(int.Parse(Next(), CultureInfo.InvariantCulture), 1); break;
                 case "--bench-frames": o.BenchFrames = Math.Max(int.Parse(Next(), CultureInfo.InvariantCulture), 1); break;
@@ -657,6 +665,11 @@ static class WorldFrame
         /// <summary>The hover outline the game draws round the character under the mouse, and with Alt those near (null in the viewer); <see cref="HoverKeys"/> picks the characters by their draw-list keys, each with its colour (empty: none).</summary>
         public HoverOutlineRenderer? HoverOutline;
         public IReadOnlyList<(long Key, Vector4 Colour)> HoverKeys = [];
+        /// <summary>
+        /// A presentation cap on how far the frame reaches (the Meitou editor's bar, high above the world): the far plane and the shadow cascades end there, so the world below
+        /// leaves the view; null in play.
+        /// </summary>
+        public float? ViewCap;
         /// <summary>The Tab panel's weather particles at 0 and its particle density, given to <see cref="Particles"/> every frame (it is made only with the first weather).</summary>
         public bool WeatherParticles = true;
         public float ParticleDensity = 1;
@@ -798,6 +811,9 @@ static class WorldFrame
         Meitou.Data.Textures.TextureQuality.Level = o.TextureQuality;
         int layerSize = Math.Max(2048 >> Meitou.Data.Textures.TextureQuality.LevelsToDrop("terrain.dds", "Landscape"), 16);
         if (layerSize != 2048) Console.WriteLine($"textures  quality {o.TextureQuality} ({Meitou.Data.Textures.TextureQuality.Labels[o.TextureQuality]}): terrain layers {layerSize}² instead of 2048²");
+        // The terrain colour tiles BC3-encoded for the colour window, once (TerrainColourCache): a first start, or one after a tile changed, encodes them on workers.
+        var colourEncode = !o.NoTextures && terrainTextures && TerrainColourCache.Missing(install)
+            ? Task.Run(() => { var w = Stopwatch.StartNew(); int n = TerrainColourCache.EncodeMissing(install); return (n, w.ElapsedMilliseconds); }) : null;
         // The files the terrain textures and the water read and bake (seconds of CPU work) are read on workers while the steps before them run.
         var terrainSource = !o.NoTextures && terrainTextures && scene.Database is { } textureDb ? Task.Run(() => TerrainTextures.Prepare(install, textureDb)) : null;
         var waterSource = !o.NoWater && scene.Database is { } waterDb ? Task.Run(() => WaterRenderer.Prepare(install, waterDb, assets, scene.Coarse)) : null;
@@ -806,6 +822,12 @@ static class WorldFrame
         var terrain = new TerrainRenderer(context, scene.Coarse, scene.CoarseSize, scene.Window);
         Console.WriteLine($"uploaded  terrain heights: {terrain.LevelCount} LOD levels, finest {terrain.FinestSpacing:0.#} units ({watch.ElapsedMilliseconds} ms)");
         TerrainTextures? textures = null;
+        if (colourEncode is not null)
+        {
+            if (!colourEncode.IsCompleted) step?.Invoke("colourmap");
+            var (tiles, ms) = Ready(colourEncode);
+            Console.WriteLine($"colour    {tiles} terrain colour tiles encoded to BC3 and cached in {ms} ms");
+        }
         if (!o.NoTextures && terrainTextures && scene.Database is not null)
         {
             step?.Invoke("biomes");
@@ -825,6 +847,7 @@ static class WorldFrame
         gpu.FogVolumes = new FogVolumes(context, o.NoFogFeatures ? [] : FogFeatures.Load(install));
         if (post is not null) post.FogVrs = true;   // takes effect where the device supports fragment shading rates
         gpu.Sky.HazeStrength = o.HazeStrength;
+        gpu.Sky.MeitouHaze = o.MeitouHaze;
         gpu.Sky.NightAir = o.NightAir;
         gpu.Sky.Planetshine = o.Planetshine;
         gpu.Sky.PlanetshineStrength = o.PlanetshineStrength;
@@ -1024,6 +1047,7 @@ static class WorldFrame
         ToneMixSlider = "Hybrid tone map: ACES share",
         GradingSlider = "Grading (0 = game)",
         HeatHazeStrengthSlider = "Heat haze strength (1 = game)",
+        BloomStrengthSlider = "Bloom strength (0 = game)",
         NightGradeStrengthSlider = "Night grading strength (0 = game)",
         ShaftStrengthSlider = "Light shafts strength",
         ShaftAirSlider = "Light shafts air (0 = none)",
@@ -1031,6 +1055,10 @@ static class WorldFrame
     /// <summary>The Tab panel switches that are not Faithful / Meitou ones (saved as <c>Meitou: &lt;label&gt;</c> like those).</summary>
     public const string
         FifthCascadeSwitch = "Shadow cascade 5 (Meitou)",
+        BloomSwitch = "Bloom",
+        // The ground relief's Faithful / Meitou switches (Enhancements "parallax", "displace"), by name.
+        GroundParallaxSwitch = "Ground parallax",
+        GroundDisplaceSwitch = "Ground displacement (tessellation)",
         RockSmoothingSwitch = "Rock smoothing (tessellation)",
         OutlineRefineSwitch = "Terrain outline refinement (tessellation)";
     /// <summary>The weather particles slider's position for the renderer's state: 0 off, 1 quarter, 2 half, 3 by sprite size (auto), 4 full size.</summary>
@@ -1046,7 +1074,7 @@ static class WorldFrame
     /// options and, once made, the renderer's parts; the distances follow the mode's defaults unless a Tab slider moved them.
     /// </summary>
     internal static IReadOnlyList<Enhancement> LiveSwitches(WorldOptions o, Func<Gpu?> gpu, Func<WorldCamera?> camera, Func<WorldRenderOptions?> render) =>
-        Enhancements.Create(o.Post, () => gpu()?.Sky.HazeStrength ?? o.HazeStrength, v => { if (gpu() is { } g) g.Sky.HazeStrength = v; },
+        Enhancements.Create(o.Post, () => gpu()?.Sky.MeitouHaze ?? o.MeitouHaze, v => { o.MeitouHaze = v; if (gpu() is { } g) g.Sky.MeitouHaze = v; },
             () => gpu()?.Shadow?.Meitou ?? o.MeitouShadows, v =>
             {
                 // The shadow distance follows the mode's default unless the Tab slider moved it.
@@ -1090,7 +1118,8 @@ static class WorldFrame
             () => gpu()?.Lamps?.InteriorAllDay ?? o.InteriorLamps, v => { o.InteriorLamps = v; if (gpu()?.Lamps is { } l) l.InteriorAllDay = v; },
             () => gpu()?.Characters?.EnhancedIcons ?? o.MeitouIcons, v => { o.MeitouIcons = v; if (gpu()?.Characters is { } c) c.EnhancedIcons = v; },
             () => gpu()?.Decals?.Meitou ?? o.MeitouBlood, v => { o.MeitouBlood = v; if (gpu()?.Decals is { } d) d.Meitou = v; },
-            () => gpu()?.Decals?.Surfaces ?? o.MeitouBloodSurfaces, v => { o.MeitouBloodSurfaces = v; if (gpu()?.Decals is { } d) d.Surfaces = v; });
+            () => gpu()?.Decals?.Surfaces ?? o.MeitouBloodSurfaces, v => { o.MeitouBloodSurfaces = v; if (gpu()?.Decals is { } d) d.Surfaces = v; },
+            () => o.MeitouTracers, v => o.MeitouTracers = v);
 
     public static SettingsPanel CreateSettingsPanel(DebugOverlay ui, Gpu g, WorldRenderOptions r, Func<float>? getHour = null, Action<float>? setHour = null,
         Func<bool>? getVSync = null, Action<bool>? setVSync = null, IReadOnlyList<Enhancement>? switches = null,
@@ -1115,7 +1144,8 @@ static class WorldFrame
             sliders.Add(new Slider(ObjectDistanceSlider, 1000, 400000, () => objects.ObjectDistance, v => objects.ObjectDistance = v, "0", Logarithmic: true,
                 Faithful: Enhancements.FaithfulObjectDistance, Meitou: Enhancements.MeitouObjectDistance));
             if (objects.HasLandmarks)
-                sliders.Add(new Slider(LandmarkDistanceSlider, 1000, 400000, () => objects.LandmarkDistance, v => objects.LandmarkDistance = MathF.Round(v / 100) * 100, "0", Logarithmic: true));
+                sliders.Add(new Slider(LandmarkDistanceSlider, 1000, 400000, () => objects.LandmarkDistance, v => objects.LandmarkDistance = MathF.Round(v / 100) * 100, "0", Logarithmic: true,
+                    Faithful: 0, Meitou: Enhancements.MeitouLandmarkDistance));
             sliders.Add(new Slider(DistantTownsSlider, 0, ObjectRanges.MaxDistantTownRangeZones * 10,
                 () => objects.DistantRange / WorldLayout.ZoneSize, v => objects.DistantRange = MathF.Round(v) * WorldLayout.ZoneSize, "0"));
             sliders.Add(new Slider(ObjectLodSlider, 0.25f, 4, () => 1 / objects.LodBias, v => objects.LodBias = 1 / v, "0.00", Logarithmic: true));
@@ -1211,13 +1241,15 @@ static class WorldFrame
             }, "0"));
             sliders.Add(new Slider(ParticleSliders[1], 0.1f, 1, () => g.ParticleDensity, v => g.ParticleDensity = MathF.Round(v * 20) / 20, "0.00"));
             // Ours, not the game's (docs/render-post.md "Tone map and grading"): the tone curve, the saturation / contrast grade, and a scale on the heat haze.
-            sliders.Add(new Slider(ToneMapSlider, 0, 3, () => (int)post.Options.ToneMap, v => post.Options.ToneMap = (ToneMapOperator)(int)MathF.Round(v), "0",
+            // The Meitou curve; the tone map switch's Faithful side is the game's clamp.
+            sliders.Add(new Slider(ToneMapSlider, 1, 3, () => (int)post.Options.ToneMap, v => post.Options.ToneMap = (ToneMapOperator)(int)MathF.Round(v), "0",
                 Text: v => (ToneMapOperator)(int)MathF.Round(v) switch { ToneMapOperator.Shoulder => "shoulder", ToneMapOperator.Aces => "ACES", ToneMapOperator.Hybrid => "hybrid (clamp + ACES)", _ => "clamp (as the game)" }));
             sliders.Add(new Slider(ToneMixSlider, 0, 1, () => post.Options.ToneMix, v => post.Options.ToneMix = MathF.Round(v * 20) / 20, "0.00"));
             sliders.Add(new Slider(GradingSlider, 0, 1, () => post.Options.Grade ? 1 : 0, v => post.Options.Grade = v >= 0.5f,
                 Text: v => v >= 0.5f ? $"saturation {PostOptions.Saturation:0.00}, contrast {PostOptions.Contrast:0.00}" : "off (as the game)"));
             sliders.Add(new Slider(HeatHazeStrengthSlider, 0, 3, () => post.Options.HeatHazeStrength, v => post.Options.HeatHazeStrength = MathF.Round(v * 20) / 20, "0.00",
                 Faithful: 1, Meitou: Enhancements.MeitouHeatHazeStrength));
+            sliders.Add(new Slider(BloomStrengthSlider, 0, 0.25f, () => post.Options.BloomStrength, v => post.Options.BloomStrength = MathF.Round(v * 200) / 200, "0.000", Faithful: 0));
             sliders.Add(new Slider(NightGradeStrengthSlider, 0, 1, () => post.Options.NightGradeStrength, v => post.Options.NightGradeStrength = MathF.Round(v * 20) / 20, "0.00"));
             sliders.Add(new Slider(ShaftStrengthSlider, 0, 1, () => post.Options.ShaftStrength, v => post.Options.ShaftStrength = MathF.Round(v * 20) / 20, "0.00"));
             sliders.Add(new Slider(ShaftAirSlider, 0, 4, () => post.Options.ShaftAir, v => post.Options.ShaftAir = MathF.Round(v * 20) / 20, "0.00"));
@@ -1234,10 +1266,13 @@ static class WorldFrame
         var toggles = switches?.Where(e => e.Id != "displace" || g.Sky.Gpu.HasTessellation).Select(e => new Toggle(e.Name, () => e.IsMeitou, v => e.IsMeitou = v, () => e.IsMeitou ? e.Meitou : e.Faithful, Remaster: true, OnOff: e.Faithful is "off" or "none")).ToList();
         if (fifthCascade is not null) (toggles ??= []).Add(fifthCascade);
         toggles ??= [];
+        // Bloom: an optional effect, off in both looks (docs/render-post.md "Bloom"); a look preset may turn it on, its strength is a slider.
+        if (g.Post is { } bloomPost)
+            toggles.Add(new Toggle(BloomSwitch, () => bloomPost.Options.Bloom, v => bloomPost.Options.Bloom = v, Remaster: true, OnOff: true, Optional: true));
         if (g.Sky.Gpu.HasTessellation)
         {
-            toggles.Add(new Toggle(RockSmoothingSwitch, () => RockSmoothing.TessellateActive, v => RockSmoothing.TessellateActive = v, OnOff: true));
-            toggles.Add(new Toggle(OutlineRefineSwitch, () => GroundRelief.RefinePixels > 0, v => GroundRelief.RefinePixels = v ? GroundRelief.DefaultRefinePixels : 0, OnOff: true));
+            toggles.Add(new Toggle(RockSmoothingSwitch, () => RockSmoothing.TessellateActive, v => RockSmoothing.TessellateActive = v, Remaster: true, OnOff: true));
+            toggles.Add(new Toggle(OutlineRefineSwitch, () => GroundRelief.RefinePixels > 0, v => GroundRelief.RefinePixels = v ? GroundRelief.DefaultRefinePixels : 0, Remaster: true, OnOff: true));
         }
         // The billboard (impostor atlas) disk cache: deleted files are baked again when next needed; the resident atlases stay until evicted.
         var actions = new List<PanelAction>();
@@ -1313,6 +1348,7 @@ static class WorldFrame
         var particles = post.Particles;
         gpu.PostChain?.ObjectMotion = null;
         post.Particles = null;
+        post.SetCloudMotion(null);
         try { post.End(); }
         finally
         {
@@ -1347,6 +1383,7 @@ static class WorldFrame
         StageClock.Lap(0);
         if (gpu.Objects is { } lodObjects) lodObjects.LodPixelsPerRadian = render.TerrainPixelScale;   // the generated object levels are placed by the pixel size too
         gpu.Objects?.SetView(rw, rh, camera.FieldOfView);   // the object textures' mip streaming measures pixels at the render size
+        gpu.Foliage?.SetView(rw, rh, camera.FieldOfView);
         gpu.Characters?.SetView(rw, rh, camera.FieldOfView);
         gpu.Objects?.Update(eye);
         StageClock.Lap(1);
@@ -1405,7 +1442,7 @@ static class WorldFrame
         gpu.Sky.PrepareCloudShadows();
         // Far enough that the haze is complete before the far plane and the water quad (1.5 × view distance wide) end,
         // so a high eye sees the sea fade into the sky instead of a cut-off edge.
-        camera.ViewDistance = Math.Max(camera.MinViewDistance, light.FogDistance / 0.7f);
+        camera.ViewDistance = Math.Min(Math.Max(camera.MinViewDistance, light.FogDistance / 0.7f), gpu.ViewCap ?? float.MaxValue);
         StageClock.Lap(3);
         // The weather's camera particles step on the caller's time (1/600 s units; the game's clock, so still while paused; constant, so still, in pictures).
         // They count as their own stage (the profiler's "particles", with their draw below).
@@ -1434,7 +1471,7 @@ static class WorldFrame
             gpu.Sky.CloudShadowScale = fogVolumes.CloudShadowScale;
         }
         StageClock.Lap(13);
-        if (gpu.Shadow is not null) gpu.Shadow.RangeCap = gpu.FogVolumes?.AtmosphereDistance;   // the cascades end where the weather fog hides everything
+        if (gpu.Shadow is not null) gpu.Shadow.RangeCap = gpu.ViewCap is { } cap ? Math.Min(cap, gpu.FogVolumes?.AtmosphereDistance ?? cap) : gpu.FogVolumes?.AtmosphereDistance;   // the cascades end where the weather fog hides everything (or at the cap)
         gpu.Shadow?.SetFogHide(gpu.FogVolumes?.ShadowHideDistance, gpu.FogVolumes?.ShadowHidePending == true);   // or where the placed fog block the eye is in hides the whole view
         if (gpu.Shadow is not null) { gpu.Shadow.Temporal = post.Temporal; DrawShadows(gpu, camera, render, light, rw, rh, gpu.Sky.ShadowSunHeight); }
 
@@ -1542,6 +1579,7 @@ static class WorldFrame
         {
             gpu.InteriorMask ??= new InteriorMaskRenderer(post.Context, maskObjects);
             gpu.InteriorMask.Record(view * Jitter.Apply(camera.Projection(aspect, maskSlice.Near, maskSlice.Far), jitter, rw, rh), eye, post.RenderWidth, post.RenderHeight);
+            maskObjects.Masks = gpu.InteriorMask;
         }
         else if (gpu.InteriorMask is { } unused) unused.Record(default, eye, 0, 0);
         host.Open(5, post.WithShadingRate(post.SceneTargets), new ClearColour(light.FogColour.X, light.FogColour.Y, light.FogColour.Z, 0), clearDepth: true);   // alpha 0: no character (the SSAO mask)
@@ -1550,7 +1588,7 @@ static class WorldFrame
         post.SetCamera(eye, view, camera.FieldOfView, aspect);
         gpu.Terrain.BeginFrame();
         bool first = true, foliageDrawn = false;
-        Matrix4x4 particleViewProjection = default, particleNearProjection = default;
+        Matrix4x4 particleViewProjection = default, particleNearProjection = default, particleLowProjection = default, particleLowNearProjection = default;
         float particleNear = 0;
         foreach (var (near, far) in SceneSlices(post, camera))
         {
@@ -1638,11 +1676,11 @@ static class WorldFrame
                 post.CharactersDrawn = characters.DrawnCharacters > 0;
                 StageClock.Lap(StageClock.Characters);   // the colour draw; the motion draw (post chain, upscalers only) laps itself in
             }
-            // Transparent water refracts the slice's scene. Fully opaque distant slices need no copy or pass restart.
-            if (render.Water && gpu.Water is { } refracting && refracting.NeedsRefraction(near))
+            // Transparent water refracts the slice's scene and measures its depth through it. Fully opaque distant slices need no copy or pass restart.
+            if (render.Water && gpu.Water is { } capturing && capturing.NeedsCapture(near, nearSlice))
             {
                 host.Close();
-                refracting.CaptureRefraction(post.SceneColour);
+                capturing.CaptureScene(post.SceneColour, nearSlice ? post.SceneDepth : null, near, far);   // the far slice's depth is a texture of its own
                 host.Open(9, post.WithShadingRate(post.SceneTargets));
             }
             host.Stage(9);
@@ -1653,6 +1691,9 @@ static class WorldFrame
             {
                 particleViewProjection = viewProjection;
                 particleNearProjection = view * Jitter.Apply(camera.Projection(aspect, Math.Min(0.5f, near * 0.5f), near), jitter, rw, rh);
+                // Unjittered, for low-resolution particles blended after the upscaler (its output is unjittered).
+                particleLowProjection = view * camera.Projection(aspect, near, far);
+                particleLowNearProjection = view * camera.Projection(aspect, Math.Min(0.5f, near * 0.5f), near);
                 particleNear = near;
             }
         }
@@ -1672,11 +1713,13 @@ static class WorldFrame
         // Then the particles, blended over it and tested against the near slice's depth (they are not fogged; docs/formats/fogfeatures.md).
         if (gpu.Particles is { } particleDraw && particleNear > 0)
         {
-            particleDraw.Prepare(particleViewProjection, particleNearProjection, particleNear, view, eye, sun, post.ParticlePixelsPerUnit(camera.Projection(aspect, 1, 10).M22), (float)post.RenderWidth * post.RenderHeight, post.Options.ParticleDivisor);
+            particleDraw.Prepare(particleViewProjection, particleNearProjection, particleNear, view, eye, sun, post.ParticlePixelsPerUnit(camera.Projection(aspect, 1, 10).M22), (float)post.RenderWidth * post.RenderHeight, post.Options.ParticleDivisor,
+                lowViewProjection: post.ParticlesAfterUpscale ? particleLowProjection : null, lowCloseViewProjection: post.ParticlesAfterUpscale ? particleLowNearProjection : null);
             if (particleDraw.FullCount > 0)
             {
+                post.PrepareSoftParticleDepth();
                 host.Open(13, post.SceneTargetsForParticles);
-                particleDraw.Record(1);
+                particleDraw.Record(1, post.SoftParticleDepth(1));
                 host.Close();
             }
             // Meitou: the alpha and additive sprites that are big on screen into low-resolution targets (half, then quarter size), each over the scene with a depth-aware upsample.
@@ -1686,7 +1729,7 @@ static class WorldFrame
                     if (particleDraw.CountFor(divisor) == 0) continue;
                     post.BeginParticlesLow(divisor);
                     host.Open(13, post.ParticleTargets(divisor));
-                    particleDraw.Record(divisor);
+                    particleDraw.Record(divisor, post.SoftParticleDepth(divisor));
                     host.Close();
                     post.MarkParticleDraws();
                     post.CompositeParticlesLow(divisor);
@@ -1695,6 +1738,7 @@ static class WorldFrame
         }
         post.MarkParticles();
         post.Particles = gpu.Particles;
+        post.SetCloudMotion(gpu.Sky.CloudMotion);
         post.End(); // SSAO, upscaler, exposure, tone map, FXAA into the chain's target
         var slices = SceneSlices(post, camera).ToList();
         // The movement marker and stealth arrows over the finished picture, in their materials' colours, sorted against the near slice's depth like the game's debug_marker.

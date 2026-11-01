@@ -81,13 +81,12 @@ sealed partial class GameHost
     void ApplyGameplay()
     {
         var gameplay = Gameplay;
-        if (popData is { } data) (data.BodyOptions.Dismemberment, data.BodyOptions.Decapitation) = (gameplay.Dismemberment, config.Decapitation);
+        if (popData is { } data) (data.BodyOptions.Dismemberment, data.BodyOptions.Decapitation, data.BodyOptions.AdvancedRagdolls) = (gameplay.Dismemberment, config.Decapitation, config.AdvancedRagdolls);
         foreach (var population in session.World.Systems.OfType<Meitou.Simulation.PopulationSystem>())
             (population.Settings.SquadSizeMultiplier, population.Settings.PopulationMultiplier, population.Settings.RaidSizeMult, population.Settings.RaidFrequencyMult) =
                 (gameplay.SquadSize, gameplay.Population, gameplay.RaidSize, gameplay.RaidFrequency);
         foreach (var ai in session.World.Systems.OfType<Meitou.Simulation.Ai.AiSystem>()) ai.Settings.TownAttacks = gameplay.TownAttacks;
         foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.StuckLimit = gameplay.HarpoonLimit;
-        foreach (var firstAid in session.World.Systems.OfType<Meitou.Simulation.FirstAid.FirstAidSystem>()) firstAid.HealGoodwill = config.HealGoodwillPoints;
     }
 
     /// <summary>The system list and its order are <see cref="StandardSystems"/>'(docs/simulation.md "Threading"); built again for each world.</summary>
@@ -98,7 +97,6 @@ sealed partial class GameHost
             // --battle-no-fear: no flee system, so nobody runs away.
             Parts = (IsSandbox || IsDuel || IsBattle ? Meitou.Simulation.StandardParts.All & ~Meitou.Simulation.StandardParts.Aggro : Meitou.Simulation.StandardParts.All)
                 & ~(IsBattle && g.BattleNoFear ? Meitou.Simulation.StandardParts.Flee : Meitou.Simulation.StandardParts.None),
-            Aggro = new Meitou.Simulation.AggroSettings { RecordLog = true },
             // NPCs that see a player character say a line as a speech bubble (docs/game/dialogue.md "Ambient conversations"); the sandbox, the duel and the battle stay silent.
             Dialogue = new Meitou.Simulation.Dialogue.DialogueSettings { AmbientEvents = !IsSandbox && !IsDuel && !IsBattle },
             Population = new Meitou.Simulation.PopulationSettings
@@ -116,7 +114,6 @@ sealed partial class GameHost
             // The duel prints what its measured lap holds (MeasureLap).
             Combat = new Meitou.Simulation.Combat.CombatOptions { SelfApproach = false, TickMedical = false, RecordLog = IsDuel, AttackSlots = Math.Clamp(config.AttackSlots, 1, 5), StuckLimit = Gameplay.HarpoonLimit, LateDefences = config.LateDefences, GunnerFacesBarrel = config.FixGunnerFacing, PunchReachFix = config.FixPunchReach },
             DoorsCloseBehind = config.DoorsCloseBehind,
-            HealGoodwill = config.HealGoodwillPoints,
             AnimationLengths = animationLengths,
             AnimationLibrary = animationLibrary,
             AnimationBlendRate = popData!.Bodies.Constants.AnimationBlendRate,
@@ -381,7 +378,6 @@ sealed partial class GameHost
         difficulty = nextDifficulty;
         player.NewGameOptions = nextDifficulty;   // the New game window then shows the loaded save's options (the original loads them into its globals)
         population = built.Population;
-        aggro = built.Aggro;
         if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
         loadedSave = loaded;
         preparedBase = null;

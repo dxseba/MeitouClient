@@ -14,7 +14,7 @@ namespace Meitou.Rendering;
 /// GPU resources for texturing the terrain (docs/formats/terrain.md, "How the terrain is textured"), streamed to
 /// follow the camera: the biome layer textures of every biome that <c>blendinfo.dat</c> lists in a cell within the
 /// material distance of the eye (two texture arrays whose slots are handed out per distinct texture pair, least
-/// recently needed evicted first), a parameter texture with one row per biome, the cell table (what each biome slot
+/// recently needed evicted first; the arrays start small and grow when every slot is needed), a parameter texture with one row per biome, the cell table (what each biome slot
 /// of a cell is right now: a row, "still loading" or unused), the world blend map, and windows of the overlay and
 /// colour maps that move with the eye. Decoding runs on worker threads; every upload is made on the thread that calls
 /// <see cref="Update"/>, in steps through an <see cref="UploadQueue"/>. Native textures (phase 8), sampled as their GL versions were
@@ -24,6 +24,12 @@ public sealed unsafe class TerrainTextures : IDisposable
 {
     /// <summary>Most texture pairs resident at once (each costs a BC3 and a BC1 layer of <c>layerSize</c>² with mips, 8.4 MB at 2048).</summary>
     public const int MaxLayers = 192;
+
+    /// <summary>Slots the arrays start with (about 270 MB at 2048); they double, up to every pair the world has, when all their slots are needed at once.</summary>
+    public const int InitialLayers = 32;
+
+    /// <summary>Frames (about 2 s) a pair that stopped being needed is kept from eviction while the arrays can still grow (<see cref="AllocateSlot"/>).</summary>
+    const int RecentFrames = 120;
 
     /// <summary>Cell table value of a biome slot that is used but not resident yet / of an unused slot.</summary>
     const byte Pending = 254, Unused = 255;
@@ -39,7 +45,7 @@ public sealed unsafe class TerrainTextures : IDisposable
     readonly BiomeState[] state;
     readonly Dictionary<(string?, string?), Pair> pairs = [];
     readonly Dictionary<Pair, List<int>> usedBy = [];
-    readonly Pair?[] owner;
+    Pair?[] owner;
     readonly ConcurrentQueue<Decoded> decoded = new();
     readonly ConcurrentQueue<string> problems = new();
     readonly int maxInFlight = Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
@@ -106,7 +112,8 @@ public sealed unsafe class TerrainTextures : IDisposable
             }
             state[b] = new BiomeState { Pairs = layers };
         }
-        Capacity = Math.Min(pairs.Count, MaxLayers);
+        MaxCapacity = Math.Min(pairs.Count, MaxLayers);
+        Capacity = Math.Min(MaxCapacity, InitialLayers);
         owner = new Pair?[Capacity];
     }
 
@@ -119,7 +126,9 @@ public sealed unsafe class TerrainTextures : IDisposable
     public int MapState { get; private set; }
     /// <summary>x0, z0, 1/width, 1/depth of the overlay and colour windows in world units (the two cover the same square).</summary>
     public Vector4 Region { get; private set; }
-    public int Capacity { get; }
+    /// <summary>Slots the arrays have now (<see cref="Grow"/> adds to it), and the most they may get: one per texture pair of the world, at most <see cref="MaxLayers"/>.</summary>
+    public int Capacity { get; private set; }
+    public int MaxCapacity { get; }
     public int TotalBiomes => biomes.Count;
     public int TotalPairs => pairs.Count;
     /// <summary>Texture pairs being decoded plus map windows being cut or uploaded.</summary>
@@ -269,18 +278,16 @@ public sealed unsafe class TerrainTextures : IDisposable
         UploadCells();
 
         // Layers are handed out as texture pairs become resident; the arrays are allocated whole, with every mip level.
-        diffuseArray = AllocateArray(true);
-        normalArray = AllocateArray(false);
-        if (GroundRelief.Enabled)
-            heightArray = Make(InternalFormat.R8, HeightSize, HeightSize, (int)Math.Log2(HeightSize) + 1, Math.Max(Capacity, 1),
-                TextureMinFilter.LinearMipmapLinear, TextureMagFilter.Linear, TextureWrapMode.Repeat, "terrain textures height", kind: TextureKind.Texture2DArray);
+        diffuseArray = AllocateArray(true, Capacity);
+        normalArray = AllocateArray(false, Capacity);
+        if (GroundRelief.Enabled) heightArray = AllocateHeight(Capacity);
         // Each slot's steepness factor (1 / (side × its height's steepness); 0: flat), read by the slot's index: its depth (GroundRelief.LayerDepthCm).
         if (GroundRelief.Enabled)
         {
-            reliefTexture = Make(InternalFormat.R32f, Math.Max(Capacity, 1), 1, 1, 1, TextureMinFilter.Nearest, TextureMagFilter.Nearest,
+            reliefTexture = Make(InternalFormat.R32f, Math.Max(MaxCapacity, 1), 1, 1, 1, TextureMinFilter.Nearest, TextureMagFilter.Nearest,
                 TextureWrapMode.ClampToEdge, "terrain relief depths");
             using var batch = Gpu.Uploads.Begin();
-            batch.Write(reliefTexture.Texture, 0, 0, Rect(0, 0, Math.Max(Capacity, 1), 1), new byte[Math.Max(Capacity, 1) * 4]);
+            batch.Write(reliefTexture.Texture, 0, 0, Rect(0, 0, Math.Max(MaxCapacity, 1), 1), new byte[Math.Max(MaxCapacity, 1) * 4]);
         }
 
         // One parameter row per biome; its layer indices are written when the biome becomes resident.
@@ -332,21 +339,72 @@ public sealed unsafe class TerrainTextures : IDisposable
     }
 
     /// <summary>GPU memory of both layer arrays (all slots, all mip levels).</summary>
-    public long ArrayBytes => Enumerable.Range(0, levelCount).Sum(l => (long)(SliceBytes(true, l) + SliceBytes(false, l))) * Math.Max(Capacity, 1);
+    public long ArrayBytes => ArrayBytesOf(Capacity);
 
-    /// <summary>One layer array, every slot and mip level, trilinear and 8x anisotropic, repeating (the slices are written as pairs arrive).</summary>
-    TerrainTexture? AllocateArray(bool diffuse)
+    long ArrayBytesOf(int slots) => Enumerable.Range(0, levelCount).Sum(l => (long)(SliceBytes(true, l) + SliceBytes(false, l))) * Math.Max(slots, 1);
+
+    /// <summary>One layer array of <paramref name="slots"/> slots with every mip level, trilinear and 8x anisotropic, repeating (the slices are written as pairs arrive).</summary>
+    TerrainTexture? AllocateArray(bool diffuse, int slots)
     {
         try
         {
-            return Make(FormatOf(diffuse), layerSize, layerSize, levelCount, Math.Max(Capacity, 1), TextureMinFilter.LinearMipmapLinear,
-                TextureMagFilter.Linear, TextureWrapMode.Repeat, diffuse ? "terrain textures diffuse" : "terrain textures normal", anisotropy: 8, kind: TextureKind.Texture2DArray);
+            return MakeArray(FormatOf(diffuse), layerSize, levelCount, slots, 8, diffuse ? "terrain textures diffuse" : "terrain textures normal");
         }
         catch (Exception e)
         {
             Messages.Add($"terrain layer array allocation: {e.Message}; try a higher --texture-quality");
             return null;
         }
+    }
+
+    TerrainTexture AllocateHeight(int slots) => MakeArray(InternalFormat.R8, HeightSize, (int)Math.Log2(HeightSize) + 1, slots, 1, "terrain textures height");
+
+    /// <summary>A layer array (a copy source too, for <see cref="Grow"/>).</summary>
+    TerrainTexture MakeArray(InternalFormat format, int size, int levels, int slots, float anisotropy, string name)
+    {
+        using var batch = Gpu.Uploads.Begin();
+        var t = batch.Create(new TextureDesc(format, size, size, levels, Math.Max(slots, 1), Kind: TextureKind.Texture2DArray,
+            Use: TextureUse.Sampled | TextureUse.TransferDst | TextureUse.TransferSrc, Name: name, Private: PrivateStatics));
+        return new TerrainTexture(Gpu, t, TextureMinFilter.LinearMipmapLinear, TextureMagFilter.Linear, TextureWrapMode.Repeat, anisotropy);
+    }
+
+    /// <summary>
+    /// Doubles the slots of the layer arrays (up to <see cref="MaxCapacity"/>): new arrays, the old slots copied in on the GPU, the old arrays released after
+    /// the frames in flight. Upload steps queued for a slot write whichever array is current when they run. False when it cannot (at the cap, or an allocation failed).
+    /// </summary>
+    bool Grow()
+    {
+        if (Capacity >= MaxCapacity || diffuseArray is null || normalArray is null) return false;
+        int slots = Math.Min(Capacity * 2, MaxCapacity);
+        TerrainTexture? diffuse = null, normal = null, height = null;
+        try
+        {
+            diffuse = MakeArray(FormatOf(true), layerSize, levelCount, slots, 8, "terrain textures diffuse");
+            normal = MakeArray(FormatOf(false), layerSize, levelCount, slots, 8, "terrain textures normal");
+            if (heightArray is not null) height = AllocateHeight(slots);
+        }
+        catch (Exception e)
+        {
+            diffuse?.Dispose();
+            normal?.Dispose();
+            height?.Dispose();
+            Messages.Add($"terrain layer arrays could not grow to {slots} slots: {e.Message}");
+            return false;
+        }
+        using (var batch = Gpu.Uploads.Begin())
+        {
+            batch.Commands.CopyLayers(diffuseArray.Texture, diffuse.Texture, Capacity);
+            batch.Commands.CopyLayers(normalArray.Texture, normal.Texture, Capacity);
+            if (heightArray is not null && height is not null) batch.Commands.CopyLayers(heightArray.Texture, height.Texture, Capacity);
+        }
+        diffuseArray.Dispose();
+        normalArray.Dispose();
+        heightArray?.Dispose();
+        (diffuseArray, normalArray, heightArray) = (diffuse, normal, height ?? heightArray);
+        Console.WriteLine($"textures  terrain layer arrays grown from {Capacity} to {slots} slots ({ArrayBytesOf(slots) / 1048576} MB)");
+        Capacity = slots;
+        Array.Resize(ref owner, slots);
+        return true;
     }
 
     // ---- per-frame streaming -------------------------------------------------------------------------------
@@ -519,9 +577,11 @@ public sealed unsafe class TerrainTextures : IDisposable
     {
         if (nextFree < Capacity) return nextFree++;
         Pair? victim = null;
+        // While the arrays may still grow, a pair needed in the last RecentFrames stays: the eye wavering at a cell's edge grows them instead of reloading it.
+        long recent = Capacity < MaxCapacity ? frame - RecentFrames : long.MaxValue;
         foreach (var p in owner)
-            if (p is not null && p.Needed != stamp && (victim is null || p.Used < victim.Used)) victim = p;
-        if (victim is null) return -1;
+            if (p is not null && p.Needed != stamp && p.Used < recent && (victim is null || p.Used < victim.Used)) victim = p;
+        if (victim is null) return Grow() ? nextFree++ : -1;
         int slot = victim.Slot;
         victim.Slot = -1;
         owner[slot] = null;
@@ -794,8 +854,8 @@ public sealed unsafe class TerrainTextures : IDisposable
 
     void AllocateMaps()
     {
-        overlayTexture = EmptyMap(mapWindows!.OverlayPixels, MapLevels, "terrain overlay map");
-        colourTexture = EmptyMap(mapWindows.ColourPixels, MapLevels, "terrain colour map");
+        overlayTexture = EmptyMap(InternalFormat.Rgba8, mapWindows!.OverlayPixels, MapLevels, "terrain overlay map");
+        colourTexture = EmptyMap(mapWindows.CompressedColour ? FormatOf(diffuse: true) : InternalFormat.Rgba8, mapWindows.ColourPixels, MapLevels, "terrain colour map");
     }
 
     void UpdateMaps(Vector3 eye, UploadQueue uploads)
@@ -822,20 +882,22 @@ public sealed unsafe class TerrainTextures : IDisposable
     void BeginMapUpload(MapWindows.Update update, UploadQueue uploads)
     {
         mapUploading = true;
-        // Every piece comes with its mip levels from the worker and goes up in slabs of about 2 MB.
+        // Every piece comes with its mip levels from the worker and goes up in slabs of about 2 MB: whole rows of pixels, of 4 × 4 blocks for BC3 colour.
         foreach (var piece in update.Pieces)
             for (int level = 0; level < piece.Levels.Length; level++)
             {
                 var (p, lv) = (piece, level);
                 int w = Math.Max(p.Width >> lv, 1), h = Math.Max(p.Height >> lv, 1), x = p.X >> lv, z = p.Z >> lv;
-                int rows = Math.Max(1, (2 << 20) / (w * 4));
-                for (int row = 0; row < h; row += rows)
+                bool blocks = p.Colour && mapWindows!.CompressedColour;
+                int unit = blocks ? 4 : 1, rowBytes = blocks ? w / 4 * 16 : w * 4, rowCount = h / unit;
+                int rows = Math.Max(1, (2 << 20) / rowBytes);
+                for (int row = 0; row < rowCount; row += rows)
                 {
-                    int r0 = row, n = Math.Min(rows, h - row);
+                    int r0 = row, n = Math.Min(rows, rowCount - row);
                     uploads.Add(() =>
                     {
                         using var batch = Gpu.Uploads.Begin();
-                        batch.Write((p.Colour ? colourTexture : overlayTexture)!.Texture, lv, 0, Rect(x, z + r0, w, n), p.Levels[lv].AsSpan(r0 * w * 4, n * w * 4));
+                        batch.Write((p.Colour ? colourTexture : overlayTexture)!.Texture, lv, 0, Rect(x, z + r0 * unit, w, n * unit), p.Levels[lv].AsSpan(r0 * rowBytes, n * rowBytes));
                     }, "map slab");
                 }
             }
@@ -850,8 +912,8 @@ public sealed unsafe class TerrainTextures : IDisposable
     }
 
     /// <summary>A window texture: <paramref name="levels"/> levels (the GL one had more allocated but sampled only these), trilinear, repeating.</summary>
-    TerrainTexture EmptyMap(int size, int levels, string name) =>
-        Make(InternalFormat.Rgba8, size, size, levels, 1, TextureMinFilter.LinearMipmapLinear, TextureMagFilter.Linear, TextureWrapMode.Repeat, name);
+    TerrainTexture EmptyMap(InternalFormat format, int size, int levels, string name) =>
+        Make(format, size, size, levels, 1, TextureMinFilter.LinearMipmapLinear, TextureMagFilter.Linear, TextureWrapMode.Repeat, name);
 
     // ---- whole-world maps ----------------------------------------------------------------------------------
 
@@ -1017,7 +1079,7 @@ public sealed unsafe class TerrainTextures : IDisposable
             TextureWrapMode.ClampToEdge, "terrain texture field");
         fieldDirty = true;
         int needed = pinned.SelectMany(b => state[b].Pairs).Distinct().Count();
-        Console.WriteLine($"field     {tiles.Length} ground textures from {pinned.Length} biomes ({needed} texture pairs kept resident, room for {Capacity}), {FieldColumns} a row, tiles {tile:0} units, " +
+        Console.WriteLine($"field     {tiles.Length} ground textures from {pinned.Length} biomes ({needed} texture pairs kept resident, room for {MaxCapacity}), {FieldColumns} a row, tiles {tile:0} units, " +
             $"from {FieldOrigin.X:0}, {FieldOrigin.Y:0}");
     }
 
@@ -1118,25 +1180,36 @@ internal sealed class TerrainTexture : IDisposable
 /// <summary>
 /// The overlay (36 units per pixel) and colour (18) maps of <c>overlaymaps/</c>, 8 × 8 tiles each, cut into windows
 /// of the same world square on a worker thread, with a small cache of decoded tiles so a moving window re-reads little.
+/// The colour window is BC3 cut from <see cref="TerrainColourCache"/>'s encoded tiles; RGBA8 from the PNGs when a tile's side does not allow blocks.
 /// </summary>
 sealed class MapWindows
 {
-    /// <summary>Window edge in overlay pixels (36 units each) and the alignment of its origin (the mip level 6 texel).</summary>
-    const int WindowPixels = 2048, Align = 64;
+    /// <summary>Window edge in overlay pixels (36 units each).</summary>
+    const int WindowPixels = 2048;
 
-    readonly TileCache overlay, colour;
+    readonly TileCache overlay;
+    readonly TileCache? colour;
+    readonly BlockTiles? colourBlocks;
     readonly int overlayTile, colourTile, ratio;
+    /// <summary>The alignment of the window's origin in overlay pixels: the mip level 6 texel (64), and for BC3 colour whole blocks at every colour level.</summary>
+    readonly int align;
     readonly double overlayUnit;
 
-    MapWindows(TileCache overlay, TileCache colour, int overlayTile, int colourTile)
+    MapWindows(TileCache overlay, TileCache? colour, BlockTiles? colourBlocks, int overlayTile, int colourTile)
     {
         this.overlay = overlay;
         this.colour = colour;
+        this.colourBlocks = colourBlocks;
         this.overlayTile = overlayTile;
         this.colourTile = colourTile;
         overlayUnit = (double)WorldLayout.WorldSize / (overlayTile * TerrainMaps.OverlayTiles);
         ratio = Math.Max((int)Math.Round((double)colourTile / overlayTile), 1);
         if (ratio * overlayTile != colourTile) throw new InvalidDataException($"colour tiles ({colourTile}) are not a whole multiple of overlay tiles ({overlayTile})");
+        align = 64;
+        if (colourBlocks is null) return;
+        while (align * ratio % TerrainColourCache.Granule != 0) align += 64;
+        if (OverlayPixels % align != 0 || overlayTile * TerrainMaps.OverlayTiles % align != 0)
+            throw new InvalidDataException($"the window ({OverlayPixels}) or the overlay map ({overlayTile * TerrainMaps.OverlayTiles}) is not a multiple of {align}");
     }
 
     public static MapWindows Open(GameInstall install, List<string> messages)
@@ -1152,21 +1225,35 @@ sealed class MapWindows
         // A 2048² overlay tile is 16 MB and a colour tile can be larger. The window spans only a few tiles; keep
         // enough for one compose and clear them below, instead of pinning 24 + 12 full decoded maps for the session.
         var o = Cache("new_overlay", 4, out int ot);
+        var firstColour = TerrainMaps.OverlayTile(install, "colour", 0, 0);
+        try
+        {
+            var tile = TerrainColourCache.Get(firstColour) ?? throw new FileNotFoundException($"missing {firstColour}");
+            return new MapWindows(o, null, new BlockTiles(install), ot, tile.Size);
+        }
+        catch (InvalidDataException e)
+        {
+            messages.Add($"colour map kept uncompressed: {e.Message}");
+        }
         var c = Cache("colour", 2, out int ct);
-        return new MapWindows(o, c, ot, ct);
+        return new MapWindows(o, c, null, ot, ct);
     }
+
+    /// <summary>Whether the colour window is BC3 (its pieces hold blocks).</summary>
+    public bool CompressedColour => colourBlocks is not null;
+
 
     public int OverlayPixels => Math.Min(WindowPixels, overlayTile * TerrainMaps.OverlayTiles);
     public int ColourPixels => OverlayPixels * ratio;
 
     /// <summary>When the window's origin (overlay pixels) differs by more than this from the desired one, it moves (4608 units).</summary>
-    public int RecentreOverlayPixels => Math.Max((int)(4608 / overlayUnit), Align);
+    public int RecentreOverlayPixels => Math.Max((int)(4608 / overlayUnit), align);
 
     /// <summary>Origin (overlay pixels) of a window centred on a point, aligned and kept inside the maps.</summary>
     public (int X, int Z) DesiredOrigin(double x, double z)
     {
         int full = overlayTile * TerrainMaps.OverlayTiles, size = OverlayPixels;
-        int Axis(double v) => Math.Clamp((int)Math.Round(((v + WorldLayout.HalfWorldSize) / overlayUnit - size / 2.0) / Align) * Align, 0, full - size);
+        int Axis(double v) => Math.Clamp((int)Math.Round(((v + WorldLayout.HalfWorldSize) / overlayUnit - size / 2.0) / align) * align, 0, full - size);
         return (Axis(x), Axis(z));
     }
 
@@ -1211,14 +1298,17 @@ sealed class MapWindows
                 {
                     var data = Cut(overlay, overlayTile, sx, sz, sw, sh);
                     pieces.Add(new Piece(false, sx % size, sz % size, sw, sh, TerrainTextures.Mips(data, sw, sh, 7, pooled: true)));
-                    var cdata = Cut(colour, colourTile, sx * ratio, sz * ratio, sw * ratio, sh * ratio);
-                    pieces.Add(new Piece(true, sx * ratio % cs, sz * ratio % cs, sw * ratio, sh * ratio, TerrainTextures.Mips(cdata, sw * ratio, sh * ratio, 7, pooled: true)));
+                    var clevels = colourBlocks is not null
+                        ? CutBlocks(colourBlocks, colourTile, sx * ratio, sz * ratio, sw * ratio, sh * ratio)
+                        : TerrainTextures.Mips(Cut(colour!, colourTile, sx * ratio, sz * ratio, sw * ratio, sh * ratio), sw * ratio, sh * ratio, 7, pooled: true);
+                    pieces.Add(new Piece(true, sx * ratio % cs, sz * ratio % cs, sw * ratio, sh * ratio, clevels));
                 }
         var update = new Update(px0, pz0, pieces);
         // The pieces own pooled copies of what they need; the decoded tiles are large and a window moves only after
         // 4,608 units, so retaining them for the next compose is not worth hundreds of MB of LOH.
         overlay.Clear();
-        colour.Clear();
+        colour?.Clear();
+        colourBlocks?.Clear();
         return update;
     }
 
@@ -1259,6 +1349,64 @@ sealed class MapWindows
         }
         cache.Trim(keys);
         return result;
+    }
+
+    /// <summary>
+    /// A piece's BC3 levels cut from the encoded colour tiles: rows of whole blocks (the alignment keeps every edge on a block at every level),
+    /// pooled like <see cref="Cut"/>'s; a missing tile leaves zero blocks.
+    /// </summary>
+    static byte[][] CutBlocks(BlockTiles cache, int tile, int x0, int z0, int w, int h)
+    {
+        int tx0 = x0 / tile, tx1 = (x0 + w - 1) / tile, tz0 = z0 / tile, tz1 = (z0 + h - 1) / tile;
+        var keys = new List<(int, int)>();
+        for (int tz = tz0; tz <= tz1; tz++)
+            for (int tx = tx0; tx <= tx1; tx++) keys.Add((tx, tz));
+        var tiles = new Dictionary<(int, int), TerrainColourCache.Tile?>();
+        Parallel.ForEach(keys, key =>
+        {
+            var t = cache.Get(key.Item1, key.Item2);
+            lock (tiles) tiles[key] = t?.Size == tile ? t : null;
+        });
+        var levels = new byte[TerrainColourCache.Levels][];
+        for (int l = 0; l < levels.Length; l++)
+        {
+            // In blocks at this level.
+            int bx0 = (x0 >> l) / 4, bz0 = (z0 >> l) / 4, bw = (w >> l) / 4, bh = (h >> l) / 4, tb = (tile >> l) / 4;
+            var result = ArrayPool<byte>.Shared.Rent(bw * bh * 16);
+            Array.Clear(result, 0, bw * bh * 16);
+            foreach (var (tx, tz) in keys)
+            {
+                if (tiles[(tx, tz)] is not { } t) continue;
+                int ax0 = Math.Max(bx0, tx * tb), ax1 = Math.Min(bx0 + bw, (tx + 1) * tb);
+                int az0 = Math.Max(bz0, tz * tb), az1 = Math.Min(bz0 + bh, (tz + 1) * tb);
+                for (int z = az0; z < az1; z++)
+                    Array.Copy(t.Levels[l], ((z - tz * tb) * tb + (ax0 - tx * tb)) * 16, result, ((z - bz0) * bw + (ax0 - bx0)) * 16, (ax1 - ax0) * 16);
+            }
+            levels[l] = result;
+        }
+        return levels;
+    }
+
+    /// <summary>The encoded colour tiles one compose uses (<see cref="TerrainColourCache"/>), cleared after it like the decoded ones.</summary>
+    sealed class BlockTiles(GameInstall install)
+    {
+        readonly Dictionary<(int, int), TerrainColourCache.Tile?> tiles = [];
+
+        public TerrainColourCache.Tile? Get(int tx, int tz)
+        {
+            lock (tiles)
+                if (tiles.TryGetValue((tx, tz), out var hit)) return hit;
+            TerrainColourCache.Tile? tile;
+            try { tile = TerrainColourCache.Get(TerrainMaps.OverlayTile(install, "colour", tx, tz)); }
+            catch (InvalidDataException) { tile = null; }   // a tile of another size than the first: left out, as a missing one
+            lock (tiles) tiles[(tx, tz)] = tile;
+            return tile;
+        }
+
+        public void Clear()
+        {
+            lock (tiles) tiles.Clear();
+        }
     }
 
     sealed class TileCache(GameInstall install, string kind, int max)

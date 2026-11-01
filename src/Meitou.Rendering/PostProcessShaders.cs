@@ -25,7 +25,7 @@ static class PostProcessShaders
     /// each of 12 spiral taps adds the cosine of the sample direction against the normal over its distance, ignoring
     /// samples further than twice the radius. Writes R = occlusion factor (1 = open), G = view depth for the blur.  The occlusion is scaled by how much of the
     /// surface is still visible through the air in front of it (haze, weather fog, fog volumes: the world position is rebuilt from depth and the
-    /// frame globals' own <c>atmoApply</c> evaluated), <c>ao = 1 - (1 - ao) * visibility</c>.
+    /// frame globals' own <c>atmoApply</c> evaluated), <c>ao = 1 - (1 - ao) * visibility</c>, and by the water in front of it (<c>uWaterY</c>).
     /// </summary>
     public static readonly string Ssao = "#version 330 core\n" + Noise + AtmosphereShaders.Functions + FogVolumeShaders.Functions + """
 
@@ -40,6 +40,17 @@ static class PostProcessShaders
         uniform float uRadius, uStrength, uFadeStart, uFadeEnd;
         uniform vec3 uRight, uUp, uBack;   // the camera's axes in the world (view space to world offsets)
         uniform vec3 uSsaoEye;
+        uniform float uWaterY;               // the water plane's height (float min: no water)
+        uniform int uClipDepthZeroToOne;     // the depth's convention (Metal 1: the clip depth itself; Vulkan 0: half of it plus a half)
+
+        // The share of a surface's occlusion the water in front of it leaves. The water writes no depth, so the floor's occlusion fell on the
+        // water's own surface; it fades in over the water's last two units along the ray, as the water's edge does (docs/render-water.md "Edges").
+        float waterVisibility(vec3 offset)
+        {
+            float below = uWaterY - (uSsaoEye.y + offset.y);
+            if (uWaterY < -1e30 || below <= 0.0 || uSsaoEye.y <= uWaterY) return 1.0;
+            return 1.0 - clamp(length(offset) * below / max(-offset.y, 1e-6) / 2.0, 0.0, 1.0);
+        }
 
         // The share of a surface's own light that reaches the eye through the air. atmoApply (the haze) is linear in the colour it is given, so
         // apply(1) - apply(0) is its transmittance, as the grass uses it; the fog volumes (drawn by the fog pass, not atmoApply) add theirs.
@@ -52,10 +63,12 @@ static class PostProcessShaders
             return dist < 1.0 ? visible : visible * fogVolumesTransmittance(uSsaoEye, offset / dist, dist);
         }
 
+        // The view depth of a stored depth. The projection's clip depth runs 0 to 1 (System.Numerics); Vulkan stores half of it plus a half, Metal
+        // the clip depth itself. GL's formula (clip depth -1 to 1) put every point about twice too far on Vulkan.
         float viewZ(float d)
         {
-            float n = 2.0 * d - 1.0;
-            return 2.0 * uNearFar.x * uNearFar.y / (uNearFar.y + uNearFar.x - n * (uNearFar.y - uNearFar.x));
+            float zd = uClipDepthZeroToOne != 0 ? d : 2.0 * d - 1.0;
+            return uNearFar.x * uNearFar.y / (uNearFar.y - zd * (uNearFar.y - uNearFar.x));
         }
         // A depth texel's own position: its depth with the screen position of its centre. The occlusion runs at half size, so its pixels' centres fall on
         // the corners between depth texels; reading the depth there and placing it at the unsnapped position let rounding pick the texel row by row,
@@ -109,7 +122,11 @@ static class PostProcessShaders
             }
             float ao = 1.0 - clamp(uStrength * sum / float(N), 0.0, 1.0);
             ao = mix(ao, 1.0, smoothstep(uFadeStart, uFadeEnd, z));
-            if (ao < 0.999) ao = mix(1.0, ao, airVisibility(p.x * uRight + p.y * uUp + p.z * uBack));   // 1 - (1 - ao) * visibility
+            if (ao < 0.999)
+            {
+                vec3 offset = p.x * uRight + p.y * uUp + p.z * uBack;
+                ao = mix(1.0, ao, airVisibility(offset) * waterVisibility(offset));   // 1 - (1 - ao) * visibility
+            }
             fragColour = vec4(ao, z, 0.0, 1.0);
         }
         """;
@@ -499,15 +516,25 @@ static class PostProcessShaders
                     }
             ivec2 t = ivec2(gl_FragCoord.xy);
             gl_FragDepth = ((t.x + t.y) & 1) == 0 ? near : far;
-            fragColour = vec4(0.0);
+            fragColour = vec4(gl_FragDepth);   // the same depth as a colour, for the Meitou fog's soft fade (the depth attachment cannot be read while tested)
         }
+        """;
+
+    /// <summary>The scene's depth copied into a colour target at the render size, for the full-size particles' soft fade (the Meitou <c>fog</c> switch).</summary>
+    public const string ParticleSoftDepth = """
+        #version 330 core
+        in vec2 vUv;
+        out vec4 fragColour;
+        uniform sampler2D uDepth;
+        void main() { fragColour = vec4(texelFetch(uDepth, ivec2(gl_FragCoord.xy), 0).r); }
         """;
 
     /// <summary>
     /// The depth-aware upsample of the low-resolution particles' accumulation, shared by <see cref="ParticleComposite"/> and <see cref="ParticleCoverage"/>:
     /// the four nearest texels with their bilinear weights (plus a floor) divided by the square of how far each one's depth is from this pixel's (relative, in
     /// linear depth), so the texels tested against this pixel's own surface (<see cref="ParticleDepth"/>) win and a sprite behind a near edge does not bleed
-    /// over it. Pixels whose four texels are empty skip the depth reads.
+    /// over it. Pixels whose four texels are empty skip the depth reads. With <c>footprint</c> (blended over a vendor upscaler's unjittered output) the pixel's
+    /// depth is the nearest of the 2 x 2 render texels round it, the ones its unjittered point can fall in whatever the jitter, not the one nearest texel.
     /// </summary>
     const string ParticleUpsample = """
         uniform sampler2D uAccum, uLowDepth, uDepth;
@@ -516,7 +543,7 @@ static class PostProcessShaders
         uniform float uDiv;
         uniform int uClipDepthZeroToOne;   // Metal's depth is 0..1; Vulkan's is recovered with 2d - 1
         float linearZ(float d) { float zd = uClipDepthZeroToOne != 0 ? d : 2.0 * d - 1.0; return uNearPlanes.x * uNearPlanes.y / (uNearPlanes.y - zd * (uNearPlanes.y - uNearPlanes.x)); }
-        vec4 particlesAt(vec2 fc)
+        vec4 particlesAt(vec2 fc, bool footprint)
         {
             vec2 lp = fc / uDiv - 0.5;
             vec2 f = lp - floor(lp);
@@ -532,18 +559,55 @@ static class PostProcessShaders
                 total += a[i].a + a[i].r + a[i].g + a[i].b;
             }
             if (total <= 0.0) return vec4(0.0);
-            float z0 = linearZ(texelFetch(uDepth, ivec2(fc), 0).r);
-            vec4 sum = vec4(0.0);
-            float weights = 0.0;
+            float d0 = texelFetch(uDepth, ivec2(fc), 0).r;
+            if (footprint)
+            {
+                ivec2 r0 = ivec2(floor(fc - 0.5)), rhi = textureSize(uDepth, 0) - 1;
+                d0 = min(min(texelFetch(uDepth, clamp(r0, ivec2(0), rhi), 0).r, texelFetch(uDepth, clamp(r0 + ivec2(1, 0), ivec2(0), rhi), 0).r),
+                         min(texelFetch(uDepth, clamp(r0 + ivec2(0, 1), ivec2(0), rhi), 0).r, texelFetch(uDepth, clamp(r0 + ivec2(1, 1), ivec2(0), rhi), 0).r));
+            }
+            float z0 = linearZ(d0);
+            float z[4];
+            float zMin = 1e30, zMax = 0.0;
             for (int i = 0; i < 4; i++)
             {
-                float bw = ((i & 1) == 0 ? 1.0 - f.x : f.x) * ((i >> 1) == 0 ? 1.0 - f.y : f.y);
-                float e = 0.02 + abs(linearZ(texelFetch(uLowDepth, q[i], 0).r) - z0) / z0;
-                float w = (bw + 0.05) / (e * e);
-                sum += a[i] * w;
-                weights += w;
+                z[i] = linearZ(texelFetch(uLowDepth, q[i], 0).r);
+                zMin = min(zMin, z[i]);
+                zMax = max(zMax, z[i]);
             }
-            return sum / weights;
+            if (zMax - zMin <= 0.04 * zMin)
+            {
+                // One surface under the footprint: the bilinear weights (with the same depth term, which is near 1 for all four).
+                vec4 sum = vec4(0.0);
+                float weights = 0.0;
+                for (int i = 0; i < 4; i++)
+                {
+                    float bw = ((i & 1) == 0 ? 1.0 - f.x : f.x) * ((i >> 1) == 0 ? 1.0 - f.y : f.y);
+                    float e = 0.02 + abs(z[i] - z0) / z0;
+                    float w = (bw + 0.05) / (e * e);
+                    sum += a[i] * w;
+                    weights += w;
+                }
+                return sum / weights;
+            }
+            // A depth edge: a joint bilateral filter over the 4 x 4 texels round the pixel (a smooth radial kernel times the depth match), so the texels tested
+            // against this pixel's surface (ParticleDepth's checkerboard holds both of a block's depths) blend among themselves. The four nearest alone gave one
+            // or two matching texels in turn along the edge: a row of beads two texels apart.
+            vec4 sum = vec4(0.0);
+            float weights = 0.0;
+            for (int y = -1; y <= 2; y++)
+                for (int x = -1; x <= 2; x++)
+                {
+                    ivec2 t = i0 + ivec2(x, y);
+                    float k = max(0.0, 1.0 - length(vec2(t) - lp) / 2.0);
+                    if (k <= 0.0) continue;
+                    ivec2 c = clamp(t, ivec2(0), hi);
+                    float e = 0.02 + abs(linearZ(texelFetch(uLowDepth, c, 0).r) - z0) / z0;
+                    float w = k * k / (e * e);
+                    sum += texelFetch(uAccum, c, 0) * w;
+                    weights += w;
+                }
+            return weights > 0.0 ? sum / weights : vec4(0.0);
         }
         """;
 
@@ -555,8 +619,10 @@ static class PostProcessShaders
         #version 330 core
         in vec2 vUv;
         out vec4 fragColour;
+        uniform float uScale;   // render pixels per target pixel: 1 over the scene, render / display over the upscaler's output
+        uniform int uFootprint; // 1 over the upscaler's output (unjittered): the nearest of the render depth's 2 x 2 round the pixel
         """ + "\n" + ParticleUpsample + "\n" + """
-        void main() { fragColour = particlesAt(gl_FragCoord.xy); }
+        void main() { fragColour = particlesAt((floor(gl_FragCoord.xy) + 0.5) * uScale, uFootprint != 0); }
         """;
 
     /// <summary>
@@ -572,7 +638,7 @@ static class PostProcessShaders
         """ + "\n" + ParticleUpsample + "\n" + """
         void main()
         {
-            vec4 a = particlesAt(floor(vUv * uFullSize) + 0.5);
+            vec4 a = particlesAt(floor(vUv * uFullSize) + 0.5, false);
             fragColour = vec4(clamp(max(a.a, max(a.r, max(a.g, a.b))), 0.0, uLimit));
         }
         """;
@@ -671,6 +737,80 @@ static class PostProcessShaders
         }
         """;
 
+    /// <summary>
+    /// Meitou bloom (docs/render-post.md "Bloom"), the scene to half size: a 4 × 4 box of texels, each decoded from the scene's gamma to linear before
+    /// it is averaged (a bilinear tap would average encoded values and lose over half the light of a lone bright texel), so every texel lands in four
+    /// destination pixels at 1/16. The firefly ceiling F compresses a texel's colour so its luminance L tends to F: c (1 + (L/F)^4)^-1/4.
+    /// </summary>
+    public const string BloomPrefilter = """
+        #version 330 core
+        in vec2 vUv;
+        out vec4 fragColour;
+        uniform sampler2D uScene;
+        uniform vec2 uDestSize;
+        uniform float uFirefly;   // the ceiling in linear scene units, 0 off
+        void main()
+        {
+            ivec2 p = ivec2(vUv * uDestSize), last = textureSize(uScene, 0) - 1;
+            vec3 sum = vec3(0.0);
+            for (int j = 0; j < 4; j++)
+                for (int i = 0; i < 4; i++)
+                {
+                    vec3 c = pow(max(texelFetch(uScene, clamp(2 * p - 1 + ivec2(i, j), ivec2(0), last), 0).rgb, 0.0), vec3(2.2));
+                    if (uFirefly > 0.0)
+                    {
+                        float r = dot(c, vec3(0.2126, 0.7152, 0.0722)) / uFirefly, r2 = r * r;
+                        c *= inversesqrt(sqrt(1.0 + r2 * r2));
+                    }
+                    sum += c;
+                }
+            fragColour = vec4(sum / 16.0, 1.0);
+        }
+        """;
+
+    /// <summary>
+    /// Meitou bloom, one level down: Jimenez's 13-tap filter (Call of Duty: Advanced Warfare, 2014), five overlapping 2 × 2 boxes of bilinear taps
+    /// with the centre one at half the weight; the 6 × 6 texel footprint never skips a source texel. <c>uTexel</c> is the source's texel.
+    /// </summary>
+    public const string BloomDown = """
+        #version 330 core
+        in vec2 vUv;
+        out vec4 fragColour;
+        uniform sampler2D uSource;
+        uniform vec2 uTexel;
+        vec3 tap(float x, float y) { return texture(uSource, vUv + vec2(x, y) * uTexel).rgb; }
+        void main()
+        {
+            vec3 a = tap(-2.0, -2.0), b = tap(0.0, -2.0), c = tap(2.0, -2.0);
+            vec3 d = tap(-1.0, -1.0), e = tap(1.0, -1.0);
+            vec3 f = tap(-2.0, 0.0), g = tap(0.0, 0.0), h = tap(2.0, 0.0);
+            vec3 i = tap(-1.0, 1.0), j = tap(1.0, 1.0);
+            vec3 k = tap(-2.0, 2.0), l = tap(0.0, 2.0), m = tap(2.0, 2.0);
+            vec3 corners = (a + b + g + f) + (b + c + h + g) + (f + g + l + k) + (g + h + m + l);
+            fragColour = vec4((d + e + i + j) * 0.125 + corners * 0.03125, 1.0);
+        }
+        """;
+
+    /// <summary>
+    /// Meitou bloom, one level up: this level times its weight plus the coarser sum through a 3 × 3 tent (1 2 1 per axis, a coarse texel apart) times
+    /// its scale: 1, or the coarsest level's weight where the coarser image is that level itself.
+    /// </summary>
+    public const string BloomUp = """
+        #version 330 core
+        in vec2 vUv;
+        out vec4 fragColour;
+        uniform sampler2D uLevel, uCoarse;
+        uniform vec4 uParams;   // own weight, coarse scale, the coarse texel
+        void main()
+        {
+            vec3 coarse = vec3(0.0);
+            for (int j = -1; j <= 1; j++)
+                for (int i = -1; i <= 1; i++)
+                    coarse += texture(uCoarse, vUv + vec2(i, j) * uParams.zw).rgb * float((2 - abs(i)) * (2 - abs(j)));
+            fragColour = vec4(texture(uLevel, vUv).rgb * uParams.x + coarse * (uParams.y / 16.0), 1.0);
+        }
+        """;
+
     /// <summary>Exposure, occlusion, the game's clip at 1 (no tone curve) and dither: HDR scene in, display colour out.</summary>
     public const string Composite = "#version 330 core\n" + Noise + """
 
@@ -685,7 +825,23 @@ static class PostProcessShaders
         uniform float uNight;      // Meitou night grading strength (the `nightgrade` switch): 0 off; needs the auto exposure's mean (uAuto)
         uniform vec2 uSceneSize;   // the scene's size when it is smaller than the picture (render scale without an upscaler), else 0: sampled with Catmull-Rom then
         uniform float uSharpen;    // after TAA or DLSS (neither sharpens): the upscaler sharpness, 0 off
+        uniform sampler2D uBloom;  // Meitou bloom: the linear scene convolved with the point spread function, at a quarter of its size
+        uniform float uBloomStrength;   // its strength, 0 off
         const float EXPOSURE_KEY = 0.55;   // hdr.material's EXPOSURE_KEY
+
+        // The bloom through a cubic B-spline in four bilinear taps (Sigg and Hadwiger, GPU Gems 2 ch. 20): one bilinear tap magnifies each quarter-size
+        // texel into a square around a small light. Positive weights summing to one, so it neither rings nor adds light; the taps are held half a texel
+        // inside the edge.
+        vec3 bloomAt(vec2 uv)
+        {
+            vec2 size = vec2(textureSize(uBloom, 0)), coord = uv * size - 0.5, f = fract(coord), i = coord - f, f2 = f * f, f3 = f2 * f;
+            vec2 w0 = (-f3 + 3.0 * f2 - 3.0 * f + 1.0) / 6.0, w1 = (3.0 * f3 - 6.0 * f2 + 4.0) / 6.0;
+            vec2 w2 = (-3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0) / 6.0, w3 = f3 / 6.0;
+            vec2 g0 = w0 + w1, g1 = w2 + w3, lo = 0.5 / size, hi = 1.0 - lo;
+            vec2 p0 = clamp((i - 1.0 + w1 / g0 + 0.5) / size, lo, hi), p1 = clamp((i + 1.0 + w3 / g1 + 0.5) / size, lo, hi);
+            return g0.y * (g0.x * texture(uBloom, p0).rgb + g1.x * texture(uBloom, vec2(p1.x, p0.y)).rgb)
+                 + g1.y * (g0.x * texture(uBloom, vec2(p0.x, p1.y)).rgb + g1.x * texture(uBloom, p1).rgb);
+        }
 
         // Catmull-Rom through five bilinear taps (the corners of the 4 x 4 footprint are left out): a sharper plain upscale than bilinear.
         vec3 sceneAt(vec2 uv)
@@ -747,6 +903,9 @@ static class PostProcessShaders
             vec2 adapted = uAuto != 0 ? texture(uAdapted, vec2(0.5)).rg : vec2(1.0);   // the clamped adapted luminance, the smoothed mean
             if (uAuto != 0) exposure *= max(EXPOSURE_KEY / adapted.r, 0.001);   // Kenshi's exposure: key over the adapted luminance
             vec3 raw = max(uSharpen > 0.0 && uSceneSize.x <= 0.0 ? sharpened(vUv) : sceneAt(vUv), 0.0);
+            // The bloom mixed in, not added: that share of every pixel's light moves into its neighbourhood, so a uniform image stays itself. In linear
+            // light, before the exposure (a scale, which commutes with the gamma), then back to the scene's gamma.
+            if (uBloomStrength > 0.0) raw = pow(mix(pow(raw, vec3(2.2)), max(bloomAt(vUv), 0.0), uBloomStrength), vec3(1.0 / 2.2));
             vec3 c = raw * exposure * uBalance;
             float ao = texture(uAo, vUv).r;
             if (uUseAo != 0) c *= ao;
@@ -1028,6 +1187,7 @@ static class PostProcessShaders
         uniform vec2 uNearFar;    // of the near depth slice
         uniform float uFarClip;   // the game's far clip D: its G-buffer depth is distance / D
         uniform int uHasDepth;    // 0: no near slice was drawn, everything counts as far
+        uniform int uClipDepthZeroToOne;   // the depth's convention (Metal 1: the clip depth itself; Vulkan 0: half of it plus a half)
 
         vec2 layer(vec2 uv, vec2 direction, float phase)
         {
@@ -1051,8 +1211,9 @@ static class PostProcessShaders
             float amplitude = 1.0;
             if (uHasDepth != 0 && d < 0.99999)
             {
-                float n = 2.0 * d - 1.0;
-                float z = 2.0 * uNearFar.x * uNearFar.y / (uNearFar.y + uNearFar.x - n * (uNearFar.y - uNearFar.x));
+                // The view depth (the projection's clip depth runs 0 to 1; GL's -1 to 1 formula made it about twice too far on Vulkan).
+                float zd = uClipDepthZeroToOne != 0 ? d : 2.0 * d - 1.0;
+                float z = uNearFar.x * uNearFar.y / (uNearFar.y - zd * (uNearFar.y - uNearFar.x));
                 float distance = z * length(vec3((vUv * 2.0 - 1.0) * uTan, 1.0));
                 amplitude = clamp(6.0 * distance / uFarClip, 0.0, 1.0);
             }

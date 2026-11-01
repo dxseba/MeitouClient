@@ -97,7 +97,7 @@ public sealed partial class CombatSystem : IProjectileSource
         {
             var p = projectiles[k];
             list[k] = new ProjectileSnapshot(p.Id, p.Position, p.Direction, p.Stuck ? 1 : MathF.Max(1, p.Speed * 0.005f), p.Stuck, p.Mesh)
-                { Shooter = new CharacterId(p.Shooter, p.ShooterGeneration) };
+                { Shooter = new CharacterId(p.Shooter, p.ShooterGeneration), Speed = p.Stuck ? 0 : p.Speed };
         }
         return list;
     }
@@ -670,6 +670,7 @@ public sealed partial class CombatSystem : IProjectileSource
         }
         PublishHit(world, CombatHitSource.Bolt, p.Shooter < prev.Length && prev[p.Shooter].Alive && prev[p.Shooter].Generation == p.ShooterGeneration ? table.IdOf(p.Shooter) : CharacterId.None,
             v, dc.Medical, part, damage, new Vector2(p.Direction.X, p.Direction.Z), events, mechanism: CombatWoundMechanism.Thrust);
+        if (knockout || death) Knockdown(world, v, dc, new Vector2(p.Direction.X, p.Direction.Z), damage.Cut + damage.Blunt + damage.Pierce);
         if (dc.Medical.Incapacitated)
         {
             D.Down = true;

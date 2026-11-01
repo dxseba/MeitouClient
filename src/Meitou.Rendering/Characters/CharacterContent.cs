@@ -256,7 +256,7 @@ internal sealed class CharacterContent : IDisposable
         this.db = db;
         modsDirectory = install.ModsDirectory;
         resolver = new MaterialResolver(db, OgreMaterialLibrary.LoadConfigured(install, out _), assets);
-        Textures = new WorldTextureCache(gpu, assets, "character textures");
+        Textures = new WorldTextureCache(gpu, assets, "character textures") { Share = TextureShare.For(gpu) };
         Morphs = new MorphArena(gpu);
         Materials = new CharacterMaterialTable(gpu);
         Rigs = rigs ?? CreateRigs(db, assets);
@@ -335,6 +335,7 @@ internal sealed class CharacterContent : IDisposable
         try
         {
             var mesh = OgreMeshReader.ReadFile(path);
+            if (MeshWeld.Enabled) OgreMeshWeld.Apply(mesh);
             var model = Model.Build(mesh, boneCount, gameBinormals: !icon, tangentSign: icon);
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
             if (limbs is not null || partMap is not null)
@@ -570,11 +571,11 @@ internal sealed class CharacterContent : IDisposable
         gpu.EnsureFrame();
         using (var uploads = gpu.Uploads.Begin())
         {
-            var vb = DeviceBuffer.Create(gpu, (ulong)(array.Length * Vertex.Size), BufferUse.Vertex, AllocationName);
+            var vb = DeviceBuffer.Create(gpu, (ulong)((array.Length + 1) * Vertex.Size), BufferUse.Vertex, AllocationName);
             var ib = DeviceBuffer.Create(gpu, (ulong)(indices.Length * 4), BufferUse.Index, AllocationName);
             uploads.Write(vb, 0, MemoryMarshal.AsBytes(array.AsSpan()));
             uploads.Write(ib, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
-            mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "anatomy", HasTangents = false, HasColours = true, Vertices = vb, Indices = ib, Offset = [0], Count = [indices.Length], Attributes = ObjectMeshCache.VertexAttributes(vb) });
+            mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "anatomy", HasTangents = false, HasColours = true, Vertices = vb, Indices = ib, Offset = [0], Count = [indices.Length], Attributes = GpuVertex.FloatAttributes(vb) });
         }
         return new LoadedMesh(mesh, null, centre, 12);
     }
@@ -587,17 +588,18 @@ internal sealed class CharacterContent : IDisposable
         foreach (var made in ready.Parts)
         {
             var part = made.Part;
-            int vertexBytes = part.Vertices.Length * Vertex.Size, indexBytes = made.All.Length * 4;
+            var packed = GpuVertex.PackCharacter(part.Vertices);
+            int vertexBytes = packed.Length, indexBytes = made.All.Length * 4;
             // One vertex of slack: each attribute is bound at its own offset, and AMD reads the last vertex of an exactly sized buffer as zeros, a spike from its bind pose (VlcekM/MeitouClient#168).
             var vertices = DeviceBuffer.Create(gpu, (ulong)(vertexBytes + Vertex.Size), BufferUse.Vertex, AllocationName);
             var indices = DeviceBuffer.Create(gpu, (ulong)indexBytes, BufferUse.Index, AllocationName);
-            uploads.Write(vertices, 0, MemoryMarshal.AsBytes(part.Vertices.AsSpan()));
+            uploads.Write(vertices, 0, packed);
             uploads.Write(indices, 0, MemoryMarshal.AsBytes(made.All.AsSpan()));
             var gp = new GpuObjectPart
             {
                 SubMeshIndex = part.SubMeshIndex, MaterialName = part.MaterialName, HasTangents = part.HasTangents, HasColours = part.HasColours,
                 Vertices = vertices, Indices = indices, Offset = made.Offset, Count = made.Count, UvScale = made.UvScale,
-                Attributes = ObjectMeshCache.VertexAttributes(vertices),
+                Attributes = GpuVertex.CharacterAttributes(vertices), Stride = GpuVertex.CharacterSize,
             };
             gpuMesh.Parts.Add(gp);
             gpuMesh.Bytes += vertexBytes + indexBytes;

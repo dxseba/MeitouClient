@@ -85,7 +85,7 @@ sealed class CharacterHeadWoundPool(IGpuContext gpu) : IDisposable
         for (uint i = 0; i < indices.Length; i++) indices[i] = i;
         using (var uploads = gpu.Uploads.Begin()) uploads.Write(ib, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
         var mesh = new GpuObjectMesh { Distances = [0], Manual = new GpuObjectMesh?[1], Centre = default, Radius = 2 };
-        mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "placed head wound", HasTangents = false, HasColours = true, Vertices = vb, Indices = ib, Offset = [0], Count = [0], Attributes = ObjectMeshCache.VertexAttributes(vb) });
+        mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "placed head wound", HasTangents = false, HasColours = true, Vertices = vb, Indices = ib, Offset = [0], Count = [0], Attributes = GpuVertex.FloatAttributes(vb) });
         return new AssetPart { Label = "placed head wound", Mesh = mesh, Shared = true, Anatomy = true, IsHeadRelief = true, BoundsCentre = default, BoundsRadius = 2, Material = material };
     }
 

@@ -12,9 +12,13 @@ sealed class GameOptions
     public bool SeedGiven;
     public bool? VSync;
     public Meitou.Data.Ui.UiMode? UiMode;
+    /// <summary><c>--low-end</c> (also passed on to WorldOptions): the Faithful UI for this run, whatever <c>--ui</c> or the saved mode says.</summary>
+    public bool LowEnd;
     public bool UiShowcase;
     /// <summary>With <c>--screenshot</c>: one HUD/panel to open for the picture (null: the HUD only).</summary>
     public string? UiPanel;
+    /// <summary>With <c>--screenshot</c>: the settings menu's Graphics page in a set of states (docs/native-ui.md "Settings"), one picture each.</summary>
+    public bool SettingsShowcase;
     /// <summary>With <c>--screenshot</c>: control ticks (and their real time of simulation, at speed 1) run before the picture, with no input.</summary>
     public int Ticks;
     public bool NoPopulation, NewGame, ListStarts;
@@ -24,7 +28,7 @@ sealed class GameOptions
     public string? SandboxCharacter, SandboxPart, SandboxHitSide, SandboxHitMechanism;
     public bool SandboxBare;
     public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead, SandboxSevereOnly, SandboxBisect;
-    public float? SandboxYaw, SandboxPower;
+    public float? SandboxYaw, SandboxPower, SandboxHitAngle;
     public int? SandboxHeadWound, SandboxCutDirection;
     public ulong? SandboxBisectVariant;
     public Meitou.Simulation.Wounds.TorsoBisectionStyle SandboxBisectStyle;
@@ -88,9 +92,10 @@ sealed class GameOptions
           --fps-limit <n>            frame limit when vsync is off (default 150 from meitou.user.json; 0 = unlimited)
           --vsync / --no-vsync       vsync (default off)
           --seed <n>                 the world seed (default 0)
-          --ui <faithful|meitou>      UI mode, independent of graphics; also available in the settings (default meitou)
+          --ui <faithful|meitou>      UI mode, independent of graphics; also available in the settings (default meitou; --low-end: faithful)
           --ui-showcase              with --screenshot: capture HUD, inventory, stats, map, menus, a trade with the nearest trader and a conversation in either UI mode
           --ui-panel <name>          with --screenshot: open one HUD/panel for the picture (hud, hud-expanded, inventory, stats, overview, menu, title, ...)
+          --settings-showcase        with --screenshot: capture the settings menu's Graphics page (every tab, a preset with changes, the preset list, Save as, Low quality, Faithful)
           --title-preview            with --screenshot: capture the staged Meitou title scene
           --no-population            no town residents or movement (an empty world)
           --new-game [start]         a new game as the NEW_GAME_STARTOFF start (default Wanderer): the player squad at its town, camera on it
@@ -105,6 +110,7 @@ sealed class GameOptions
           --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
           --sandbox-cut-direction <n> with --sandbox-dummy: fixed blade axis 1 down, 2 left, 3 right
           --sandbox-hit-mechanism <kind> with --sandbox-dummy: slash (default), thrust, or crush for visual comparison
+          --sandbox-hit-angle <deg> with --sandbox 2: attacker approach around the victim (0 front, 90 right, 180 back); also fixes dummy impact direction
           --sandbox-hit-side <side>  with --sandbox-dummy: fixed victim-local incoming side front, left, right, or back
           --sandbox-hit-damage <n>   with --sandbox-dummy: every third hit cuts for n (default 30); head profiles enlarge at 35
           --sandbox-races            the sandbox adds one character of every person race (the first CHARACTER record listing only that race) in rings round the pair, whatever n is; the log lists them
@@ -157,6 +163,7 @@ sealed class GameOptions
             {
                 case "--ui-showcase": g.UiShowcase = true; break;
                 case "--ui-panel": g.UiPanel = Next(); break;
+                case "--settings-showcase": g.SettingsShowcase = true; break;
                 case "--fps-limit": g.FpsLimit = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--seed": g.Seed = ulong.Parse(Next(), CultureInfo.InvariantCulture); g.SeedGiven = true; break;
                 case "--ui":
@@ -189,6 +196,11 @@ sealed class GameOptions
                 case "--sandbox-hit-mechanism":
                     g.SandboxHitMechanism = Next().ToLowerInvariant();
                     if (g.SandboxHitMechanism is not ("slash" or "thrust" or "crush")) throw new ArgumentException("--sandbox-hit-mechanism must be slash, thrust, or crush");
+                    break;
+                case "--sandbox-hit-angle":
+                    float approach = float.Parse(Next(), CultureInfo.InvariantCulture);
+                    if (!float.IsFinite(approach)) throw new ArgumentException("--sandbox-hit-angle must be finite degrees");
+                    g.SandboxHitAngle = MathF.IEEERemainder(approach, 360);
                     break;
                 case "--sandbox-hit-side":
                     g.SandboxHitSide = Next().ToLowerInvariant();
@@ -284,9 +296,11 @@ sealed class GameOptions
                 case "--scene-every": g.SceneEvery = Math.Max(int.Parse(Next(), CultureInfo.InvariantCulture), 1); break;
                 case "--scene-npc": g.SceneNpc = Next(); break;
                 case "--scene-town": g.SceneTown = Next(); break;
+                case "--low-end": g.LowEnd = true; rest.Add(a); break;
                 default: rest.Add(a); break;
             }
         }
+        if (g.LowEnd) g.UiMode = Meitou.Data.Ui.UiMode.Faithful;
         return (g, rest.ToArray());
     }
 }

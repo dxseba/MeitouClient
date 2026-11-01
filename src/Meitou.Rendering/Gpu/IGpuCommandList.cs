@@ -103,6 +103,9 @@ public interface IGpuCommandList
     /// <summary>A new texture: the backend's own image, and its transition recorded into this command list.</summary>
     GpuTexture CreateTexture(TextureDesc desc);
 
+    /// <summary>Records the transition of a texture made by <see cref="IGpuContext.CreateTextureOffThread"/> (nothing where the backend has none).</summary>
+    void InitTexture(GpuTexture texture) { }
+
     // ---- transfers ----
 
     /// <summary>Fills a range of a buffer with a value.</summary>
@@ -116,6 +119,10 @@ public interface IGpuCommandList
 
     /// <summary>Copies a tightly packed region of a texture's level and layer into a buffer (the bakes' readback).</summary>
     void CopyTextureToBuffer(GpuTexture src, int level, int layer, in PixelRect region, GpuBuffer dst, ulong offset);
+
+    /// <summary>Copies the first <paramref name="layers"/> layers of every level of <paramref name="src"/> into the same layers and levels of <paramref name="dst"/>
+    /// (same format and level sizes; <paramref name="src"/> made with <see cref="TextureUse.TransferSrc"/>). Ordered by full barriers around it.</summary>
+    void CopyLayers(GpuTexture src, GpuTexture dst, int layers);
 
     /// <summary>Resolves a multisample texture into a single-sample one.</summary>
     void Resolve(GpuTexture src, GpuTexture dst);

@@ -100,7 +100,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         colourProg = new ObjProg(gpu, nativeFrame, BuildingLodShaders.VertexNative(), BuildingLodShaders.FragmentNative(), "objects");
         solidProg = new ObjProg(gpu, nativeFrame, BuildingLodShaders.VertexNative(), BuildingLodShaders.FragmentNative(solid: true), "objects solid");
         depthProg = new ObjProg(gpu, nativeFrame, BuildingLodShaders.VertexNative(), BuildingLodShaders.DepthNative(), "objects depth");
-        textureCache = new WorldTextureCache(gpu, assets, "object textures");
+        textureCache = new WorldTextureCache(gpu, assets, "object textures") { Share = TextureShare.For(gpu) };
         var library = OgreMaterialLibrary.LoadConfigured(objects.Install, out _);
         resolver = new MaterialResolver(objects.Database, library, assets);
         meshes = new ObjectMeshCache(gpu, assets, uploads);
@@ -356,6 +356,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
     /// <summary>A line about what is loaded, for the log.</summary>
     /// <summary>GPU memory held by streamed meshes and textures, for the stats line and the window title.</summary>
     public long ResidentBytes => meshes.Bytes + textureCache.ResidentBytes;
+    /// <summary>The objects' texture cache (the VRAM dump lists it).</summary>
+    public WorldTextureCache Textures => textureCache;
     public string ResidentDescription => $"{meshes.Bytes / 1048576.0:0} MB in {meshes.Resident} meshes ({meshes.Unloads} unloaded, {meshes.Reloads} reloaded, {meshes.Refined} remade finer, {meshes.Coarsened} coarser), {textureCache.Describe()}";
     public string Describe() =>
         $"{streamer.Loaded} zones, {streamer.Instances:N0} instances ({streamer.Resolved:N0} resolved{(streamer.LandmarkZone is { } lz ? $", of them {lz.Real.Count(i => i.Gpu is not null)} of {lz.Real.Count} landmarks" : "")}), {meshes.Resident}/{meshes.Total} meshes requested or resident, resident: {ResidentDescription}, " +
@@ -981,16 +983,23 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
 
     /// <summary>
     /// Whether the interior view leaves a building part out: an interior part (or inside-only furniture) of a building seen from outside, or, in the view, a
-    /// part or object above the viewed floor. Floor 0 is never hidden (game: only the floor 1..3 lists are switched).
+    /// part or object above the viewed floor. Floor 0 is never hidden (game: only the floor 1..3 lists are switched). Nor is a door: in the game it is a building
+    /// of its own, which the view of the building it belongs to does not switch, and 15 of the base game's door leaves are floor-1 parts (Storm Houses, shacks),
+    /// which left the doorway empty at floor 0 (docs/render-objects.md "Doors").
     /// </summary>
     bool InteriorHidden(PlacedMesh p)
     {
         if (p.Kind != PlacedKind.BuildingPart) return false;
+        if (p.DoorIndex >= 0 && !p.Interior) return false;
         if (InteriorView.Count == 0 || !p.Interior && (p.Floor == 0 || AllFloors)) return p.Interior;
         // Layout objects (signs, furniture) go with their building.
         if (!InteriorView.TryGetValue(p.ParentPlacementId ?? p.PlacementId, out int floor)) return p.Interior;
         return p.Floor > floor && !AllFloors;
     }
+
+    /// <summary>What <see cref="InteriorHidden"/> leaves out whatever the viewed floor: an interior part of a building not in the interior view.</summary>
+    bool OutsideHidden(PlacedMesh p) =>
+        p.Kind == PlacedKind.BuildingPart && p.Interior && !InteriorView.ContainsKey(p.ParentPlacementId ?? p.PlacementId);
 
     /// <summary>Draws the objects seen from <paramref name="eye"/> through <paramref name="frustum"/>.</summary>
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, WorldRenderOptions options, Vector3 light, Vector3 fogColour, float fogDistance, TerrainRenderer terrain)
@@ -1010,6 +1019,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         active.Clear();
         terrainMeshes.Clear();
         terrainMeshesCut.Clear();
+        if (depthPass) ShadowCut(ref cutConstants);
 
         // 1. Cull and choose levels: every instance into the batch of its (mesh, materials, level) with its dither range.
         float realBand = Math.Clamp(real * 0.1f, 50, 1500);
@@ -1075,6 +1085,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         {
             var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance };
             if (!depthPass) InteriorMaskRenderer.Apply(ref view, InteriorCut);
+            else (view.CutVolumes, view.CutRanges, view.CutPlanes) = (cutConstants.CutVolumes, cutConstants.CutRanges, cutConstants.CutPlanes);
             var fadeRange = new Vector4(real - realBand, real, DistantReach - distantBand, DistantReach);
             if (wireMode != 2)
             {
@@ -1104,7 +1115,9 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
     {
         if (inst.Gpu is not { } gpu) return;
         if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(zone, inst); return; }
-        if (InteriorHidden(inst.Placed) || StandsAbove(inst) || ClosedAround(inst)) return;
+        // A shadow pass keeps what the floor view hides above the viewed floor, so a lower floor stays shaded under its ceiling (docs/render-objects.md
+        // "Closed interiors"): only a closed building's interior parts stay out.
+        if ((depthPass ? OutsideHidden(inst.Placed) : InteriorHidden(inst.Placed) || StandsAbove(inst)) || ClosedAround(inst)) return;
         if (inst.Placed.DoorIndex >= 0) PoseDoor(inst, gpu);
         if (inst.Placed.Joints is not null) PoseJoints(inst, gpu);
         float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
@@ -1163,8 +1176,11 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
             site = true;
         }
         else if (inst.Tint < 0) m.M44 = inst.Tint;
-        // A map feature (CLIP_INTERIOR, docs/render-interior-cut.md) over a building's interior mask takes the cut; the rest keep the programs without it.
-        bool cut = !depthPass && inst.Placed.Kind == PlacedKind.MapFeature && InteriorCut is { Active: true } mask && mask.Overlaps(inst.Centre, inst.Radius);
+        // A map feature (CLIP_INTERIOR, docs/render-interior-cut.md) over a building's interior mask takes the cut, and so does another building's part over
+        // the mask of a building in the interior view (CutsIntoViewed); the rest keep the programs without it.
+        // In a shadow pass such a part casts nothing inside the viewed buildings' hulls (ShadowCut).
+        bool cut = depthPass ? shadowCuts.Count > 0 && CutsShadow(inst)
+            : InteriorCut is { Active: true } mask && (inst.Placed.Kind == PlacedKind.MapFeature ? mask.Overlaps(inst.Centre, inst.Radius) : CutsIntoViewed(inst, mask));
         if (!blend.IsBlending)
         {
             Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior, site, highlight: highlight, cut: cut);
@@ -1172,6 +1188,60 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         }
         Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior, site, highlight: highlight, cut: cut);
         Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior, site, highlight: highlight, cut: cut);
+    }
+
+    /// <summary>
+    /// Leave out other buildings' parts inside a building in the interior view (Fixes settings, on by default; docs/render-interior-cut.md "Meitou"): the Hub's
+    /// town wall runs into the Shinobi Thieves tower (issue #111). Not the parts of a building with a drawn mask (the viewed one's own floors and interior), nor
+    /// doors, layout objects or buildings placed inside another.
+    /// </summary>
+    public bool CutIntoViewed { get; set; } = true;
+
+    bool CutsIntoViewed(ObjectStreamer.Instance inst, InteriorMaskRenderer mask) =>
+        CutIntoViewed && InteriorView.Count > 0 && Cuttable(inst) && mask.Overlaps(inst.Centre, inst.Radius, InteriorView) && !mask.Drew(inst.Placed.PlacementId);
+
+    bool Cuttable(ObjectStreamer.Instance inst) =>
+        !inst.Stand && inst.Placed is { Kind: PlacedKind.BuildingPart, DoorIndex: < 0, ParentPlacementId: null, Contained: false };
+
+    /// <summary>The interior masks last drawn (the main view's), whose owners a shadow pass leaves uncut as the colour pass does.</summary>
+    internal InteriorMaskRenderer? Masks { get; set; }
+
+    /// <summary>The viewed buildings' hulls a shadow pass cuts (<see cref="ShadowCut"/>).</summary>
+    readonly List<InteriorVolume> shadowCuts = [];
+    ViewConstants cutConstants;
+
+    bool CutsShadow(ObjectStreamer.Instance inst)
+    {
+        if (!Cuttable(inst) || InteriorView.ContainsKey(inst.Placed.PlacementId) || Masks?.Drew(inst.Placed.PlacementId) == true) return false;
+        foreach (var v in shadowCuts)
+            if (v.Distance(inst.Centre) <= inst.Radius) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// The shadow side of <see cref="CutIntoViewed"/>: the hulls (convex footprint, height range) of the buildings in the interior view, into <paramref name="view"/>
+    /// for the depth program, up to 4 buildings and 32 edges in all; a hull that does not fit is left uncut.
+    /// </summary>
+    void ShadowCut(ref ViewConstants view)
+    {
+        shadowCuts.Clear();
+        view.CutVolumes = 0;
+        if (!CutIntoViewed || InteriorView.Count == 0) return;
+        int planes = 0;
+        foreach (var id in InteriorView.Keys)
+        {
+            if (shadowCuts.Count == 4) break;
+            if (InteriorFor(id) is not { Footprint: { Length: >= 3 } f } v || planes + f.Length > 32) continue;
+            view.CutRanges[shadowCuts.Count] = new Vector4(planes, f.Length, v.YMin, v.YMax);
+            for (int i = 0; i < f.Length; i++)
+            {
+                var e = f[(i + 1) % f.Length] - f[i];
+                var n = e.LengthSquared() > 1e-8f ? Vector2.Normalize(new Vector2(-e.Y, e.X)) : Vector2.Zero;   // counter-clockwise: inside on the left
+                view.CutPlanes[planes++] = new Vector4(n, Vector2.Dot(n, f[i]), 0);
+            }
+            shadowCuts.Add(v);
+        }
+        view.CutVolumes = (uint)shadowCuts.Count;
     }
 
     void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false, bool site = false, int ghost = 0, bool highlight = false, bool cut = false)

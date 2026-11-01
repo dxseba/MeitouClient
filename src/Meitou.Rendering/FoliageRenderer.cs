@@ -134,7 +134,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         prepassSolidMesh = new NativeProg(gpu, nativeFrame, FoliageShaders.MeshVertexNative(), FoliageShaders.MeshPrepassNative(solid: true), "foliage mesh prepass solid");
         grassProgram = new NativeProg(gpu, nativeFrame, FoliageShaders.GrassVertexNative(), FoliageShaders.GrassFragmentNative(), "foliage grass");
         grassMotionProgram = new NativeProg(gpu, nativeFrame, FoliageShaders.GrassMotionVertexNative(), FoliageShaders.GrassMotionFragmentNative(), "foliage grass motion");
-        textures = new WorldTextureCache(gpu, assets, "foliage textures");
+        textures = new WorldTextureCache(gpu, assets, "foliage textures") { Share = TextureShare.For(gpu) };
         // Metal's GPU cull and its separate pre-frame command buffer are opt-in after the 2026-10-23 progress
         // timeouts; the CPU cull is the stable reference. Vulkan keeps the GPU path.
         bool metalGpuCull = Environment.GetEnvironmentVariable("MEITOU_METAL_GPU_CULL") is "1" or "true";
@@ -215,6 +215,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     public float LargeRange { get; set; } = FoliageSizes.DefaultLargeRange;
     /// <summary>The memory-pressure guard (<see cref="VramGuard"/>): every range here (and the reaches that decide which zones are laid out) is
     /// multiplied by its scale, nothing new is started while it is under pressure, and idle meshes are evicted sooner. Null: no clamp.</summary>
+    /// <summary>The foliage's texture cache (the VRAM dump lists it).</summary>
+    public WorldTextureCache Textures => textures;
     public VramGuard? Guard
     {
         get => guard;
@@ -873,11 +875,16 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     sealed class MeshAsset
     {
         public required FoliageMesh Mesh;
+        /// <summary>Its meshes are welded (<see cref="MeshWeld"/>, as it was when the decode began): its LOD levels must be made from the same vertices.</summary>
+        public bool Weld;
         public Task<(Model? Main, Model? Leaves)>? Job;
         public GpuMesh? Main, Leaves;
         public bool Resident, Failed, Uploading;
         public long LastUsed, Bytes;
         public FoliageMaterial? MainMaterial, LeavesMaterial;
+        /// <summary>World length per texture-coordinate unit of the mesh and of its leaves, before the instance's scale (<see cref="TexelScale"/>; infinity:
+        /// unknown, the textures keep every mip). Known with <see cref="HasBounds"/>.</summary>
+        public float MainTexel = float.PositiveInfinity, LeavesTexel = float.PositiveInfinity;
         public bool Terrain => Mesh.MaterialType == 2;
         public Vector3 Centre;
         public float Radius = 1;
@@ -963,16 +970,22 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             a.LeavesMaterial = new FoliageMaterial(textures.Get(mesh.LeavesTexture, false, deferred: true), textures.Get(mesh.LeavesNormal, false, deferred: true), null, null,
                 mesh.LeavesAlphaThreshold / 255f, true, false, Vector2.One, false, 0, MeshSurface.Foliage);
         string main = mesh.MeshPath, leaves = mesh.LeavesMesh ?? "";
-        a.Job = BackgroundWork.Run(() => (DecodeTrimmed(main, mesh, false), leaves.Length > 0 ? DecodeTrimmed(leaves, mesh, true) : null));
+        bool weld = a.Weld = MeshWeld.Enabled;
+        a.Job = BackgroundWork.Run(() => (DecodeTrimmed(main, mesh, false, weld), leaves.Length > 0 ? DecodeTrimmed(leaves, mesh, true, weld) : null));
         decoding.Add(a);
         return a;
     }
 
-    Model? Decode(string name)
+    Model? Decode(string name, bool weld)
     {
         var path = assets.Find(name) ?? assets.Find(Path.GetFileName(name.Replace('\\', '/')));
         if (path is null) { lock (Messages) Messages.Add($"foliage mesh not found: {name}"); return null; }
-        try { return Model.Build(OgreMeshReader.ReadFile(path), null); }
+        try
+        {
+            var mesh = OgreMeshReader.ReadFile(path);
+            if (weld) OgreMeshWeld.Apply(mesh);
+            return Model.Build(mesh, null);
+        }
         catch (Exception e) when (e is OgreFormatException or EndOfStreamException or IOException or InvalidDataException)
         {
             lock (Messages) Messages.Add($"foliage mesh {name}: {e.Message}");
@@ -1004,8 +1017,25 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             a.Triangles = main.Parts.Sum(p => p.Indices.Length / 3) + (leaves?.Parts.Sum(p => p.Indices.Length / 3) ?? 0);
             a.HasBounds = true;
             a.TriExtent = FoliageScreenLod.TriangleExtent(Triangles(main).Concat(leaves is null ? [] : Triangles(leaves)));
+            a.MainTexel = a.Terrain ? float.PositiveInfinity : TexelScale(main, a.MainMaterial);
+            a.LeavesTexel = leaves is null ? float.PositiveInfinity : TexelScale(leaves, a.LeavesMaterial);
             QueueMesh(a, main, leaves);
         }
+    }
+
+    /// <summary>
+    /// Mip streaming: the world length one unit of the coordinates <paramref name="material"/> samples spans on <paramref name="model"/>, before the
+    /// instance's scale: the most stretched part's <see cref="MeshTexelScale"/> over the material's tiling, as for the objects. Infinity (every mip kept)
+    /// for a triplanar material, whose footprint has no such bound, and for a part without a usable mapping.
+    /// </summary>
+    static float TexelScale(Model model, FoliageMaterial? material)
+    {
+        if (material is null || material.Triplanar) return float.PositiveInfinity;
+        float tile = Math.Min(material.Tile.X, material.Tile.Y);
+        if (!(tile > 0)) return float.PositiveInfinity;
+        float uv = 0;
+        foreach (var part in model.Parts) if (part.Indices.Length > 0) uv = Math.Max(uv, MeshTexelScale.Of(part));
+        return uv > 0 ? uv / tile : float.PositiveInfinity;
     }
 
     /// <summary>The areas of a model's triangles, in mesh units squared.</summary>
@@ -1051,7 +1081,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             GpuPart? gp = null;
             // The trimmed list (card trimming) follows the original one in the same buffer: the draws pick a range (FoliageRenderer.Trim.cs).
             var allIndices = p.TrimmedIndices is null ? p.Indices : [.. p.Indices, .. p.TrimmedIndices];
-            int vertexBytes = p.Vertices.Length * Vertex.Size, indexBytes = allIndices.Length * sizeof(uint);
+            var packed = GpuVertex.PackObject(p.Vertices);
+            int vertexBytes = packed.Length, indexBytes = allIndices.Length * sizeof(uint);
             tally[0] += vertexBytes + indexBytes;
             uploads.Enqueue(() =>
             {
@@ -1072,7 +1103,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
                     Gpu.EnsureFrame();
                 {
                     using var batch = Gpu.Uploads.Begin();
-                    batch.Write(gp!.Vertices, (ulong)start, System.Runtime.InteropServices.MemoryMarshal.AsBytes(p.Vertices.AsSpan()).Slice(start, length));
+                    batch.Write(gp!.Vertices, (ulong)start, packed.AsSpan(start, length));
                 }
                 });
             }
@@ -1102,6 +1133,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     /// <summary>
     /// Once a second: marks the meshes (and their textures) of every zone group within its range as in use, whatever the camera looks at, and
     /// unloads the GPU meshes unused for <see cref="IdleSeconds"/>. A mesh needed again is decoded and uploaded afresh (<see cref="Reload"/>).
+    /// The same pass gives the textures their mip streaming need: the group's nearest instance over the texel size at its largest scale, offered
+    /// before the keys are read so a first load already drops what the view cannot sample.
     /// </summary>
     void TrimResident(Vector3 eye, bool force)
     {
@@ -1118,10 +1151,16 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
                 var a = g.Asset;
                 a.LastUsed = now;
                 if (!a.Resident) Reload(a);   // in range but unloaded (or never loaded after an unload): decode it again, wherever the camera looks
+                if (!a.HasBounds) continue;
+                float near = g.BoundsReady ? BoxDistance(g.BoundMin, g.BoundMax, eye) : zoneDistance, scale = Math.Max(g.MaxScale, 1e-6f);
+                Offer(a.MainMaterial, near / (a.MainTexel * scale));
+                Offer(a.LeavesMaterial, near / (a.LeavesTexel * scale));
                 foreach (var m in (ReadOnlySpan<FoliageMaterial?>)[a.MainMaterial, a.LeavesMaterial])
-                    if (m is not null && a.HasBounds) _ = (m.Diffuse?.Key, m.Normal?.Key, m.Diffuse2?.Key, m.Normal2?.Key);   // reading a key counts as use (WorldTexture.Key)
+                    if (m is not null) _ = (m.Diffuse?.Key, m.Normal?.Key, m.Diffuse2?.Key, m.Normal2?.Key);   // reading a key counts as use (WorldTexture.Key)
             }
         }
+        textures.CommitNeeds();
+        textures.Rebalance();
         foreach (var a in assetsByMesh.Values)
         {
             if (!a.Resident || (now - a.LastUsed) / 1000.0 <= (guard is { Pressure: true } ? Math.Min(IdleSeconds, GuardIdleSeconds) : IdleSeconds)) continue;
@@ -1135,6 +1174,22 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             meshUnloads++;
         }
     }
+
+    /// <summary>A user of the material's textures at <paramref name="need"/> (<see cref="WorldTexture.OfferNow"/>: a texture loaded this pass takes it at once).</summary>
+    static void Offer(FoliageMaterial? m, float need)
+    {
+        if (m is null) return;
+        m.Diffuse?.OfferNow(need);
+        m.Normal?.OfferNow(need);
+        m.Diffuse2?.OfferNow(need);
+        m.Normal2?.OfferNow(need);
+    }
+
+    /// <summary>The distance from <paramref name="eye"/> to the box (0 inside).</summary>
+    static float BoxDistance(Vector3 min, Vector3 max, Vector3 eye) => Vector3.Distance(eye, Vector3.Clamp(eye, min, max));
+
+    /// <summary>Tells the foliage textures' mip streaming the camera: the render size in pixels and the vertical field of view (the upscaler's LOD bias is the context's).</summary>
+    public void SetView(int width, int height, float fieldOfView) => textures.Mips.SetView(width, height, fieldOfView, Gpu.LodBias);
 
     void DeleteMesh(GpuMesh m)
     {
@@ -1152,23 +1207,14 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         if (a.Resident || a.Failed || a.Job is not null || a.Uploading || guard is { Streaming: false }) return;
         string main = a.Mesh.MeshPath, leaves = a.Mesh.LeavesMesh ?? "";
         a.LastUsed = Environment.TickCount64;
-        a.Job = BackgroundWork.Run(() => (DecodeTrimmed(main, a.Mesh, false), leaves.Length > 0 ? DecodeTrimmed(leaves, a.Mesh, true) : null));
+        bool weld = a.Weld = MeshWeld.Enabled;
+        a.Job = BackgroundWork.Run(() => (DecodeTrimmed(main, a.Mesh, false, weld), leaves.Length > 0 ? DecodeTrimmed(leaves, a.Mesh, true, weld) : null));
         decoding.Add(a);
         meshReloads++;
     }
 
-    /// <summary>The mesh layout: position, normal, texture coordinates, tangent, colour of <see cref="Vertex"/> (locations 0 to 4).</summary>
-    internal static readonly MeshAttribute[] MeshLayout = [new(0, 3, 0), new(1, 3, 12), new(2, 2, 24), new(3, 4, 32), new(4, 4, 48)];
-
-    /// <summary>The attributes at locations 0 to 4 as VkGl exported the GL vertex array (one binding per attribute, at its offset).</summary>
-    internal static LegacyProgram.Attribute?[] VertexAttributes(DeviceBuffer vertices)
-    {
-        var result = new LegacyProgram.Attribute?[MeshLayout.Length];
-        foreach (var a in MeshLayout)
-            result[a.Location] = new LegacyProgram.Attribute(new GpuBufferBinding(vertices.Handle, (ulong)a.Offset),
-                GlConventions.VertexFormat(GLEnum.Float, a.Size, false, false), (uint)Vertex.Size, false);
-        return result;
-    }
+    /// <summary>The attributes at locations 0 to 4 (position, normal, texture coordinates, tangent, colour) of the object layout (<see cref="GpuVertex"/>).</summary>
+    internal static LegacyProgram.Attribute?[] VertexAttributes(DeviceBuffer vertices) => GpuVertex.ObjectAttributes(vertices);
 
     /// <summary>The part for the terrain's mesh path (the attributes at 0 to 4 and the index buffer); made on first use.</summary>
     static MeshBindings PlainMesh(GpuPart gp) => gp.Plain ??= MeshBindings.Of(VertexAttributes(gp.Vertices), gp.Indices);

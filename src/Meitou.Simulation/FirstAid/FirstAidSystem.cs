@@ -19,7 +19,7 @@ namespace Meitou.Simulation.FirstAid;
 /// <item><b>Rate</b> (<b>Observed</b>, character-stats.md): <c>lerp(1, 15, min(skill, kit quality) x 0.01) x medic speed mult</c> (x <c>robot medic speed mult</c> for a robot kit) per unit of <c>dt</c> on the first part with room (the next only once it fills), after any open wound is closed;
 /// the kit's <c>charges</c> fall by <c>lerp(medkit drain 99, medkit drain 1, (100 - skill) / 100) x dt</c> per wound step or part bandaged (bandaging drains only the player's kits; character-stats.md "First aid update"). The skill is the medic's <c>medic</c> (first aid kit) or <c>robotics</c> (robot kit) times
 /// the stat multiplier of injuries and hunger. <c>dt</c> is <b>game seconds</b> (<b>engine choice</b>, the unit is <b>Unknown</b>).</item>
-/// <item><b>Auto</b> (<c>SlowWorld</c>, every <see cref="FirstAidSettings.AutoEveryTicks"/> ticks, serial in slot order): an idle, wandering or following NPC looks for a patient with the original's
+/// <item><b>Auto</b> (<c>SlowWorld</c>, each NPC every <see cref="FirstAidSettings.AutoEveryTicks"/> ticks on its slot's turn, serial in slot order): an idle, wandering or following NPC looks for a patient with the original's
 /// Medic finder (<see cref="FindPatient"/>, FirstAidSystem.Finder.cs), as the decision step asks for the player characters' medic, robotics and splint jobs (<see cref="RegisterSources"/>).</item>
 /// <item><b>Rest</b> (<see cref="CharacterTask.Rest"/>): <see cref="RestOrder"/>; <see cref="BodySystem"/> reads the task as <see cref="MedicalContext.Resting"/>. Lying in a bed is
 /// <see cref="Locks.BedSystem"/>'s (<see cref="CharacterTask.Sleep"/>); <see cref="BodySystem"/> gives it the bed's healing.</item>
@@ -40,12 +40,6 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
     public ItemFactory Items { get; } = items;
     /// <summary>The relation event of bandaging an unconscious patient of another faction (<see cref="FactionDeeds.FirstAid"/>); null: none.</summary>
     public FactionDeeds? Deeds { get; set; }
-    /// <summary>
-    /// Meitou's Healing goodwill (0: off, the game's first-aid deed alone): a player medic that finishes treating a downed (unconscious or crawling) character of another faction raises
-    /// that faction's relation to the player by this many points, never past the ally line (<see cref="FactionRelations.AllyThreshold"/>); once per patient while it stays down.
-    /// </summary>
-    public float HealGoodwill { get; set; }
-    readonly HashSet<CharacterId> thanked = [];
     readonly XpService xp = new(constants, options);
     readonly BodyOptions bodyOptions = options;
 
@@ -174,6 +168,7 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
         n.TaskTime = 0;
         cold.TreatTarget = patient;
         cold.TreatSplint = splint;
+        cold.PathFailed = false;   // a failure from before is not this walk's
     }
 
     /// <summary>Dialogue events 18-22 (EV_HEALING_OTHER_START ... EV_FIRSTAID_KIT_EMPTY).</summary>
@@ -247,6 +242,17 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
             n.TaskTime -= dt;
             var goal = new Vector2(next[t].Position.X, next[t].Position.Z);
             bool asking = (n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
+            // No way to the patient: no path, or one that ends short of the asked goal (the walkability answers an unreachable goal with the way to the reachable point nearest it). The
+            // original's task walk reports it (notifyPathImpossible): the patient goes on the medic's path failures for 20 s, which the finder skips, and the treatment ends. Without it
+            // a medic asked for the same hopeless path every half second (issue #124: searches run to the iteration limit, ~280 MB/s of garbage).
+            if (!asking && (cold.PathFailed || (n.Flags & (ushort)MoveFlags.HasPath) != 0 && cold.Path.Length > 0
+                && Vector2.Distance(new Vector2(cold.Path[^1].X, cold.Path[^1].Z), n.Goal) > Settings.Reach))
+            {
+                cold.PathFailed = false;
+                PursuitSystem.GiveUp(world, cold, table.IdOf(t));
+                End(world, i);
+                continue;
+            }
             bool stale = (n.Flags & (ushort)MoveFlags.HasPath) == 0 || Vector2.DistanceSquared(goal, n.Goal) > PursuitSystem.RepathDistance * PursuitSystem.RepathDistance;
             if (asking || !stale || n.TaskTime > 0) continue;
             n.Goal = goal;
@@ -351,7 +357,6 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
         {
             Say(world, m, medicCold.TreatTarget, HealingOtherFinished, BeingHealedFinished);
             patientCold.StuckBolts = null;   // the bolts go when first aid has nothing left to do (FUN_14064d800 -> FUN_14052bc10)
-            Goodwill(world, medicCold, p);
             End(world, m);   // nothing left to bandage
             return;
         }
@@ -366,7 +371,6 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
         float bandaged = body.Treat(dt, skill, quality, robot, ctx, out int touched);
         if (bandaged <= 0)
         {
-            Goodwill(world, medicCold, p);
             End(world, m);
             return;
         }
@@ -375,20 +379,6 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
         xp.Medic(stats, race, medicRace, dt, StatOf(robot));
         // An unconscious patient's faction is grateful to the medic's (engine choice: every update that bandages; the original's update fires it only when its loop got past the wounds).
         Deeds?.FirstAid(world, m, p, dt);
-    }
-
-    /// <summary>The <see cref="HealGoodwill"/> of a finished treatment of slot <paramref name="p"/>.</summary>
-    void Goodwill(World world, CharacterCold medic, int p)
-    {
-        var table = world.Characters;
-        if (HealGoodwill <= 0 || !medic.IsPlayer || Relations is not { } r || table.Cold(p) is not { Medical: { Dead: false } med } patient || !(med.Unconscious || med.Crawling)) return;
-        int player = r.PlayerFaction;
-        if (patient.Faction == player || !r.Contains(patient.Faction) || !r.Contains(player) || r.Factions[patient.Faction].NotReal) return;
-        // A patient that got up (or died) since may be thanked for again.
-        thanked.RemoveWhere(id => !table.TryResolveNext(id, out int s) || table.Cold(s) is not { Medical: { Dead: false } m } || !(m.Unconscious || m.Crawling));
-        if (!thanked.Add(table.IdOf(p))) return;
-        float now = r.Get(patient.Faction, player);
-        if (now < FactionRelations.AllyThreshold) PlayerRelations.Add(world, r, patient.Faction, player, MathF.Min(HealGoodwill, FactionRelations.AllyThreshold - now));
     }
 
     /// <summary>
@@ -529,14 +519,18 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
 
     public void SlowWorld(World world)
     {
-        if (Settings.AutoEveryTicks <= 0 || world.Tick % Settings.AutoEveryTicks != 0) return;
+        // Each NPC looks every AutoEveryTicks ticks, a slot's turn falling on its own tick (slot mod the period), so the looks spread over the ticks instead of all landing on one
+        // (the original runs its AI updates 8 characters a frame in turn, FUN_140786e30).
+        int every = Settings.AutoEveryTicks;
+        if (every <= 0) return;
         var table = world.Characters;
         var next = table.Next;
+        int phase = (int)(world.Tick % every);
         var taken = Treated(table);
         BeginSweep(world);
         try
         {
-            for (int i = 0; i < table.HighWater; i++)
+            for (int i = phase; i < table.HighWater; i += every)
             {
                 if (!next[i].Alive) continue;
                 var cold = table.Cold(i)!;

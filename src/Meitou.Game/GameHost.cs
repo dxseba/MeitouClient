@@ -36,7 +36,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     WorldSession session = null!;   // disposed with the host (Run)
     Meitou.Simulation.PopulationSystem? population;
     /// <summary>The fights started by faction hostility (printed to the log); null in the sandbox and without the population.</summary>
-    Meitou.Simulation.AggroSystem? aggro;
     // The game data the world was built from, kept to build the next world of a quickload (GameHost.Saving.cs).
     Meitou.Simulation.PopulationData? popData;
     IReadOnlyList<Meitou.Data.World.TownPlacement> townPlacements = [];
@@ -168,6 +167,9 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 nav = new Meitou.Navigation.NavSystem(install, gameDb, levels!, heights.HeightAt);
                 nav.ZoneReady += ready => { lock (navReady) navReady.Add(ready.Zone); };
                 walkability = new NavAdapter(nav.Walkability);
+                // The long-range grid built behind the loading: built by the first long route instead, it held the path threads ~3 s (issue #124).
+                var navForRoutes = nav;
+                _ = Task.Run(() => navForRoutes.Walkability.Coarse.Warm());
                 // Ragdolls land on the terrain and the buildings' collision (gathered per zone on a worker when a ragdoll comes near).
                 ragdollGeometry = new Meitou.Navigation.RagdollGeometry(install, gameDb, levels!, heights.HeightAt);
             }
@@ -190,7 +192,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                     $"{buildings.Values.Sum(l => l.Sum(b => b.Spots.Count - b.Beds))} nodes in {buildings.Count} towns ({watch.ElapsedMilliseconds} ms)");
             }
             var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root),
-                bodyOptions: Meitou.Simulation.Bodies.BodyOptions.Default with { Dismemberment = Gameplay.Dismemberment, Decapitation = config.Decapitation }, biomes: biomes, buildings: buildings, roads: levels?.Roads(), townZones: levels?.TownZones(), level: levels?.Level);
+                bodyOptions: Meitou.Simulation.Bodies.BodyOptions.Default with { Dismemberment = Gameplay.Dismemberment, Decapitation = config.Decapitation, AdvancedRagdolls = config.AdvancedRagdolls }, biomes: biomes, buildings: buildings, roads: levels?.Roads(), townZones: levels?.TownZones(), level: levels?.Level);
             if (levels is not null) data.Sight = new BuildingSight(install, gameDb, levels, scene.Objects?.Layouts ?? new Meitou.Data.World.BuildingLayouts(gameDb, levels.Interiors));
             if (nav is not null) nav.Walkability.Roads = data.Roads;   // one network for both: on-screen long routes take the roads as the off-screen squads do
             // The mineable rocks for ore mines, from the foliage placement (read through the renderer's layout cache when it has the zone).
@@ -212,7 +214,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             simWalkability = walkability;
             var built = BuildSystems(interactive);
             population = built.Population;
-            aggro = built.Aggro;
             if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
             systems = built.Systems;
             constants = data.Bodies.Constants;

@@ -102,6 +102,7 @@ sealed partial class GameHost
         // Keep the shared rendering settings' callbacks and persistence keys; the game supplies its own modal layout.
         // --low-end (WorldOptions.LowEnd) is a preset for this run: the saved sliders and switches would undo it, so they are left as saved and not applied.
         bool lowEnd = Environment.GetCommandLineArgs().Contains("--low-end");
+        var runOnly = RunOnlyKeys();   // the keys this run leaves as saved (--bloom)
         var settingsValues = overlay is null ? null : WorldFrame.CreateSettingsPanel(overlay, gpu, render,
             getHour: () => (float)session.Clock.HourOfDay, setHour: v => { session.Clock.SetHourOfDay(v); if (IsDuel) duelHour = v; },
             getVSync: () => display.VSync, setVSync: v => display.VSync = v, switches: switches,
@@ -151,15 +152,17 @@ sealed partial class GameHost
         player.ConfigureTutorials(tutorials);
         if (panel is not null && !lowEnd)
             foreach (var slider in panel.Sliders)
-                if (!SessionSliders.Contains(slider.Label) && config.Graphics.TryGetValue(slider.Label, out float v) && !(o.Post.Upscale.Explicit && WorldFrame.UpscalerSliders.Contains(slider.Label))
+                if (!runOnly.Contains(slider.Label) && config.Graphics.TryGetValue(slider.Label, out float v) && !(o.Post.Upscale.Explicit && WorldFrame.UpscalerSliders.Contains(slider.Label))
                     && !(slider.Label == WorldFrame.TextureQualitySlider && Environment.GetCommandLineArgs().Contains("--texture-quality")))   // the saved one was applied before the boot (Program)
                     slider.Set(Math.Clamp(v, slider.Min, slider.Max));
+        // The look as the command line chose it: Faithful or Meitou for "all", else read from the switches (not saved).
+        if (CommandLineLook() is var (given, faithfulLook) && given) config.FaithfulLook = faithfulLook;
         // The switches as saved, then the saved preset (one the launcher chose), unless the command line chose them (--meitou / --faithful):
         // switches it moved would read as another preset.
         if (panel is not null && !lowEnd && !Environment.GetCommandLineArgs().Any(a => a is "--meitou" or "--faithful"))
         {
             foreach (var toggle in panel.Toggles)
-                if (config.Graphics.TryGetValue(SwitchKey(toggle.Label), out float v) && (v >= 0.5f) != toggle.Get()) toggle.Set(v >= 0.5f);
+                if (!SettingsMenu.HiddenSwitch(toggle.Label) && !runOnly.Contains(SwitchKey(toggle.Label)) && config.Graphics.TryGetValue(SwitchKey(toggle.Label), out float v) && (v >= 0.5f) != toggle.Get()) toggle.Set(v >= 0.5f);
             panel.ApplySavedPreset();
         }
         var stats = new List<string>();
@@ -286,7 +289,7 @@ sealed partial class GameHost
                 return;
             }
             // F10 (rebindable) opens the debug menu, which then takes every key until it closes.
-            if (KeyMap.Map(k) is { } mapped && session.Bindings.Get(InputAction.ToggleDebugMenu).Contains(Binding.Of(mapped))) { debugMenuOpen = !debugMenuOpen; return; }
+            if (KeyMap.Map(k) is { } mapped && session.Bindings.Get(InputAction.ToggleDebugMenu).Contains(Binding.Of(mapped))) { debugMenuOpen = !debugMenuOpen; debugParts = null; return; }
             if (debugMenuOpen)
             {
                 if ((k == SilkKey.KeypadEnter ? EngineKey.Enter : KeyMap.Map(k)) is { } menuKey) DebugMenuKey(menuKey);
@@ -349,10 +352,11 @@ sealed partial class GameHost
             if (k == SilkKey.F9 && ctrl) { fpsVisible = !fpsVisible; return; }
             if (KeyMap.Map(k) is { } key)
             {
-                if (shiftDown && key == EngineKey.F1) { Console.WriteLine(meitou.Toggle()); return; }
+                if (shiftDown && key == EngineKey.F1) { Console.WriteLine(meitou.Toggle()); config.FaithfulLook = !meitou.On; return; }
                 if (shiftDown && key == EngineKey.F2 && switches.FirstOrDefault(e => e.Id == "skin") is { } skin)   // the skin switch alone, to compare faces
                 { skin.IsMeitou = !skin.IsMeitou; Console.WriteLine($"skin      {skin.State}"); return; }
                 if (shiftDown && key == EngineKey.F11) { ToggleNavOverlay(); return; }
+                if (shiftDown && ctrl && key == EngineKey.F12) { DumpVram(profiler); return; }
                 if (shiftDown && key == EngineKey.F12) { if (profiler is not null) profiler.ShowVram = !profiler.ShowVram; return; }   // the VRAM pie (F12 alone cycles the profiler)
                 if (player.BuildKey(key, shiftDown)) return;
                 session.Input.SetKey(key, true);
@@ -472,7 +476,7 @@ sealed partial class GameHost
                 actions.Pressed(InputAction.ToggleFreeCamera)) player.Follow = null;
             if (actions.Pressed(InputAction.ToggleSettings) && panel is not null) panel.Visible = !panel.Visible;
             if (actions.Pressed(InputAction.Screenshot)) screenshotRequested = true;
-            if (actions.Pressed(InputAction.ToggleStats)) statsVisible = !statsVisible;
+            if (actions.Pressed(InputAction.ToggleStats)) { statsVisible = !statsVisible; FoliageGpuCull.CountTriangles = statsVisible; }   // the foliage triangles are read from its GPU cull while shown
             if (actions.Pressed(InputAction.ToggleFps)) fpsVisible = !fpsVisible;
             if (actions.Pressed(InputAction.QuickSave)) quickSaveRequested = true;
             if (actions.Pressed(InputAction.QuickLoad)) quickLoadRequested = true;
@@ -496,6 +500,9 @@ sealed partial class GameHost
         double drawTotal = 0, gpuSum = 0, statsTimer = 0;
         int gpuSamples = 0, statsFrames = 0;
         long statsTicks = 0;
+        // The triangle counts summed over the statistics' second (the objects' from their running colour total).
+        double terrainTris = 0, characterTris = 0, grassBlades = 0;
+        long objectTris0 = 0;
         while (!window.IsClosing && !quit)
         {
             BenchLap(BenchTail);
@@ -699,7 +706,6 @@ sealed partial class GameHost
                 if (!g.NoPopulation && !covered && panel?.Visible != true) player.Steer();
                 if (ui && overlay is not null && !g.NoPopulation)
                 {
-                    player.SelectionRings = config.SelectionRings;
                     player.Draw(overlay, size.X, size.Y);
                 }
                 if (ui && overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
@@ -762,6 +768,9 @@ sealed partial class GameHost
                 PlayBenchRendered(Stopwatch.GetElapsedTime(t0).TotalMilliseconds, display.Context.Pipelines.LatePipelines);
                 if (display.Context.GpuFrameMs > 0) { gpuSum += display.Context.GpuFrameMs; gpuSamples++; }
                 statsFrames++;
+                terrainTris += gpu.Terrain.DrawnTriangles;
+                characterTris += gpu.Characters?.DrawnTriangles ?? 0;
+                if (gpu.Foliage is { Enabled: true } drawnFoliage) grassBlades += drawnFoliage.DrawnBlades;
                 if (takeFile is not null) { FramebufferCapture.SavePng(display.Context, finalPicture ?? backbuffer, takeFile, size.X, size.Y, topDown: finalPicture is not null); cinema.FrameDone(); }
                 else if (shot) SaveScreenshot(display.Context, finalPicture ?? backbuffer, size.X, size.Y, topDown: finalPicture is not null);
                 if (feedbackShot)
@@ -773,17 +782,20 @@ sealed partial class GameHost
             statsTimer += dt;
             if (statsTimer >= 1)
             {
-                // Once a second: the frame, the simulation, then the renderer's lines.
+                // Once a second: the frame and the simulation, then the renderer's sections.
                 stats.Clear();
-                stats.Add($"{statsFrames / statsTimer:0} fps rendered{(frameGen is { Enabled: true } ? ", x2 shown with frame generation" : "")} ({(display.VSync ? "vsync" : fpsLimit > 0 ? $"limit {fpsLimit}{(frameGen is { Enabled: true } ? " shown" : "")}" : "uncapped")}), gpu {(gpuSamples > 0 ? $"{gpuSum / gpuSamples:0.00}" : "-")} ms");
+                stats.Add("Performance");
+                stats.Add($"  frame rate    {statsFrames / statsTimer:0} fps{(frameGen is { Enabled: true } ? " (x2 shown with frame generation)" : "")}, {(display.VSync ? "vsync" : fpsLimit > 0 ? $"limit {fpsLimit}" : "uncapped")}; graphics card {(gpuSamples > 0 ? $"{gpuSum / gpuSamples:0.0}" : "-")} ms a frame");
                 long ticks = session.Simulation.TotalTicks - statsTicks;
                 statsTicks = session.Simulation.TotalTicks;
-                stats.Add($"simulation  {ticks / statsTimer:0} ticks/s, {session.CurrentSnapshot.Characters.Count} characters, dropped {session.Simulation.DroppedTicks} ticks in all");
-                WorldStats.Add(stats, display.Context, gpu, render, camera.Eye);
-                stats.Add($"ui          {(interfaceHidden ? 0 : player.OpaqueUiCoverage):P0} of the screen under opaque controls");
-                if (audio is not null) stats.Add($"audio       {audio.StatsLine()}");
-                if (audio is not null) stats.Add($"world audio {WorldAudioStats()}");
-                if (audio is not null) stats.Add($"char audio  {CharacterAudioStats()}, {UiAudioStats()}");
+                stats.Add($"  simulation    {ticks / statsTimer:0} ticks/s, {session.CurrentSnapshot.Characters.Count} characters, {session.Simulation.DroppedTicks} ticks dropped since the start");
+                long objectTris = gpu.Objects?.Totals[0, 1] ?? 0;
+                int frames = Math.Max(statsFrames, 1);
+                WorldStats.Add(stats, display.Context, gpu, camera.Eye,
+                    new WorldStats.Triangles(terrainTris / frames, (objectTris - objectTris0) / (double)frames, gpu.Foliage?.ColourTrianglesPerFrame, characterTris / frames, grassBlades / frames));
+                gpu.Foliage?.ResetDrawTally();
+                objectTris0 = objectTris;
+                terrainTris = characterTris = grassBlades = 0;
                 statsTimer = gpuSum = 0;
                 statsFrames = gpuSamples = 0;
             }
@@ -832,12 +844,13 @@ sealed partial class GameHost
             if (panel is not null && !lowEnd)
             {
                 foreach (var slider in panel.Sliders)
-                    if (!SessionSliders.Contains(slider.Label)) config.Graphics[slider.Label] = slider.Get();
-                foreach (var toggle in panel.Toggles) config.Graphics[SwitchKey(toggle.Label)] = toggle.Get() ? 1 : 0;
+                    if (!runOnly.Contains(slider.Label)) config.Graphics[slider.Label] = slider.Get();
+                foreach (var toggle in panel.Toggles)
+                    if (!runOnly.Contains(SwitchKey(toggle.Label))) config.Graphics[SwitchKey(toggle.Label)] = toggle.Get() ? 1 : 0;
                 panel.SavePreset();
             }
             config.Bindings = session.Bindings.ToDictionary();
-            config.UiMode = player.UiMode;
+            if (!g.LowEnd || player.UiMode != Meitou.Data.Ui.UiMode.Faithful) config.UiMode = player.UiMode;   // --low-end's Faithful UI is for the run
             config.Save();
         }
 
@@ -846,6 +859,35 @@ sealed partial class GameHost
 
     /// <summary>Panel rows that are the session's state, not graphics settings: kept out of <c>graphics</c> in meitou.user.json (vsync and full screen have their own keys).</summary>
     static readonly HashSet<string> SessionSliders = ["Time of day", "VSync", "Full screen"];
+
+    /// <summary>
+    /// The <c>graphics</c> keys this run neither reads from nor writes to meitou.user.json: <see cref="SessionSliders"/>, and the bloom's switch and strength
+    /// when <c>--bloom</c> sets them for one run.
+    /// </summary>
+    static HashSet<string> RunOnlyKeys()
+    {
+        var keys = new HashSet<string>(SessionSliders);
+        if (Environment.GetCommandLineArgs().Contains("--bloom")) { keys.Add(WorldFrame.BloomStrengthSlider); keys.Add(SettingsMenu.SwitchKeyPrefix + WorldFrame.BloomSwitch); }
+        return keys;
+    }
+
+    /// <summary>
+    /// The look the command line chose: Given when <c>--meitou</c> or <c>--faithful</c> is on it; Faithful by the last <c>all</c> (<c>--faithful all</c> true,
+    /// <c>--meitou all</c> false), null when only some switches are named (the menu then reads the look from the switches without saving it).
+    /// </summary>
+    static (bool Given, bool? Faithful) CommandLineLook()
+    {
+        var args = Environment.GetCommandLineArgs();
+        bool given = false;
+        bool? faithful = null;
+        for (int i = 0; i + 1 < args.Length; i++)
+            if (args[i] is "--meitou" or "--faithful")
+            {
+                given = true;
+                if (args[i + 1].Split(',', StringSplitOptions.TrimEntries).Contains("all")) faithful = args[i] == "--faithful";
+            }
+        return (given, faithful);
+    }
 
     /// <summary>The player moved, turned, zoomed or switched the camera this tick (what hands a camera the cinema left back to the rig).</summary>
     static bool CameraInput(ActionState a) =>
@@ -892,6 +934,22 @@ sealed partial class GameHost
         double remaining = end - clock.Elapsed.TotalSeconds;
         if (remaining > 0.002) Thread.Sleep(TimeSpan.FromSeconds(remaining - 0.0015));
         while (clock.Elapsed.TotalSeconds < end) Thread.SpinWait(64);
+    }
+
+    /// <summary>Ctrl+Shift+F12: what is in video memory now, to vram-&lt;time&gt;.txt beside log.txt (<see cref="FrameProfiler.DumpVram"/>).</summary>
+    void DumpVram(FrameProfiler? profiler)
+    {
+        if (profiler is null) return;
+        string path = Path.Combine(AppContext.BaseDirectory, $"vram-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+        void Caches(TextWriter w)
+        {
+            if (gpu.Guard is { } guard) { w.WriteLine(guard.Status); w.WriteLine(); }
+            gpu.Objects?.Textures.WriteReport(w);
+            gpu.Foliage?.Textures.WriteReport(w);
+            gpu.Characters?.Textures.WriteReport(w);
+        }
+        try { profiler.DumpVram(path, Caches); Console.WriteLine($"vram      dumped to {path}"); }
+        catch (IOException e) { Console.WriteLine($"vram      dump failed: {e.Message}"); }
     }
 
     // F12's sim parts: the names (the tick phases, the time outside the world's ticks, the world's systems), made again when the world is, and the frame's ms.
@@ -946,11 +1004,5 @@ sealed partial class GameHost
         if (population is not null)
             foreach (var w in population.TakeWildLog())
                 Console.WriteLine($"wild      tick {w.Tick}: {w.Squad} ({w.Members}) from the {(w.Kind == Meitou.Simulation.WildKind.Nest ? "nest" : "sector of")} {w.Place}");
-        if (aggro is null || aggro.Log.Count == 0) return;
-        var table = world.Characters;
-        string Who(Meitou.Simulation.CharacterId id, int faction) =>
-            $"{(table.IsAlive(id) ? table.Cold(id.Slot)!.Name : "?")} ({(popData is { } d && faction >= 0 && faction < d.Factions.Count ? d.Factions[faction].Name : "no faction")})";
-        foreach (var e in aggro.TakeLog())
-            Console.WriteLine($"aggro     tick {e.Tick}: {Who(e.Attacker, e.AttackerFaction)} attacks {Who(e.Target, e.TargetFaction)} at {e.Distance:0}");
     }
 }

@@ -76,7 +76,16 @@ sealed partial class GameHost
         var world = session.World;
         string record = SandboxRecord(scene.Database!);
         float half = g.Sandbox >= 2 ? 15 : 0;
-        sandboxHero = population!.SpawnSandbox(world, record, new Vector2(-half, 0), player: true, yaw: MathF.PI / 2, maleHuman: g.SandboxBare);
+        var heroAt = new Vector2(-half, 0);
+        float heroYaw = MathF.PI / 2;
+        if (g.Sandbox >= 2 && g.SandboxHitAngle is { } approach)
+        {
+            float angle = -MathF.PI / 2 + approach * MathF.PI / 180;
+            heroAt = new Vector2(half, 0) + new Vector2(MathF.Sin(angle), MathF.Cos(angle)) * (2 * half);
+            var toVictim = new Vector2(half, 0) - heroAt;
+            heroYaw = MathF.Atan2(toVictim.X, toVictim.Y);
+        }
+        sandboxHero = population!.SpawnSandbox(world, record, heroAt, player: true, yaw: heroYaw, maleHuman: g.SandboxBare);
         if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2, maleHuman: g.SandboxBare);
         // n above 2: the rest stand idle in rings round the pair (the player's faction, so they keep out of the fight), 15 units apart, a look each;
         // --sandbox-races: then one of every person race, in the rings after them.
@@ -253,7 +262,12 @@ sealed partial class GameHost
         var position = world.Characters.Previous[sandboxFoe.Slot].Position;
         float round = yaw + dummyHits * 2.399963f;   // from every side in turn
         var direction = -new Vector2(MathF.Sin(round), MathF.Cos(round));
-        if (g.SandboxHitSide is { } side)
+        if (g.SandboxHitAngle is { } hitAngle)
+        {
+            float angle = yaw + hitAngle * MathF.PI / 180;
+            direction = -new Vector2(MathF.Sin(angle), MathF.Cos(angle));
+        }
+        else if (g.SandboxHitSide is { } side)
         {
             Vector2 outward = side switch { "left" => -Vector2.UnitX, "right" => Vector2.UnitX, "back" => -Vector2.UnitY, _ => Vector2.UnitY };
             float c = MathF.Cos(yaw), s = MathF.Sin(yaw);

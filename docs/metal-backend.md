@@ -675,7 +675,7 @@ passes the sky's real sun height, the fog/atmosphere range caps, far-cascade coa
 the landmark shadow map, and the temporal shadow noise. The map's world-derived lookup also flips v on Metal: Vulkan's raw
 render targets are bottom-up (its present flips the backbuffer once), Metal's are top-down, so the cascade and landmark
 receiver matrices otherwise sample the maps vertically mirrored. The shadow map is still drawn before the scene, after the
-interior view, so upper-floor casters are hidden with their floors.
+interior view; upper-floor casters stay ([closed interiors](render-objects.md#closed-interiors)).
 
 ### 5. The UI (plan step 8)
 
@@ -814,6 +814,8 @@ default.
 - Texture views: the textures carry `PixelFormatView`; a non-identity `GpuSwizzle` is
   `newTextureViewWithPixelFormat:textureType:levels:slices:swizzle:` (the BC4 masks' `RrrOne`). Metal's blit cannot
   scale: `BlitLevel` copies equal-sized levels and renders a sampling pass over level views when they differ.
+  `Blit` copies matching single-sample 2D depth textures with a native blit; scaled or mismatched depth copies are unsupported.
+  **Observed** (macOS, surface-blood save): a depth target in the sampling pass aborts pipeline creation.
 - Partial clears: a fullscreen triangle under the rect's scissor (colour and/or depth outputs), then the previous
   viewport/scissor are restored and the pipeline filter reset. Sets the depth-stencil state for the clear.
 - A Metal `drawPrimitives…indirectBuffer` is one command; `DrawIndexedIndirect` loops, and the count variants issue

@@ -484,6 +484,9 @@ public sealed unsafe class CommandList : IGpuCommandList
     /// </summary>
     public GpuTexture CreateTexture(TextureDesc desc) => ctx.CreateTexture(desc, Handle);
 
+    /// <inheritdoc/>
+    public void InitTexture(GpuTexture texture) => ctx.InitTexture(texture, Handle);
+
     /// <summary>(Added for the Meitou water's ocean.) Copies tightly packed texels from <paramref name="src"/> at <paramref name="offset"/> over a
     /// whole level and layer of <paramref name="dst"/> (GENERAL layout). The caller orders it against the writes before and the reads after.</summary>
     public unsafe void CopyTextureToBuffer(GpuTexture src, int level, int layer, in PixelRect region, GpuBuffer dst, ulong offset)
@@ -507,6 +510,26 @@ public sealed unsafe class CommandList : IGpuCommandList
             ImageExtent = new Extent3D((uint)Math.Max(dst.Desc.Width >> level, 1), (uint)Math.Max(dst.Desc.Height >> level, 1), 1),
         };
         vk.CmdCopyBufferToImage(Handle, device.BufferAt(src.Index), device.NativeImage(dst), ImageLayout.General, 1, &copy);
+    }
+
+    /// <inheritdoc/>
+    public void CopyLayers(GpuTexture src, GpuTexture dst, int layers)
+    {
+        var d = src.Desc;
+        int levels = Math.Min(d.Levels, dst.Desc.Levels);
+        if (layers <= 0 || levels <= 0) return;
+        var regions = stackalloc ImageCopy[levels];
+        var aspect = GlConventions.VkAspect(d);
+        for (int level = 0; level < levels; level++)
+            regions[level] = new ImageCopy
+            {
+                SrcSubresource = new ImageSubresourceLayers(aspect, (uint)level, 0, (uint)layers),
+                DstSubresource = new ImageSubresourceLayers(aspect, (uint)level, 0, (uint)layers),
+                Extent = new Extent3D((uint)Math.Max(d.Width >> level, 1), (uint)Math.Max(d.Height >> level, 1), 1),
+            };
+        Barrier(BarrierBatch.Full);
+        vk.CmdCopyImage(Handle, device.NativeImage(src), ImageLayout.General, device.NativeImage(dst), ImageLayout.General, (uint)levels, regions);
+        Barrier(BarrierBatch.Full);
     }
 
     /// <summary>Resolves level 0 / layer 0 of a multisampled colour texture into a single-sampled one (the reflection's 4× target).</summary>

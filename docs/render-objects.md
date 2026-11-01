@@ -12,6 +12,18 @@ Workers prepare resident mesh/texture content; render thread publishes GPU objec
 and per-instance state have separate lifetimes. A resident mesh can change finest LOD: refresh
 all draw/ray-geometry references before retiring replaced buffers.
 
+Mesh vertex buffers use `GpuVertex` layouts, packed at upload from the CPU's 84-byte `Vertex`: objects, foliage, debris and impostor
+bakes 44 bytes (normal and tangent snorm16, colour half), characters 64 (colour stays float: its X carries the morph slot bits).
+**Verified** (viewer, The Hub, two cameras): renders differ from the float layout less than two float-layout runs differ from each
+other; resident object meshes 174 → 98 MB.
+
+Switch `weld` (Meitou): objects, foliage, characters and debris weld their meshes as they load (`OgreMeshWeld`): vertices equal in
+everything but the tangent frame (same handedness, bone assignments and pose offsets) become one with the normalized sum of their
+tangents; indices, generated LOD levels, bone assignments and poses are renumbered. Faithful keeps the files' vertices. Read at
+decode, so a change applies to meshes loaded after it; LOD caches key on it (`MeshWeld.CacheVariant`). **Verified** (viewer, The
+Hub, TAA off): Faithful matches the build without the switch within run-to-run noise; Meitou changes buildings by 0.06/255 mean,
+object meshes 98 → 50 MB. About 115 ns per vertex on the decode thread.
+
 Faithful uses researched object/part distances; Meitou `reach` extends size-aware ranges and
 distant landmarks/towns. Distant town stand-ins fade separately from real parts. Source/manual
 and generated levels use projected demand with stable transitions. Do not treat a shorter part
@@ -32,6 +44,17 @@ biome pairs and foliage layouts rank by distance from the arrival, and what is o
 (`ObjectStreamer.Rank`). Object textures the arrival view uses are touched first and decode ahead of the other streaming work
 (`WorldTextureCache.Urgent`, `BackgroundWork.RunUrgent`). The terrain height window and the grass pages still follow only the eye.
 The simulation focus moves to the landing character at once, so its towns populate during the flight.
+
+## Shared texture images
+
+The object, foliage and character texture caches share images (`TextureShare`, per GPU context): a file one cache holds at the current quality
+level is taken by another instead of loaded when it drops no more top levels than that cache's mip streaming would, and two loads of the same file
+and levels that land together keep one. An image goes with its last user; each cache still counts its bytes. **Observed** (VRAM dump, 2026-11-01):
+about 150 MB of the same files were resident twice before this.
+
+The sharing caches also have one high-water mark together (`TextureShare.ResidentBytes` against `MarkMb`, 2 GB at full quality), not one each.
+Above it, textures unused for 8 s are unloaded, least recently used first, until the total is under three quarters of the mark. Below it,
+a texture is unloaded after 20 s unused.
 
 ## Kept points
 
@@ -103,6 +126,10 @@ open amounts (`WorldObjectRenderer.Doors`, by placement id and index); `DrawReal
 `DoorLeaf.LocalOffset` ([motion](game/locks.md#doors)) along the axes of the part's collision box (`DoorFrame`, the first box of its
 `xml collision`, PhysX Z-up mapped to the part's Y-up), in world units, when its amount changed. Colour and shadow passes see the moved leaf; the GI acceleration structures take
 the instance transform only when they gather instances (not checked for leaves in motion).
+The interior view's floor never hides a door part (`WorldObjectRenderer.InteriorHidden`). **Verified** (probe over the base game's BUILDING `doors`): 15 of
+47 door entries have a leaf part with `building floor` 1 (Storm Houses A-H, the shacks, the swamp houses), so hiding by floor left their doorway empty at
+floor 0 (issue #170). In the game a door is a building of its own (`Building::createPhysical` makes one per entry); that its parent's floor view
+leaves it shown is **Unknown** in code, inferred from those common houses.
 
 ## Turrets
 
@@ -147,6 +174,8 @@ motion vectors of moving parts not checked.
   - In the install's interior layouts, 10 170 objects without the flag are `is exterior furniture` (barrels, cages, camp beds, Stack's rooftop awnings); these are now hidden while closed.
   - 1 820 objects with the flag (yard tents, torches) stay.
 - A building inside another (`PlacedMesh.Contained`) is hidden while the building whose hull holds it is closed (`ClosedAround`); a player site takes its parent's hull over a neighbour's within the 2-unit margin (`PlacedMesh.ContainerId`). These are player sites with a parent (saved with `flags` 0), and zone states with `is inside building` and no outside flag.
+- Shadow passes keep what the floor view hides above the viewed floor (parts, objects standing above it; `WorldObjectRenderer.DrawReal`), so a lower
+  floor stays shaded under its ceiling (a watchtower's floor 0 was sunlit). Whether the game's hidden floors cast shadows is **Unknown**.
 - **Not done:** interior lamps still light a closed interior.
 
 ## Validation
