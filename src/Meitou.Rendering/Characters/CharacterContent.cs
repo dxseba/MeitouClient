@@ -35,6 +35,8 @@ internal sealed class AssetPart
     public int ShownShots;
     /// <summary>The first loaded bolt of the crossbow in the hands: its origin is the muzzle (<see cref="CharacterRenderer.Muzzle"/>).</summary>
     public bool Muzzle;
+    /// <summary>Melee blade blood source: 1 hip, 2 back, 0 a scabbard, backup or other attachment.</summary>
+    public int WeaponBloodSlot;
     /// <summary>
     /// Whether the part shows with a weapon drawn (<paramref name="weaponDrawn"/>), that weapon being the crossbow (<paramref name="ranged"/>) or the back melee weapon
     /// (<paramref name="back"/>, else the hip one), with <paramref name="shots"/> bolts loaded in the crossbow.
@@ -127,6 +129,8 @@ internal sealed class PartMaterial
     public bool VertexColoured;
     /// <summary>Takes blood (<see cref="CharacterShaders.Bloody"/>; <see cref="BloodFull"/>: the whole mesh at the full amount, a stump): <see cref="Colour1"/> holds the blood colour, <see cref="Colour2"/> x and y the race's <c>blood horizontal</c> and <c>blood vertical</c>.</summary>
     public bool Bloody, BloodFull;
+    /// <summary>Rigid melee blade's signed local length axis and grip-to-tip length; zero for other materials.</summary>
+    public Vector4 WeaponBloodAxis;
     /// <summary>A headless body's neck cap (<see cref="CharacterShaders.Wound"/>): <see cref="Colour1"/> the race's blood colour, the diffuse slot the splatter map; <see cref="Mechanical"/> a robot race's.</summary>
     public bool Wound, Mechanical;
     /// <summary>The body's normal blend weight towards <see cref="CharacterShaders.SlotBlendNormal"/> (the original's <c>muscleBlend</c>).</summary>
@@ -999,6 +1003,7 @@ internal sealed class CharacterContent : IDisposable
                 BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, ShownShots = part.ShownShots, Muzzle = part is { Field: "live ammo", ShownShots: 1, Shown: WeaponShown.RangedDrawn }, HideSide = part.HideSide, PickBoxes = loaded.PickBoxes ?? [],
                 FileDistances = loaded.FileDistances, FileFirst = loaded.FileFirst, FileRadius = loaded.FileRadius,
             };
+            SetupWeaponBlood(ap, part, loaded);
             if (!shared)
             {
                 // Mode 0: attachObjectToBone at the attachment point; a bone the skeleton lacks falls back to the root.
@@ -1057,6 +1062,22 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>A body texture by file (bordered, as the body's own), streamed in like the rest.</summary>
     public WorldTexture? BodyTexture(string? name) => Texture(name, true);
+
+    void SetupWeaponBlood(AssetPart asset, CharacterPart part, LoadedMesh mesh)
+    {
+        if (part.Record.Type != FcsRecordType.WEAPON || part.Mode != AttachMode.Bone || part.Field == "sheath" || part.Point == "back2"
+            || part.Field != "bare sword" && part.Record.GetPath("bare sword").Length > 0 || mesh.PickBoxes is not { Length: > 0 } boxes) return;
+        var min = boxes.Aggregate(new Vector3(float.MaxValue), (p, b) => Vector3.Min(p, b.Min));
+        var max = boxes.Aggregate(new Vector3(float.MinValue), (p, b) => Vector3.Max(p, b.Max));
+        var size = max - min;
+        int axis = size.Y >= size.X && size.Y >= size.Z ? 1 : size.X >= size.Z ? 0 : 2;
+        float end = MathF.Abs(max[axis]) >= MathF.Abs(min[axis]) ? max[axis] : min[axis];
+        if (!float.IsFinite(end) || MathF.Abs(end) < 0.01f) return;
+        var direction = Vector3.Zero; direction[axis] = MathF.Sign(end);
+        asset.WeaponBloodSlot = part.Shown is WeaponShown.BackDrawn or WeaponShown.BackSheathed || part.Point == "back" ? 2 : 1;
+        asset.Material.WeaponBloodAxis = new(direction, MathF.Abs(end));
+        asset.Material.Tex[CharacterShaders.SlotBlood] = Texture("bloody.png", false);
+    }
 
     /// <summary>The body blood layer (docs/game/blood-decals.md "On the body and on severed limbs"): the race's blood colour and scales and the splatter map; none for an animal or a bloodless race.</summary>
     void BodyBlood(PartMaterial m, CharacterAppearance c)

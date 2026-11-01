@@ -62,8 +62,10 @@ public static class GroundItemSave
             game.Zones.TryGetValue(z, out var zone);
             var old = zone is null ? [] : SaveGroundItems.Read(zone);
             var kept = old.Where(o => factory.Create(o.Item.BaseId) is null).ToList();
-            var named = old.Select(o => o.Record.StringId).ToHashSet(StringComparer.Ordinal);
-            if (zone is not null && items.All(i => i.Item.Saved is { } s && named.Contains(s.StringId)) && items.Count + kept.Count == old.Count) continue;
+            var oldBlood = new Dictionary<string, Vector4>(StringComparer.Ordinal);
+            foreach (var entry in old) oldBlood.TryAdd(entry.Record.StringId, entry.Item.WeaponBlood);
+            if (zone is not null && items.All(i => i.Item.Saved is { } s && oldBlood.TryGetValue(s.StringId, out var blood)
+                && blood == new SaveItem { BaseId = i.Item.Record, WeaponBlood = i.Item.WeaponBlood }.WeaponBlood) && items.Count + kept.Count == old.Count) continue;
             if (zone is null) game.Zones[z] = zone = new SaveZone(z, new SaveFile());
             SaveGroundItems.Write(zone, [.. items.Select(i => (i.Position, i.Rotation, SavedKit.FromItem(i.Item)))], kept);
             if (zone.File.Records.Count == 0) game.Zones.Remove(z);

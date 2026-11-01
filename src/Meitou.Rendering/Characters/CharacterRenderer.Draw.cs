@@ -264,6 +264,7 @@ internal sealed unsafe partial class CharacterRenderer
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && ((l.HeadFrame.M41 > 0.5f || l.HeadFrame.M42 >= 2) ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
+                WithWeaponBlood(ref instance, l, part);
                 if (motionPass)
                 {
                     var previousWorld = Relative(l.State.PreviousWorld, origin);
@@ -409,6 +410,7 @@ internal sealed unsafe partial class CharacterRenderer
                     Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && ((l.HeadFrame.M41 > 0.5f || l.HeadFrame.M42 >= 2) ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)),
                     MorphBase = part.Morphed ? l.Asset.MorphBase : 0, PreviousModel = motion ? f.PreviousModel : default,
                 };
+                WithWeaponBlood(ref instance, l, part);
                 // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
                 float lod = f.Lod * bias;
                 if (depth && part.Material.Shading == CharacterShaders.ShadeHair && !l.Asset.Animal) lod *= CharacterContent.HairLodScale;
@@ -589,6 +591,16 @@ internal sealed unsafe partial class CharacterRenderer
         static float Pair(ulong b, int j) => (float)((b >> (16 * j)) & 0xFFFF);
         m.M14 = Pair(blood, 0); m.M24 = Pair(blood, 1); m.M34 = Pair(blood, 2); m.M44 = Pair(blood, 3);
         return m;
+    }
+
+    void WithWeaponBlood(ref CharInstance instance, in Live live, AssetPart part)
+    {
+        if (portraitLive >= 0 || part.WeaponBloodSlot == 0) return;
+        var blood = part.WeaponBloodSlot == 1 ? live.HipWeaponBlood : live.BackWeaponBlood;
+        if (!float.IsFinite(blood.X) || !float.IsFinite(blood.Y) || !float.IsFinite(blood.Z) || !float.IsFinite(blood.W) || blood.W <= 0) return;
+        blood = Vector4.Clamp(blood, Vector4.Zero, Vector4.One);
+        instance.Model.M14 = blood.X; instance.Model.M24 = blood.Y; instance.Model.M34 = blood.Z; instance.Model.M44 = blood.W;
+        instance.Flags |= CharacterShaders.WeaponBloodFlag;
     }
 
     readonly JobPool<DrawJob> drawJobs = new();

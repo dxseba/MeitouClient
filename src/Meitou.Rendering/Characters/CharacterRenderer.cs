@@ -190,6 +190,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public bool Repose, WeaponDrawn, RangedDrawn, BackDrawn;
         /// <summary>The blood of its first 8 body parts, a byte each (<see cref="CharacterInstance.Blood"/>).</summary>
         public ulong Blood;
+        public Vector4 HipWeaponBlood, BackWeaponBlood;
         /// <summary>The generic wound mask index, 0 without generic cuts; permanent wounds can still need the header.</summary>
         public uint WoundMask, LostGroups, LimbCuts, PartOnly;
         public bool HasWounds;
@@ -506,6 +507,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 : Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0)));
             if (scale != 1 && inst.World is null) l.World = Matrix4x4.CreateScale(scale) * l.World;
             (l.WeaponDrawn, l.RangedDrawn, l.BackDrawn, l.Shots, l.Bolts) = (inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, inst.Shots, inst.Bolts);
+            (l.HipWeaponBlood, l.BackWeaponBlood) = (inst.HipWeaponBlood, inst.BackWeaponBlood);
             l.Centre = centre;
             l.Radius = asset.Radius * scale;
             l.WoundMask = woundMasks.Update(inst.Key, asset.Rig, asset.WoundPoints, inst.Wounds);
@@ -795,6 +797,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         if (m.Skin && SkinFor(m)) flags |= CharacterShaders.Skin;
         if (m.VertexColoured) flags |= CharacterShaders.VertexColoured;
         if (m.Bloody && has[CharacterShaders.SlotBlood]) flags |= CharacterShaders.Bloody | (m.BloodFull ? CharacterShaders.BloodFull : 0);
+        if (m.WeaponBloodAxis.W > 0 && has[CharacterShaders.SlotBlood]) flags |= CharacterShaders.WeaponBloodMaterial;
         if (m.Wound) flags |= CharacterShaders.Wound | (m.Mechanical ? CharacterShaders.Mechanical : 0);
         // Textures assigned but not resident yet: a hair's diffuse (its cut-out), a clipped item's normal map, the head's maps.
         if (m.Shading == CharacterShaders.ShadeHair && m.Tex[CharacterShaders.SlotDiffuse] is not null && !has[CharacterShaders.SlotDiffuse]
@@ -814,7 +817,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         r.VestCount = vests;
         r.AlphaThreshold = m.AlphaThreshold;
         r.ShirtColour = new Vector4(m.ShirtColour, m.GlossMult);
-        r.SkinTone = new Vector4(m.SkinTone, has[CharacterShaders.SlotBlendNormal] ? m.MuscleBlend : 0);
+        r.SkinTone = m.WeaponBloodAxis.W > 0 ? m.WeaponBloodAxis : new Vector4(m.SkinTone, has[CharacterShaders.SlotBlendNormal] ? m.MuscleBlend : 0);
         r.HairColour = new Vector4(m.HairColour, 1);
         r.HairAlpha = m.HairAlpha; r.HairMult = m.HairMult; r.BeardAlpha = m.BeardAlpha;
         r.DiffuseChannel = m.DiffuseChannel; r.AlphaChannel = m.AlphaChannel;

@@ -26,6 +26,18 @@ public sealed class SaveItem
     public int ItemFunction { get; init; }
     public float Quality { get; init; }
     public float Charges { get; init; } = 1;
+    Vector4 weaponBlood;
+    /// <summary>Meitou-only visual melee-item blood: colour xyz and coverage W, each clamped to 0..1. Nonfinite or zero-coverage data is clean.</summary>
+    public Vector4 WeaponBlood
+    {
+        get => weaponBlood;
+        init
+        {
+            weaponBlood = float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z) && float.IsFinite(value.W)
+                ? Vector4.Clamp(value, Vector4.Zero, Vector4.One) : default;
+            if (weaponBlood.W <= 0) weaponBlood = default;
+        }
+    }
     /// <summary>A removed prosthetic's condition, the <c>dam</c>, <c>wear</c> and <c>stun</c> floats (docs/game/character-stats.md "Limb replacements and robots"); 0 for other items.</summary>
     public float Damage { get; init; }
     public float Wear { get; init; }
@@ -53,6 +65,8 @@ public readonly record struct SaveItemLock(int Level, bool Locked, bool Broken, 
 /// <summary>Reads and writes the items of an INVENTORY_STATE inside one save file (a platoon's).</summary>
 public static class SaveInventory
 {
+    public const string WeaponBloodKey = "meitou weapon blood";
+
     /// <summary>
     /// The items an INVENTORY_STATE holds: each instance names an INVENTORY_ITEM_STATE of the same file; a container item's single instance names the INVENTORY_STATE of its
     /// contents (<b>Verified</b> in the samples, save.md). Instances whose target is missing are skipped.
@@ -96,6 +110,7 @@ public static class SaveInventory
         ItemFunction = r.Ints.GetValueOrDefault("item function"),
         Quality = r.Floats.GetValueOrDefault("quality"),
         Charges = r.Floats.GetValueOrDefault("charges", 1),
+        WeaponBlood = r.Vector4s.GetValueOrDefault(WeaponBloodKey),
         Damage = r.Floats.GetValueOrDefault("dam"),
         Wear = r.Floats.GetValueOrDefault("wear"),
         Stun = r.Floats.GetValueOrDefault("stun"),
@@ -160,6 +175,8 @@ public static class SaveInventory
         r.Ints["quantity"] = item.Quantity;
         r.Floats["charges"] = item.Charges;
         r.Floats["quality"] = item.Quality;
+        if (item.WeaponBlood.W > 0) r.Vector4s[WeaponBloodKey] = item.WeaponBlood;
+        else r.Vector4s.Remove(WeaponBloodKey);
         // A prosthetic's condition: written where the record had it or it is not zero.
         foreach (var (k, v) in new[] { ("dam", item.Damage), ("wear", item.Wear), ("stun", item.Stun) })
             if (v != 0 || r.Floats.ContainsKey(k)) r.Floats[k] = v;

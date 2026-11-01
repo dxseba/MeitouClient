@@ -75,7 +75,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--battle-map <map>` | plateau, mesa, fog, sandbox, or x,z | plateau | Where the battle is fought. `mesa` is the duel spot; `fog` a plateau in the Fog Islands; `sandbox` is the flat floor. |
 | `--battle-width <a>[,<b>]` | counts | rows as given | Fighters per row for each side (one value: both). |
 | `--battle-no-fear` | | off | Nobody in the battle runs away. |
-| `--scene <name>` | fight, turret, bed, acid, menu, bisect | none | With `--screenshot`: stage a scene and save frames (`bisect` uses `--sandbox 2 --sandbox-bisect`; other scenes usually use `--load`). |
+| `--scene <name>` | fight, turret, bed, acid, menu, bisect, weapon-blood | none | With `--screenshot`: stage a scene and save frames (`bisect` uses `--sandbox 2 --sandbox-bisect`; `weapon-blood` follows ordinary sandbox combat and logs hip/back item coverage; other scenes usually use `--load`). |
 | `--scene-frames <n>` | 1 to 200 | 8 | Frames saved. |
 | `--scene-every <n>` | 1 or more | 30 | Control ticks between saved frames. |
 | `--scene-npc <record>` | CHARACTER name or id | Bandit | Enemies spawned by the fight and turret scenes. |

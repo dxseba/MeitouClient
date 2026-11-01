@@ -50,6 +50,9 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public Meitou.Data.Characters.BodyBuild? Build { get; init; }
     /// <summary>The blood each of the first 8 body parts shows, a byte each (<c>CharacterSnapshot.BloodAmounts</c>).</summary>
     public ulong Blood { get; init; }
+    /// <summary>Blood on the owned hip/back melee weapon: RGB colour and accumulated amount in W, from 0 to 1.</summary>
+    public Vector4 HipWeaponBlood { get; init; }
+    public Vector4 BackWeaponBlood { get; init; }
     /// <summary>Open wounds to draw on the body, at most 64 drawn.</summary>
     public IReadOnlyList<CharacterWoundMark> Wounds { get; init; } = [];
     /// <summary>Bits of the <see cref="Characters.WoundMasks.BodyGroup"/>s lost to a cut: their anatomy is not drawn.</summary>

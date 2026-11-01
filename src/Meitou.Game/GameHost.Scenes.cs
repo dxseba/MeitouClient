@@ -15,7 +15,7 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>The scenes <see cref="StageScene"/> knows.</summary>
-    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect"];
+    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "weapon-blood"];
 
     /// <summary>The menu scene's targets, one frame each.</summary>
     static readonly string[] SceneMenus = ["character", "door", "container", "cage"];
@@ -42,6 +42,9 @@ sealed partial class GameHost
             case "bisect":
                 if (!IsSandbox || !g.SandboxBisect) throw new ArgumentException("--scene bisect needs --sandbox 2 --sandbox-bisect");
                 return session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe)?.Position;
+            case "weapon-blood":
+                if (!IsSandbox) throw new ArgumentException("--scene weapon-blood needs --sandbox");
+                return null;   // follow the leader through an ordinary sandbox fight; no visual blood is forced
             case "fight":
             {
                 if (DebugRecord(g.SceneNpc, character: true) is not { } npc) { Console.WriteLine($"scene     no character record matches '{g.SceneNpc}'"); return null; }
@@ -124,7 +127,7 @@ sealed partial class GameHost
             session.Tick();
             session.AdvanceSimulation(session.Ticks.TickSeconds);
             UpdateNav(wait: true);
-            if (g.SandboxBisect)
+            if (g.SandboxBisect || g.Scene == "weapon-blood")
             {
                 UpdateWounds(session.World);
                 UpdateGuts(session.World, (float)session.Ticks.TickSeconds, draw: false);
@@ -143,7 +146,7 @@ sealed partial class GameHost
         var near = session.CurrentSnapshot.Characters.Where(c => !c.IsPlayer && Vector3.Distance(c.Position, me.Position) < 200)
             .Select(c => $"{c.Name} [{c.Task}{(session.World.Characters.TryResolveNext(c.Id, out int cs) && session.World.Characters.Cold(cs) is { } cc ? $" faction {cc.Faction}{(cc.Fleeing ? ", fleeing" : "")}{(cc.Fighter is { CanAttack: false } ? ", no attack" : "")}" : "")}{(c.InCombat ? ", fighting" : "")}{(c.FightsPlayer ? ", vs player" : "")}{(c.Body is { Unconscious: true } ? ", down" : c.Body is { Dead: true } ? ", dead" : "")}]");
         return $"{me.Name} at {me.Position.X:0}, {me.Position.Z:0}: task {me.Task}, {me.Activity}, weapon {(me.WeaponDrawn ? me.BackDrawn ? "back" : "hip" : "none")}, " +
-            $"in bed {me.InBed}, weather {me.WeatherNotice}, {blood}, {parts}; enemies fighting {enemies.Count}{(turrets.Length > 0 ? $"; gunners: {turrets}" : "")}; near: {string.Join(", ", near)}";
+            $"weapon blood hip {me.HipWeaponBlood.W:0.00}, back {me.BackWeaponBlood.W:0.00}; in bed {me.InBed}, weather {me.WeatherNotice}, {blood}, {parts}; enemies fighting {enemies.Count}{(turrets.Length > 0 ? $"; gunners: {turrets}" : "")}; near: {string.Join(", ", near)}";
     }
 
     /// <summary>
@@ -165,7 +168,7 @@ sealed partial class GameHost
                 camera.Target = p;
             }
             ApplyCamera(session.Camera.Current);
-            if (scene == "bisect") SandboxFollowCamera();
+            if (scene is "bisect" or "weapon-blood") SandboxFollowCamera();
             UpdateBuildings();
             gpu.Characters?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);

@@ -88,6 +88,7 @@ public static class SavedKit
         // "" keeps the record's colour the factory gave: saves from before Meitou kept colours wrote "" for every item.
         if (s.ColourId.Length > 0) item.ColourId = s.ColourId;
         item.Charges = s.Charges;
+        item.WeaponBlood = s.WeaponBlood;
         item.Death = s.Death;
         item.Unique = s.Unique;
         (item.LimbDamage, item.LimbWear, item.LimbStun) = (s.Damage, s.Wear, s.Stun);
@@ -122,7 +123,7 @@ public static class SavedKit
         var saved = new SaveItem
         {
             BaseId = i.Record, MaterialId = i.MaterialId, CompanyId = i.CompanyId, Crafter = i.Crafter, Uniform = i.Uniform, ColourId = i.ColourId, Section = section, X = i.X, Y = i.Y, Quantity = i.Quantity, Level = i.Level,
-            ItemFunction = i.ItemFunction, Quality = i.Quality, Charges = i.Charges, Source = i.Saved,
+            ItemFunction = i.ItemFunction, Quality = i.Quality, Charges = i.Charges, WeaponBlood = i.WeaponBlood, Source = i.Saved,
             Damage = i.LimbDamage, Wear = i.LimbWear, Stun = i.LimbStun, Death = i.Death, Unique = i.Unique,
             Lock = i.Lock is { } l ? new SaveItemLock(l.Level, l.EffectivelyLocked, l.Broken, l.Hardness) : null,
             Contents = i.Contents is { } bag ? FromInventory(bag) : null,

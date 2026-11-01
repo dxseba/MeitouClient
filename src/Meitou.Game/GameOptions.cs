@@ -124,7 +124,7 @@ sealed class GameOptions
           --quit-after <s>           close after s seconds and print the frame rate (smoke test)
           --scene <name>             with --screenshot (and --load): stage a scene and save a frame every --scene-every ticks (default 30), --scene-frames of them (default 8):
                                      fight (enemies of --scene-npc spawned beside the leader and attacked), turret (the nearest town turret, enemies spawned in its range),
-                                     bed (the leader sleeps in the nearest bed), acid (acid rain forced on the characters), bisect (with --sandbox 2 --sandbox-bisect: visible impact and falling halves), menu (the context menus of the nearest character,
+                                     bed (the leader sleeps in the nearest bed), acid (acid rain forced on the characters), bisect (with --sandbox 2 --sandbox-bisect: visible impact and falling halves), weapon-blood (ordinary sandbox combat, logs item blood), menu (the context menus of the nearest character,
                                      door, container and cage, one frame each); the log prints the leader's state each frame; --scene-town <name> moves the squad to that town first (turret)
           --no-precompile            compile methods on their first call only (by default a background thread compiles the game's methods ahead)
           --play-bench <dir>         with --load (or a new game): the game driven by a script (idle, camera orbit, zoom, pan, a long travel, time x2 and x5, talk, trade,

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Numerics;
 using Meitou.Data;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
@@ -69,6 +70,8 @@ public sealed class ItemInstance
     public float LimbDamage { get; set; }
     public float LimbWear { get; set; }
     public float LimbStun { get; set; }
+    /// <summary>Visual blood on this melee item: victim colour in xyz and accumulated coverage in W (0 clean, 1 saturated). Moves with the item; no combat effect.</summary>
+    public Vector4 WeaponBlood { get; set; }
     public int Width { get; init; } = 1;
     public int Height { get; init; } = 1;
     /// <summary>Weight of one unit in kg as it counts in the inventory total (weapons already scaled by <c>weapon inventory weight mult</c>).</summary>
@@ -133,7 +136,7 @@ public sealed class ItemInstance
     {
         Record = Record, Name = Name, Type = Type, EquipmentSection = EquipmentSection, IsLocked = IsLocked, WornOnlyBy = WornOnlyBy, WornNeverBy = WornNeverBy, MaterialId = MaterialId, CompanyId = CompanyId, Section = Section, X = X, Y = Y, Quantity = quantity, Level = Level, Crafter = Crafter, Uniform = Uniform, ColourId = ColourId,
         ItemFunction = ItemFunction, Quality = Quality, Charges = Charges, MaxCharges = MaxCharges, Width = Width, Height = Height, UnitWeight = baseWeight, DynamicWeight = DynamicWeight, StackLimit = StackLimit,
-        IsFood = IsFood, ContentsFactor = ContentsFactor, Mark = Mark, Death = Death, Unique = Unique, Buyback = Buyback?.Take(quantity),
+        IsFood = IsFood, ContentsFactor = ContentsFactor, Mark = Mark, Death = Death, Unique = Unique, WeaponBlood = WeaponBlood, Buyback = Buyback?.Take(quantity),
     };
 
     /// <summary>

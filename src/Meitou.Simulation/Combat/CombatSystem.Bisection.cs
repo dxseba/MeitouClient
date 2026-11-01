@@ -47,7 +47,11 @@ public sealed partial class CombatSystem
         if (!TorsoBisectionPolicy.SupportsStyle(direction, style) || !TorsoBisectionPolicy.ShouldBisect(input, 0)) return false;
         var events = new List<MedicalEvent>();
         var damage = new HitDamage(cut, 0, 0);
+        var sourceFighter = attackerSlot >= 0 ? table.Cold(attackerSlot)?.Fighter : null;
+        var strikingItem = sourceFighter is { IsAnimal: false, Unarmed: false } ? sourceFighter.Weapon?.SourceItem : null;
+        bool organicBeforeHit = !medical.Parts[chest].IsRobotic(race);
         medical.ApplyHit(chest, damage, MakeContext(world, victimSlot, victim), events);
+        DepositWeaponBlood(strikingItem, race, damage, true, organicBeforeHit, CombatWoundMechanism.Slash);
         var source = attackerSlot >= 0 ? table.IdOf(attackerSlot) : CharacterId.None;
         ulong variation = visualSeed ?? TorsoBisectionPolicy.VisualSeedFor(world.Seed, victimId, source, (ulong)world.Tick);
         if (!TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, direction, events, variation, travel, yaw, style)) return false;

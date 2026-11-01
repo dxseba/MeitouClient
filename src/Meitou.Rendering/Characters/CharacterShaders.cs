@@ -22,6 +22,8 @@ static class CharacterShaders
     public const uint HeadReliefFlag = 1u << 4;
     /// <summary>Shared hair can read the head wound header without taking the body wound material or deformation.</summary>
     public const uint HairWoundFlag = 1u << 5;
+    /// <summary>A rigid melee blade's four model-row W values carry its own RGB blood colour and amount.</summary>
+    public const uint WeaponBloodFlag = 1u << 6;
     /// <summary>Bind height of a human face's eyes, a tuning value.</summary>
     const string EyeHeight = "17.9";
     public const uint WoundFlag = 1u << 31, TearFlag = 1u << 2, PlateFlag = 1u << 3;
@@ -46,7 +48,9 @@ static class CharacterShaders
         // With Bloody: the whole mesh at the full amount (a stump) instead of its parts' damage (the instance carries them).
         BloodFull = 1 << 21,
         // A headless body's neck cap (NeckCap, Meitou decapitation): the wound; with Mechanical, a robot race's metal socket.
-        Wound = 1 << 22, Mechanical = 1 << 23;
+        Wound = 1 << 22, Mechanical = 1 << 23,
+        // A rigid blade's skinTone holds its signed local length axis and grip-to-tip length; tex[19] is bloody.png.
+        WeaponBloodMaterial = 1 << 24;
     // Instance flag (CharInstance.Flags; bit 0 interior, 12-15 hidden limbs, 16-17 the boots' side, 18-27 hidden parts): a headless body (Meitou decapitation): its head
     // vertices (CharacterContent.HeadBit) are hidden.
     public const uint Headless = 1u << 28;
@@ -212,6 +216,11 @@ static class CharacterShaders
             vHeadFrame[3].y = headHeader ? float(floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 12u & 3u) : 0.0;
             vHeadProfile = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 9u & 7u : 0u;
             vHeadOpen = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 7u & 3u : 0u;
+            if ((aInstanceData.z & {{WeaponBloodFlag}}u) != 0u)
+            {
+                vHeadRelief |= {{WeaponBloodFlag}}u;
+                vHeadFrame[0] = vec4(aInstance0.w, aInstance1.w, aInstance2.w, aInstance3.w);
+            }
             vTorsoBand = 1000.0;
             if ((aInstanceData.z & 0x8000002Cu) != 0u)
             {
@@ -595,6 +604,19 @@ static class CharacterShaders
                 float amount = flag(f, 2097152u) ? 1.0 : vBloodAmount;
                 if (vWounds != 0u) amount *= 0.45;   // a wounded body: the cuts carry the gore, not an even coat
                 albedo = mix(albedo, blood.rgb, clamp(blood.a - 1.0 + clamp(amount, 0.0, 1.0), 0.0, 1.0));
+            }
+            if ((vHeadRelief & {{WeaponBloodFlag}}u) != 0u && flag(f, {{WeaponBloodMaterial}}u))
+            {
+                vec3 axis = m.skinTone.xyz;
+                float length = max(m.skinTone.w, 0.01);
+                float along = dot(vSkinPos, axis) / length;
+                float distal = smoothstep(0.18, 0.85, along);
+                float across = abs(axis.x) > 0.5 ? vSkinPos.y : vSkinPos.x;
+                vec4 blood = tex(m.tex[19], vec2(along * 1.7, across / max(length * 0.10, 0.03) + 0.5));
+                float coverage = clamp((blood.a - 1.0 + vHeadFrame[0].w * distal) * 3.0, 0.0, 1.0);
+                albedo = mix(albedo, blood.rgb * vHeadFrame[0].rgb, coverage);
+                gloss = mix(gloss, 0.65, coverage);
+                metal = mix(metal, 0.02, coverage);
             }
             // A headless body's neck cap (NeckCap): uv is (0, 0) at its centre and 1 at the rim; colour1 the race's blood colour, the diffuse slot the splatter map.
             // Flesh: the fluid darkening into the cut, a bone at the centre. Mechanical (a robot race): a dark metal socket, its core darker, the fluid over it.

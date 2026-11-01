@@ -1,6 +1,7 @@
 using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Gameplay.Combat;
+using Meitou.Simulation.Items;
 
 namespace Meitou.Simulation.Combat;
 
@@ -36,6 +37,8 @@ public sealed class WeaponInstance(WeaponData data, WeaponStats stats)
 {
     public WeaponData Data { get; } = data;
     public WeaponStats Stats { get; } = stats;
+    /// <summary>The actual inventory item these stats came from; null for natural weapons, fists and synthetic fighters.</summary>
+    public ItemInstance? SourceItem { get; init; }
 
     /// <summary>The skill the weapon's category uses (<c>FUN_140897f30</c>, <b>Observed</b>): katanas, sabres, hackers, heavy weapons, blunt, polearms; martial arts for fists and creature attacks.</summary>
     public StatsEnumerated Skill { get; } = SkillOf(data.SkillCategory);
@@ -46,7 +49,10 @@ public sealed class WeaponInstance(WeaponData data, WeaponStats stats)
     public bool CanBlock => Data.CanBlock;
 
     public static WeaponInstance Create(float quality, WeaponData data, WeaponManufacturer? manufacturer, WeaponMaterial? material, CombatConstants constants) =>
-        new(data, WeaponStats.Compute(quality, data, manufacturer ?? WeaponManufacturer.Neutral, material ?? WeaponMaterial.None, constants));
+        Create(quality, data, manufacturer, material, constants, null);
+
+    public static WeaponInstance Create(float quality, WeaponData data, WeaponManufacturer? manufacturer, WeaponMaterial? material, CombatConstants constants, ItemInstance? sourceItem) =>
+        new(data, WeaponStats.Compute(quality, data, manufacturer ?? WeaponManufacturer.Neutral, material ?? WeaponMaterial.None, constants)) { SourceItem = sourceItem };
 
     public static StatsEnumerated SkillOf(int category) => category switch
     {

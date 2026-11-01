@@ -25,6 +25,7 @@ public sealed partial class CombatSystem
         TargetKind kind = race.IsRobot ? TargetKind.Robot : dc.Fighter is { IsAnimal: true } ? TargetKind.Animal : TargetKind.Human;
         float skill = Eff(ac, fighter.WeaponSkill);
         float str = Eff(ac, StatsEnumerated.Strength);
+        var strikingItem = !fighter.IsAnimal && !fighter.Unarmed ? fighter.Weapon?.SourceItem : null;
         var packet = fighter.Unarmed
             ? DamageFormulas.UnarmedPacket(UnarmedRating(world, a, ac, fighter), Eff(ac, StatsEnumerated.Toughness), str, fighter.FistsItem, kind, race.StringId, fighter.DamageOutput, combat)
             : DamageFormulas.Packet(skill, Eff(ac, StatsEnumerated.Dexterity) * fighter.DexterityMult, str, fighter.Weapon!, kind, race.StringId, fighter.DamageOutput, combat);
@@ -32,9 +33,15 @@ public sealed partial class CombatSystem
         var ctx = MakeContext(world, d, dc);
         var events = hitEvents;
         events.Clear();
+        bool aliveBeforeHit = !medical.Dead;
+        int partCount = CanDepositWeaponBlood(strikingItem, race, aliveBeforeHit) ? medical.Parts.Count : 0;
+        Span<bool> organicBeforeHit = partCount <= 64 ? stackalloc bool[partCount] : new bool[partCount];
+        for (int i = 0; i < partCount; i++) organicBeforeHit[i] = !medical.Parts[i].IsRobotic(race);
         ReadOnlySpan<ArmourPiece> armour = dc.Fighter is { } df ? df.Armour : default;
         var cover = new CoverRoll(world.Seed, Rng.Key(table.IdOf(d)), a, blow, 0);
         var (part, damage, absorbed) = HitResolver.LandDetailed(medical, ctx, packet, armour, cover, toughness, false, false, combat, events);
+        if ((uint)part < (uint)organicBeforeHit.Length)
+            DepositWeaponBlood(strikingItem, race, damage, aliveBeforeHit, organicBeforeHit[part], mechanism);
         FloatHit(world, d, dc, ac.IsPlayer, part, damage, absorbed);
         ref var D = ref write[d];
         D.Taken++;

@@ -83,6 +83,8 @@ public sealed partial class CombatSystem
         // A hit.
         var fighter = ac.Fighter;
         var target = dc.Fighter;
+        int strikeLimb = blow <= 1 ? tech.Limb1 : tech.Limb2;
+        var strikingItem = !fighter.IsAnimal && !fighter.Unarmed && strikeLimb == 4 ? fighter.Weapon?.SourceItem : null;
         float toughness = Eff(dc, StatsEnumerated.Toughness);
         TargetKind kind = dc.Race.IsRobot ? TargetKind.Robot : target.IsAnimal ? TargetKind.Animal : TargetKind.Human;
         float skill = Eff(ac, fighter.WeaponSkill);
@@ -99,8 +101,13 @@ public sealed partial class CombatSystem
         var events = hitEvents;   // Apply is serial, so one list serves every hit
         events.Clear();
         bool aliveBeforeHit = !dc.Medical.Dead;
+        int partCount = CanDepositWeaponBlood(strikingItem, dc.Race, aliveBeforeHit) ? dc.Medical.Parts.Count : 0;
+        Span<bool> organicBeforeHit = partCount <= 64 ? stackalloc bool[partCount] : new bool[partCount];
+        for (int i = 0; i < partCount; i++) organicBeforeHit[i] = !dc.Medical.Parts[i].IsRobotic(dc.Race);
         var cover = new CoverRoll(world.Seed, Rng.Key(table.IdOf(d)), a, seq, blow);
         var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events);
+        if ((uint)part < (uint)organicBeforeHit.Length)
+            DepositWeaponBlood(strikingItem, dc.Race, damage, aliveBeforeHit, organicBeforeHit[part], mechanism);
         var cutTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
         ulong visualSeed = Wounds.TorsoBisectionPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), CombatRolls.BlowCounter(a, seq, blow, 0));
         bool bisected = TryBisect(dc, part, damage, mechanism, aliveBeforeHit,
