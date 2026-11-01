@@ -1,15 +1,45 @@
+using System.Globalization;
 using System.Numerics;
 
 namespace Meitou.Rendering.Characters;
 
-/// <summary>Small relief patches projected onto the body's actual forehead triangles; layers 8/9 are scalp/skull wounds.</summary>
+/// <summary>A blade-shaped forehead wound, projected onto the skin; layers 8/9 are scalp/skull wounds.</summary>
 static class HeadWoundSurface
 {
-    static readonly Vector3 Centre = new(0.3f, 18.85f, 0.65f);
-    const int Segments = 80;
+    static readonly Vector3 Centre = new(0.42f, 18.9f, 0.83f);
+    static readonly Vector3 Normal = Vector3.Normalize(new(0.81257f, 0.30728f, 0.49528f));
+    static readonly Vector3 Across = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, Normal));
+    static readonly Vector3 Up = Vector3.Normalize(Vector3.Cross(Normal, Across));
+    static readonly Vector3 Along = Vector3.Normalize(Across * 0.83f + Up * 0.55f);
+    static readonly Vector3 Side = Vector3.Normalize(Vector3.Cross(Normal, Along));
+    const float HalfLength = 0.62f, HalfWidth = 0.105f;
+    const int Sections = 48;
 
-    // Keep this contour in step with CharacterShaders' head opening. Projection uses the undeformed skin, like that shader.
-    static float Field(Vector3 p) => Vector3.Distance(p, Centre) + 0.012f * MathF.Sin(p.X * 17 + p.Y * 9) + 0.007f * MathF.Sin(p.Y * 21);
+    // These parameters also emit the skin's GLSL field; no separately tuned painted opening.
+    static float Width(float u) => HalfWidth * MathF.Pow(MathF.Max(0, 1 - MathF.Abs(u) / HalfLength), 0.65f)
+        * (1 + 0.10f * MathF.Sin(u * 47) + 0.06f * MathF.Sin(u * 83));
+    static float Bend(float u) => 0.008f * MathF.Sin(u * 15) + 0.003f * MathF.Sin(u * 37);
+    static float Cleft(float u) => 0.24f + 0.20f * MathF.Exp(-MathF.Pow((u - 0.12f) / 0.20f, 2));
+    static string F(float value) => value.ToString("0.0########", CultureInfo.InvariantCulture);
+    static string V(Vector3 v) => $"vec3({F(v.X)}, {F(v.Y)}, {F(v.Z)})";
+    public static string ShaderField => $$"""
+        float headSwordCleft(vec3 p)
+        {
+            float u = dot(p - {{V(Centre)}}, {{V(Along)}});
+            float t = (u - 0.12) / 0.20;
+            return 0.24 + 0.20 * exp(-t * t);
+        }
+        float headSwordWound(vec3 p)
+        {
+            vec3 d = p - {{V(Centre)}};
+            float u = dot(d, {{V(Along)}}), v = dot(d, {{V(Side)}});
+            if (abs(u) > {{F(HalfLength)}} || abs(dot(d, {{V(Normal)}})) > 0.65) return 100.0;
+            float width = {{F(HalfWidth)}} * pow(max(0.0, 1.0 - abs(u) / {{F(HalfLength)}}), 0.65)
+                * (1.0 + 0.10 * sin(u * 47.0) + 0.06 * sin(u * 83.0));
+            float bend = 0.008 * sin(u * 15.0) + 0.003 * sin(u * 37.0);
+            return abs(v - bend) / max(width, 0.0001);
+        }
+        """;
 
     public static Vertex[] Source(Model model)
     {
@@ -21,7 +51,7 @@ static class HeadWoundSurface
                 var b = part.Vertices[part.Indices[i + 1]];
                 var c = part.Vertices[part.Indices[i + 2]];
                 if (a.Uv.Y >= 0 || b.Uv.Y >= 0 || c.Uv.Y >= 0) continue;
-                if (MathF.Min(Vector3.Distance(a.Position, Centre), MathF.Min(Vector3.Distance(b.Position, Centre), Vector3.Distance(c.Position, Centre))) > 1.5f) continue;
+                if (MathF.Min(Vector3.Distance(a.Position, Centre), MathF.Min(Vector3.Distance(b.Position, Centre), Vector3.Distance(c.Position, Centre))) > 1.6f) continue;
                 result.AddRange([a, b, c]);
             }
         return result.ToArray();
@@ -30,12 +60,6 @@ static class HeadWoundSurface
     public static void Append(List<Vertex> destination, Vertex[] source, int headBone, Vector4[]? morphs)
     {
         if (source.Length == 0) return;
-        var closest = source.MinBy(v => Vector3.DistanceSquared(v.Position, Centre));
-        var normal = Vector3.Normalize(closest.Normal);
-        var across = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, normal));
-        if (!float.IsFinite(across.X)) return;
-        var up = Vector3.Normalize(Vector3.Cross(normal, across));
-        var origin = closest.Position;
         Vector3 Delta(Vertex v)
         {
             uint slot = BitConverter.SingleToUInt32Bits(v.Colour.X);
@@ -43,7 +67,7 @@ static class HeadWoundSurface
         }
         (Vector3 Position, Vector3 Morph)? Surface(Vector3 point)
         {
-            Vector3 start = point + normal * 2, direction = -normal;
+            Vector3 start = point + Normal * 2, direction = -Normal;
             float best = float.MaxValue;
             (Vector3 Position, Vector3 Morph)? found = null;
             for (int i = 0; i + 2 < source.Length; i += 3)
@@ -61,71 +85,67 @@ static class HeadWoundSurface
                 float t = Vector3.Dot(edge2, q) / determinant;
                 if (t < 0 || t > 4) continue;
                 var hit = start + direction * t;
+                if (MathF.Abs(Vector3.Dot(hit - Centre, Normal)) > 0.65f) continue;
                 float distance = Vector3.DistanceSquared(hit, Centre);
-                if (distance < best) { best = distance; found = (hit, Delta(source[i]) * (1 - u - v) + Delta(source[i + 1]) * u + Delta(source[i + 2]) * v); }
+                if (distance < best)
+                {
+                    best = distance;
+                    found = (hit, Delta(source[i]) * (1 - u - v) + Delta(source[i + 1]) * u + Delta(source[i + 2]) * v);
+                }
             }
             return found;
         }
-        // Centre the rings on the projection of the wound centre, rather than on the nearest (coarse) vertex.
-        if (Surface(Centre) is not { } projected || Field(projected.Position) > 0.255f) return;
-        origin = projected.Position;
         var pending = new List<Vertex>();
         bool Patch(bool broken)
         {
-            float[] radii = broken ? [0.405f, 0.36f, 0.32f, 0.285f, 0.275f, 0.275f] : [0.405f, 0.36f, 0.32f, 0.28f, 0.25f];
-            float[] heights = broken ? [-0.004f, -0.015f, -0.05f, -0.05f, -0.075f, -0.14f] : [-0.004f, -0.015f, -0.05f, -0.05f, -0.05f];
-            var rings = new Vector3[radii.Length, Segments];
-            for (int ring = 0; ring < radii.Length; ring++)
-                for (int segment = 0; segment < Segments; segment++)
+            // Cross-sections follow the blade, with pointed ends. Broken skull: two banks and an open cleft, no circular cap.
+            float[] bands = broken ? [-1.2f, -0.85f, -0.52f, -0.24f, -0.24f, 0.24f, 0.24f, 0.52f, 0.85f, 1.2f]
+                                   : [-1.2f, -0.85f, -0.52f, 0, 0.52f, 0.85f, 1.2f];
+            float[] heights = broken ? [-0.004f, -0.012f, -0.045f, -0.045f, -0.13f, -0.13f, -0.045f, -0.045f, -0.012f, -0.004f]
+                                     : [-0.004f, -0.012f, -0.045f, -0.045f, -0.045f, -0.012f, -0.004f];
+            var points = new Vector3[Sections + 1, bands.Length];
+            var colours = new Vector4[Sections + 1, bands.Length];
+            Vector2 uv = default;
+            for (int row = 0; row <= Sections; row++)
+            {
+                float u = HalfLength * (2f * row / Sections - 1), width = Width(u), bend = Bend(u);
+                for (int band = 0; band < bands.Length; band++)
                 {
-                    float angle = MathF.Tau * segment / Segments;
-                    var radial = across * MathF.Cos(angle) + up * MathF.Sin(angle);
-                    float low = 0, high = 0;
-                    // High-frequency edge noise can cross a level more than once: keep the first connected contour.
-                    for (int scan = 1; scan <= 70; scan++)
-                    {
-                        high = scan * 0.01f;
-                        if (Surface(origin + radial * high) is not { } sample) return false;
-                        if (Field(sample.Position) >= radii[ring]) break;
-                        low = high;
-                    }
-                    var hit = projected;
-                    for (int step = 0; step < 16; step++)
-                    {
-                        float radius = (low + high) / 2;
-                        if (Surface(origin + radial * radius) is not { } point) return false;
-                        hit = point;
-                        if (Field(point.Position) < radii[ring]) low = radius; else high = radius;
-                    }
-                    // The edge lifts in little pieces; the inner bone face drops into the existing skin opening.
-                    float chip = broken && ring is 3 or 4 ? 0.004f * MathF.Sin(segment * 1.73f) : 0;
-                    rings[ring, segment] = hit.Position + hit.Morph + normal * (heights[ring] + chip);
+                    float side = bands[band];
+                    if (broken && band is >= 3 and <= 6) side = MathF.Sign(side) * Cleft(u);
+                    if (Surface(Centre + Along * u + Side * (bend + side * width)) is not { } hit) return false;
+                    float lift = width / HalfWidth * 0.004f * MathF.Sin(u * 19 + side * 2);
+                    points[row, band] = hit.Position + hit.Morph + Normal * (heights[band] * Math.Clamp(width / HalfWidth * 4, 0, 1) + lift);
+                    // Dark wet cut lips, a narrow ivory strip, and the darker broken bone's inner face.
+                    bool flesh = MathF.Abs(side) >= 0.85f;
+                    bool inner = broken && band is 4 or 5;
+                    float grain = 0.94f + 0.06f * MathF.Sin(u * 31 + side * 5);
+                    float exposure = Math.Clamp(1.3f - MathF.Abs(u + 0.03f) / 0.36f, 0, 1) * (side > 0 ? 0.60f : 1);
+                    var tissue = new Vector4(0.28f, 0.025f, 0.03f, 0);
+                    colours[row, band] = (flesh ? tissue : inner ? new Vector4(0.32f, 0.19f, 0.15f, 0)
+                        : Vector4.Lerp(tissue, new Vector4(0.61f, 0.55f, 0.44f, 0), exposure)) * grain;
                 }
-            Vector4 Colour(int ring) => ring < 2 ? new(0.30f, 0.025f, 0.03f, 0) : broken && ring == radii.Length - 1 ? new(0.34f, 0.22f, 0.15f, 0) : new(0.68f, 0.60f, 0.47f, 0);
+            }
             void Triangle(Vector3 a, Vector3 b, Vector3 c, Vector4 ca, Vector4 cb, Vector4 cc)
             {
                 var cross = Vector3.Cross(b - a, c - a);
                 if (cross.LengthSquared() < 1e-12f) return;
                 var n = Vector3.Normalize(cross);
-                if (Vector3.Dot(n, normal) < 0) { (b, c) = (c, b); (cb, cc) = (cc, cb); n = -n; }
-                Vertex Make(Vector3 p, Vector4 colour) => new() { Position = p, Normal = Vector3.Normalize(normal * 0.5f + n * 0.5f), Uv = closest.Uv, Tangent = new Vector4(p, broken ? 9 : 8), Colour = colour, Bones = (uint)headBone, Weights = new(1, 0, 0, 0) };
+                if (Vector3.Dot(n, Normal) < 0) { (b, c) = (c, b); (cb, cc) = (cc, cb); n = -n; }
+                Vertex Make(Vector3 p, Vector4 colour) => new() { Position = p, Normal = Vector3.Normalize(Normal * 0.5f + n * 0.5f), Uv = uv, Tangent = new Vector4(p, broken ? 9 : 8), Colour = colour, Bones = (uint)headBone, Weights = new(1, 0, 0, 0) };
                 pending.AddRange([Make(a, ca), Make(b, cb), Make(c, cc)]);
             }
-            for (int ring = 0; ring + 1 < radii.Length; ring++)
-                for (int segment = 0; segment < Segments; segment++)
+            for (int row = 0; row < Sections; row++)
+                for (int band = 0; band + 1 < bands.Length; band++)
                 {
-                    int next = (segment + 1) % Segments;
-                    var a = rings[ring, segment]; var b = rings[ring, next];
-                    var c = rings[ring + 1, segment]; var d = rings[ring + 1, next];
-                    Triangle(a, b, c, Colour(ring), Colour(ring), Colour(ring + 1));
-                    Triangle(b, d, c, Colour(ring), Colour(ring + 1), Colour(ring + 1));
+                    if (broken && band == 4) continue; // The blade's cleft stays open all the way through the bone.
+                    Vector3 a = points[row, band], b = points[row + 1, band], c = points[row, band + 1], d = points[row + 1, band + 1];
+                    Triangle(a, b, c, colours[row, band], colours[row + 1, band], colours[row, band + 1]);
+                    Triangle(b, d, c, colours[row + 1, band], colours[row + 1, band + 1], colours[row, band + 1]);
                 }
-            if (!broken)
-                for (int segment = 0; segment < Segments; segment++)
-                    Triangle(rings[radii.Length - 1, segment], rings[radii.Length - 1, (segment + 1) % Segments], origin + projected.Morph + normal * -0.05f, Colour(2), Colour(2), Colour(2));
             return true;
         }
-        // Both variants must fit. Otherwise retain the shader's painted fallback, with no incomplete strip.
+        // All-or-nothing fit, so unsupported heads keep the shader fallback rather than a half-open strip.
         if (Patch(false) && Patch(true)) destination.AddRange(pending);
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -318,7 +318,7 @@ static class CharacterShaders
 
     static string F(float v) => v.ToString("0.0########", System.Globalization.CultureInfo.InvariantCulture);
 
-    public static string Fragment() => "#version 450\n" + NativeShaders.Prelude(PushMembers) + "#define LAMP_SKIN\n" + NativeShaders.AtmosphereFunctions + Structs + Lookup + $$"""
+    public static string Fragment() => "#version 450\n" + NativeShaders.Prelude(PushMembers) + "#define LAMP_SKIN\n" + NativeShaders.AtmosphereFunctions + Structs + Lookup + HeadWoundSurface.ShaderField + $$"""
         in vec3 vWorld;
         in float vCurvature;
         in vec3 vNormal;
@@ -568,13 +568,15 @@ static class CharacterShaders
             // A cut limb's end: a clean edge, then a ragged band of flesh with bone at its heart.
             if (vHeadOpen != 0u)
             {
-                // Bone is painted on the skin itself: the fitted skull does not close the forehead. A broken skull opens at its middle onto the brain.
-                float open = distance(vSkinPos, vec3(0.3, 18.85, 0.65)) + 0.012 * sin(vSkinPos.x * 17.0 + vSkinPos.y * 9.0) + 0.007 * sin(vSkinPos.y * 21.0);
+                // The painted fallback and fitted relief share a blade profile; a skull cleft opens onto the brain.
+                float open = headSwordWound(vSkinPos);
+                // The blade splits the fitted internal head bone as well as the skin and relief.
+                if (vHeadOpen >= 2u && vAnatomy == 1u && vClipLayer < 0.5 && vSkinPos.y > 17.5 && open < headSwordCleft(vSkinPos)) discard;
                 if (vAnatomy == 0u)
                 {
-                    if ((vHeadRelief != 0u && open < 0.36) || (vHeadOpen >= 2u && open < 0.26)) discard;
-                    float wet = 1.0 - smoothstep(0.32, 0.42, open), bone = 1.0 - smoothstep(0.29, 0.33, open);
-                    albedo = mix(mix(albedo, vec3(0.3, 0.02, 0.025), wet), vec3(0.68, 0.6, 0.47), bone);
+                    if ((vHeadRelief != 0u && open < 0.85) || (vHeadOpen >= 2u && open < headSwordCleft(vSkinPos))) discard;
+                    float wet = 1.0 - smoothstep(0.85, 1.35, open), bone = 1.0 - smoothstep(0.48, 0.60, open);
+                    albedo = mix(mix(albedo, vec3(0.3, 0.02, 0.025), wet), vec3(0.61, 0.55, 0.44), bone);
                     gloss = mix(gloss, 0.75, wet);
                 }
             }
