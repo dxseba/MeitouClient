@@ -143,6 +143,7 @@ internal sealed unsafe partial class CharacterRenderer
             ref var l = ref live[liveCount++];
             l = default;
             l.Asset = asset;
+            l.DrawParts = asset.Parts;
             l.World = Matrix4x4.Identity;
             l.Centre = eye;
             l.Radius = 1;

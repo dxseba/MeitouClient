@@ -233,7 +233,7 @@ internal sealed unsafe partial class CharacterRenderer
             bool interior = portraitLive < 0 && l.Interior;
             var world = Relative(l.World, origin);
             float worldScale = world.ScaleLength();
-            var parts = l.Asset.Parts;
+            var parts = l.DrawParts;
             for (int p = 0; p < parts.Count; p++)
             {
                 var part = parts[p];
@@ -263,7 +263,7 @@ internal sealed unsafe partial class CharacterRenderer
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
-                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
+                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (l.HeadFrame.M41 > 0.5f ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass)
                 {
                     var previousWorld = Relative(l.State.PreviousWorld, origin);
@@ -318,12 +318,12 @@ internal sealed unsafe partial class CharacterRenderer
         var world = Relative(l.World, origin);
         float worldScale = world.ScaleLength();
         var previousWorld = motion ? Relative(l.State.PreviousWorld, origin) : default;
-        var parts = l.Asset.Parts;
+        var parts = l.DrawParts;
         for (int p = 0; p < parts.Count; p++)
         {
             var part = parts[p];
             ref var f = ref partFrames[l.PartBase + p];
-            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.WoundMask != 0 && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) && (l.PartOnly == 0 || (part.IsBody && l.WoundMask != 0)) && !(part.Bone >= 0 && l.LostGroups != 0 && (l.LostGroups >> woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) & 1) != 0 && woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) is 1 or 2);
+            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.HasWounds && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) && (l.PartOnly == 0 || (part.IsBody && l.HasWounds)) && !(part.Bone >= 0 && l.LostGroups != 0 && (l.LostGroups >> woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) & 1) != 0 && woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) is 1 or 2);
             if (!f.Shows) continue;
             f.Model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             f.Scale = part.Shared ? worldScale : f.Model.ScaleLength();
@@ -393,7 +393,7 @@ internal sealed unsafe partial class CharacterRenderer
                     views[k].Batches.Chunks[c].Characters++;
                 }
             if (seen == 0) continue;
-            var parts = l.Asset.Parts;
+            var parts = l.DrawParts;
             for (int p = 0; p < parts.Count; p++)
             {
                 ref readonly var f = ref partFrames[l.PartBase + p];
@@ -406,7 +406,7 @@ internal sealed unsafe partial class CharacterRenderer
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance
                 {
-                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0),
+                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (l.HeadFrame.M41 > 0.5f ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)),
                     MorphBase = part.Morphed ? l.Asset.MorphBase : 0, PreviousModel = motion ? f.PreviousModel : default,
                 };
                 // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
@@ -561,9 +561,9 @@ internal sealed unsafe partial class CharacterRenderer
     /// row j's w, as an exact integer (CharacterShaders: <c>vBloodAmount</c>).
     /// </summary>
     /// <summary>The instance flag of a body with wounds, off in a portrait, whose palette has no header.</summary>
-    uint WoundFlag(AssetPart part, uint mask, bool reliefVisible)
+    uint WoundFlag(AssetPart part, bool hasWounds, bool reliefVisible)
     {
-        if (mask == 0 || portraitLive >= 0) return part.Anatomy ? CharacterShaders.AnatomyFlag : 0;
+        if (!hasWounds || portraitLive >= 0) return part.Anatomy ? CharacterShaders.AnatomyFlag : 0;
         if (part.Anatomy) return CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag;
         if (part.IsBody) return CharacterShaders.WoundFlag | (reliefVisible ? CharacterShaders.HeadReliefFlag : 0u);
         if (!part.Shared) return 0;

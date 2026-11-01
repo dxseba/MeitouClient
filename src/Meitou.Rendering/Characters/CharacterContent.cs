@@ -23,6 +23,7 @@ internal sealed class AssetPart
     /// <summary>Skinned by the body's bone palette (clothing, hair, beards); else placed by <see cref="Bone"/> and <see cref="Offset"/>.</summary>
     public required bool Shared;
     public uint HeadReliefProfiles;
+    public bool IsHeadRelief;
     public int Bone = -1;
     public Matrix4x4 Offset = Matrix4x4.Identity;
     /// <summary>Index among the character's bone-attached parts (the matrices <see cref="CharacterRenderer"/> keeps per frame); -1 for shared parts.</summary>
@@ -143,6 +144,7 @@ internal sealed class CharacterAsset
     public required CharacterAppearance Appearance;
     public required SkeletonRig Rig;
     public WoundPoint[]? WoundPoints;
+    public Vertex[]? HeadSource;
     public BodyShapeData? Shape;
     /// <summary>The stat-driven body last applied to the shape and the body's normal maps (<see cref="CharacterRenderer"/>), null before the first.</summary>
     public BodyBuild? AppliedBuild;
@@ -197,6 +199,7 @@ internal sealed class CharacterContent : IDisposable
 {
     const string AllocationName = "character meshes";
     readonly IGpuContext gpu;
+    readonly CharacterHeadWoundPool headWoundPool;
     readonly AssetLocator assets;
     readonly GameDatabase db;
     readonly MaterialResolver resolver;
@@ -238,6 +241,7 @@ internal sealed class CharacterContent : IDisposable
     public CharacterContent(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)
     {
         this.gpu = gpu;
+        headWoundPool = new CharacterHeadWoundPool(gpu);
         this.assets = assets;
         this.db = db;
         modsDirectory = install.ModsDirectory;
@@ -268,6 +272,7 @@ internal sealed class CharacterContent : IDisposable
         meshes.Clear();
         prepared.Clear();
         MeshBytes = 0;
+        headWoundPool.Dispose();
         Textures.Dispose();
         Morphs.Dispose();
         Materials.Dispose();
@@ -524,6 +529,9 @@ internal sealed class CharacterContent : IDisposable
         }
         return meshes[key] = UploadAnatomy(vertices);
     }
+
+    public HeadWoundView HeadPlacement(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp) =>
+        headWoundPool.Resolve(key, asset, placement, headState, stamp);
 
     LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase)
     {
@@ -933,6 +941,7 @@ internal sealed class CharacterContent : IDisposable
             asset.Height = Math.Max(2 * body.Centre.Y, 1);
             asset.Radius = body.Radius + new Vector2(body.Centre.X, body.Centre.Z).Length();
         }
+        asset.HeadSource = HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant());
         var setup = Rigs.For(c);
         asset.Shape = setup?.Shape;
         asset.GroundOffset = setup?.GroundOffset ?? 0;
@@ -1011,7 +1020,7 @@ internal sealed class CharacterContent : IDisposable
             asset.Parts.First(p => p.IsBody).HeadReliefProfiles = relief.HeadReliefProfiles;
             asset.Parts.Add(new AssetPart
             {
-                Label = "head wound relief", Mesh = relief.Gpu, Shared = true, Anatomy = true, BoundsCentre = relief.Centre, BoundsRadius = relief.Radius,
+                Label = "head wound relief", IsHeadRelief = true, Mesh = relief.Gpu, Shared = true, Anatomy = true, BoundsCentre = relief.Centre, BoundsRadius = relief.Radius,
                 Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "head wound relief" },
             });
         }

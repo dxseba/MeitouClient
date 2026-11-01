@@ -1720,6 +1720,16 @@ Code map:
 - **Load.** `SaveLoader.Load` makes characters before the first tick. The character table copies its previous state over the next one at
   `BeginTick`, so state that must reach a tick is not written into `Next` there. It goes through `World.Commands` like player input.
 
+### Severe head wounds
+
+**Observed** (Meitou `GameHost.UpdateWounds` and scripted human head-wound captures): the fourth head hit with cut + pierce >= 15 opens jaw loss, scalp or broken skull (slot modulo 3; sandbox override). Scalp/skull have six profiles: down and opposed diagonals, each at two force sizes. Opening force >= 35 selects the larger size; a later qualifying stronger hit enlarges the opening without changing its fixed placement or axis. Blunt damage does not accumulate these openings.
+
+The head region comes from medical damage selection. Incoming horizontal direction and victim yaw estimate the side; blade direction estimates the axis. `CombatEvent.Position` is the victim root, not a measured blade/skin contact. The renderer projects the saved bind-space estimate onto actual head triangles ([head relief](character-renderer.md#head-wound-relief)). Invalid estimates retain the preset forehead placement.
+
+`head-wounds.meitou` is a Meitou-only save sidecar, separate from generic `wounds.meitou`. Header `MEITOU-HEAD-WOUNDS 1`; each invariant-culture row is `H container instance heavyHits kind profile`, optionally followed by nine floats (point, normal, tangent). Kinds: 0 none, 1 jaw, 2 scalp, 3 broken skull; profiles 0–5 for scalp/skull, otherwise 0. Missing or unsupported sidecars restore no severe state; malformed rows are skipped. Retained save handles filter imported/deleted characters. Heavy-hit counts, forms, profiles and placement survive loading; jaw restoration suppresses the one-shot falling-jaw effect.
+
+Loaded NPCs wait by stable save handle while unspawned and rebind on streaming generation changes. Generated NPCs retain state on their stored `CharacterCold`; `SaveCapture.LastColdHandles` maps those records, including offscreen members, into each captured save without treating fresh platoon handles as permanent runtime identities. Snapshot arrays are made before background file writes.
+
 ### Quicksave and quickload
 
 F5/F9 and named save menus share mapping. Restore clock, player money/faction, relation/prosperity,

@@ -75,7 +75,7 @@ sealed partial class GameHost
     void CutLimbs(CharacterSnapshot c)
     {
         if (gpu.Characters is not { } characters || session.World.Characters.Cold(c.Id.Slot)?.Medical is not { } medical) return;
-        if (jawsLost.Contains(c.Id) && limbsCut.Add((c.Id, 7)))
+        if (!(IsSandbox && g.SandboxDummy && g.SandboxSevereOnly) && severeHeads.Of(c.Id)?.Kind == Meitou.Simulation.Wounds.SevereHeadWoundKind.JawLost && !restoredJaws.Contains(c.Id) && limbsCut.Add((c.Id, 7)))
         {
             long jawFrom = DrawKey(c.Id), jawKey = jawFrom ^ (1L << 53) ^ (7L << 48);
             if (characters.LastDrawn(jawFrom, "Bip01 Jaw") is ({ } jawWorld, { } jawLook, var jawAt) && characters.HoldPose(jawKey, jawFrom))

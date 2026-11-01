@@ -152,6 +152,7 @@ public static partial class SaveCapture
     sealed class MemoryPass
     {
         public readonly Dictionary<CharacterId, Hand> Handles = [];
+        public readonly Dictionary<CharacterCold, Hand> ColdHandles = [];
         public readonly List<(FcsRecord Record, SquadMemoryData? Data)> Targets = [];
         public readonly List<(FcsRecord State, CharacterId Partner)> Carries = [];
         public readonly List<(FcsRecord Record, string Prefix, CharacterId Target)> OrderTargets = [];
@@ -160,6 +161,8 @@ public static partial class SaveCapture
 
     /// <summary>The handles of the last capture, for side files keyed by character.</summary>
     public static volatile Dictionary<CharacterId, Hand>? LastHandles;
+    /// <summary>Every cold character written, including stored offscreen NPCs without a runtime id; for visual sidecars only.</summary>
+    public static volatile Dictionary<CharacterCold, Hand>? LastColdHandles;
     [ThreadStatic] static MemoryPass? memoryPass;
 
     static Dialogue.SquadMemory? MemoryOf(World world) => world.Systems.OfType<Dialogue.DialogueSystem>().FirstOrDefault()?.Memory;
@@ -172,6 +175,7 @@ public static partial class SaveCapture
         if (memoryPass is not { } pass) return;
         memoryPass = null;
         LastHandles = pass.Handles;
+        LastColdHandles = pass.ColdHandles;
         foreach (var (record, data) in pass.Targets)
             MemorySave.Write(record, data, id => pass.Handles.TryGetValue(id, out var hand) ? hand : null);
         // The carry links (FUN_1406280a0 writes the partner's handle under `carrying`, the null one when it is not saved).
@@ -484,6 +488,7 @@ public static partial class SaveCapture
         if (isNew || cold.LookEdited) WriteAppearance(sc, cold, data.Db, races, replace: !isNew);
         // What it carries and wears, as it is now; items read from a save keep their records' other keys.
         if (cold.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));
+        if (memoryPass is { } writing) writing.ColdHandles[cold] = sc.Handle;
         if (!id.IsNone) memoryPass?.Handles[id] = sc.Handle;
         return sc;
     }

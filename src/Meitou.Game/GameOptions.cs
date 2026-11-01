@@ -21,9 +21,9 @@ sealed class GameOptions
     /// <summary>The animation sandbox (<c>--sandbox [n]</c>): 0 off, else the number of characters (1 or 2) on a flat wireframe floor.</summary>
     public int Sandbox;
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
-    public string? SandboxCharacter, SandboxPart;
+    public string? SandboxCharacter, SandboxPart, SandboxHitSide;
     public bool SandboxBare;
-    public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead;
+    public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead, SandboxSevereOnly;
     public float? SandboxYaw, SandboxPower;
     public int? SandboxHeadWound, SandboxCutDirection;
     public float SandboxHitDamage = 30;
@@ -96,6 +96,11 @@ sealed class GameOptions
           --sandbox [n]              animation sandbox: no world, a flat 1000x1000 wireframe floor (lines every 10, bold every 100) with 1 character (n = 2: two facing each other 30 units apart; more: the rest idle in rings round them, up to 1000); Z/X/C walk/run/free, [ ] fixed speed, P patrol, G fight, Y follow; works with --screenshot --ticks
           --sandbox-character <name> the CHARACTER or ANIMAL_CHARACTER record the sandbox spawns (default: the first member of the default new-game start)
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), fight (the G key, with --sandbox 2), e.g. run,patrol (with --move-to or --screenshot)
+          --sandbox-severe-only     with --sandbox-dummy: hide generic wound marks and falling jaw to inspect permanent head state without a wound mask
+          --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
+          --sandbox-cut-direction <n> with --sandbox-dummy: fixed blade axis 1 down, 2 left, 3 right
+          --sandbox-hit-side <side>  with --sandbox-dummy: fixed victim-local incoming side front, left, right, or back
+          --sandbox-hit-damage <n>   with --sandbox-dummy: every third hit cuts for n (default 30); head profiles enlarge at 35
           --sandbox-races            the sandbox adds one character of every person race (the first CHARACTER record listing only that race) in rings round the pair, whatever n is; the log lists them
           --terrain-sandbox [cliffs] [x,z]  the empty world round a flat spot (default the flattest found) whose ground is a field of 200-unit tiles, one per ground texture
                                      (cliffs: 100-unit tiles of every cliff texture on a 45-degree face),
@@ -175,10 +180,15 @@ sealed class GameOptions
                     g.SandboxCutDirection = int.Parse(Next());
                     if (g.SandboxCutDirection is < 1 or > 3) throw new ArgumentException("--sandbox-cut-direction must be 1 (down), 2 (left), or 3 (right)");
                     break;
+                case "--sandbox-hit-side":
+                    g.SandboxHitSide = Next().ToLowerInvariant();
+                    if (g.SandboxHitSide is not ("front" or "left" or "right" or "back")) throw new ArgumentException("--sandbox-hit-side must be front, left, right, or back");
+                    break;
                 case "--sandbox-hit-damage":
                     g.SandboxHitDamage = float.Parse(Next(), CultureInfo.InvariantCulture);
                     if (!float.IsFinite(g.SandboxHitDamage) || g.SandboxHitDamage <= 0) throw new ArgumentException("--sandbox-hit-damage must be positive and finite");
                     break;
+                case "--sandbox-severe-only": g.SandboxSevereOnly = true; break;
                 case "--sandbox-head-wound": g.SandboxHeadWound = int.Parse(Next()); break;
                 case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever-level": g.SandboxSever = true; g.SandboxSeverLevel = int.Parse(Next()); break;

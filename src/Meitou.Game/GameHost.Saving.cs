@@ -6,6 +6,7 @@ using Meitou.Data.Save;
 using Meitou.Data.World;
 using Meitou.Simulation;
 using Meitou.Simulation.Saving;
+using Meitou.Simulation.Wounds;
 
 namespace Meitou.Game;
 
@@ -180,6 +181,7 @@ sealed partial class GameHost
         if (!SavesAvailable(out string reason)) { player.Notice(reason, true); return; }
         session.SettleAhead();   // a tick run ahead counts as run: the saved world and its clock agree
         var world = session.World;
+        UpdateWounds(world);   // include landed hits queued by the final settled tick in the save snapshot
         if (!world.Player.Exists) { player.Notice("Nothing to save: no player squad (start a new game)", true); return; }
         if (Busy()) { player.Notice("Save or load still in progress", true); return; }
         var watch = Stopwatch.StartNew();
@@ -207,6 +209,14 @@ sealed partial class GameHost
         if (!feedback) saveInUse = folder;
         var woundHandles = Meitou.Simulation.Saving.SaveCapture.LastHandles;
         string[]? wounds2 = woundHandles is null ? null : [.. wounds.Write(id => woundHandles.TryGetValue(id, out var hand) ? (hand.C, hand.I) : null)];
+        // Snapshot on the simulation thread; the write worker never enumerates mutable wound state.
+        var keptHeadHandles = game.Characters.Select(c => (c.Handle.C, c.Handle.I)).ToHashSet();
+        var coldHeads = Meitou.Simulation.Saving.SaveCapture.LastColdHandles?
+            .Where(pair => pair.Key.SevereHeadWound is not null)
+            .Select(pair => (Handle: (pair.Value.C, pair.Value.I), State: pair.Key.SevereHeadWound!.Value)).ToArray();
+        string[]? severeHeads2 = woundHandles is null ? null : [.. severeHeads.Write(
+            id => woundHandles.TryGetValue(id, out var hand) ? (hand.C, hand.I) : null,
+            keptHeadHandles.Contains, coldHeads)];
         saveWrite = Task.Run(() =>
         {
             try
@@ -214,6 +224,7 @@ sealed partial class GameHost
                 var written = Stopwatch.StartNew();
                 game.Write(folder);
                 if (wounds2 is { } lines) File.WriteAllLines(Path.Combine(folder, WoundFile), lines);
+                if (severeHeads2 is { } headLines) File.WriteAllLines(Path.Combine(folder, SevereHeadWounds.FileName), headLines);
                 Console.WriteLine($"save      {folder}: captured in {captureMs:0.0} ms{(ahead ? "" : " (the base made on the spot)")}, written in {written.ElapsedMilliseconds} ms");
                 if (!feedback) saveNotices.Enqueue(("Saved", false));
             }

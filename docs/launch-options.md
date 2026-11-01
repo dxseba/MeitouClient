@@ -52,6 +52,8 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-behead` | | off | With `--sandbox-dummy`: the foe loses its head at tick 120. |
 | `--sandbox-head-wound <n>` | 0, 1, 2 | by character | With `--sandbox-dummy`: the head wound that the fourth heavy blow opens: jaw, scalp, broken skull. |
 | `--sandbox-cut-direction <n>` | 1, 2, 3 | cycling | With `--sandbox-dummy`: fix the blade direction to down, left, or right for reproducible head wound profiles. |
+| `--sandbox-severe-only` | | off | With `--sandbox-dummy`: hide generic marks and falling jaw to verify permanent head rendering without a generic wound mask. |
+| `--sandbox-hit-side <side>` | front, left, right, back | cycling | With `--sandbox-dummy`: fix the incoming side in the victim's local frame for reproducible head placement. |
 | `--sandbox-hit-damage <n>` | positive number | 30 | With `--sandbox-dummy`: cutting damage of every third test hit. Head profiles grow at 35 or more; a head opening still needs four hits of at least 15. |
 | `--sandbox-female` | | off | With `--sandbox-bare`: the fighters are women. |
 | `--sandbox-torso` | | off | With `--sandbox-dummy`: test hits only on the chest and stomach. |

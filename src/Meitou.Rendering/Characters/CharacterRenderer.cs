@@ -190,8 +190,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public bool Repose, WeaponDrawn, RangedDrawn, BackDrawn;
         /// <summary>The blood of its first 8 body parts, a byte each (<see cref="CharacterInstance.Blood"/>).</summary>
         public ulong Blood;
-        /// <summary>The wound mask index for the palette header, 0 without wounds.</summary>
+        /// <summary>The generic wound mask index, 0 without generic cuts; permanent wounds can still need the header.</summary>
         public uint WoundMask, LostGroups, LimbCuts, PartOnly;
+        public bool HasWounds;
+        public IReadOnlyList<AssetPart> DrawParts;
+        public Matrix4x4 HeadFrame;
+        public bool HeadReliefReady;
         public Vector4[]? WoundSpheres, WoundCuts;
         /// <summary>Posed this frame whatever the thinning (the player's, a ragdoll, a new asset or a first pose).</summary>
         public bool MustPose;
@@ -484,18 +488,25 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             l.Centre = centre;
             l.Radius = asset.Radius * scale;
             l.WoundMask = woundMasks.Update(inst.Key, asset.Rig, asset.WoundPoints, inst.Wounds);
-            l.WoundSpheres = woundMasks.Spheres(inst.Key);
-            l.WoundCuts = woundMasks.Cuts(inst.Key);
+            l.WoundSpheres = l.WoundMask != 0 ? woundMasks.Spheres(inst.Key) : null;
+            l.WoundCuts = l.WoundMask != 0 ? woundMasks.Cuts(inst.Key) : null;
             l.LostGroups = inst.LostGroups;
             l.LimbCuts = inst.LimbCuts;
             l.PartOnly = inst.PartOnly;
-            if (l.WoundMask != 0) boneTotal += CharacterShaders.WoundHeaderBones;
+            l.HasWounds = l.WoundMask != 0 || (l.LostGroups | l.LimbCuts | l.PartOnly) != 0;
+            var headView = l.HasWounds && inst.HeadWoundPlacement is { } placement
+                ? content.HeadPlacement(inst.Key, asset, placement, inst.LostGroups, updateStamp)
+                : new HeadWoundView(asset.Parts, default, false);
+            l.DrawParts = headView.Parts;
+            l.HeadFrame = headView.Frame;
+            l.HeadReliefReady = headView.ReliefReady;
+            if (l.HasWounds) boneTotal += CharacterShaders.WoundHeaderBones;
             l.BoneBase = boneTotal;
             boneTotal += asset.Rig.BoneCount;
             l.AttachBase = attachCount;
             attachCount += asset.AttachCount;
             l.PartBase = partTotal;
-            partTotal += asset.Parts.Count;
+            partTotal += l.DrawParts.Count;
             if (!states.TryGetValue(inst.Key, out var state)) states[inst.Key] = state = new CharState();
             state.Seen = updateStamp;
             l.State = state;
@@ -587,16 +598,18 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     state.PosedRagdoll = l.Bones;
                 }
                 state.Bones.CopyTo(new Span<Matrix4x4>((byte*)bonePointer + (long)l.BoneBase * 64, rig.BoneCount));
-                if (l.WoundMask != 0) {
+                if (l.HasWounds) {
                     var header = (byte*)bonePointer + (l.BoneBase - CharacterShaders.WoundHeaderBones) * 64L;
+                    new Span<byte>(header, CharacterShaders.WoundHeaderBones * 64).Clear();
                     *(uint*)header = l.WoundMask;
                     ((uint*)header)[1] = l.LostGroups;
                     ((uint*)header)[2] = l.LimbCuts;
                     ((uint*)header)[3] = l.PartOnly;
                     var groups = woundMasks.BoneGroups(rig);
                     groups.AsSpan().CopyTo(new Span<uint>(header + 16, 8));
-                    l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 64, WoundMasks.Spheres16));
-                    l.WoundCuts?.CopyTo(new Span<Vector4>(header + 64 * 17, WoundMasks.Spheres16));
+                    *(Matrix4x4*)(header + 64) = l.HeadFrame;
+                    l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 128, WoundMasks.Spheres16));
+                    l.WoundCuts?.CopyTo(new Span<Vector4>(header + 64 * 18, WoundMasks.Spheres16));
                 }
                 state.Attach.CopyTo(attachArray, l.AttachBase);
                 if (motion)
@@ -617,7 +630,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         for (int i = 0; i < liveCount; i++)
         {
             float distance = Vector3.Distance(eye, live[i].Centre);
-            foreach (var part in live[i].Asset.Parts)
+            foreach (var part in live[i].DrawParts)
             {
                 if (!part.ShowsWith(live[i].WeaponDrawn, live[i].RangedDrawn, live[i].Shots, live[i].BackDrawn)) continue;
                 if (part.MaterialFrame != updateStamp)

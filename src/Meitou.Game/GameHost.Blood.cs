@@ -8,6 +8,7 @@ using Meitou.Data.World;
 using Meitou.Rendering;
 using Meitou.Rendering.Gpu;
 using Meitou.Simulation;
+using Meitou.Simulation.Wounds;
 
 namespace Meitou.Game;
 
@@ -168,10 +169,8 @@ sealed partial class GameHost
 
     const string WoundFile = "wounds.meitou";
     const int JawBlows = 4;
-    readonly Dictionary<CharacterId, int> jawBlows = [];
-    readonly HashSet<CharacterId> jawsLost = [];
-    /// <summary>Head state: bit 7 scalp gone, bit 8 broken skull; bits 9-11 blade direction and force profile.</summary>
-    readonly Dictionary<CharacterId, uint> headsOpen = [];
+    readonly SevereHeadWounds severeHeads = new();
+    readonly HashSet<CharacterId> restoredJaws = [];
     string? woundsFrom;
 
     void UpdateWounds(World world)
@@ -188,16 +187,28 @@ sealed partial class GameHost
             wounds.Clear();
             gutFalls.Clear();
             gutsSpilled.Clear();
-            jawBlows.Clear();
-            jawsLost.Clear();
-            headsOpen.Clear();
+            severeHeads.Clear();
+            restoredJaws.Clear();
             // Only right after a load: a new game must not take the last save's wounds.
             string? loadedFrom = woundsFrom;
             woundsFrom = null;
-            if (loadedFrom is { } folder && File.Exists(Path.Combine(folder, WoundFile)))
-                wounds.Read(File.ReadLines(Path.Combine(folder, WoundFile)), key => Meitou.Simulation.Saving.SaveLoader.LastSpawned.TryGetValue(key, out var who) ? who : null);
+            if (loadedFrom is { } folder)
+            {
+                if (File.Exists(Path.Combine(folder, WoundFile)))
+                    wounds.Read(File.ReadLines(Path.Combine(folder, WoundFile)), SavedWoundCharacter);
+                if (File.Exists(Path.Combine(folder, SevereHeadWounds.FileName)))
+                {
+                    var retained = loadedSave?.Source.Characters.Select(c => (c.Handle.C, c.Handle.I)).ToHashSet();
+                    var restored = severeHeads.Read(File.ReadLines(Path.Combine(folder, SevereHeadWounds.FileName)), SavedWoundCharacter,
+                        retained is null ? null : retained.Contains);
+                    foreach (var pair in severeHeads.All)
+                        if (pair.Value.Kind == SevereHeadWoundKind.JawLost) restoredJaws.Add(pair.Key);
+                    Console.WriteLine($"wounds    severe head state: {restored.Restored} restored, {restored.Pending} waiting for characters, {restored.Rejected} rejected rows");
+                }
+            }
             world.CombatEvents = woundQueue;
         }
+        RefreshSevereHeadStates(world);
         if (world.Tick / WoundHealTicks != woundHealStep) { woundHealStep = world.Tick / WoundHealTicks; wounds.Heal(WoundHealDose); }
         while (woundQueue.TryDequeue(out var e))
         {
@@ -229,31 +240,73 @@ sealed partial class GameHost
                         Rotation = Quaternion.Identity, Spin = new Vector3(5, 3, 7),
                     });
                 }
-            if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
+            if (e.Part < 0 || !world.Characters.IsAlive(e.Victim) || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
             var part = medical.Parts[e.Part];
             // The fourth heavy head blow opens one of the three head-wound forms.
             if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
             {
-                jawBlows[e.Victim] = jawBlows.GetValueOrDefault(e.Victim) + 1;
+                var head = severeHeads.Of(e.Victim) ?? new SevereHeadWoundState(0);
+                head = head with { HeavyHits = head.HeavyHits < int.MaxValue ? head.HeavyHits + 1 : int.MaxValue };
                 // The opening hit fixes the direction; later force can enlarge it without rotating it.
-                if (headsOpen.TryGetValue(e.Victim, out uint opened) && e.Damage.Cut + e.Damage.Pierce >= 35 && (opened >> 9 & 7) < 3)
-                    headsOpen[e.Victim] = (opened & 0x1FFu) | (((opened >> 9 & 7) + 3) << 9);
-                if (jawBlows[e.Victim] == JawBlows)
-                    switch (g.SandboxHeadWound ?? e.Victim.Slot % 3)   // each character's own
+                if (head.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull && e.Damage.Cut + e.Damage.Pierce >= 35 && head.Profile < 3)
+                    head = head with { Profile = head.Profile + 3 };
+                if (head.HeavyHits == JawBlows && head.Kind == SevereHeadWoundKind.None)
+                {
+                    var kind = (g.SandboxHeadWound ?? e.Victim.Slot % 3) switch
                     {
-                        case 1: headsOpen[e.Victim] = (1u << 7) | (HeadProfile(e.CutDirection, e.Damage.Cut + e.Damage.Pierce) << 9); break;
-                        case 2: headsOpen[e.Victim] = (3u << 7) | (HeadProfile(e.CutDirection, e.Damage.Cut + e.Damage.Pierce) << 9); break;
-                        default: jawsLost.Add(e.Victim); break;
-                    }
+                        1 => SevereHeadWoundKind.Scalp,
+                        2 => SevereHeadWoundKind.BrokenSkull,
+                        _ => SevereHeadWoundKind.JawLost,
+                    };
+                    head = head with
+                    {
+                        Kind = kind,
+                        Profile = kind == SevereHeadWoundKind.JawLost ? 0 : (int)HeadProfile(e.CutDirection, e.Damage.Cut + e.Damage.Pierce),
+                        Placement = kind == SevereHeadWoundKind.JawLost ? null : HeadWoundPlacementPolicy.Estimate(e.Direction, e.VictimYaw, e.CutDirection),
+                    };
+                }
+                severeHeads.Set(e.Victim, head);
+                cold.SevereHeadWound = head;
+                if (cold.Save?.Source.Handle is { IsNull: false } handle) severeHeads.Bind(e.Victim, (handle.C, handle.I));
             }
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
         }
     }
 
+    void RefreshSevereHeadStates(World world)
+    {
+        var table = world.Characters;
+        // Generated NPCs keep their cold object in StoredSquad even before they have a save handle.
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            var id = table.IdOf(slot);
+            if (!table.IsAlive(id) || table.Cold(slot) is not { } cold) continue;
+            if (severeHeads.Of(id) is null && cold.SevereHeadWound is { } stored)
+            {
+                severeHeads.Set(id, stored);
+                if (stored.Kind == SevereHeadWoundKind.JawLost) restoredJaws.Add(id);
+            }
+            if (cold.Save?.Source.Handle is { IsNull: false } handle) severeHeads.Bind(id, (handle.C, handle.I));
+        }
+        // Loaded NPCs can leave and return under a new runtime generation; stable save handles bridge the change.
+        foreach (var id in severeHeads.Refresh(SavedWoundCharacter, table.IsAlive))
+            if (severeHeads.Of(id)?.Kind == SevereHeadWoundKind.JawLost) restoredJaws.Add(id);
+        severeHeads.PruneUnboundInactive(table.IsAlive);
+        restoredJaws.RemoveWhere(id => !table.IsAlive(id));
+        foreach (var (id, state) in severeHeads.All)
+            if (table.IsAlive(id) && table.Cold(id.Slot) is { } cold) cold.SevereHeadWound = state;
+    }
+
+    CharacterId? SavedWoundCharacter((int C, int I) key)
+    {
+        var world = session.World;
+        if (world.Saved?.Spawned.TryGetValue(key, out var saved) == true && world.Characters.IsAlive(saved)) return saved;
+        return Meitou.Simulation.Saving.SaveLoader.LastSpawned.TryGetValue(key, out var playerId) && world.Characters.IsAlive(playerId) ? playerId : null;
+    }
+
     // HitOutcomes directions: down/up, left, right; rear 7/9 retain down/right orientation.
     static uint HeadProfile(int cut, float force) => (cut switch { 1 or 5 or 7 => 2u, 2 => 1u, _ => 0u }) + (force >= 35 ? 3u : 0u);
 
-    /// <summary>A cut's axis, the blow's own direction, turned a little (within 20 degrees): the arm's swing is not known exactly.</summary>
     /// <summary>The body groups of a character's stumps (<see cref="Meitou.Rendering.Characters.WoundMasks.BodyGroup"/>: arms 1 and 2, legs 3 and 4).</summary>
     uint LostGroups(CharacterId id)
     {
@@ -261,8 +314,7 @@ sealed partial class GameHost
         if (session.World.Characters.Cold(id.Slot)?.Medical is { } medical)
             foreach (var part in medical.Parts)
                 if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb) lost |= 1u << (limb < 2 ? 1 + limb : 1 + limb);
-        if (jawsLost.Contains(id)) lost |= 1u << Meitou.Rendering.Characters.WoundMasks.JawGroup;
-        lost |= headsOpen.GetValueOrDefault(id);
+        lost |= severeHeads.Of(id)?.RendererFlags ?? 0;
         if (gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) lost |= 1u << 5;   // the bowel has left the body
         return lost;
     }
@@ -292,6 +344,7 @@ sealed partial class GameHost
     /// <summary>The character's open wounds as the renderer places them (segments as <see cref="Meitou.Simulation.Wounds.Wound"/>).</summary>
     IReadOnlyList<Meitou.Rendering.CharacterWoundMark> WoundMarks(CharacterId id)
     {
+        if (IsSandbox && g.SandboxDummy && g.SandboxSevereOnly) return [];
         var marks = new List<Meitou.Rendering.CharacterWoundMark>();
         var body = wounds.Of(id) ?? NoWounds;
         for (int i = 0; i < body.Torso.Length; i++)

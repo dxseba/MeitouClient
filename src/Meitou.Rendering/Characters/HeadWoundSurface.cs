@@ -4,7 +4,7 @@ using System.Numerics;
 namespace Meitou.Rendering.Characters;
 
 /// <summary>A blade-shaped forehead wound, projected onto the skin; layers 8/9 are scalp/skull wounds.</summary>
-static class HeadWoundSurface
+static partial class HeadWoundSurface
 {
     static readonly Vector3 Centre = new(0.42f, 18.9f, 0.83f);
     static readonly Vector3 Normal = Vector3.Normalize(new(0.81257f, 0.30728f, 0.49528f));
@@ -35,7 +35,9 @@ static class HeadWoundSurface
         get
         {
             var frames = new System.Text.StringBuilder();
-            frames.Append("void headSwordFrame(uint profile, out vec3 centre, out vec3 along, out vec3 side, out float halfLength, out float halfWidth) {\n");
+            frames.Append("void headSwordFrame(uint profile, mat4 placement, out vec3 centre, out vec3 along, out vec3 side, out vec3 normal, out float halfLength, out float halfWidth) {\n");
+            frames.Append($"normal = {V(Normal)};\n");
+            frames.Append("if (placement[3].x > 0.5) { centre = placement[0].xyz; halfLength = placement[0].w; along = placement[1].xyz; halfWidth = placement[1].w; normal = placement[2].xyz; side = normalize(cross(normal, along)); return; }\n");
             for (int i = 0; i < Profiles; i++)
             {
                 var frame = Frame(i);
@@ -44,25 +46,34 @@ static class HeadWoundSurface
             var fallback = Frame(0);
             frames.Append($"else {{ centre = {V(fallback.Centre)}; along = {V(fallback.Along)}; side = {V(fallback.Side)}; halfLength = {F(fallback.HalfLength)}; halfWidth = {F(fallback.HalfWidth)}; }} }}\n");
             return frames + $$"""
-                float headSwordCleft(vec3 p, uint profile)
+                float headSwordCleft(vec3 p, uint profile, mat4 placement)
                 {
-                    vec3 centre, along, side; float halfLength, halfWidth;
-                    headSwordFrame(profile, centre, along, side, halfLength, halfWidth);
+                    vec3 centre, along, side, normal; float halfLength, halfWidth;
+                    headSwordFrame(profile, placement, centre, along, side, normal, halfLength, halfWidth);
                     float u = dot(p - centre, along);
                     float t = (u - 0.12) / 0.20;
                     return 0.24 + 0.20 * exp(-t * t);
                 }
-                float headSwordWound(vec3 p, uint profile)
+                float headSwordWound(vec3 p, uint profile, mat4 placement)
                 {
-                    vec3 centre, along, side; float halfLength, halfWidth;
-                    headSwordFrame(profile, centre, along, side, halfLength, halfWidth);
+                    vec3 centre, along, side, normal; float halfLength, halfWidth;
+                    headSwordFrame(profile, placement, centre, along, side, normal, halfLength, halfWidth);
                     vec3 d = p - centre;
                     float u = dot(d, along), v = dot(d, side);
-                    if (abs(u) > halfLength || abs(dot(d, {{V(Normal)}})) > 0.65) return 100.0;
+                    if (abs(u) > halfLength || abs(dot(d, normal)) > 0.65) return 100.0;
                     float width = halfWidth * pow(max(0.0, 1.0 - abs(u) / halfLength), 0.65)
                         * (1.0 + 0.10 * sin(u * 47.0) + 0.06 * sin(u * 83.0));
                     float bend = 0.008 * sin(u * 15.0) + 0.003 * sin(u * 37.0);
                     return abs(v - bend) / max(width, 0.0001);
+                }
+                float headSwordHair(vec3 p, uint profile, mat4 placement)
+                {
+                    vec3 centre, along, side, normal; float halfLength, halfWidth;
+                    headSwordFrame(profile, placement, centre, along, side, normal, halfLength, halfWidth);
+                    float depth = dot(p - centre, normal);
+                    if (depth < -0.65) return 100.0;
+                    // Raised strands and braids project back onto this cut; the opposite scalp stays outside it.
+                    return headSwordWound(p - normal * max(depth, 0.0), profile, placement);
                 }
                 """;
         }
@@ -78,7 +89,6 @@ static class HeadWoundSurface
                 var b = part.Vertices[part.Indices[i + 1]];
                 var c = part.Vertices[part.Indices[i + 2]];
                 if (a.Uv.Y >= 0 || b.Uv.Y >= 0 || c.Uv.Y >= 0) continue;
-                if (MathF.Min(Vector3.Distance(a.Position, Centre), MathF.Min(Vector3.Distance(b.Position, Centre), Vector3.Distance(c.Position, Centre))) > 1.6f) continue;
                 result.AddRange([a, b, c]);
             }
         return result.ToArray();
@@ -86,6 +96,7 @@ static class HeadWoundSurface
 
     public static uint Append(List<Vertex> destination, Vertex[] source, int headBone, Vector4[]? morphs)
     {
+        source = Nearby(source, Centre, 1.6f);
         if (source.Length == 0) return 0;
         Vector3 Delta(Vertex v)
         {
