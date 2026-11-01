@@ -158,6 +158,12 @@ static class CharacterShaders
                     float radius = mod(c.w, 10.0), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
                     dent = max(dent, near * near * (3.0 - 2.0 * near) * max(radius - 1.0, 0.0) * 0.28);
                 }
+                if (own == 6u && (floatBitsToUint(words[0][1]) >> 7u & 1u) != 0u)
+                {
+                    // A broken jaw hangs, swung open about its hinge below the ears.
+                    vec2 arm = local.zy - vec2(0.1, 17.75);
+                    local.zy = vec2(0.1, 17.75) + vec2(arm.x * 0.8 + arm.y * 0.6, arm.y * 0.8 - arm.x * 0.6);
+                }
                 if (aPosition.y > 16.0) dent = 0.0;   // the head counts as torso by group: a chest wound must not sink the face
                 local -= aNormal * min(dent, own == 0u ? 0.55 : own < 3u ? 0.25 : 0.4);   // never past the bone: arms are thinnest
             }
