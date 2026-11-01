@@ -15,7 +15,7 @@ public sealed record EcorcheBatch(string Bone, int Layer, EcorcheVertex[] Vertic
 /// </summary>
 public static class EcorcheAsset
 {
-    const int MaxBatches = 90, MaxNameLength = 80, MaxLayer = 4, MaxBatchVertices = 60000, MaxVertices = 1500000;
+    const int MaxBatches = 90, MaxNameLength = 80, MaxLayer = 6, MaxBatchVertices = 60000, MaxVertices = 1500000;
 
     public static IReadOnlyList<EcorcheBatch> Read(Stream stream)
     {

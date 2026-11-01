@@ -464,23 +464,25 @@ internal sealed class CharacterContent : IDisposable
                 Vertex a = Wall(row, column), b = Wall(row, column + 1), c = Wall(row + 1, column), d = Wall(row + 1, column + 1);
                 vertices.AddRange([a, b, c, b, d, c]);
             }
-        // A tongue in the open mouth: a flattened, tapering lobe on the head bone, unwalled by anything else in a body with no mouth of its own.
-        if (rig.Handle("Bip01 Head") is { } tongueBone)
+        // The mouth behind a lost jaw (Z-Anatomy, the user's Mouth.anatomy): placed as one piece, box to box, in the head's lower part. Rigid on the head bone.
+        if (File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy")) && rig.Handle("Bip01 Head") is { } mouthBone)
         {
-            var root = headMiddle + new Vector3(0, (headMin.Y - headMax.Y) * 0.2f, 0.2f);
-            Vertex Lobe(float along, float round)
+            using var mouthStream = File.OpenRead(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy"));
+            var mouth = Meitou.Data.Characters.EcorcheAsset.Read(mouthStream);
+            var (min, max) = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
+            foreach (var part in mouth) foreach (var v in part.Vertices) (min, max) = (Vector3.Min(min, v.Position), Vector3.Max(max, v.Position));
+            var head = headMax - headMin;
+            float mouthScale = MathF.Min(head.X * 0.62f / (max.X - min.X), head.Y * 0.5f / (max.Y - min.Y));
+            var place = new Vector3(headMiddle.X, headMin.Y + head.Y * 0.32f, headMiddle.Z - head.Z * 0.02f);
+            foreach (var part in mouth)
             {
-                float width = 0.42f * MathF.Sqrt(MathF.Max(1 - along * along, 0)), y = MathF.Sin(round) * width * 0.4f, x = MathF.Cos(round) * width;
-                var p = root + new Vector3(x, y - along * along * 0.15f, along * 0.7f);
-                return new Vertex { Position = p, Normal = Vector3.Normalize(new Vector3(x, y * 2, 0.2f)), Uv = Nearest(p, 0).Uv, Tangent = new Vector4(p, 4), Colour = new Vector4(0.42f, 0.12f, 0.13f, 0), Bones = (uint)tongueBone, Weights = new Vector4(1, 0, 0, 0) };
-            }
-            for (int ring = 0; ring < 8; ring++)
-                for (int side = 0; side < 10; side++)
+                var colour = part.Bone.Contains("constrictor") ? new Vector4(0.26f, 0.05f, 0.05f, 0) : part.Bone == "Gingiva" ? new Vector4(0.55f, 0.2f, 0.2f, 0) : new Vector4(0.5f, 0.17f, 0.18f, 0);
+                foreach (var v in part.Vertices)
                 {
-                    float a0 = ring / 8f * 1.8f - 0.9f, a1 = (ring + 1) / 8f * 1.8f - 0.9f, r0 = side / 10f * MathF.Tau, r1 = (side + 1) / 10f * MathF.Tau;
-                    Vertex q = Lobe(a0, r0), w = Lobe(a0, r1), e = Lobe(a1, r0), t = Lobe(a1, r1);
-                    vertices.AddRange([q, e, w, w, e, t]);
+                    var p = (v.Position - (min + max) / 2) * mouthScale + place;
+                    vertices.Add(new Vertex { Position = p, Normal = v.Normal, Uv = skin[0].Uv, Tangent = new Vector4(p, 5), Colour = colour, Bones = (uint)mouthBone, Weights = new Vector4(1, 0, 0, 0) });
                 }
+            }
         }
         // Clustered on a fine grid: seen only through cuts, the file's detail is lost, and triangles that collapse go.
         for (int i = 0; i + 2 < vertices.Count;)
