@@ -21,7 +21,7 @@ sealed class GameOptions
     /// <summary>The animation sandbox (<c>--sandbox [n]</c>): 0 off, else the number of characters (1 or 2) on a flat wireframe floor.</summary>
     public int Sandbox;
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
-    public string? SandboxCharacter, SandboxPart, SandboxHitSide;
+    public string? SandboxCharacter, SandboxPart, SandboxHitSide, SandboxHitMechanism;
     public bool SandboxBare;
     public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead, SandboxSevereOnly;
     public float? SandboxYaw, SandboxPower;
@@ -99,6 +99,7 @@ sealed class GameOptions
           --sandbox-severe-only     with --sandbox-dummy: hide generic wound marks and falling jaw to inspect permanent head state without a wound mask
           --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
           --sandbox-cut-direction <n> with --sandbox-dummy: fixed blade axis 1 down, 2 left, 3 right
+          --sandbox-hit-mechanism <kind> with --sandbox-dummy: slash (default), thrust, or crush for visual comparison
           --sandbox-hit-side <side>  with --sandbox-dummy: fixed victim-local incoming side front, left, right, or back
           --sandbox-hit-damage <n>   with --sandbox-dummy: every third hit cuts for n (default 30); head profiles enlarge at 35
           --sandbox-races            the sandbox adds one character of every person race (the first CHARACTER record listing only that race) in rings round the pair, whatever n is; the log lists them
@@ -179,6 +180,10 @@ sealed class GameOptions
                 case "--sandbox-cut-direction":
                     g.SandboxCutDirection = int.Parse(Next());
                     if (g.SandboxCutDirection is < 1 or > 3) throw new ArgumentException("--sandbox-cut-direction must be 1 (down), 2 (left), or 3 (right)");
+                    break;
+                case "--sandbox-hit-mechanism":
+                    g.SandboxHitMechanism = Next().ToLowerInvariant();
+                    if (g.SandboxHitMechanism is not ("slash" or "thrust" or "crush")) throw new ArgumentException("--sandbox-hit-mechanism must be slash, thrust, or crush");
                     break;
                 case "--sandbox-hit-side":
                     g.SandboxHitSide = Next().ToLowerInvariant();

@@ -1,6 +1,7 @@
 using System.Numerics;
 using Meitou.Simulation;
 using Meitou.Simulation.Wounds;
+using Meitou.Simulation.Combat;
 using Meitou.Simulation.Saving;
 using Meitou.Tests.Simulation;
 
@@ -13,15 +14,15 @@ public class SevereHeadWoundsTests
     static readonly HeadWoundPlacement Placement = new(new(0.37f, 18.72f, 0.91f), Vector3.UnitZ, Vector3.UnitX);
 
     [Fact]
-    public void Save_load_preserves_each_form_the_profile_the_opening_frame_and_preopening_hits()
+    public void Save_load_preserves_each_form_profile_opening_frame_preopening_hits_and_impact_mechanism()
     {
         var before = new SevereHeadWounds();
         SevereHeadWoundState[] states =
         [
             new(3),
-            new(4, SevereHeadWoundKind.JawLost),
-            new(5, SevereHeadWoundKind.Scalp, 1, Placement),
-            new(8, SevereHeadWoundKind.BrokenSkull, 5, Placement),
+            new(4, SevereHeadWoundKind.JawLost, Mechanism: CombatWoundMechanism.Crush),
+            new(5, SevereHeadWoundKind.Scalp, 1, Placement, CombatWoundMechanism.Thrust),
+            new(8, SevereHeadWoundKind.BrokenSkull, 5, Placement, CombatWoundMechanism.Crush),
         ];
         for (int i = 0; i < states.Length; i++) Assert.True(before.Set(new(i, 1), states[i]));
         var lines = before.Write(id => (20, id.Slot + 100)).ToArray();
@@ -41,7 +42,7 @@ public class SevereHeadWoundsTests
     public void Unspawned_saved_characters_survive_another_save_and_resolve_when_their_handle_appears()
     {
         var before = new SevereHeadWounds();
-        var state = new SevereHeadWoundState(6, SevereHeadWoundKind.BrokenSkull, 4, Placement);
+        var state = new SevereHeadWoundState(6, SevereHeadWoundKind.BrokenSkull, 4, Placement, CombatWoundMechanism.Thrust);
         before.Set(Original, state);
         var first = before.Write(_ => (30, 7)).ToArray();
         var during = new SevereHeadWounds();
@@ -69,7 +70,7 @@ public class SevereHeadWoundsTests
     public void New_live_damage_wins_over_an_older_unresolved_save_record()
     {
         var store = new SevereHeadWounds();
-        store.Read([SevereHeadWounds.Header, "H 1 8 3 0 0"], _ => null);
+        store.Read([SevereHeadWounds.Header, "H 1 8 3 0 0 1"], _ => null);
         var newer = new SevereHeadWoundState(5, SevereHeadWoundKind.BrokenSkull, 3, Placement);
         store.Set(Reloaded, newer);
         Assert.Equal(1, store.Resolve(_ => Reloaded));
@@ -83,7 +84,7 @@ public class SevereHeadWoundsTests
         [
             [],
             ["7 9 -1 8 0.5 0 0 1 1 0 0.2 1 1.2 4 4 1 120"],
-            ["MEITOU-HEAD-WOUNDS 2", "H 1 1 4 3 5"],
+            ["MEITOU-HEAD-WOUNDS 3", "H 1 1 4 3 5 1"],
         ];
         foreach (var lines in inputs)
         {
@@ -101,17 +102,17 @@ public class SevereHeadWoundsTests
         string[] lines =
         [
             SevereHeadWounds.Header,
-            "H 8 1 4 3 2", // Valid, followed by a malformed duplicate.
-            "H 8 1 -1 3 2",
-            "H -1 1 4 3 2",
-            "H 8 2 4 3 6",
-            "H 8 3 4 9 0",
-            "H 8 4 4 1 2",
-            "H 8 5 4 3 2 NaN 1 2 0 0 1 1 0 0",
-            "H 8 6 4 3 2 1 2 3 0 0 0 1 0 0",
-            "H 8 7 4 3 2 1 2 3 0 0 1 0 0 1", // Parallel frame vectors.
-            "H 8 8 many 3 2",
-            "H 8 9 4 2 1",
+            "H 8 1 4 3 2 1", // Valid, followed by a malformed duplicate.
+            "H 8 1 -1 3 2 1",
+            "H -1 1 4 3 2 1",
+            "H 8 2 4 3 6 1",
+            "H 8 3 4 9 0 1",
+            "H 8 4 4 1 2 1",
+            "H 8 5 4 3 2 1 NaN 1 2 0 0 1 1 0 0",
+            "H 8 6 4 3 2 1 1 2 3 0 0 0 1 0 0",
+            "H 8 7 4 3 2 1 1 2 3 0 0 1 0 0 1", // Parallel frame vectors.
+            "H 8 8 many 3 2 1",
+            "H 8 9 4 2 1 1",
         ];
         var store = new SevereHeadWounds();
         var result = store.Read(lines, h => new(h.I, 1));
@@ -125,9 +126,10 @@ public class SevereHeadWoundsTests
     [Fact]
     public void Renderer_flags_round_trip_jaw_scalp_and_skull_without_limb_bits()
     {
-        SevereHeadWoundState[] states = [new(4, SevereHeadWoundKind.JawLost), new(5, SevereHeadWoundKind.Scalp, 2), new(9, SevereHeadWoundKind.BrokenSkull, 5)];
+        SevereHeadWoundState[] states = [new(4, SevereHeadWoundKind.JawLost), new(5, SevereHeadWoundKind.Scalp, 2, Mechanism: CombatWoundMechanism.Thrust), new(9, SevereHeadWoundKind.BrokenSkull, 5, Mechanism: CombatWoundMechanism.Crush)];
         foreach (var state in states)
             Assert.Equal(state, SevereHeadWoundState.FromRendererFlags(state.HeavyHits, state.RendererFlags | 0xFu));
+        Assert.Equal(CombatWoundMechanism.Slash, SevereHeadWoundState.FromRendererFlags(4, 1u << 7).Mechanism);
     }
     [Fact]
     public void Loaded_npc_keeps_its_state_while_unloaded_and_rebinds_to_the_new_runtime_generation()
@@ -152,7 +154,7 @@ public class SevereHeadWoundsTests
     public void Captured_live_identity_wins_a_collision_with_an_old_binding_and_pending_record()
     {
         var store = new SevereHeadWounds();
-        store.Read([SevereHeadWounds.Header, "H 4 2 3 0 0", "H 4 3 2 0 0"], h => h.I == 2 ? Original : null);
+        store.Read([SevereHeadWounds.Header, "H 4 2 3 0 0 1", "H 4 3 2 0 0 1"], h => h.I == 2 ? Original : null);
         var newer = new SevereHeadWoundState(9, SevereHeadWoundKind.BrokenSkull, 5, Placement);
         store.Set(Reloaded, newer);
         // The current capture is authoritative even before Refresh has seen the new runtime generation.
@@ -175,7 +177,7 @@ public class SevereHeadWoundsTests
         store.Set(Original, state);
         Assert.True(store.Bind(Original, (1, 1)));
         var lines = store.Write(_ => (9, 3)).ToArray();
-        Assert.Equal([SevereHeadWounds.Header, "H 9 3 4 1 0"], lines);
+        Assert.Equal([SevereHeadWounds.Header, "H 9 3 4 1 0 1"], lines);
     }
 
     [Fact]
@@ -194,10 +196,10 @@ public class SevereHeadWoundsTests
     public void Removed_saved_identities_are_filtered_while_unloaded_identities_are_retained()
     {
         var store = new SevereHeadWounds();
-        store.Read([SevereHeadWounds.Header, "H 2 1 4 1 0", "H 2 2 4 3 4"], h => h.I == 1 ? Original : null);
+        store.Read([SevereHeadWounds.Header, "H 2 1 4 1 0 1", "H 2 2 4 3 4 1"], h => h.I == 1 ? Original : null);
         // A removed live identity can leave a remembered binding, while the second character is merely unloaded.
         var lines = store.Write(_ => null, h => h == (2, 2)).ToArray();
-        Assert.Equal([SevereHeadWounds.Header, "H 2 2 4 3 4"], lines);
+        Assert.Equal([SevereHeadWounds.Header, "H 2 2 4 3 4 1"], lines);
         store.Remove(Original);
         Assert.Null(store.Of(Original));
     }
@@ -213,14 +215,14 @@ public class SevereHeadWoundsTests
         Assert.True(store.Bind(Reloaded, (5, 1)));
         Assert.Null(store.Of(Original));
         Assert.Equal(newer, store.Of(Reloaded));
-        Assert.Equal([SevereHeadWounds.Header, "H 5 1 5 3 3"], store.Write(_ => null).ToArray());
+        Assert.Equal([SevereHeadWounds.Header, "H 5 1 5 3 3 1"], store.Write(_ => null).ToArray());
     }
 
     [Fact]
     public void Cold_character_records_preserve_unloaded_fresh_npcs_and_current_capture_wins_over_stale_cold_data()
     {
         var store = new SevereHeadWounds();
-        store.Read([SevereHeadWounds.Header, "H 8 1 2 0 0"], _ => null);
+        store.Read([SevereHeadWounds.Header, "H 8 1 2 0 0 1"], _ => null);
         var coldNpc = new SevereHeadWoundState(5, SevereHeadWoundKind.Scalp, 2, Placement);
         var stalePlayer = new SevereHeadWoundState(4, SevereHeadWoundKind.BrokenSkull, 0);
         var livePlayer = new SevereHeadWoundState(7, SevereHeadWoundKind.BrokenSkull, 3, Placement);
@@ -238,7 +240,7 @@ public class SevereHeadWoundsTests
     public void Pruning_obsolete_unbound_runtime_ids_keeps_active_bound_and_pending_states()
     {
         var store = new SevereHeadWounds();
-        store.Read([SevereHeadWounds.Header, "H 6 1 4 1 0", "H 6 2 4 2 1"], h => h.I == 1 ? Original : null);
+        store.Read([SevereHeadWounds.Header, "H 6 1 4 1 0 1", "H 6 2 4 2 1 1"], h => h.I == 1 ? Original : null);
         var oldGenerated = new CharacterId(30, 1);
         var newGenerated = new CharacterId(30, 2);
         var generatedState = new SevereHeadWoundState(5, SevereHeadWoundKind.BrokenSkull, 5, Placement);
@@ -256,7 +258,7 @@ public class SevereHeadWoundsTests
     public void Imported_sidecar_discards_omitted_npc_before_its_old_handle_is_reused()
     {
         var store = new SevereHeadWounds();
-        var result = store.Read([SevereHeadWounds.Header, "H 9 1 4 1 0", "H 9 2 5 3 4"],
+        var result = store.Read([SevereHeadWounds.Header, "H 9 1 4 1 0 1", "H 9 2 5 3 4 1"],
             h => h == (9, 1) ? Original : null, h => h == (9, 1));
         Assert.True(result.SupportedVersion);
         Assert.Equal(1, result.Restored);
@@ -264,7 +266,7 @@ public class SevereHeadWoundsTests
         Assert.Equal(0, result.Rejected);
         Assert.Equal(0, store.Resolve(h => h == (9, 1) ? Original : h == (9, 2) ? Reloaded : null));
         Assert.Null(store.Of(Reloaded));
-        Assert.Equal([SevereHeadWounds.Header, "H 9 1 4 1 0"], store.Write(id => id == Original ? (9, 1) : null).ToArray());
+        Assert.Equal([SevereHeadWounds.Header, "H 9 1 4 1 0 1"], store.Write(id => id == Original ? (9, 1) : null).ToArray());
     }
     [Fact]
     public void Captured_offscreen_npc_keeps_its_cold_wound_under_the_exact_written_character_handle()
@@ -272,7 +274,7 @@ public class SevereHeadWoundsTests
         var data = SyntheticTown.Data(SyntheticTown.Database());
         using var world = new Meitou.Simulation.World(new WorldSettings { Seed = 11, PublishSnapshots = false }, new OpenGroundWalkability(SyntheticTown.Ground), []);
         world.Player.Faction = data.PlayerFaction;
-        var state = new SevereHeadWoundState(6, SevereHeadWoundKind.BrokenSkull, 4, Placement);
+        var state = new SevereHeadWoundState(6, SevereHeadWoundKind.BrokenSkull, 4, Placement, CombatWoundMechanism.Thrust);
         var cold = new CharacterCold { Name = "Injured offscreen guard", RecordId = "2-t", Faction = data.FactionIndex("20-t"), SevereHeadWound = state };
         var stored = new StoredSquad { Name = "Stored guards" };
         stored.Members.Add(new(cold, SyntheticTown.Centre, 0.4f, true));
@@ -298,6 +300,55 @@ public class SevereHeadWoundsTests
         var restored = new SevereHeadWounds();
         Assert.Equal(1, restored.Read(snapshot, _ => Reloaded, retained.Contains).Restored);
         Assert.Equal(state, restored.Of(Reloaded));
+    }
+    [Fact]
+    public void Version_one_plain_and_placed_wounds_default_to_slash_and_upgrade_on_the_next_save()
+    {
+        var store = new SevereHeadWounds();
+        var result = store.Read(["MEITOU-HEAD-WOUNDS 1", "H 5 1 3 0 0", "H 5 2 5 3 4 0.37 18.72 0.91 0 0 1 1 0 0"],
+            h => h.I == 1 ? Original : null);
+        Assert.True(result.SupportedVersion);
+        Assert.Equal(1, result.Restored);
+        Assert.Equal(1, result.Pending);
+        Assert.Equal(new SevereHeadWoundState(3), store.Of(Original));
+        var upgraded = store.Write(_ => (5, 1)).ToArray();
+        Assert.Equal("MEITOU-HEAD-WOUNDS 2", upgraded[0]);
+        Assert.Equal("H 5 1 3 0 0 1", upgraded[1]);
+        var after = new SevereHeadWounds();
+        var restored = after.Read(upgraded, h => h.I == 1 ? Original : Reloaded);
+        Assert.Equal(2, restored.Restored);
+        Assert.Equal(new SevereHeadWoundState(5, SevereHeadWoundKind.BrokenSkull, 4, Placement), after.Of(Reloaded));
+    }
+
+    [Fact]
+    public void Version_two_rejects_unspecified_unknown_and_noninteger_mechanisms_without_erasing_valid_damage()
+    {
+        var store = new SevereHeadWounds();
+        var result = store.Read([SevereHeadWounds.Header,
+            "H 3 1 4 2 3 2", "H 3 1 4 2 3 0", "H 3 2 4 2 3 -1", "H 3 3 4 2 3 4", "H 3 4 4 2 3 Slash", "H 3 5 4 2 3 2147483648"],
+            _ => Original);
+        Assert.Equal(1, result.Restored);
+        Assert.Equal(5, result.Rejected);
+        Assert.Equal(new SevereHeadWoundState(4, SevereHeadWoundKind.Scalp, 3, Mechanism: CombatWoundMechanism.Thrust), store.Of(Original));
+        Assert.False(store.Set(Reloaded, new(4, SevereHeadWoundKind.Scalp, Mechanism: CombatWoundMechanism.Unspecified)));
+        Assert.Null(store.Of(Reloaded));
+    }
+
+    [Fact]
+    public void Each_sidecar_version_accepts_only_its_own_plain_and_placed_record_shapes()
+    {
+        var legacy = new SevereHeadWounds();
+        var oldResult = legacy.Read(["MEITOU-HEAD-WOUNDS 1", "H 5 1 4 2 2 1", "H 5 2 4 3 2 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 3 4 2 2"],
+            _ => Original);
+        Assert.Equal(1, oldResult.Restored);
+        Assert.Equal(2, oldResult.Rejected);
+        var current = new SevereHeadWounds();
+        var newResult = current.Read([SevereHeadWounds.Header, "H 5 1 4 2 2", "H 5 2 4 3 2 0.37 18.72 0.91 0 0 1 1 0 0", "H 5 3 4 2 2 3"],
+            _ => Reloaded);
+        Assert.Equal(1, newResult.Restored);
+        Assert.Equal(2, newResult.Rejected);
+        Assert.Equal(CombatWoundMechanism.Slash, legacy.Of(Original)!.Value.Mechanism);
+        Assert.Equal(CombatWoundMechanism.Crush, current.Of(Reloaded)!.Value.Mechanism);
     }
 }
 

@@ -39,6 +39,7 @@ public class HeadWoundPlacementPolicyTests
         var left = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 2)!.Value;
         var right = HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 3)!.Value;
         Assert.True(down.Tangent.Y > 0.98f);
+        Assert.Equal(down.Tangent, HeadWoundPlacementPolicy.Estimate(new(0, -1), 0, 4)!.Value.Tangent);
         Assert.True(left.Tangent.X < -0.8f);
         Assert.True(right.Tangent.X > 0.8f);
         Assert.Equal(down.Normal, left.Normal);

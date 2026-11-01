@@ -208,6 +208,7 @@ static class CharacterShaders
             vJawCut = 0.0;
             vHeadRelief = aInstanceData.z & {{HeadReliefFlag}}u;
             vHeadFrame = headHeader ? skin.bones[aInstanceData.x - 33u] : mat4(0.0);
+            vHeadFrame[3].y = headHeader ? float(floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 12u & 3u) : 0.0;
             vHeadProfile = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 9u & 7u : 0u;
             vHeadOpen = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 7u & 3u : 0u;
             if ((aInstanceData.z & 12u) != 0u)

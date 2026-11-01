@@ -496,7 +496,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             l.HasWounds = l.WoundMask != 0 || (l.LostGroups | l.LimbCuts | l.PartOnly) != 0;
             var headView = l.HasWounds && inst.HeadWoundPlacement is { } placement
                 ? content.HeadPlacement(inst.Key, asset, placement, inst.LostGroups, updateStamp)
-                : new HeadWoundView(asset.Parts, default, false);
+                : CharacterHeadWoundPool.Fallback(asset, inst.LostGroups);
             l.DrawParts = headView.Parts;
             l.HeadFrame = headView.Frame;
             l.HeadReliefReady = headView.ReliefReady;

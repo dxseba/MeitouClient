@@ -8,6 +8,7 @@ using Meitou.Data.World;
 using Meitou.Rendering;
 using Meitou.Rendering.Gpu;
 using Meitou.Simulation;
+using Meitou.Simulation.Combat;
 using Meitou.Simulation.Wounds;
 
 namespace Meitou.Game;
@@ -242,13 +243,16 @@ sealed partial class GameHost
                 }
             if (e.Part < 0 || !world.Characters.IsAlive(e.Victim) || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
             var part = medical.Parts[e.Part];
+            // Visual severity uses the delivered channel, while the pre-armour mechanism distinguishes clubs from blades.
+            var mechanism = HeadMechanism(e);
+            float headForce = mechanism == CombatWoundMechanism.Crush ? e.Damage.Cut + e.Damage.Blunt + e.Damage.Pierce : e.Damage.Cut + e.Damage.Pierce;
             // The fourth heavy head blow opens one of the three head-wound forms.
-            if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
+            if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && headForce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
             {
                 var head = severeHeads.Of(e.Victim) ?? new SevereHeadWoundState(0);
                 head = head with { HeavyHits = head.HeavyHits < int.MaxValue ? head.HeavyHits + 1 : int.MaxValue };
                 // The opening hit fixes the direction; later force can enlarge it without rotating it.
-                if (head.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull && e.Damage.Cut + e.Damage.Pierce >= 35 && head.Profile < 3)
+                if (head.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull && headForce >= 35 && head.Profile < 3)
                     head = head with { Profile = head.Profile + 3 };
                 if (head.HeavyHits == JawBlows && head.Kind == SevereHeadWoundKind.None)
                 {
@@ -261,7 +265,8 @@ sealed partial class GameHost
                     head = head with
                     {
                         Kind = kind,
-                        Profile = kind == SevereHeadWoundKind.JawLost ? 0 : (int)HeadProfile(e.CutDirection, e.Damage.Cut + e.Damage.Pierce),
+                        Mechanism = mechanism,
+                        Profile = kind == SevereHeadWoundKind.JawLost ? 0 : (int)HeadProfile(e.CutDirection, headForce),
                         Placement = kind == SevereHeadWoundKind.JawLost ? null : HeadWoundPlacementPolicy.Estimate(e.Direction, e.VictimYaw, e.CutDirection),
                     };
                 }
@@ -304,8 +309,16 @@ sealed partial class GameHost
         return Meitou.Simulation.Saving.SaveLoader.LastSpawned.TryGetValue(key, out var playerId) && world.Characters.IsAlive(playerId) ? playerId : null;
     }
 
+    static CombatWoundMechanism HeadMechanism(in CombatEvent e) => e.Mechanism switch
+    {
+        CombatWoundMechanism.Slash or CombatWoundMechanism.Thrust or CombatWoundMechanism.Crush => e.Mechanism,
+        _ when e.Source == CombatHitSource.Bolt || e.CutDirection == 4 => CombatWoundMechanism.Thrust,
+        _ when e.Damage.Cut + e.Damage.Pierce <= 0 && e.Damage.Blunt > 0 => CombatWoundMechanism.Crush,
+        _ => CombatWoundMechanism.Slash,
+    };
+
     // HitOutcomes directions: down/up, left, right; rear 7/9 retain down/right orientation.
-    static uint HeadProfile(int cut, float force) => (cut switch { 1 or 5 or 7 => 2u, 2 => 1u, _ => 0u }) + (force >= 35 ? 3u : 0u);
+    static uint HeadProfile(int cut, float force) => (cut switch { 1 or 4 or 5 or 7 => 2u, 2 => 1u, _ => 0u }) + (force >= 35 ? 3u : 0u);
 
     /// <summary>The body groups of a character's stumps (<see cref="Meitou.Rendering.Characters.WoundMasks.BodyGroup"/>: arms 1 and 2, legs 3 and 4).</summary>
     uint LostGroups(CharacterId id)

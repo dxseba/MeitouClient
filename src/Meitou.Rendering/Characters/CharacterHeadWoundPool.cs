@@ -23,10 +23,18 @@ sealed class CharacterHeadWoundPool(IGpuContext gpu) : IDisposable
     readonly Dictionary<long, Slot> byKey = [];
     readonly PartMaterial material = new() { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "placed head wound" };
 
+    public static HeadWoundView Fallback(CharacterAsset asset, uint headState)
+    {
+        int mechanism = (int)(headState >> 12 & 3);
+        var frame = default(Matrix4x4);
+        frame.M42 = mechanism;
+        return new(mechanism >= 2 ? asset.HeadPaintedParts : asset.Parts, frame, false);
+    }
+
     public HeadWoundView Resolve(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp)
     {
         if (asset.Animal || asset.Appearance.Race.GetBool("is robot") || asset.Blending || asset.HeadSource is not { Length: > 0 } source || asset.HeadBone < 0 || (headState >> 7 & 3) == 0)
-            return new(asset.Parts, default, false);
+            return Fallback(asset, headState);
         if (!byKey.TryGetValue(key, out var slot))
         {
             if (slots.Count < Capacity) { slot = new Slot(); slots.Add(slot); }
@@ -34,7 +42,7 @@ sealed class CharacterHeadWoundPool(IGpuContext gpu) : IDisposable
             {
                 slot = slots.MinBy(s => s.Seen)!;
                 // More than the in-flight frame ring; never steal a slot still used by a recent view.
-                if (stamp - slot.Seen <= 60) return new(asset.Parts, default, false);
+                if (stamp - slot.Seen <= 60) return Fallback(asset, headState);
                 byKey.Remove(slot.Key);
                 slot.Asset = null;
             }
@@ -42,14 +50,15 @@ sealed class CharacterHeadWoundPool(IGpuContext gpu) : IDisposable
             byKey[key] = slot;
         }
         slot.Seen = stamp;
-        uint state = headState & 0xF80;
+        uint state = headState & 0x3F80;
         if (ReferenceEquals(slot.Asset, asset) && slot.Placement == placement && slot.HeadState == state && slot.MorphBase == asset.MorphBase)
             return slot.View;
         (slot.Asset, slot.Placement, slot.HeadState, slot.MorphBase) = (asset, placement, state, asset.MorphBase);
         int profile = Math.Clamp((int)(headState >> 9 & 7), 0, 5);
-        if (!HeadWoundSurface.TryProjectPlacement(source, placement, profile, out var frame))
-            return slot.View = new(asset.Parts, default, false);
-        var parts = asset.Parts.Where(p => !p.IsHeadRelief).ToList();
+        int mechanism = (int)(headState >> 12 & 3);
+        if (!HeadWoundSurface.TryProjectPlacement(source, placement, profile, out var frame, mechanism))
+            return slot.View = Fallback(asset, headState);
+        var parts = asset.HeadPaintedParts.ToList();
         var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
         var vertices = HeadWoundSurface.FitPlacementVertices(source, frame, asset.HeadBone, morphs, profile, (headState >> 7 & 3) >= 2, out var fitted);
         frame = fitted;

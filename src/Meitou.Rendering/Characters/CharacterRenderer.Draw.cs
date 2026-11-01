@@ -263,7 +263,7 @@ internal sealed unsafe partial class CharacterRenderer
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
-                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (l.HeadFrame.M41 > 0.5f ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
+                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && ((l.HeadFrame.M41 > 0.5f || l.HeadFrame.M42 >= 2) ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass)
                 {
                     var previousWorld = Relative(l.State.PreviousWorld, origin);
@@ -406,7 +406,7 @@ internal sealed unsafe partial class CharacterRenderer
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance
                 {
-                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (l.HeadFrame.M41 > 0.5f ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)),
+                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.HasWounds, l.Pixels > AnatomyPixels && l.PartOnly == 0 && ((l.HeadFrame.M41 > 0.5f || l.HeadFrame.M42 >= 2) ? l.HeadReliefReady : (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0)),
                     MorphBase = part.Morphed ? l.Asset.MorphBase : 0, PreviousModel = motion ? f.PreviousModel : default,
                 };
                 // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).

@@ -44,15 +44,15 @@ static partial class HeadWoundSurface
                 frames.Append($"{(i == 0 ? "if" : "else if")} (profile == {i}u) {{ centre = {V(frame.Centre)}; along = {V(frame.Along)}; side = {V(frame.Side)}; halfLength = {F(frame.HalfLength)}; halfWidth = {F(frame.HalfWidth)}; }}\n");
             }
             var fallback = Frame(0);
-            frames.Append($"else {{ centre = {V(fallback.Centre)}; along = {V(fallback.Along)}; side = {V(fallback.Side)}; halfLength = {F(fallback.HalfLength)}; halfWidth = {F(fallback.HalfWidth)}; }} }}\n");
-            return frames + $$"""
+            frames.Append($"else {{ centre = {V(fallback.Centre)}; along = {V(fallback.Along)}; side = {V(fallback.Side)}; halfLength = {F(fallback.HalfLength)}; halfWidth = {F(fallback.HalfWidth)}; }}\n");
+            frames.Append("headShapePreset(profile, placement, halfLength, halfWidth); }\n");
+            return ShapeShader + frames + $$"""
                 float headSwordCleft(vec3 p, uint profile, mat4 placement)
                 {
                     vec3 centre, along, side, normal; float halfLength, halfWidth;
                     headSwordFrame(profile, placement, centre, along, side, normal, halfLength, halfWidth);
                     float u = dot(p - centre, along);
-                    float t = (u - 0.12) / 0.20;
-                    return 0.24 + 0.20 * exp(-t * t);
+                    return headShapeCleft(u, halfLength, placement);
                 }
                 float headSwordWound(vec3 p, uint profile, mat4 placement)
                 {
@@ -61,9 +61,8 @@ static partial class HeadWoundSurface
                     vec3 d = p - centre;
                     float u = dot(d, along), v = dot(d, side);
                     if (abs(u) > halfLength || abs(dot(d, normal)) > 0.65) return 100.0;
-                    float width = halfWidth * pow(max(0.0, 1.0 - abs(u) / halfLength), 0.65)
-                        * (1.0 + 0.10 * sin(u * 47.0) + 0.06 * sin(u * 83.0));
-                    float bend = 0.008 * sin(u * 15.0) + 0.003 * sin(u * 37.0);
+                    float width = headShapeWidth(u, halfLength, halfWidth, placement);
+                    float bend = headShapeBend(u, placement);
                     return abs(v - bend) / max(width, 0.0001);
                 }
                 float headSwordHair(vec3 p, uint profile, mat4 placement)

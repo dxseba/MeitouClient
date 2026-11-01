@@ -669,7 +669,7 @@ public sealed partial class CombatSystem : IProjectileSource
             }
         }
         PublishHit(world, CombatHitSource.Bolt, p.Shooter < prev.Length && prev[p.Shooter].Alive && prev[p.Shooter].Generation == p.ShooterGeneration ? table.IdOf(p.Shooter) : CharacterId.None,
-            v, dc.Medical, part, damage, new Vector2(p.Direction.X, p.Direction.Z), events);
+            v, dc.Medical, part, damage, new Vector2(p.Direction.X, p.Direction.Z), events, mechanism: CombatWoundMechanism.Thrust);
         if (dc.Medical.Incapacitated)
         {
             D.Down = true;

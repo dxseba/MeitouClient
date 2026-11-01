@@ -151,6 +151,8 @@ internal sealed class CharacterAsset
     /// <summary>The body normal maps and weight of <see cref="AppliedBuild"/> while a map is still loading; the parts keep the last ones until both are resident.</summary>
     public (WorldTexture? Normal, WorldTexture? Blend, float Weight)? PendingNormals;
     public readonly List<AssetPart> Parts = [];
+    IReadOnlyList<AssetPart>? headPaintedParts;
+    public IReadOnlyList<AssetPart> HeadPaintedParts => headPaintedParts ??= Parts.Where(p => !p.IsHeadRelief).ToArray();
     /// <summary>The carried lights (<see cref="CharacterAppearance.Lights"/>): a bone, the offset from it and an attach slot, posed like a bone-attached part.</summary>
     public readonly List<(int Bone, Matrix4x4 Offset, int AttachIndex, Meitou.Data.World.WorldLight Light)> Lamps = [];
     /// <summary>The posture libraries (<c>postures</c>, <c>neck set</c>, <c>shoulder set</c>) held at the body file's sliders, weight 1.</summary>

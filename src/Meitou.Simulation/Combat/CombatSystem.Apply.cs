@@ -93,6 +93,7 @@ public sealed partial class CombatSystem
             : DamageFormulas.Packet(skill, dex, str, fighter.Weapon!, kind, dc.Race.StringId, fighter.DamageOutput, combat);
         packet = Powered(packet, tech, blow);
         if (table.IdOf(a) == TestPowerOf) packet = packet with { Cut = packet.Cut * TestPower, Blunt = packet.Blunt * TestPower, Pierce = packet.Pierce * TestPower };
+        var mechanism = CombatWoundMechanisms.Classify(fighter, packet, direction);
 
         var ctx = MakeContext(world, d, dc);
         var events = hitEvents;   // Apply is serial, so one list serves every hit
@@ -122,7 +123,7 @@ public sealed partial class CombatSystem
                     break;
             }
         }
-        PublishHit(world, CombatHitSource.Melee, table.IdOf(a), d, dc.Medical, part, damage, -toAttacker, events, direction, tech.LowStrike);
+        PublishHit(world, CombatHitSource.Melee, table.IdOf(a), d, dc.Medical, part, damage, -toAttacker, events, direction, tech.LowStrike, mechanism);
         // A shackled defender is knocked out instead of staggered a quarter of the time (Character::_startStumble: MedicalSystem::knockout with factor 0.002, the floor of 3 s).
         if (!dc.Medical.Incapacitated && Meitou.Simulation.Locks.LockSystem.WornShackles(dc) is not null
             && CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.Shackled, CombatRolls.BlowCounter(a, seq, blow, 0)) < ShackledKnockout)

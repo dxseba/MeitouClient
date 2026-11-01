@@ -230,6 +230,20 @@ sealed partial class GameHost
             part = medical.Parts.Select((p, i) => (p, i)).Where(x => x.p.Template.StringId is "100-gamedata.quack" or "101-gamedata.quack").ElementAt(dummyHits % 2).i;
         int cut = (dummyHits++ * 7 / 3 % 3) switch { 0 => 1, 1 => 2, _ => 3 };
         cut = g.SandboxCutDirection ?? cut;   // down, left, right
+        var mechanism = g.SandboxHitMechanism switch
+        {
+            "thrust" => Meitou.Simulation.Combat.CombatWoundMechanism.Thrust,
+            "crush" => Meitou.Simulation.Combat.CombatWoundMechanism.Crush,
+            _ => Meitou.Simulation.Combat.CombatWoundMechanism.Slash,
+        };
+        if (mechanism == Meitou.Simulation.Combat.CombatWoundMechanism.Thrust) cut = 4;
+        float force = dummyHits % 3 == 0 ? g.SandboxHitDamage : dummyHits % 3 == 1 ? 3 : 8;
+        var damage = mechanism switch
+        {
+            Meitou.Simulation.Combat.CombatWoundMechanism.Crush => new Meitou.Simulation.Bodies.HitDamage(0, force, 0),
+            Meitou.Simulation.Combat.CombatWoundMechanism.Thrust => new Meitou.Simulation.Bodies.HitDamage(0, 0, force),
+            _ => new Meitou.Simulation.Bodies.HitDamage(force, 0, 0),
+        };
         float yaw = world.Characters.Previous[sandboxFoe.Slot].Yaw;
         var position = world.Characters.Previous[sandboxFoe.Slot].Position;
         float round = yaw + dummyHits * 2.399963f;   // from every side in turn
@@ -241,7 +255,7 @@ sealed partial class GameHost
             direction = -new Vector2(c * outward.X + s * outward.Y, -s * outward.X + c * outward.Y);
         }
         woundQueue.Enqueue(new Meitou.Simulation.Combat.CombatEvent(Meitou.Simulation.Combat.CombatEventKind.Hit, world.Tick, Meitou.Simulation.Combat.CombatHitSource.Melee, sandboxHero, sandboxFoe,
-            part, medical.Parts[part].Template.LimbSlot, position, direction, new Meitou.Simulation.Bodies.HitDamage(dummyHits % 3 == 0 ? g.SandboxHitDamage : dummyHits % 3 == 1 ? 3 : 8, 0, 0), yaw, cut));
+            part, medical.Parts[part].Template.LimbSlot, position, direction, damage, yaw, cut, Mechanism: mechanism));
     }
 
     void SandboxBare()

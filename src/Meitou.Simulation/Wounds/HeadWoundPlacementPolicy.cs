@@ -19,7 +19,7 @@ public static class HeadWoundPlacementPolicy
         var up = Vector3.Normalize(Vector3.Cross(normal, across));
         var tangent = cutDirection switch
         {
-            1 or 5 or 7 => up,
+            1 or 4 or 5 or 7 => up,
             2 => Vector3.Normalize(-across * 0.83f + up * 0.55f),
             _ => Vector3.Normalize(across * 0.83f + up * 0.55f),
         };

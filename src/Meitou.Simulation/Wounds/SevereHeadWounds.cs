@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using Meitou.Simulation.Combat;
 
 namespace Meitou.Simulation.Wounds;
 
@@ -24,18 +25,19 @@ public readonly record struct HeadWoundPlacement(Vector3 Point, Vector3 Normal, 
 }
 
 /// <summary>The severe visual head state, including heavy blows before an opening exists. Profile 0..5 selects the blade axis and force size.</summary>
-public readonly record struct SevereHeadWoundState(int HeavyHits, SevereHeadWoundKind Kind = SevereHeadWoundKind.None, int Profile = 0, HeadWoundPlacement? Placement = null)
+public readonly record struct SevereHeadWoundState(int HeavyHits, SevereHeadWoundKind Kind = SevereHeadWoundKind.None, int Profile = 0, HeadWoundPlacement? Placement = null, CombatWoundMechanism Mechanism = CombatWoundMechanism.Slash)
 {
     public bool IsValid => HeavyHits >= 0 && Kind is >= SevereHeadWoundKind.None and <= SevereHeadWoundKind.BrokenSkull
         && Profile is >= 0 and < 6 && (Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull || Profile == 0)
+        && Mechanism is >= CombatWoundMechanism.Slash and <= CombatWoundMechanism.Crush
         && (Placement is not { } placement || placement.IsValid);
 
-    /// <summary>The renderer's jaw bit 6, scalp/skull bits 7/8 and profile bits 9..11.</summary>
+    /// <summary>The renderer's jaw bit 6, scalp/skull bits 7/8, profile bits 9..11 and impact mechanism bits 12..13.</summary>
     public uint RendererFlags => Kind switch
     {
         SevereHeadWoundKind.JawLost => 1u << 6,
-        SevereHeadWoundKind.Scalp => 1u << 7 | (uint)Profile << 9,
-        SevereHeadWoundKind.BrokenSkull => 3u << 7 | (uint)Profile << 9,
+        SevereHeadWoundKind.Scalp => 1u << 7 | (uint)Profile << 9 | (uint)Mechanism << 12,
+        SevereHeadWoundKind.BrokenSkull => 3u << 7 | (uint)Profile << 9 | (uint)Mechanism << 12,
         _ => 0,
     };
 
@@ -45,7 +47,9 @@ public readonly record struct SevereHeadWoundState(int HeavyHits, SevereHeadWoun
             : (flags >> 7 & 3) >= 2 ? SevereHeadWoundKind.BrokenSkull
             : (flags & (1u << 7)) != 0 ? SevereHeadWoundKind.Scalp : SevereHeadWoundKind.None;
         int profile = kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull ? (int)(flags >> 9 & 7) : 0;
-        return new(heavyHits, kind, profile, placement);
+        var mechanism = (CombatWoundMechanism)(flags >> 12 & 3);
+        if (mechanism == CombatWoundMechanism.Unspecified) mechanism = CombatWoundMechanism.Slash;
+        return new(heavyHits, kind, profile, placement, mechanism);
     }
 }
 
@@ -58,7 +62,8 @@ public readonly record struct HeadWoundReadResult(bool SupportedVersion, int Res
 public sealed class SevereHeadWounds
 {
     public const string FileName = "head-wounds.meitou";
-    public const string Header = "MEITOU-HEAD-WOUNDS 1";
+    public const string Header = "MEITOU-HEAD-WOUNDS 2";
+    const string LegacyHeader = "MEITOU-HEAD-WOUNDS 1";
     static readonly CultureInfo Culture = CultureInfo.InvariantCulture;
     readonly Dictionary<CharacterId, SevereHeadWoundState> live = [];
     readonly Dictionary<(int C, int I), SevereHeadWoundState> pending = [];
@@ -175,7 +180,7 @@ public sealed class SevereHeadWounds
         yield return Header;
         foreach (var (saved, state) in records.OrderBy(p => p.Key.C).ThenBy(p => p.Key.I))
         {
-            string line = string.Create(Culture, $"H {saved.C} {saved.I} {state.HeavyHits} {(int)state.Kind} {state.Profile}");
+            string line = string.Create(Culture, $"H {saved.C} {saved.I} {state.HeavyHits} {(int)state.Kind} {state.Profile} {(int)state.Mechanism}");
             if (state.Placement is { } p)
                 line += string.Create(Culture, $" {p.Point.X:R} {p.Point.Y:R} {p.Point.Z:R} {p.Normal.X:R} {p.Normal.Y:R} {p.Normal.Z:R} {p.Tangent.X:R} {p.Tangent.Y:R} {p.Tangent.Z:R}");
             yield return line;
@@ -184,50 +189,58 @@ public sealed class SevereHeadWounds
 
     /// <summary>
     /// Replaces this store from a supported sidecar. Missing/old generic-wound data and unknown versions produce no severe states.
+    /// Version 1 defaults to slash; version 2 requires an explicit slash, thrust or crush mechanism.
     /// Malformed rows are rejected independently so one damaged record cannot lose other characters' wounds.
     /// </summary>
     public HeadWoundReadResult Read(IEnumerable<string> lines, Func<(int C, int I), CharacterId?> character, Func<(int C, int I), bool>? exists = null)
     {
         Clear();
-        bool header = false;
+        int version = 0;
         int rejected = 0;
         foreach (var line in lines)
         {
             string text = line.Trim().TrimStart('\uFEFF');
             if (text.Length == 0 || text.StartsWith('#')) continue;
-            if (!header)
+            if (version == 0)
             {
-                if (text != Header) return new(false, 0, 0, 0);
-                header = true;
+                version = text switch { Header => 2, LegacyHeader => 1, _ => 0 };
+                if (version == 0) return new(false, 0, 0, 0);
                 continue;
             }
-            if (!TryRow(text, out var handle, out var state)) { rejected++; continue; }
+            if (!TryRow(text, version, out var handle, out var state)) { rejected++; continue; }
             if (exists?.Invoke(handle) == false) continue; // An import can intentionally leave saved NPCs out of the world.
             pending[handle] = state;
         }
-        if (!header) return new(false, 0, 0, 0);
+        if (version == 0) return new(false, 0, 0, 0);
         int restored = Resolve(character);
         return new(true, restored, pending.Count, rejected);
     }
 
-    static bool TryRow(string line, out (int C, int I) handle, out SevereHeadWoundState state)
+    static bool TryRow(string line, int version, out (int C, int I) handle, out SevereHeadWoundState state)
     {
         handle = default;
         state = default;
         var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (fields.Length is not (6 or 15) || fields[0] != "H") return false;
+        int fixedFields = version == 1 ? 6 : 7;
+        if ((fields.Length != fixedFields && fields.Length != fixedFields + 9) || fields[0] != "H") return false;
         bool Integer(int i, out int value) => int.TryParse(fields[i], NumberStyles.Integer, Culture, out value);
         if (!Integer(1, out int container) || !Integer(2, out int instance) || container < 0 || instance < 0
             || !Integer(3, out int hits) || !Integer(4, out int kind) || !Integer(5, out int profile)) return false;
+        var mechanism = CombatWoundMechanism.Slash;
+        if (version == 2)
+        {
+            if (!Integer(6, out int encodedMechanism) || encodedMechanism is < 1 or > 3) return false;
+            mechanism = (CombatWoundMechanism)encodedMechanism;
+        }
         HeadWoundPlacement? placement = null;
-        if (fields.Length == 15)
+        if (fields.Length == fixedFields + 9)
         {
             Span<float> values = stackalloc float[9];
             for (int i = 0; i < values.Length; i++)
-                if (!float.TryParse(fields[i + 6], NumberStyles.Float, Culture, out values[i]) || !float.IsFinite(values[i])) return false;
+                if (!float.TryParse(fields[i + fixedFields], NumberStyles.Float, Culture, out values[i]) || !float.IsFinite(values[i])) return false;
             placement = new(new(values[0], values[1], values[2]), new(values[3], values[4], values[5]), new(values[6], values[7], values[8]));
         }
-        state = new(hits, (SevereHeadWoundKind)kind, profile, placement);
+        state = new(hits, (SevereHeadWoundKind)kind, profile, placement, mechanism);
         if (!state.IsValid) return false;
         handle = (container, instance);
         return true;

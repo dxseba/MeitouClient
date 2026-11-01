@@ -28,6 +28,7 @@ public sealed partial class CombatSystem
         var packet = fighter.Unarmed
             ? DamageFormulas.UnarmedPacket(UnarmedRating(world, a, ac, fighter), Eff(ac, StatsEnumerated.Toughness), str, fighter.FistsItem, kind, race.StringId, fighter.DamageOutput, combat)
             : DamageFormulas.Packet(skill, Eff(ac, StatsEnumerated.Dexterity) * fighter.DexterityMult, str, fighter.Weapon!, kind, race.StringId, fighter.DamageOutput, combat);
+        var mechanism = CombatWoundMechanisms.Classify(fighter, packet);
         var ctx = MakeContext(world, d, dc);
         var events = hitEvents;
         events.Clear();
@@ -53,7 +54,7 @@ public sealed partial class CombatSystem
                     break;
             }
         }
-        PublishHit(world, CombatHitSource.Execution, table.IdOf(a), d, medical, part, damage, new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z), events);
+        PublishHit(world, CombatHitSource.Execution, table.IdOf(a), d, medical, part, damage, new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z), events, mechanism: mechanism);
         if (medical.Incapacitated)
         {
             D.Down = true;

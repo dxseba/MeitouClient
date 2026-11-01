@@ -3,14 +3,14 @@ using System.Numerics;
 namespace Meitou.Rendering.Characters;
 
 /// <summary>A surface-fixed frame, before face morphs. The fourth matrix vector marks dynamic placement.</summary>
-readonly record struct HeadWoundFrame(Vector3 Centre, Vector3 Normal, Vector3 Along, float HalfLength, float HalfWidth)
+readonly record struct HeadWoundFrame(Vector3 Centre, Vector3 Normal, Vector3 Along, float HalfLength, float HalfWidth, int Mechanism = 0)
 {
     public Vector3 Side => Vector3.Normalize(Vector3.Cross(Normal, Along));
     public Matrix4x4 Packed => new(
         Centre.X, Centre.Y, Centre.Z, HalfLength,
         Along.X, Along.Y, Along.Z, HalfWidth,
         Normal.X, Normal.Y, Normal.Z, 0.65f,
-        1, 0, 0, 0);
+        1, Mechanism, 0, 0);
 }
 
 static partial class HeadWoundSurface
@@ -80,14 +80,14 @@ static partial class HeadWoundSurface
     }
 
     /// <summary>Projects an inferred head-region anchor onto original skin; this is not a weapon collision measurement.</summary>
-    public static bool TryProjectPlacement(Vertex[] source, in CharacterHeadWoundPlacement placement, int profile, out HeadWoundFrame frame)
+    public static bool TryProjectPlacement(Vertex[] source, in CharacterHeadWoundPlacement placement, int profile, out HeadWoundFrame frame, int mechanism = 0)
     {
         frame = default;
         if (!Finite(placement.Point) || !Unit(placement.Normal, out var normal) || !Finite(placement.Tangent) || source.Length == 0) return false;
         if (Project(source, placement.Point, normal, placement.Point, 2, null) is not { } hit) return false;
         if (!Unit(placement.Tangent - hit.Normal * Vector3.Dot(placement.Tangent, hit.Normal), out var along)) return false;
-        var preset = Frame(Math.Clamp(profile, 0, Profiles - 1));
-        frame = new(hit.Position, hit.Normal, along, preset.HalfLength, preset.HalfWidth);
+        var dimensions = Dimensions(Math.Clamp(profile, 0, Profiles - 1), mechanism);
+        frame = new(hit.Position, hit.Normal, along, dimensions.HalfLength, dimensions.HalfWidth, mechanism);
         return true;
     }
 
@@ -119,11 +119,11 @@ static partial class HeadWoundSurface
         var colours = new Vector4[Sections + 1, bands.Length];
         for (int row = 0; row <= Sections; row++)
         {
-            float u = f.HalfLength * (2f * row / Sections - 1), width = Width(u, f.HalfLength, f.HalfWidth), bend = Bend(u);
+            float u = f.HalfLength * (2f * row / Sections - 1), width = ShapeWidth(u, f.HalfLength, f.HalfWidth, f.Mechanism), bend = ShapeBend(u, f.Mechanism);
             for (int band = 0; band < bands.Length; band++)
             {
                 float side = bands[band];
-                if (broken && band is >= 3 and <= 6) side = MathF.Sign(side) * Cleft(u);
+                if (broken && band is >= 3 and <= 6) side = MathF.Sign(side) * ShapeCleft(u, f.HalfLength, f.Mechanism);
                 var p = f.Centre + f.Along * u + f.Side * (bend + side * width);
                 if (Project(source, p, f.Normal, f.Centre, 0.65f, morphs) is not { } hit) return null;
                 float lift = width / f.HalfWidth * 0.004f * MathF.Sin(u * 19 + side * 2);
