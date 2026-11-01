@@ -25,7 +25,8 @@ sealed class GameOptions
     public bool SandboxBare;
     public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead;
     public float? SandboxYaw, SandboxPower;
-    public int? SandboxHeadWound;
+    public int? SandboxHeadWound, SandboxCutDirection;
+    public float SandboxHitDamage = 30;
     public int? SandboxSeverLevel;
     public float SandboxZoom = 30;
     /// <summary>Camera target height above the sandbox character, for wound close-ups.</summary>
@@ -170,6 +171,14 @@ sealed class GameOptions
                 case "--sandbox-clothed": g.SandboxClothed = true; break;
                 case "--sandbox-torso": g.SandboxTorso = true; break;
                 case "--sandbox-female": g.SandboxFemale = true; break;
+                case "--sandbox-cut-direction":
+                    g.SandboxCutDirection = int.Parse(Next());
+                    if (g.SandboxCutDirection is < 1 or > 3) throw new ArgumentException("--sandbox-cut-direction must be 1 (down), 2 (left), or 3 (right)");
+                    break;
+                case "--sandbox-hit-damage":
+                    g.SandboxHitDamage = float.Parse(Next(), CultureInfo.InvariantCulture);
+                    if (!float.IsFinite(g.SandboxHitDamage) || g.SandboxHitDamage <= 0) throw new ArgumentException("--sandbox-hit-damage must be positive and finite");
+                    break;
                 case "--sandbox-head-wound": g.SandboxHeadWound = int.Parse(Next()); break;
                 case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever-level": g.SandboxSever = true; g.SandboxSeverLevel = int.Parse(Next()); break;

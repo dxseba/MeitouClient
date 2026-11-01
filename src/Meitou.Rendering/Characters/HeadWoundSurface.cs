@@ -10,36 +10,63 @@ static class HeadWoundSurface
     static readonly Vector3 Normal = Vector3.Normalize(new(0.81257f, 0.30728f, 0.49528f));
     static readonly Vector3 Across = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, Normal));
     static readonly Vector3 Up = Vector3.Normalize(Vector3.Cross(Normal, Across));
-    static readonly Vector3 Along = Vector3.Normalize(Across * 0.83f + Up * 0.55f);
-    static readonly Vector3 Side = Vector3.Normalize(Vector3.Cross(Normal, Along));
-    const float HalfLength = 0.62f, HalfWidth = 0.105f;
+    const float BaseHalfLength = 0.62f, BaseHalfWidth = 0.105f;
+    const int Profiles = 6;
+    static (Vector3 Centre, Vector3 Along, Vector3 Side, float HalfLength, float HalfWidth) Frame(int profile)
+    {
+        int direction = profile % 3;
+        bool heavy = profile >= 3;
+        var along = direction switch { 1 => Vector3.Normalize(-Across * 0.83f + Up * 0.55f), 2 => Up, _ => Vector3.Normalize(Across * 0.83f + Up * 0.55f) };
+        var centre = Centre + (direction == 1 ? -Across * 0.02f - Up * 0.18f : direction == 2 ? -Up * 0.12f : Vector3.Zero);
+        float halfLength = direction switch { 1 => 0.53f * (heavy ? 1.08f : 1), 2 => heavy ? 0.58f : 0.52f, _ => BaseHalfLength * (heavy ? 1.12f : 1) };
+        return (centre, along, Vector3.Normalize(Vector3.Cross(Normal, along)), halfLength, BaseHalfWidth * (heavy ? 1.3f : 1));
+    }
     const int Sections = 48;
 
     // These parameters also emit the skin's GLSL field; no separately tuned painted opening.
-    static float Width(float u) => HalfWidth * MathF.Pow(MathF.Max(0, 1 - MathF.Abs(u) / HalfLength), 0.65f)
+    static float Width(float u, float halfLength, float halfWidth) => halfWidth * MathF.Pow(MathF.Max(0, 1 - MathF.Abs(u) / halfLength), 0.65f)
         * (1 + 0.10f * MathF.Sin(u * 47) + 0.06f * MathF.Sin(u * 83));
     static float Bend(float u) => 0.008f * MathF.Sin(u * 15) + 0.003f * MathF.Sin(u * 37);
     static float Cleft(float u) => 0.24f + 0.20f * MathF.Exp(-MathF.Pow((u - 0.12f) / 0.20f, 2));
     static string F(float value) => value.ToString("0.0########", CultureInfo.InvariantCulture);
     static string V(Vector3 v) => $"vec3({F(v.X)}, {F(v.Y)}, {F(v.Z)})";
-    public static string ShaderField => $$"""
-        float headSwordCleft(vec3 p)
+    public static string ShaderField
+    {
+        get
         {
-            float u = dot(p - {{V(Centre)}}, {{V(Along)}});
-            float t = (u - 0.12) / 0.20;
-            return 0.24 + 0.20 * exp(-t * t);
+            var frames = new System.Text.StringBuilder();
+            frames.Append("void headSwordFrame(uint profile, out vec3 centre, out vec3 along, out vec3 side, out float halfLength, out float halfWidth) {\n");
+            for (int i = 0; i < Profiles; i++)
+            {
+                var frame = Frame(i);
+                frames.Append($"{(i == 0 ? "if" : "else if")} (profile == {i}u) {{ centre = {V(frame.Centre)}; along = {V(frame.Along)}; side = {V(frame.Side)}; halfLength = {F(frame.HalfLength)}; halfWidth = {F(frame.HalfWidth)}; }}\n");
+            }
+            var fallback = Frame(0);
+            frames.Append($"else {{ centre = {V(fallback.Centre)}; along = {V(fallback.Along)}; side = {V(fallback.Side)}; halfLength = {F(fallback.HalfLength)}; halfWidth = {F(fallback.HalfWidth)}; }} }}\n");
+            return frames + $$"""
+                float headSwordCleft(vec3 p, uint profile)
+                {
+                    vec3 centre, along, side; float halfLength, halfWidth;
+                    headSwordFrame(profile, centre, along, side, halfLength, halfWidth);
+                    float u = dot(p - centre, along);
+                    float t = (u - 0.12) / 0.20;
+                    return 0.24 + 0.20 * exp(-t * t);
+                }
+                float headSwordWound(vec3 p, uint profile)
+                {
+                    vec3 centre, along, side; float halfLength, halfWidth;
+                    headSwordFrame(profile, centre, along, side, halfLength, halfWidth);
+                    vec3 d = p - centre;
+                    float u = dot(d, along), v = dot(d, side);
+                    if (abs(u) > halfLength || abs(dot(d, {{V(Normal)}})) > 0.65) return 100.0;
+                    float width = halfWidth * pow(max(0.0, 1.0 - abs(u) / halfLength), 0.65)
+                        * (1.0 + 0.10 * sin(u * 47.0) + 0.06 * sin(u * 83.0));
+                    float bend = 0.008 * sin(u * 15.0) + 0.003 * sin(u * 37.0);
+                    return abs(v - bend) / max(width, 0.0001);
+                }
+                """;
         }
-        float headSwordWound(vec3 p)
-        {
-            vec3 d = p - {{V(Centre)}};
-            float u = dot(d, {{V(Along)}}), v = dot(d, {{V(Side)}});
-            if (abs(u) > {{F(HalfLength)}} || abs(dot(d, {{V(Normal)}})) > 0.65) return 100.0;
-            float width = {{F(HalfWidth)}} * pow(max(0.0, 1.0 - abs(u) / {{F(HalfLength)}}), 0.65)
-                * (1.0 + 0.10 * sin(u * 47.0) + 0.06 * sin(u * 83.0));
-            float bend = 0.008 * sin(u * 15.0) + 0.003 * sin(u * 37.0);
-            return abs(v - bend) / max(width, 0.0001);
-        }
-        """;
+    }
 
     public static Vertex[] Source(Model model)
     {
@@ -57,9 +84,9 @@ static class HeadWoundSurface
         return result.ToArray();
     }
 
-    public static void Append(List<Vertex> destination, Vertex[] source, int headBone, Vector4[]? morphs)
+    public static uint Append(List<Vertex> destination, Vertex[] source, int headBone, Vector4[]? morphs)
     {
-        if (source.Length == 0) return;
+        if (source.Length == 0) return 0;
         Vector3 Delta(Vertex v)
         {
             uint slot = BitConverter.SingleToUInt32Bits(v.Colour.X);
@@ -96,8 +123,9 @@ static class HeadWoundSurface
             return found;
         }
         var pending = new List<Vertex>();
-        bool Patch(bool broken)
+        bool Patch(bool broken, int profile)
         {
+            var (centre, along, sideAxis, halfLength, halfWidth) = Frame(profile);
             // Cross-sections follow the blade, with pointed ends. Broken skull: two banks and an open cleft, no circular cap.
             float[] bands = broken ? [-1.2f, -0.85f, -0.52f, -0.24f, -0.24f, 0.24f, 0.24f, 0.52f, 0.85f, 1.2f]
                                    : [-1.2f, -0.85f, -0.52f, 0, 0.52f, 0.85f, 1.2f];
@@ -108,14 +136,14 @@ static class HeadWoundSurface
             Vector2 uv = default;
             for (int row = 0; row <= Sections; row++)
             {
-                float u = HalfLength * (2f * row / Sections - 1), width = Width(u), bend = Bend(u);
+                float u = halfLength * (2f * row / Sections - 1), width = Width(u, halfLength, halfWidth), bend = Bend(u);
                 for (int band = 0; band < bands.Length; band++)
                 {
                     float side = bands[band];
                     if (broken && band is >= 3 and <= 6) side = MathF.Sign(side) * Cleft(u);
-                    if (Surface(Centre + Along * u + Side * (bend + side * width)) is not { } hit) return false;
-                    float lift = width / HalfWidth * 0.004f * MathF.Sin(u * 19 + side * 2);
-                    points[row, band] = hit.Position + hit.Morph + Normal * (heights[band] * Math.Clamp(width / HalfWidth * 4, 0, 1) + lift);
+                    if (Surface(centre + along * u + sideAxis * (bend + side * width)) is not { } hit) return false;
+                    float lift = width / halfWidth * 0.004f * MathF.Sin(u * 19 + side * 2);
+                    points[row, band] = hit.Position + hit.Morph + Normal * (heights[band] * Math.Clamp(width / halfWidth * 4, 0, 1) + lift);
                     // Dark wet cut lips, a narrow ivory strip, and the darker broken bone's inner face.
                     bool flesh = MathF.Abs(side) >= 0.85f;
                     bool inner = broken && band is 4 or 5;
@@ -132,7 +160,7 @@ static class HeadWoundSurface
                 if (cross.LengthSquared() < 1e-12f) return;
                 var n = Vector3.Normalize(cross);
                 if (Vector3.Dot(n, Normal) < 0) { (b, c) = (c, b); (cb, cc) = (cc, cb); n = -n; }
-                Vertex Make(Vector3 p, Vector4 colour) => new() { Position = p, Normal = Vector3.Normalize(Normal * 0.5f + n * 0.5f), Uv = uv, Tangent = new Vector4(p, broken ? 9 : 8), Colour = colour, Bones = (uint)headBone, Weights = new(1, 0, 0, 0) };
+                Vertex Make(Vector3 p, Vector4 colour) => new() { Position = p, Normal = Vector3.Normalize(Normal * 0.5f + n * 0.5f), Uv = uv, Tangent = new Vector4(p, 8 + profile * 2 + (broken ? 1 : 0)), Colour = colour, Bones = (uint)headBone, Weights = new(1, 0, 0, 0) };
                 pending.AddRange([Make(a, ca), Make(b, cb), Make(c, cc)]);
             }
             for (int row = 0; row < Sections; row++)
@@ -145,7 +173,15 @@ static class HeadWoundSurface
                 }
             return true;
         }
-        // All-or-nothing fit, so unsupported heads keep the shader fallback rather than a half-open strip.
-        if (Patch(false) && Patch(true)) destination.AddRange(pending);
+        // Fit each profile independently; a failed profile keeps its own painted fallback.
+        uint supported = 0;
+        for (int profile = 0; profile < Profiles; profile++)
+        {
+            int start = pending.Count;
+            if (Patch(false, profile) && Patch(true, profile)) supported |= 1u << profile;
+            else pending.RemoveRange(start, pending.Count - start);
+        }
+        destination.AddRange(pending);
+        return supported;
     }
 }

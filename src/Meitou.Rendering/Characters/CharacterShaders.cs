@@ -20,6 +20,8 @@ static class CharacterShaders
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
     public const uint HeadReliefFlag = 1u << 4;
+    /// <summary>Shared hair can read the head wound header without taking the body wound material or deformation.</summary>
+    public const uint HairWoundFlag = 1u << 5;
     /// <summary>Bind height of a human face's eyes, a tuning value.</summary>
     const string EyeHeight = "17.9";
     public const uint WoundFlag = 1u << 31, TearFlag = 1u << 2, PlateFlag = 1u << 3;
@@ -123,7 +125,9 @@ static class CharacterShaders
         flat out uint vCuts;
         out vec3 vBindPos;
         out vec3 vSkinPos;
+        flat out uint vHeadHair;
         flat out uint vHeadRelief;
+        flat out uint vHeadProfile;
         flat out uint vHeadOpen;  // bit 0 the scalp is gone at the brow, bit 1 the skull broken too
         out float vJawCut;      // the lost jaw's vertices at 1: its edge falls between them, per pixel
         out float vCutBand;     // a cut limb: distance past the cut, below 0 gone
@@ -189,6 +193,8 @@ static class CharacterShaders
             float turn = atan(aNormal.x, aNormal.z) / 3.14159265359 * 0.5;
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
             bool wounded = (aInstanceData.z & 0x80000000u) != 0u, anatomy = (aInstanceData.z & 0x40000000u) != 0u;
+            vHeadHair = aInstanceData.z & {{HairWoundFlag}}u;
+            bool headHeader = wounded || vHeadHair != 0u;
             vAnatomy = anatomy ? 1u : 0u;
             vPlated = (aInstanceData.z & 8u) != 0u ? 1.0 : 0.0;
             vCuts = aInstanceData.x - 16u;
@@ -200,7 +206,8 @@ static class CharacterShaders
             vCutBand = 1000.0;
             vJawCut = 0.0;
             vHeadRelief = aInstanceData.z & {{HeadReliefFlag}}u;
-            vHeadOpen = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 7u & 3u : 0u;
+            vHeadProfile = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 9u & 7u : 0u;
+            vHeadOpen = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 7u & 3u : 0u;
             if ((aInstanceData.z & 12u) != 0u)
             {
                 // Worn on the body: torn where a wound of its own body group lies under it (the wound spheres are in the same bind space; in it a hand hangs by the hip).
@@ -213,7 +220,7 @@ static class CharacterShaders
                     if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.1) * 0.75 - distance(aPosition, c.xyz));
                 }
             }
-            if (anatomy && aTangent.w > 7.5) vAnatomy = (aTangent.w < 8.5 ? vHeadOpen == 1u : vHeadOpen >= 2u) ? 4u : 3u;   // fitted scalp/bone relief, only its own wound variant
+            if (anatomy && aTangent.w > 7.5) vAnatomy = uint((aTangent.w - 8.0) * 0.5) == vHeadProfile && (mod(aTangent.w - 8.0, 2.0) < 0.5 ? vHeadOpen == 1u : vHeadOpen >= 2u) ? 4u : 3u;   // fitted scalp/bone relief, only its own wound variant
             else if (anatomy && aTangent.w > 5.5 && aTangent.w < 6.5) vAnatomy = vHeadOpen >= 2u ? 2u : 3u;   // the brain: only behind a broken skull
             else if (anatomy && aTangent.w > 4.5 && aTangent.w < 5.5) vAnatomy = (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 6u & 1u) != 0u ? 2u : 3u;   // the mouth: only with the jaw gone
             else if (anatomy && aTangent.w > 6.5) vAnatomy = 2u;   // the back wall needs no mask: only a hole in the skin reveals it
@@ -329,7 +336,9 @@ static class CharacterShaders
         in float vHidden;
         in vec4 vColour;
         in vec4 vBlood;
+        flat in uint vHeadHair;
         flat in uint vHeadRelief;
+        flat in uint vHeadProfile;
         flat in uint vHeadOpen;
         in float vJawCut;
         in float vCutBand;
@@ -447,7 +456,7 @@ static class CharacterShaders
         {
             vec3 geometric = normalize(vNormal);
             float curvature = vCurvature;
-            if (vHidden > 0.0) discard;
+            if (vHidden > 0.0 || (vHeadHair != 0u && vHeadOpen != 0u && headSwordWound(vSkinPos, vHeadProfile) < 1.15)) discard;
             if (pc.depthIndex != 0u) { fragColour = vec4(pc.flatColour, 1.0); return; }
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
@@ -566,15 +575,15 @@ static class CharacterShaders
             // Metal plate does not tear: it takes the wound's blood.
             vec3 woundBend = vec3(0.0);
             // A cut limb's end: a clean edge, then a ragged band of flesh with bone at its heart.
-            if (vHeadOpen != 0u)
+            if (vHeadOpen != 0u && vHeadHair == 0u)
             {
                 // The painted fallback and fitted relief share a blade profile; a skull cleft opens onto the brain.
-                float open = headSwordWound(vSkinPos);
+                float open = headSwordWound(vSkinPos, vHeadProfile);
                 // The blade splits the fitted internal head bone as well as the skin and relief.
-                if (vHeadOpen >= 2u && vAnatomy == 1u && vClipLayer < 0.5 && vSkinPos.y > 17.5 && open < headSwordCleft(vSkinPos)) discard;
+                if (vHeadOpen >= 2u && vAnatomy == 1u && vClipLayer < 0.5 && vSkinPos.y > 17.5 && open < headSwordCleft(vSkinPos, vHeadProfile)) discard;
                 if (vAnatomy == 0u)
                 {
-                    if ((vHeadRelief != 0u && open < 0.85) || (vHeadOpen >= 2u && open < headSwordCleft(vSkinPos))) discard;
+                    if ((vHeadRelief != 0u && open < 0.85) || (vHeadOpen >= 2u && open < headSwordCleft(vSkinPos, vHeadProfile))) discard;
                     float wet = 1.0 - smoothstep(0.85, 1.35, open), bone = 1.0 - smoothstep(0.48, 0.60, open);
                     albedo = mix(mix(albedo, vec3(0.3, 0.02, 0.025), wet), vec3(0.61, 0.55, 0.44), bone);
                     gloss = mix(gloss, 0.75, wet);
@@ -711,15 +720,19 @@ static class CharacterShaders
         string stock = NativeShaders.DepthFragment;
         const string stockMain = "void main() { shadowWriteDepth(); }";
         if (!stock.Contains(stockMain)) throw new InvalidOperationException("CharacterShaders: the stock depth fragment changed");
-        return stock.Replace(stockMain, "") + Structs + Lookup + """
+        return stock.Replace(stockMain, "") + Structs + Lookup + HeadWoundSurface.ShaderField + """
         in vec2 vUv;
         flat in uint vMaterial;
         in float vHidden;
         flat in uint vAnatomy;
         flat in float vClipLayer;
+        flat in uint vHeadHair;
+        flat in uint vHeadOpen;
+        flat in uint vHeadProfile;
+        in vec3 vSkinPos;
         void main()
         {
-            if (vHidden > 0.0 || (vClipLayer > 7.5 && vAnatomy == 3u)) discard;
+            if (vHidden > 0.0 || (vClipLayer > 7.5 && vAnatomy == 3u) || (vHeadHair != 0u && vHeadOpen != 0u && headSwordWound(vSkinPos, vHeadProfile) < 1.15)) discard;
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
@@ -740,17 +753,23 @@ static class CharacterShaders
     /// The motion pass (<c>IWorldPostChain.ObjectMotion</c>): the character's own motion, as the grass writes its sway (UV units, this frame minus last, jitter removed), where
     /// the character is what the near depth shows (<c>pc.depthIndex</c> carries the depth texture's bindless index in this pass).
     /// </summary>
-    public static string MotionFragment() => "#version 450\n" + NativeShaders.Prelude(PushMembers) + Structs + Lookup + """
+    public static string MotionFragment() => "#version 450\n" + NativeShaders.Prelude(PushMembers) + Structs + Lookup + HeadWoundSurface.ShaderField + """
         in vec2 vUv;
         in vec4 vNow;
         in vec4 vPrevious;
         flat in uint vMaterial;
         in float vHidden;
+        flat in uint vAnatomy;
+        flat in float vClipLayer;
+        flat in uint vHeadHair;
+        flat in uint vHeadOpen;
+        flat in uint vHeadProfile;
+        in vec3 vSkinPos;
         layout(location = 0) out vec4 fragColour;
         float viewZ(float d) { float zd = 2.0 * d - 1.0; return view.nearPlanes.x * view.nearPlanes.y / (view.nearPlanes.y - zd * (view.nearPlanes.y - view.nearPlanes.x)); }
         void main()
         {
-            if (vHidden > 0.0) discard;
+            if (vHidden > 0.0 || (vClipLayer > 7.5 && vAnatomy == 3u) || (vHeadHair != 0u && vHeadOpen != 0u && headSwordWound(vSkinPos, vHeadProfile) < 1.15)) discard;
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;

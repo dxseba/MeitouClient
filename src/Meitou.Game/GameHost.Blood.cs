@@ -170,7 +170,7 @@ sealed partial class GameHost
     const int JawBlows = 4;
     readonly Dictionary<CharacterId, int> jawBlows = [];
     readonly HashSet<CharacterId> jawsLost = [];
-    /// <summary>The head wound's other forms: bit 7 the scalp gone, bit 8 the skull broken as well.</summary>
+    /// <summary>Head state: bit 7 scalp gone, bit 8 broken skull; bits 9-11 blade direction and force profile.</summary>
     readonly Dictionary<CharacterId, uint> headsOpen = [];
     string? woundsFrom;
 
@@ -231,21 +231,27 @@ sealed partial class GameHost
                 }
             if (e.Part < 0 || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
             var part = medical.Parts[e.Part];
-            // Heavy blows to the head: the fourth takes the jaw.
+            // The fourth heavy head blow opens one of the three head-wound forms.
             if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
             {
                 jawBlows[e.Victim] = jawBlows.GetValueOrDefault(e.Victim) + 1;
-                if (jawBlows[e.Victim] >= JawBlows)
+                // The opening hit fixes the direction; later force can enlarge it without rotating it.
+                if (headsOpen.TryGetValue(e.Victim, out uint opened) && e.Damage.Cut + e.Damage.Pierce >= 35 && (opened >> 9 & 7) < 3)
+                    headsOpen[e.Victim] = (opened & 0x1FFu) | (((opened >> 9 & 7) + 3) << 9);
+                if (jawBlows[e.Victim] == JawBlows)
                     switch (g.SandboxHeadWound ?? e.Victim.Slot % 3)   // each character's own
                     {
-                        case 1: headsOpen[e.Victim] = 1u << 7; break;
-                        case 2: headsOpen[e.Victim] = 3u << 7; break;
+                        case 1: headsOpen[e.Victim] = (1u << 7) | (HeadProfile(e.CutDirection, e.Damage.Cut + e.Damage.Pierce) << 9); break;
+                        case 2: headsOpen[e.Victim] = (3u << 7) | (HeadProfile(e.CutDirection, e.Damage.Cut + e.Damage.Pierce) << 9); break;
                         default: jawsLost.Add(e.Victim); break;
                     }
             }
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
         }
     }
+
+    // HitOutcomes directions: down/up, left, right; rear 7/9 retain down/right orientation.
+    static uint HeadProfile(int cut, float force) => (cut switch { 1 or 5 or 7 => 2u, 2 => 1u, _ => 0u }) + (force >= 35 ? 3u : 0u);
 
     /// <summary>A cut's axis, the blow's own direction, turned a little (within 20 degrees): the arm's swing is not known exactly.</summary>
     /// <summary>The body groups of a character's stumps (<see cref="Meitou.Rendering.Characters.WoundMasks.BodyGroup"/>: arms 1 and 2, legs 3 and 4).</summary>

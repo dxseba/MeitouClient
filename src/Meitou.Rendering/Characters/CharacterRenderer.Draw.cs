@@ -263,7 +263,7 @@ internal sealed unsafe partial class CharacterRenderer
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
-                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask, l.Pixels > AnatomyPixels && l.PartOnly == 0), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
+                var instance = new CharInstance { Model = part.IsBody ? WithBlood(model, l.Blood) : model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0), MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass)
                 {
                     var previousWorld = Relative(l.State.PreviousWorld, origin);
@@ -406,7 +406,7 @@ internal sealed unsafe partial class CharacterRenderer
                 uint hidden = (part.IsBody && l.Asset.Appearance is { } look ? (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12 | (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18 : 0u) | (uint)part.HideSide << 16 | (headless ? CharacterShaders.Headless : 0u) | (headOnly ? CharacterShaders.HeadOnly : 0u);
                 var instance = new CharInstance
                 {
-                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask, l.Pixels > AnatomyPixels && l.PartOnly == 0),
+                    Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model, BoneBase = (uint)l.BoneBase, Material = (uint)part.Material.Slot, Flags = (l.Interior ? 1u : 0u) | hidden | WoundFlag(part, l.WoundMask, l.Pixels > AnatomyPixels && l.PartOnly == 0 && (part.HeadReliefProfiles & (1u << (int)(l.LostGroups >> 9 & 7))) != 0),
                     MorphBase = part.Morphed ? l.Asset.MorphBase : 0, PreviousModel = motion ? f.PreviousModel : default,
                 };
                 // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
@@ -561,7 +561,15 @@ internal sealed unsafe partial class CharacterRenderer
     /// row j's w, as an exact integer (CharacterShaders: <c>vBloodAmount</c>).
     /// </summary>
     /// <summary>The instance flag of a body with wounds, off in a portrait, whose palette has no header.</summary>
-    uint WoundFlag(AssetPart part, uint mask, bool reliefVisible) => mask == 0 || portraitLive >= 0 ? (part.Anatomy ? CharacterShaders.AnatomyFlag : 0) : part.Anatomy ? CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag : part.IsBody ? CharacterShaders.WoundFlag | (part.HeadRelief && reliefVisible ? CharacterShaders.HeadReliefFlag : 0u) : part.Shared ? (part.Plate ? CharacterShaders.PlateFlag : CharacterShaders.TearFlag) : 0;
+    uint WoundFlag(AssetPart part, uint mask, bool reliefVisible)
+    {
+        if (mask == 0 || portraitLive >= 0) return part.Anatomy ? CharacterShaders.AnatomyFlag : 0;
+        if (part.Anatomy) return CharacterShaders.WoundFlag | CharacterShaders.AnatomyFlag;
+        if (part.IsBody) return CharacterShaders.WoundFlag | (reliefVisible ? CharacterShaders.HeadReliefFlag : 0u);
+        if (!part.Shared) return 0;
+        return (part.Plate ? CharacterShaders.PlateFlag : CharacterShaders.TearFlag)
+            | (part.Material.Shading == CharacterShaders.ShadeHair ? CharacterShaders.HairWoundFlag : 0u);
+    }
 
     /// <summary>Height on screen under which a body's anatomy is not drawn: inside a cut it is lost at that size, and each costs 350k triangles.</summary>
     const float AnatomyPixels = 180;

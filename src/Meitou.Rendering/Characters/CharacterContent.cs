@@ -22,7 +22,7 @@ internal sealed class AssetPart
     public required GpuObjectMesh Mesh;
     /// <summary>Skinned by the body's bone palette (clothing, hair, beards); else placed by <see cref="Bone"/> and <see cref="Offset"/>.</summary>
     public required bool Shared;
-    public bool HeadRelief;
+    public uint HeadReliefProfiles;
     public int Bone = -1;
     public Matrix4x4 Offset = Matrix4x4.Identity;
     /// <summary>Index among the character's bone-attached parts (the matrices <see cref="CharacterRenderer"/> keeps per frame); -1 for shared parts.</summary>
@@ -211,7 +211,7 @@ internal sealed class CharacterContent : IDisposable
 
     /// <param name="FirstMaterialName">The first submesh's material (script) name, which is all the material resolver takes of a submesh; null: no submesh.</param>
     sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null,
-        float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null);
+        float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null, uint HeadReliefProfiles = 0);
 
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
     const float SkullMargin = 0.5f, AnatomyGrid = 0.04f, AnatomyClearance = 0.2f;
@@ -290,7 +290,7 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>What a worker makes of a mesh file (<see cref="PrepareMesh"/>): everything but the GPU buffers.</summary>
     sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst, PickBox[] PickBoxes,
-        float[]? FileDistances, int FileFirst, float FileRadius, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null);
+        float[]? FileDistances, int FileFirst, float FileRadius, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null, uint HeadReliefProfiles = 0);
     /// <summary>A prepared mesh (null: it could not be read) and the messages its reading left.</summary>
     sealed record Prepared(PreparedMesh? Mesh, List<string> Messages);
     static readonly Prepared Uploaded = new(null, []);
@@ -531,8 +531,8 @@ internal sealed class CharacterContent : IDisposable
         if (meshes.TryGetValue(key, out var cached)) return cached;
         if (rig.Handle("Bip01 Head") is not { } head || !HeadSurfaces.TryGetValue(bodyPath.ToLowerInvariant(), out var surface)) return null;
         var vertices = new List<Vertex>();
-        HeadWoundSurface.Append(vertices, surface, head, shapeDeltas);
-        return meshes[key] = vertices.Count == 0 ? null : UploadAnatomy(vertices);
+        uint supported = HeadWoundSurface.Append(vertices, surface, head, shapeDeltas);
+        return meshes[key] = vertices.Count == 0 ? null : UploadAnatomy(vertices) with { HeadReliefProfiles = supported };
     }
 
     LoadedMesh UploadAnatomy(List<Vertex> vertices)
@@ -1008,7 +1008,7 @@ internal sealed class CharacterContent : IDisposable
         // Face relief is small and per morph; keep the much larger internal anatomy shared between faces.
         if (!asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase) is { } relief)
         {
-            asset.Parts.First(p => p.IsBody).HeadRelief = true;
+            asset.Parts.First(p => p.IsBody).HeadReliefProfiles = relief.HeadReliefProfiles;
             asset.Parts.Add(new AssetPart
             {
                 Label = "head wound relief", Mesh = relief.Gpu, Shared = true, Anatomy = true, BoundsCentre = relief.Centre, BoundsRadius = relief.Radius,
