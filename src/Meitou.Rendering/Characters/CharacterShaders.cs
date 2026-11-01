@@ -130,6 +130,17 @@ static class CharacterShaders
         out float vClip;        // anatomy: above 0 outside every wound
         out float vBloodAmount; // the blood amount of the vertex's body part (the instance carries the parts': two 8-bit amounts in the w of each matrix row)
 
+        // The lower jaw: any real weight on its bone (lips and chin are shared with the head), or the face below the mouth's line.
+        bool JawVertex(mat4 header)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                uint b = aBones[k];
+                if (aWeights[k] > 0.12 && ((floatBitsToUint(header[1 + b / 32u][b / 8u % 4u]) >> (b % 8u * 4u)) & 15u) == 6u) return true;
+            }
+            return aPosition.y > 16.95 && aPosition.y < 17.66 && aPosition.z > 0.75;
+        }
+
         void main()
         {
             mat4 model = mat4(vec4(aInstance0.xyz, 0.0), vec4(aInstance1.xyz, 0.0), vec4(aInstance2.xyz, 0.0), vec4(aInstance3.xyz, 1.0));
@@ -158,7 +169,7 @@ static class CharacterShaders
                     float radius = mod(c.w, 10.0), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
                     dent = max(dent, near * near * (3.0 - 2.0 * near) * max(radius - 1.0, 0.0) * 0.28);
                 }
-                if (own == 6u && (floatBitsToUint(words[0][1]) >> 7u & 1u) != 0u)
+                if (JawVertex(words) && (floatBitsToUint(words[0][1]) >> 7u & 1u) != 0u)
                 {
                     // A broken jaw hangs, swung open about its hinge below the ears.
                     vec2 arm = local.zy - vec2(0.1, 17.75);
@@ -225,8 +236,8 @@ static class CharacterShaders
                 uint cutBone = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
                 uint cutGroup = (floatBitsToUint(cutHeader[1 + cutBone / 32u][cutBone / 8u % 4u]) >> (cutBone % 8u * 4u)) & 15u;
                 uint only = floatBitsToUint(cutHeader[0][3]);
-                if (only != 0u) { vHidden = cutGroup == (only >> 8) ? 0.0 : 1.0; vCutBand = float(only & 255u) * 0.1 - aPosition.y; }
-                else if (cutGroup == 6u) { if ((floatBitsToUint(cutHeader[0][1]) >> 6u & 1u) != 0u) vHidden = 1.0; }
+                if (only != 0u) { vHidden = (only >> 8) == 6u ? (JawVertex(cutHeader) ? 0.0 : 1.0) : cutGroup == (only >> 8) ? 0.0 : 1.0; vCutBand = float(only & 255u) * 0.1 - aPosition.y; }
+                else if ((floatBitsToUint(cutHeader[0][1]) >> 6u & 1u) != 0u && JawVertex(cutHeader)) vHidden = 1.0;
                 else if (cutGroup >= 1u && cutGroup <= 4u)
                 {
                     uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;
