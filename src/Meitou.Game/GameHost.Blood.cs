@@ -170,6 +170,8 @@ sealed partial class GameHost
     const int JawBlows = 4;
     readonly Dictionary<CharacterId, int> jawBlows = [];
     readonly HashSet<CharacterId> jawsLost = [];
+    /// <summary>The head wound's other forms: bit 7 the scalp gone, bit 8 the skull broken as well.</summary>
+    readonly Dictionary<CharacterId, uint> headsOpen = [];
     string? woundsFrom;
 
     void UpdateWounds(World world)
@@ -188,6 +190,7 @@ sealed partial class GameHost
             gutsSpilled.Clear();
             jawBlows.Clear();
             jawsLost.Clear();
+            headsOpen.Clear();
             // Only right after a load: a new game must not take the last save's wounds.
             string? loadedFrom = woundsFrom;
             woundsFrom = null;
@@ -232,7 +235,13 @@ sealed partial class GameHost
             if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
             {
                 jawBlows[e.Victim] = jawBlows.GetValueOrDefault(e.Victim) + 1;
-                if (jawBlows[e.Victim] >= JawBlows) jawsLost.Add(e.Victim);
+                if (jawBlows[e.Victim] >= JawBlows)
+                    switch (g.SandboxHeadWound ?? e.Victim.Slot % 3)   // each character's own
+                    {
+                        case 1: headsOpen[e.Victim] = 1u << 7; break;
+                        case 2: headsOpen[e.Victim] = 3u << 7; break;
+                        default: jawsLost.Add(e.Victim); break;
+                    }
             }
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
         }
@@ -247,6 +256,7 @@ sealed partial class GameHost
             foreach (var part in medical.Parts)
                 if (part.Limb == Meitou.Simulation.Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb) lost |= 1u << (limb < 2 ? 1 + limb : 1 + limb);
         if (jawsLost.Contains(id)) lost |= 1u << Meitou.Rendering.Characters.WoundMasks.JawGroup;
+        lost |= headsOpen.GetValueOrDefault(id);
         if (gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) lost |= 1u << 5;   // the bowel has left the body
         return lost;
     }

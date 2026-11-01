@@ -122,6 +122,7 @@ static class CharacterShaders
         flat out uint vCuts;
         out vec3 vBindPos;
         out vec3 vSkinPos;
+        flat out uint vHeadOpen;  // 1 the scalp is gone at the brow, 2 the skull broken too
         out float vJawCut;      // the lost jaw's vertices at 1: its edge falls between them, per pixel
         out float vCutBand;     // a cut limb: distance past the cut, below 0 gone
         flat out uint vWounds;  // the wound mask, 0 without wounds
@@ -196,6 +197,7 @@ static class CharacterShaders
             vClip = -1.0;
             vCutBand = 1000.0;
             vJawCut = 0.0;
+            vHeadOpen = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 7u & 3u : 0u;
             if ((aInstanceData.z & 12u) != 0u)
             {
                 // Worn on the body: torn where a wound of its own body group lies under it (the wound spheres are in the same bind space; in it a hand hangs by the hip).
@@ -208,7 +210,8 @@ static class CharacterShaders
                     if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.1) * 0.75 - distance(aPosition, c.xyz));
                 }
             }
-            if (anatomy && aTangent.w > 4.5 && aTangent.w < 5.5) vAnatomy = (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 6u & 1u) != 0u ? 2u : 3u;   // the mouth: only with the jaw gone
+            if (anatomy && aTangent.w > 5.5 && aTangent.w < 6.5) vAnatomy = vHeadOpen >= 2u ? 2u : 3u;   // the brain: only behind a broken skull
+            else if (anatomy && aTangent.w > 4.5 && aTangent.w < 5.5) vAnatomy = (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 6u & 1u) != 0u ? 2u : 3u;   // the mouth: only with the jaw gone
             else if (anatomy && aTangent.w > 6.5) vAnatomy = 2u;   // the back wall needs no mask: only a hole in the skin reveals it
             else if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
             else if (anatomy)
@@ -321,6 +324,7 @@ static class CharacterShaders
         in float vHidden;
         in vec4 vColour;
         in vec4 vBlood;
+        flat in uint vHeadOpen;
         in float vJawCut;
         in float vCutBand;
         flat in uint vWounds;
@@ -556,6 +560,18 @@ static class CharacterShaders
             // Metal plate does not tear: it takes the wound's blood.
             vec3 woundBend = vec3(0.0);
             // A cut limb's end: a clean edge, then a ragged band of flesh with bone at its heart.
+            if (vHeadOpen != 0u)
+            {
+                // Bone is painted on the skin itself: the fitted skull does not close the forehead. A broken skull opens at its middle onto the brain.
+                float open = distance(vSkinPos, vec3(0.3, 18.85, 0.65)) + 0.03 * sin(vSkinPos.x * 31.0 + vSkinPos.y * 13.0) + 0.02 * sin(vSkinPos.y * 47.0);
+                if (vAnatomy == 0u)
+                {
+                    if (vHeadOpen >= 2u && open < 0.2) discard;
+                    float wet = 1.0 - smoothstep(0.32, 0.42, open), bone = 1.0 - smoothstep(0.29, 0.33, open);
+                    albedo = mix(mix(albedo, vec3(0.3, 0.02, 0.025), wet), vec3(0.68, 0.6, 0.47), bone);
+                    gloss = mix(gloss, 0.75, wet);
+                }
+            }
             if (vJawCut > 0.0)
             {
                 float tornLip = vJawCut + 0.035 * sin(vBlood.x * 70.0) + 0.02 * sin(vBlood.y * 35.0);   // a soft edge: the face's long triangles draw any stronger tear as spikes

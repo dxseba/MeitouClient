@@ -491,11 +491,27 @@ internal sealed class CharacterContent : IDisposable
                 }
             }
         }
+        // The brain behind a broken skull (Z-Anatomy, the user's Brain.anatomy): box to box inside the skull. Rigid on the head bone.
+        if (File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Brain.anatomy")) && rig.Handle("Bip01 Head") is { } brainBone)
+        {
+            using var brainStream = File.OpenRead(Path.Combine(Path.GetDirectoryName(path)!, "Brain.anatomy"));
+            var brain = Meitou.Data.Characters.EcorcheAsset.Read(brainStream);
+            var (min, max) = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
+            foreach (var part in brain) foreach (var v in part.Vertices) (min, max) = (Vector3.Min(min, v.Position), Vector3.Max(max, v.Position));
+            var fit = (headMax - headMin) * new Vector3(0.8f, 0.5f, 0.8f) / (max - min);
+            var place = new Vector3(headMiddle.X, headMin.Y + (headMax.Y - headMin.Y) * 0.68f, headMiddle.Z);
+            foreach (var part in brain)
+                foreach (var v in part.Vertices)
+                {
+                    var p = (v.Position - (min + max) / 2) * fit + place;
+                    vertices.Add(new Vertex { Position = p, Normal = v.Normal, Uv = skin[0].Uv, Tangent = new Vector4(p, 6), Colour = new Vector4(0.6f, 0.4f, 0.4f, 0), Bones = (uint)brainBone, Weights = new Vector4(1, 0, 0, 0) });
+                }
+        }
         // Clustered on a fine grid: seen only through cuts, the file's detail is lost, and triangles that collapse go.
         for (int i = 0; i + 2 < vertices.Count;)
         {
             static Vector3 Snap(Vector3 p) => new(MathF.Round(p.X / AnatomyGrid) * AnatomyGrid, MathF.Round(p.Y / AnatomyGrid) * AnatomyGrid, MathF.Round(p.Z / AnatomyGrid) * AnatomyGrid);
-            if (vertices[i].Position.Y > 16.9f && vertices[i].Tangent.W == 0) { i += 3; continue; }   // the skull keeps its detail: teeth do not survive the grid
+            if (vertices[i].Position.Y > 16.9f && vertices[i].Tangent.W is 0 or 6) { i += 3; continue; }   // the skull keeps its detail: teeth do not survive the grid
             Vector3 a = Snap(vertices[i].Position), b = Snap(vertices[i + 1].Position), c = Snap(vertices[i + 2].Position);
             if (a == b || b == c || a == c) { vertices[i] = vertices[^3]; vertices[i + 1] = vertices[^2]; vertices[i + 2] = vertices[^1]; vertices.RemoveRange(vertices.Count - 3, 3); continue; }
             vertices[i] = vertices[i] with { Position = a };

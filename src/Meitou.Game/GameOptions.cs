@@ -25,6 +25,7 @@ sealed class GameOptions
     public bool SandboxBare;
     public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead;
     public float? SandboxYaw, SandboxPower;
+    public int? SandboxHeadWound;
     public int? SandboxSeverLevel;
     public float SandboxZoom = 30;
     /// <summary>The sandbox hero's start state, comma-separated: walk, run or free; a fixed speed in units/s; patrol (a 400-unit line), for pictures.</summary>
@@ -167,6 +168,7 @@ sealed class GameOptions
                 case "--sandbox-clothed": g.SandboxClothed = true; break;
                 case "--sandbox-torso": g.SandboxTorso = true; break;
                 case "--sandbox-female": g.SandboxFemale = true; break;
+                case "--sandbox-head-wound": g.SandboxHeadWound = int.Parse(Next()); break;
                 case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever-level": g.SandboxSever = true; g.SandboxSeverLevel = int.Parse(Next()); break;
                 case "--sandbox-power": g.SandboxPower = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;

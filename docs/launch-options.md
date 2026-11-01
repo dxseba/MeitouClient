@@ -50,6 +50,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Fighters are male humans. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
 | `--sandbox-part <name>` | head, chest, stomach, left arm... | off | With `--sandbox-dummy`: test hits only on that body part. |
 | `--sandbox-behead` | | off | With `--sandbox-dummy`: the foe loses its head at tick 120. |
+| `--sandbox-head-wound <n>` | 0, 1, 2 | by character | With `--sandbox-dummy`: the head wound that the fourth heavy blow opens: jaw, scalp, broken skull. |
 | `--sandbox-female` | | off | With `--sandbox-bare`: the fighters are women. |
 | `--sandbox-torso` | | off | With `--sandbox-dummy`: test hits only on the chest and stomach. |
 | `--sandbox-clothed` | | off | With `--sandbox-dummy`: the fighters keep their clothes. |
