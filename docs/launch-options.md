@@ -55,6 +55,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-torso` | | off | With `--sandbox-dummy`: test hits only on the chest and stomach. |
 | `--sandbox-clothed` | | off | With `--sandbox-dummy`: the fighters keep their clothes. |
 | `--sandbox-zoom <d>` | units | 30 | With `--sandbox-bare`: the camera boom. |
+| `--sandbox-height <h>` | units | 0 | With `--sandbox-bare` and follow: raise the camera target above the character origin for wound close-ups (17 frames the human head in the dummy scene). |
 | `--sandbox-sever` | | off | With `--sandbox-dummy`: the foe loses both arms at tick 30. |
 | `--sandbox-sever-level <n>` | 0 to 2 | | As `--sandbox-sever`, cut at shoulder, above the elbow or at the forearm. |
 | `--sandbox-yaw <deg>` | degrees | off | With `--sandbox-bare`: the camera yaw round the fighters. |

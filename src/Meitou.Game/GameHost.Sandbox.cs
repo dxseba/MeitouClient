@@ -275,7 +275,7 @@ sealed partial class GameHost
         var rig = session.Camera.Strategy;
         if (g.SandboxBare) rig.Place(new Vector2(latest.X, latest.Z), g.SandboxYaw is { } degrees ? degrees * MathF.PI / 180 : rig.Yaw, rig.Pitch, g.SandboxZoom);   // close enough to judge a wound
         else session.Camera.MovePivot(new Vector2(latest.X, latest.Z));
-        camera.Target = drawn;
+        camera.Target = drawn + new Vector3(0, g.SandboxBare ? g.SandboxHeight : 0, 0);
     }
 
     /// <summary>The debug panel, over the finished picture and the HUD (the floor's grid is the terrain's: <see cref="WorldRenderOptions.Grid"/>).</summary>

@@ -28,6 +28,8 @@ sealed class GameOptions
     public int? SandboxHeadWound;
     public int? SandboxSeverLevel;
     public float SandboxZoom = 30;
+    /// <summary>Camera target height above the sandbox character, for wound close-ups.</summary>
+    public float SandboxHeight;
     /// <summary>The sandbox hero's start state, comma-separated: walk, run or free; a fixed speed in units/s; patrol (a 400-unit line), for pictures.</summary>
     public string? SandboxMode;
     /// <summary><c>--sandbox-races</c>: one character of every person race (a CHARACTER record listing only that race) in rings round the pair, whatever n is.</summary>
@@ -174,6 +176,7 @@ sealed class GameOptions
                 case "--sandbox-power": g.SandboxPower = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--sandbox-part": g.SandboxPart = Next(); break;
                 case "--sandbox-sever": g.SandboxSever = true; break;
+                case "--sandbox-height": g.SandboxHeight = float.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--sandbox-zoom": g.SandboxZoom = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--sandbox-dummy": g.SandboxDummy = g.SandboxBare = true; break;
                 case "--sandbox-mode": g.SandboxMode = Next(); break;

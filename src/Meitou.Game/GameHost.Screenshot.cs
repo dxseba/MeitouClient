@@ -134,6 +134,7 @@ sealed partial class GameHost
             foreach (var line in population.TakeTownLog()) Console.WriteLine($"town      {line}");
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);
+        SandboxFollowCamera();   // preserve the drawn character target, including the wound inspection height
         if (g.TitlePreview && player is not null) ApplyTitleCamera();
         // After a walk (--move-to) the picture is of where the leader got to.
         if (g.MoveTo is not null && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } walker)
