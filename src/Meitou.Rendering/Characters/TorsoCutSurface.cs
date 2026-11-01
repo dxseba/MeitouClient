@@ -2,8 +2,8 @@ using System.Numerics;
 
 namespace Meitou.Rendering.Characters;
 
-/// <summary>A torso cross-section with a wet flesh ring and open centre for the installed anatomy.</summary>
-static class TorsoCutSurface
+/// <summary>A wet cross-section rim; full-body cuts also have recessed flesh backing behind the installed anatomy.</summary>
+static partial class TorsoCutSurface
 {
     public const int Layer = 32;
     public const float ExposureDepth = 2.8f;
@@ -126,6 +126,12 @@ static class TorsoCutSurface
     {
         if (!TryNormalize(cut, out var normalized)) return null;
         var n = new Vector3(normalized.Plane.X, normalized.Plane.Y, normalized.Plane.Z);
+        // Equivalent halfspaces must use the same section basis and triangulation, including reversed input planes.
+        if (normalized.FullBody && (MathF.Abs(n.X) > 1e-6f ? n.X < 0 : MathF.Abs(n.Y) > 1e-6f ? n.Y < 0 : n.Z < 0))
+        {
+            normalized = normalized with { Plane = -normalized.Plane, KeepSide = -normalized.KeepSide };
+            n = -n;
+        }
         var points = new List<Point>();
         var byPosition = new Dictionary<Vector3, int>();
         var weld = new Dictionary<(int X, int Y, int Z), List<int>>();
@@ -313,6 +319,7 @@ static class TorsoCutSurface
         int total = rims.Sum(r => r.Points.Count), budget = normalized.FullBody ? 2048 : 512;
         var outward = n * -normalized.KeepSide;
         var result = new List<Vertex>();
+        var sectionSkin = new SectionSkin(normalized.FullBody ? source.Select(point => point.Position + Delta(point)).ToArray() : [], n);
         for (int contour = 0; contour < rims.Count; contour++)
         {
         var rim = rims[contour].Points;
@@ -326,12 +333,14 @@ static class TorsoCutSurface
         var middle = rim.Aggregate(Vector3.Zero, (sum, p) => sum + p.Position) / rim.Count;
         var middleMorph = rim.Aggregate(Vector3.Zero, (sum, p) => sum + p.Morph) / rim.Count;
         var inset = normalized.FullBody ? Insets(rim, n, u, v) : null;
+        var depths = inset is not null ? SectionDepths(rim, inset, n * normalized.KeepSide, sectionSkin) : null;
         Vertex At(int index, int band)
         {
             var point = rim[index];
             float radius = band switch { 0 => 1.005f, 1 => 0.90f, _ => 0.72f };
             float depth = band switch { 0 => Ragged(point.Position), 1 => 0.025f, _ => 0.20f };
-            if (inset is not null && band > 0) depth = MathF.Min(depth, MathF.Max(0.01f, inset[index].Length() * 1.2f));
+            if (depths is not null && band == 3) depth = depths[index];
+            else if (inset is not null && band > 0) depth = MathF.Min(depth, MathF.Max(0.01f, inset[index].Length() * 1.2f));
             var p = inset is null ? middle + (point.Position - middle) * radius + middleMorph + (point.Morph - middleMorph) * radius
                 : point.Position + point.Morph + inset[index] * (band == 0 ? 0 : band == 1 ? 0.45f : 1);
             p += n * (depth * normalized.KeepSide);
@@ -354,13 +363,23 @@ static class TorsoCutSurface
                 var a = At(i, band); var b = At(next, band); var c = At(i, band + 1); var d = At(next, band + 1);
                 Triangle(a, b, c); Triangle(b, d, c);
             }
+        if (normalized.FullBody)
+        {
+            var floor = Enumerable.Range(0, rim.Count).Select(i => At(i, 3)).ToArray();
+            var triangles = SectionTriangles(floor, u, v);
+            var outline = rim.Select(p => p.Position + p.Morph).ToArray();
+            AppendSectionBacking(floor, triangles, outline, normalized, sectionSkin, 32768 - result.Count - 15 * budget, Triangle);
+            // Reserve the remaining contours' flesh first, so a bone detail can never overflow the shared cap buffer.
+            AppendLimbBoneSection(floor, triangles, outline, groups, normalized, u, v, 32768 - result.Count - 15 * budget, Triangle);
         }
+        }
+        if (normalized.FullBody) FitSectionBacking(result, normalized, sectionSkin);
         return result.Count > 0 ? result.ToArray() : null;
     }
 
     static Vector3[] Insets(List<Point> rim, Vector3 normal, Vector3 u, Vector3 v)
     {
-        var polygon = rim.Select(p => new Vector2(Vector3.Dot(p.Position, u), Vector3.Dot(p.Position, v))).ToArray();
+        var polygon = rim.Select(p => new Vector2(Vector3.Dot(p.Position + p.Morph, u), Vector3.Dot(p.Position + p.Morph, v))).ToArray();
         static float Cross(Vector2 a, Vector2 b) => a.X * b.Y - a.Y * b.X;
         bool Inside(Vector2 point)
         {
@@ -374,8 +393,8 @@ static class TorsoCutSurface
         for (int i = 0; i < rim.Count; i++)
         {
             int previous = (i + rim.Count - 1) % rim.Count, next = (i + 1) % rim.Count;
-            var before = Vector3.Normalize(rim[i].Position - rim[previous].Position);
-            var after = Vector3.Normalize(rim[next].Position - rim[i].Position);
+            var before = Vector3.Normalize(rim[i].Position + rim[i].Morph - rim[previous].Position - rim[previous].Morph);
+            var after = Vector3.Normalize(rim[next].Position + rim[next].Morph - rim[i].Position - rim[i].Morph);
             var first = Vector3.Cross(normal, before);
             var inward = first + Vector3.Cross(normal, after);
             inward = inward.LengthSquared() > 1e-8f ? Vector3.Normalize(inward) : first;
@@ -395,6 +414,49 @@ static class TorsoCutSurface
             }
             while (amount > 0.0005f && !Inside(polygon[i] + direction * amount)) amount *= 0.5f;
             result[i] = amount > 0.0005f ? inward * amount : default;
+        }
+        bool InOrOn(Vector2 point)
+        {
+            if (Inside(point)) return true;
+            for (int edge = 0; edge < polygon.Length; edge++)
+            {
+                var a = polygon[edge]; var step = polygon[(edge + 1) % polygon.Length] - a;
+                float length = step.LengthSquared();
+                float t = length < 1e-12f ? 0 : Math.Clamp(Vector2.Dot(point - a, step) / length, 0, 1);
+                if (Vector2.DistanceSquared(point, a + step * t) < 1e-10f) return true;
+            }
+            return false;
+        }
+        bool EdgeInside(Vector2 a, Vector2 b)
+        {
+            if (!InOrOn(a) || !InOrOn(b) || !InOrOn((a + b) * 0.5f)) return false;
+            var direction = b - a;
+            for (int edge = 0; edge < polygon.Length; edge++)
+            {
+                var start = polygon[edge]; var step = polygon[(edge + 1) % polygon.Length] - start;
+                float determinant = Cross(direction, step);
+                if (MathF.Abs(determinant) < 1e-10f) continue;
+                float along = Cross(start - a, step) / determinant;
+                float crossing = Cross(start - a, direction) / determinant;
+                if (along is > 0.00001f and < 0.99999f && crossing is >= 0 and <= 1) return false;
+            }
+            return true;
+        }
+        Vector2 Shifted(int index) => polygon[index] + new Vector2(Vector3.Dot(result[index], u), Vector3.Dot(result[index], v));
+        // Individually valid inset vertices can still connect across a concave throat or hip gap. Keep every inset edge inside its own original loop.
+        for (int pass = 0; pass < 20; pass++)
+        {
+            bool changed = false;
+            for (int i = 0; i < rim.Count; i++)
+            {
+                int next = (i + 1) % rim.Count;
+                if (EdgeInside(Shifted(i), Shifted(next))) continue;
+                result[i] *= 0.5f; result[next] *= 0.5f;
+                if (result[i].LengthSquared() < 1e-12f) result[i] = default;
+                if (result[next].LengthSquared() < 1e-12f) result[next] = default;
+                changed = true;
+            }
+            if (!changed) break;
         }
         return result;
     }

@@ -671,7 +671,7 @@ public sealed partial class FixtureRegistry
         var table = world.Characters;
         if (cage.Kind != FixtureKind.Cage || !IsFree(table, cage) || !table.TryResolveNext(prisoner, out int s)) return false;
         var c = table.Cold(s)!;
-        if (c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone) return false;
+        if (c.TorsoBisection is { IsValid: true } || c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone) return false;
         TaskStart.End(world, s, TaskEnd.Stopped);   // the task and a fight end through their handlers: a caged character works no machine, site or bed
         c.InSomething = HeldState.Imprisoned;
         c.InWhat = cage.Id;
@@ -821,7 +821,7 @@ public sealed partial class FixtureRegistry
         if (bed.Kind != FixtureKind.Bed || !table.TryResolveNext(sleeper, out int s)) return false;
         var c = table.Cold(s)!;
         if (c.InSomething == HeldState.Bed && c.InWhat == bed.Id) return true;
-        if (!IsFree(table, bed) || c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone) return false;
+        if (c.TorsoBisection is { IsValid: true } || !IsFree(table, bed) || c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone) return false;
         c.InSomething = HeldState.Bed;
         c.InWhat = bed.Id;
         bed.Occupant = sleeper;

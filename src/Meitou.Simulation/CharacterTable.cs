@@ -295,6 +295,16 @@ public sealed class CharacterCold
     public bool MedicJob => Jobs.Exists(j => j.Type == Meitou.Data.Gameplay.Ai.TaskType.JOB_MEDIC);
     /// <summary>The character this one carries on its left shoulder (none: not carrying); the original's <c>isCarrying</c> with the partner handle. Set and cleared by <see cref="Carrying.CarrySystem"/> in serial phases only, together with <see cref="CarriedBy"/> of the other.</summary>
     public CharacterId Carrying { get; set; } = CharacterId.None;
+    /// <summary>1 carries the positive torso half; 0 carries the ordinary body or its negative half.</summary>
+    public int CarryingTorsoSide { get; set; }
+    /// <summary>The independently carried positive torso half's holder. Its inventory remains the original corpse's.</summary>
+    public CharacterId TorsoPositiveCarriedBy { get; set; } = CharacterId.None;
+    public Carrying.CarryAttach? TorsoPositiveCarryAttach { get; set; }
+    /// <summary>The positive half's own world-space root; null until physics or a restored/fallback placement supplies it.</summary>
+    public Vector3? TorsoPositivePosition { get; set; }
+    public float TorsoPositiveYaw { get; set; }
+    /// <summary>A release requests translation of only the positive root chain, consumed by the ragdoll system.</summary>
+    public Vector3? TorsoPositiveReleaseAt { get; set; }
     /// <summary>The character carrying this one (none: not carried); the original's <c>isBeingCarried</c> with the partner handle.</summary>
     public CharacterId CarriedBy { get; set; } = CharacterId.None;
     /// <summary>While carried: lifted awake by a friendly carrier (the player's Pick Up on a standing squad mate), so it stays on the shoulder until put down rather than being set down as one that came round.</summary>
@@ -303,6 +313,8 @@ public sealed class CharacterCold
     public Carrying.CarryAttach? CarryAttach { get; set; }
     /// <summary>Whom the <see cref="CharacterTask.PickUp"/>, <see cref="CharacterTask.Loot"/> or <see cref="CharacterTask.StealthKo"/> task is for; meaningful only while one of those tasks is set.</summary>
     public CharacterId CarryTarget { get; set; } = CharacterId.None;
+    /// <summary>Which half the pending lift or put-down addresses (1 positive, 0 ordinary/negative).</summary>
+    public int CarryTargetTorsoSide { get; set; }
     /// <summary>Seconds into the <c>shoulder lift left</c> clip of a pick-up or put-down, or the <c>knockout</c> swing of a stealth KO, in progress (-1: not yet; the animation system plays the clip at this time).</summary>
     public float LiftTime { get; set; } = -1;
     /// <summary>The stealth KO target heard the attacker on its last step before the swing (the sense entry's heard flag, <see cref="CharacterTask.StealthKo"/>).</summary>
@@ -704,6 +716,11 @@ public sealed class CharacterTable
             // Carrying, looting and the rescue job add to the hash only while set, so worlds without them hash as before.
             if (!k.Carrying.IsNone) { hasher.Add(0x43617272); hasher.Add(k.Carrying); }
             if (!k.CarriedBy.IsNone) { hasher.Add(0x42726E65); hasher.Add(k.CarriedBy); }
+            if (k.CarryingTorsoSide != 0) { hasher.Add(0x43617253); hasher.Add(k.CarryingTorsoSide); }
+            if (!k.TorsoPositiveCarriedBy.IsNone) { hasher.Add(0x54724361); hasher.Add(k.TorsoPositiveCarriedBy); }
+            if (k.TorsoPositivePosition is { } positiveAt) { hasher.Add(0x5472506F); hasher.Add(positiveAt); hasher.Add(k.TorsoPositiveYaw); }
+            if (k.TorsoPositiveReleaseAt is { } releaseAt) { hasher.Add(0x54725265); hasher.Add(releaseAt); }
+            if (k.CarryTargetTorsoSide != 0) { hasher.Add(0x54725467); hasher.Add(k.CarryTargetTorsoSide); }
             if (k.CarriedAwake) hasher.Add(0x4177616B);
             if (c.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot or (byte)CharacterTask.StealthKo) { hasher.Add(k.CarryTarget); hasher.Add(k.LiftTime); hasher.Add((int)resume); if (c.Task == (byte)CharacterTask.StealthKo) hasher.Add(k.KnockoutHeard); if (k.Kidnapping) hasher.Add(0x4B69646E); if (k.Snatching) hasher.Add(0x536E6174); if (k.Foraging) hasher.Add(0x466F7267); if (k.LootFlags != 0) hasher.Add(0x4C6F6F74 ^ (int)k.LootFlags); }
             // Orders add to the hash only while set, so worlds without them hash as before.

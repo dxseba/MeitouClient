@@ -212,6 +212,81 @@ public class RagdollTorsoPhysicsTests
     }
 
     [Fact]
+    public void The_positive_half_can_be_carried_without_lifting_the_negative_half()
+    {
+        using var scene = new Scene();
+        scene.World.RunTicks(240);
+        var before = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
+        var ground = scene.BoneWorld(before.Negative, 0);
+        var carrierCold = new CharacterCold { Name = "Positive carrier", Appearance = scene.Cold.Appearance, Race = Human, Medical = Healthy() };
+        var carrier = scene.World.Characters.Spawn(new() { Position = new(100, 0, 20), Health = 100 }, carrierCold, scene.World.Tick);
+        carrierCold.Carrying = scene.Id;
+        carrierCold.CarryingTorsoSide = 1;
+        scene.Cold.TorsoPositiveCarriedBy = carrier;
+        scene.World.RunTick();
+        var held = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
+        var lifted = scene.BoneWorld(held.Positive, 0);
+        Assert.True(lifted.Y > 10);
+        Assert.True(lifted.X > 80);
+        Assert.InRange(Vector3.Distance(ground, scene.BoneWorld(held.Negative, 0)), 0, 0.1f);
+        Assert.Equal(carrier, scene.Snapshot.TorsoPositiveCarriedBy);
+        Assert.Equal(CharacterId.None, scene.Snapshot.CarriedBy);
+        Assert.Equal(1, Assert.Single(scene.World.Snapshot.Characters, c => c.Id == carrier).CarryingTorsoSide);
+        Assert.NotNull(scene.Snapshot.TorsoPositivePosition);
+    }
+
+    [Fact]
+    public void Separate_carriers_can_hold_both_halves_and_dropping_one_does_not_release_the_other()
+    {
+        using var scene = new Scene();
+        scene.World.RunTicks(240);
+        var negativeCold = new CharacterCold { Name = "Negative carrier", Appearance = scene.Cold.Appearance, Race = Human, Medical = Healthy() };
+        var negativeCarrier = scene.World.Characters.Spawn(new() { Position = new(20, 0, 20), Health = 100 }, negativeCold, scene.World.Tick);
+        var positiveCold = new CharacterCold { Name = "Positive carrier", Appearance = scene.Cold.Appearance, Race = Human, Medical = Healthy() };
+        var positiveCarrier = scene.World.Characters.Spawn(new() { Position = new(100, 0, 20), Health = 100 }, positiveCold, scene.World.Tick);
+        negativeCold.Carrying = positiveCold.Carrying = scene.Id;
+        positiveCold.CarryingTorsoSide = 1;
+        scene.Cold.CarriedBy = negativeCarrier;
+        scene.Cold.TorsoPositiveCarriedBy = positiveCarrier;
+        scene.World.RunTick();
+        var held = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
+        var negativeAt = scene.BoneWorld(held.Negative, 0);
+        var positiveAt = scene.BoneWorld(held.Positive, 0);
+        Assert.True(negativeAt.Y > 10 && positiveAt.Y > 10);
+        Assert.True(Vector3.Distance(negativeAt, positiveAt) > 60);
+        Assert.InRange(scene.BoneWorld(held.Negative, 2).Y, 0.1f, 3.5f);
+        positiveCold.Carrying = CharacterId.None;
+        positiveCold.CarryingTorsoSide = 0;
+        scene.Cold.TorsoPositiveCarriedBy = CharacterId.None;
+        scene.Cold.TorsoPositiveCarryAttach = null;
+        scene.Cold.TorsoPositiveReleaseAt = new(120, 0, 20);
+        scene.World.RunTicks(120);
+        var dropped = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
+        Assert.InRange(Vector3.Distance(negativeAt, scene.BoneWorld(dropped.Negative, 0)), 0, 0.1f);
+        Assert.Equal(negativeCarrier, scene.Snapshot.CarriedBy);
+        Assert.Equal(CharacterId.None, scene.Snapshot.TorsoPositiveCarriedBy);
+        Assert.Null(scene.Cold.TorsoPositiveReleaseAt);
+        Assert.InRange(scene.BoneWorld(dropped.Positive, 0).X, 115, 125);
+        Assert.True(scene.BoneWorld(dropped.Positive, 0).Y < 8);
+    }
+
+    [Fact]
+    public void Saved_fragment_poses_can_remain_far_from_the_logical_owner_and_each_other()
+    {
+        using var scene = new Scene();
+        scene.World.RunTicks(500);
+        var saved = Assert.IsType<SavedRagdoll>(scene.Physics.SaveState(scene.Id));
+        var halves = Assert.IsType<SavedTorsoRagdoll>(saved.Torso);
+        var farPositive = halves.Positive.Pose.Select(p => p with { Position = p.Position + new Vector3(2000, 0, 0) }).ToArray();
+        var farNegative = halves.Negative.Pose.Select((p, i) => i == 0 ? p : p with { Position = p.Position + new Vector3(-2000, 0, 0) }).ToArray();
+        saved = saved with { Pose = farNegative, Torso = halves with { Positive = halves.Positive with { Pose = farPositive }, Negative = halves.Negative with { Pose = farNegative } } };
+        using var loaded = new Scene(restore: saved);
+        loaded.World.RunTick();
+        var restored = Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(loaded.Physics.SaveState(loaded.Id)).Torso);
+        AssertPose(farPositive, restored.Positive.Pose);
+        AssertPose(farNegative, restored.Negative.Pose);
+    }
+    [Fact]
     public void An_ordinary_severed_arm_falls_with_its_loot_item_and_disappears_when_picked_up()
     {
         using var scene = new Scene(torso: false);

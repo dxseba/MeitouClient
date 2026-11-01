@@ -34,6 +34,7 @@ public sealed partial class CombatSystem
         var events = hitEvents;
         events.Clear();
         bool aliveBeforeHit = !medical.Dead;
+        bool wasIncapacitated = medical.Incapacitated;
         int partCount = CanDepositWeaponBlood(strikingItem, race, aliveBeforeHit) ? medical.Parts.Count : 0;
         Span<bool> organicBeforeHit = partCount <= 64 ? stackalloc bool[partCount] : new bool[partCount];
         for (int i = 0; i < partCount; i++) organicBeforeHit[i] = !medical.Parts[i].IsRobotic(race);
@@ -72,7 +73,7 @@ public sealed partial class CombatSystem
         var toAttacker = new Vector2(prev[a].Position.X - prev[d].Position.X, prev[a].Position.Z - prev[d].Position.Z);
         Sound(world, SoundKind.Hit, d, a, prev[d].Position, unarmed: fighter.Unarmed, robot: ac.Race!.IsRobot);
         Splash(world, d, dc, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce);
-        if (death) Knockdown(world, d, dc, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce);
+        HitRagdoll(world, d, dc, part, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce, wasIncapacitated, death, prev[a].Position);
         if (medical.Incapacitated) Sound(world, SoundKind.Down, d, a, prev[d].Position, fatal: death);
         if (death && world.Uniques.RecordOf(table.IdOf(d)) is { } unique) world.Uniques.Died(unique, ac.IsPlayer, dc.Faction);
         return death;

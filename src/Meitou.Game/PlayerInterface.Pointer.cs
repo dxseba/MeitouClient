@@ -50,7 +50,7 @@ sealed partial class PlayerInterface
         if (hover is { } h) list.Add(h);
         var selection = SelectedIds();
         foreach (var c in session.CurrentSnapshot.Characters)
-            if (c.Id != hover?.Id && Vector3.DistanceSquared(c.Position, centre) <= radius * radius)
+            if (c.Id != hover?.Id && (Vector3.DistanceSquared(c.Position, centre) <= radius * radius || c.TorsoPositivePosition is { } positive && Vector3.DistanceSquared(positive, centre) <= radius * radius))
                 list.Add((c.Id, PointerColour(QuickOrderFor(c, selection)?.Pointer ?? "arrow")));
         return list;
     }
@@ -72,6 +72,8 @@ sealed partial class PlayerInterface
         if (mapDrag is not null) return (-1, mouse, CtrlHeld, AltHeld, "hand", null);   // the map's pan
         if (UiVisible && pointerOverUi || UiCapturesPointer || ContextMenuOpen || ModalOpen || dragging || settingsOpen || TitleOpen) return (-1, mouse, CtrlHeld, AltHeld, "arrow", null);
         if (BuildPointer() is { } building) return (-1, mouse, CtrlHeld, AltHeld, building, null);
+        if (BodyFragmentLabelAt(mouse) is { } fragment)
+            return (-1, mouse, CtrlHeld, AltHeld, fragment.Interactive && SelectedIds().Count > 0 ? "lift" : "arrow", fragment.Interactive ? fragment.Owner : null);
         var snapshot = session.CurrentSnapshot;
         if (pointer.Tick == snapshot.Tick && pointer.Mouse == mouse && pointer.Ctrl == CtrlHeld && pointer.Alt == AltHeld) return pointer;
         (string Name, CharacterId? Target) chosen = ("arrow", null);

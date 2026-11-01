@@ -118,6 +118,8 @@ sealed partial class PlayerInterface
     /// <summary>The nearest accepted character under the pixel with its ray distance; null when none, or when the nearest is hidden behind a building seen from outside.</summary>
     (CharacterId Id, float T)? PickWhereAt(Vector2 pixel, Func<CharacterSnapshot, bool> accept)
     {
+        if (BodyFragmentLabelAt(pixel) is { Interactive: true } label && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == label.Owner) is { } labelled && accept(labelled))
+            return (label.Owner, 0);
         if (Ray(pixel) is not { } ray) return null;
         CharacterId? best = null;
         float bestT = float.MaxValue;
@@ -163,7 +165,7 @@ sealed partial class PlayerInterface
         (Picked Kind, float T) best = (Picked.None, float.MaxValue);
         void Offer(Picked kind, float? t) { if (t is { } v && v < best.T) best = (kind, v); }
         if (QuickOrder(p) is { Do: not null } order) Offer(Picked.Character, PickWhereAt(p, c => c.Id == order.Target)?.T ?? 0);
-        else if (PickWhereAt(p, _ => true) is { } any && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == any.Id) is { } held && Verbs(held).Count > 0)
+        else if (PickWhereAt(p, _ => true) is { } any && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == any.Id) is { } held && Verbs(held, PickTorsoSide(any.Id, p)).Count > 0)
             Offer(Picked.Character, any.T);   // no quick order, but a held click opens its menu
         var item = PickGroundItemAt(p);
         Offer(Picked.GroundItem, item?.T);

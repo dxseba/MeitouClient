@@ -141,6 +141,7 @@ public static partial class SaveCapture
             WriteWildNpcs(builder, world, data, population, nests, options, clock, buildings, races);
         }
 
+        WriteUnwrittenTorsoOwners(builder, world, data, options, clock, buildings, races);
         WriteMemories();
         game.UpdateDerived();
         return game;
@@ -470,6 +471,7 @@ public static partial class SaveCapture
             HeldSave.Write(g, cold, link, world.Fixtures, buildings);
             // Carrying or carried: the bool says which, the partner's handle is written once every character has one.
             g.Bools["carrying"] = !cold.Carrying.IsNone;
+            TorsoCarrySave.Write(g, cold);
             var partner = cold.Carrying.IsNone ? cold.CarriedBy : cold.Carrying;
             if (partner.IsNone) Hand.Null.Write(g, "carrying"); else memoryPass?.Carries.Add((g, partner));
             // A world without ragdolls (headless) keeps what was read; a stale pose is not used where the character no longer lies.
@@ -713,8 +715,8 @@ public static partial class SaveCapture
             {
                 // A save's never-made platoon once made, wiped out, keeps its record: the original's saver (FUN_140372ef0) drops a declared-dead platoon unless
                 // a member is carried or a player's squad is within 500, else writes it with its dead and `never been activated` 0 (a regenerating one too).
-                if (into is null) continue;
-                if (roamer!.Dead && !every.Any(m => !table.Cold(m.Slot)!.CarriedBy.IsNone) && !PlayerNear(world, roamer.Position))
+                if (into is null && !every.Any(m => !table.Cold(m.Slot)!.CarriedBy.IsNone || !table.Cold(m.Slot)!.TorsoPositiveCarriedBy.IsNone)) continue;
+                if (into is not null && roamer is { Dead: true } && !every.Any(m => !table.Cold(m.Slot)!.CarriedBy.IsNone || !table.Cold(m.Slot)!.TorsoPositiveCarriedBy.IsNone) && !PlayerNear(world, roamer.Position))
                 {
                     builder.RemovePlatoon(into);
                     continue;

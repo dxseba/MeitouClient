@@ -232,6 +232,8 @@ public sealed partial class CombatSystem
             s.TargetSlot = -1;
             s.Engaged = false;
             s.Picked = false;
+            s.AllowIncapacitated = false;
+            s.TargetBodyPart = null;
             if (cold.InCombat) EndFight(table, i, ref s);
             return;
         }
@@ -290,8 +292,8 @@ public sealed partial class CombatSystem
             bool fighting = s.TargetSlot >= 0;
             // The target's fight ended since it let this one close in: its engaged list was emptied (FUN_1406659b0 mode 2), the fighter keeps its target and asks again below.
             if (s.Engaged && fighting && (uint)s.TargetSlot < (uint)prev.Length && !Listed(in s, in read[s.TargetSlot])) s.Engaged = false;
-            if (fighting && !(s.TargetSlot < prev.Length && prev[s.TargetSlot].Alive && prev[s.TargetSlot].Generation == s.TargetGeneration && !read[s.TargetSlot].Down
-                && table.Cold(s.TargetSlot) is { IsImprisoned: false, CarriedBy.IsNone: true, Medical.Incapacitated: false }))
+            if (fighting && !(s.TargetSlot < prev.Length && prev[s.TargetSlot].Alive && prev[s.TargetSlot].Generation == s.TargetGeneration
+                && MayKeepAttackTarget(world, i, s.TargetSlot, s.Picked, s.AllowIncapacitated, read[s.TargetSlot].Down) && ValidBodyPartTarget(world, i, s)))
             {
                 s.AttackTech = -1;
                 s.NextBlow = 0;
@@ -304,6 +306,8 @@ public sealed partial class CombatSystem
                     fighting = false;
                     s.TargetSlot = -1;
                     s.Picked = false;
+                    s.AllowIncapacitated = false;
+                    s.TargetBodyPart = null;
                     if (task || NothingLeft(world, i, in s)) EndFight(table, i, ref s);
                 }
             }
@@ -354,6 +358,8 @@ public sealed partial class CombatSystem
                 s.TargetGeneration = prev[yielder].Generation;
                 s.Engaged = false;
                 s.Picked = false;
+                s.AllowIncapacitated = false;
+                s.TargetBodyPart = null;
                 fighting = true;
             }
             if (!fighting) s.Engaged = false;
@@ -452,11 +458,12 @@ public sealed partial class CombatSystem
         var medical = cold.Medical!;
         float length = fighter.WeaponLength;
         // The gap to where the target will be (a target that is not fighting is led by LeadSeconds, FUN_1402b4570).
-        var aim = prev[t].Position + (inFight[t] ? Vector3.Zero : prev[t].Velocity * CombatTuning.AimLeadSeconds);
+        var aim = TargetPoint(world, s, prev[t].Position + (inFight[t] ? Vector3.Zero : prev[t].Velocity * CombatTuning.AimLeadSeconds));
         float e = fighter.EncumbranceFactor;
         var query = new AttackQuery
         {
             Category = fighter.TechniqueCategory,
+            GroundTarget = GroundTarget(world, i, s),
             Skill = cold.Stats![fighter.WeaponSkill],
             UnarmedSkill = WeaponStats.Lerp(e, 0.2f, 1) * (cold.Stats[StatsEnumerated.MartialArts] + fighter.UnarmedBonus),
             Animal = fighter.IsAnimal,
@@ -464,7 +471,7 @@ public sealed partial class CombatSystem
             Encumbrance = e,
             WeaponLength = length,
             Scale = medical.ScaleK,
-            Gap = CombatTuning.Gap(prev[i].Position, aim, cold, tc),
+            Gap = s.TargetBodyPart is null ? CombatTuning.Gap(prev[i].Position, aim, cold, tc) : PartTargetGap(prev[i].Position, aim, cold),
             Previous = s.LastTech,
             TargetStaggered = now < read[t].StunUntil,
             LeftArm = medical.ArmWorks(left: true),
@@ -620,11 +627,11 @@ public sealed partial class CombatSystem
         int t = s.TargetSlot, now = (int)world.Tick;
         if (s.AttackTech < 0 || s.NextBlow != 1 || s.Ranged || (uint)t >= (uint)prev.Length || !prev[t].Alive || s.TargetGeneration != prev[t].Generation) return false;
         if (table.Cold(t) is not { Fighter: { } target, Stats: not null, Medical: not null } tc) return false;
-        var to = prev[t].Position - prev[i].Position;
+        var to = TargetPoint(world, s, prev[t].Position) - prev[i].Position;
         bool start = now <= s.AttackStart + 1 && to.X * to.X + to.Z * to.Z > 25;   // the attack start's own turn, at the target's place
         if (!start)
         {
-            var aim = prev[t].Position + (tc.InCombat ? Vector3.Zero : prev[t].Velocity * CombatTuning.AimLeadSeconds);
+            var aim = TargetPoint(world, s, prev[t].Position + (tc.InCombat ? Vector3.Zero : prev[t].Velocity * CombatTuning.AimLeadSeconds));
             to = aim - prev[i].Position;
             if (!(to.Length() > 8)) return false;
             float defence = DefenceRating(world, t, tc, target);

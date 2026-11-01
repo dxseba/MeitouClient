@@ -33,7 +33,7 @@ sealed class CharacterHeadWoundPool(IGpuContext gpu) : IDisposable
 
     public HeadWoundView Resolve(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp)
     {
-        if (asset.Animal || asset.Appearance.Race.GetBool("is robot") || asset.Blending || asset.HeadSource is not { Length: > 0 } source || asset.HeadBone < 0 || (headState >> 7 & 3) == 0)
+        if (asset.Appearance.Headless || asset.Animal || asset.Appearance.Race.GetBool("is robot") || asset.Blending || asset.HeadSource is not { Length: > 0 } source || asset.HeadBone < 0 || (headState >> 7 & 3) == 0)
             return Fallback(asset, headState);
         if (!byKey.TryGetValue(key, out var slot))
         {

@@ -82,6 +82,9 @@ public sealed partial class PopulationSystem
         c.Jobs.Clear();
         c.Running = null;
         c.Carrying = CharacterId.None;
+        c.CarryingTorsoSide = c.CarryTargetTorsoSide = 0;
+        c.TorsoPositiveCarriedBy = CharacterId.None;
+        c.TorsoPositiveCarryAttach = null;
         c.CarriedBy = CharacterId.None;
         c.CarryTarget = CharacterId.None;
         c.LiftTime = -1;

@@ -45,9 +45,9 @@ public static class HitResolver
 
     /// <summary>The same as the delegate overload, with the cover roll as a struct so that a hit allocates nothing.</summary>
     public static (int Part, HitDamage Damage) Land<TCover>(MedicalState medical, in MedicalContext ctx, in DamagePacket packet, ReadOnlySpan<ArmourPiece> armour,
-        TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events) where TCover : struct, ICoverRoll
+        TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events, int? targetPart = null) where TCover : struct, ICoverRoll
     {
-        var (part, damage, _) = LandDetailed(medical, ctx, packet, armour, coverRoll, toughness, lowStrike, directionSix, c, events);
+        var (part, damage, _) = LandDetailed(medical, ctx, packet, armour, coverRoll, toughness, lowStrike, directionSix, c, events, targetPart);
         return (part, damage);
     }
 
@@ -57,10 +57,10 @@ public static class HitResolver
 
     /// <summary><see cref="Land{TCover}"/> that also reports what the armour stopped.</summary>
     public static (int Part, HitDamage Damage, ArmourAbsorbed Absorbed) LandDetailed<TCover>(MedicalState medical, in MedicalContext ctx, in DamagePacket packet, ReadOnlySpan<ArmourPiece> armour,
-        TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events) where TCover : struct, ICoverRoll
+        TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events, int? targetPart = null) where TCover : struct, ICoverRoll
     {
-        int part = medical.ChoosePart(ctx, lowStrike, directionSix);
-        if (part < 0) return (-1, default, default);
+        int part = medical.ChoosePart(ctx, lowStrike, directionSix, targetPart);
+        if ((uint)part >= (uint)medical.Parts.Count) return (-1, default, default);
         string partId = medical.Parts[part].Template.StringId;
         Span<bool> covering = armour.Length <= 32 ? stackalloc bool[armour.Length] : new bool[armour.Length];
         for (int i = 0; i < armour.Length; i++) covering[i] = ArmourStack.Covers(armour[i].Data, partId, coverRoll.Roll(i));

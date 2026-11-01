@@ -266,5 +266,7 @@ public sealed partial class CombatSystem
         s.Engaged = false;
         s.LastTech = -1;
         s.Picked = false;
+        s.AllowIncapacitated = false;
+        s.TargetBodyPart = null;
     }
 }

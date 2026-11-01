@@ -88,6 +88,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             if (OverHud(p)) return true;
             // A ground item's name label (shown while Highlight is held) takes the left press; its release over it is the item's pick-up (FUN_1401638f0).
             if (LabelAt(p) is { } label) { labelPress = label; return true; }
+            if (BodyFragmentLabelMouseDown(button, p, ctrl, alt)) return true;
             if (BuildClick()) return true;
             dragFrom = p;
             dragging = false;
@@ -108,16 +109,18 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (button == MouseButton.Middle && UiVisible && MapPointerDown(p)) return true;
         if (button == MouseButton.Right && !OverHud(p))
         {
+            if (BodyFragmentLabelMouseDown(button, p, ctrl, alt)) return true;
             // Alt + right click on a downed or dead character: the nearest selected loots it (take all). Ctrl + right click: picks it up, or puts it down when a selected
             // character carries it. A plain right click on one of your own downed characters that needs no first aid picks it up too (the original's quick right click).
             // A ground item's name label (shown while Alt is held) is drawn over everything: a click on it is the item's, never the body lying beside it.
             var downed = (alt || ctrl) && LabelAt(p) is null ? PickDowned(p) : null;
+            int torsoSide = downed is { } fragment ? PickTorsoSide(fragment, p) : 0;
             if (alt && downed is { } loot && SelectedIds() is { Count: > 0 })
-                Say(new Meitou.Simulation.Carrying.LootOrder([], loot) { Tick = session.World.Tick });
-            else if (ctrl && downed is { } body && Selected().Where(c => c.Carrying == body).Select(c => c.Id).ToArray() is { Length: > 0 } carriers)
+                Say(new Meitou.Simulation.Carrying.LootOrder([], loot) { Tick = session.World.Tick, TorsoSide = torsoSide });
+            else if (ctrl && downed is { } body && Selected().Where(c => CarriesFragment(c, body, torsoSide)).Select(c => c.Id).ToArray() is { Length: > 0 } carriers)
                 Say(new Meitou.Simulation.Carrying.PutDownOrder(carriers) { Tick = session.World.Tick });
             else if (ctrl && downed is { } lift && SelectedIds() is { Count: > 0 })
-                Say(new Meitou.Simulation.Carrying.PickUpOrder([], lift) { Tick = session.World.Tick });
+                Say(new Meitou.Simulation.Carrying.PickUpOrder([], lift) { Tick = session.World.Tick, TorsoSide = torsoSide });
             // Else the nearest target along the ray (PickAt). On a character: the quick order (trade with a trader, attack anyone else, treat a hurt ally, pick up a downed one of yours,
             // loot anyone else's) is given when the button comes up before the context menu's hold time; held longer, the menu opens instead (PlayerInterface.ContextMenu.cs).
             else if (PickAt(p).Kind is var kind && kind == Picked.Character) { var quick = QuickOrder(p)?.Do; if (!ContextPress(p, quick)) quick?.Invoke(); }
@@ -147,7 +150,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     (string Pointer, CharacterId Target, Action? Do)? QuickOrder(Vector2 p)
     {
         if (PickWhereAt(p, _ => true) is not { } hit || session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == hit.Id) is not { } target) return null;
-        return QuickOrderFor(target, SelectedIds());
+        return QuickOrderFor(target, SelectedIds(), PickTorsoSide(target.Id, p));
     }
 
     /// <summary>The talk pointer: <c>s_talk</c> while the character holds a line for the player (Dialogue <c>playerInterruptionDialog</c> +0xc8, <c>FUN_1407fb410</c>), else <c>talk</c>.</summary>
@@ -161,15 +164,16 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// (<c>search</c> pointer for a bandit, slave or not-real faction, else <c>scavenge</c>); standing and the lead sneaking, pick the shackles of a prisoner, loot a slave, else stealth KO; else talk
     /// when it has something to say (a trader trades), otherwise nothing (<c>green</c> pointer when allied to the lead).
     /// </summary>
-    (string Pointer, CharacterId Target, Action? Do)? QuickOrderFor(CharacterSnapshot c, IReadOnlyList<CharacterId> selection)
+    (string Pointer, CharacterId Target, Action? Do)? QuickOrderFor(CharacterSnapshot c, IReadOnlyList<CharacterId> selection, int torsoSide = 0)
     {
         var characters = session.CurrentSnapshot.Characters;
         CharacterSnapshot? lead = null;
         float nearest = float.MaxValue;
+        var targetAt = torsoSide == 1 ? c.TorsoPositivePosition ?? c.Position : c.Position;
         foreach (var o in characters)
         {
             if (selection.Count > 0 ? !selection.Contains(o.Id) : !o.IsPlayer) continue;
-            float d = Vector3.DistanceSquared(o.Position, c.Position);
+            float d = Vector3.DistanceSquared(o.Position, targetAt);
             if (d < nearest) (lead, nearest) = (o, d);
         }
         if (lead is null) return null;
@@ -177,6 +181,13 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         long tick = world.Tick;
         bool give = selection.Count > 0;
         Action? Do(Action a) => give ? a : null;
+        if (c.TorsoBisection is { IsValid: true })
+        {
+            var holder = FragmentCarrier(c, torsoSide);
+            if (!holder.IsNone)
+                return selection.Contains(holder) ? ("lift", c.Id, Do(() => Say(new Meitou.Simulation.Carrying.PutDownOrder([holder]) { Tick = tick }))) : null;
+            return lead.Id == c.Id ? null : ("lift", c.Id, Do(() => Say(new Meitou.Simulation.Carrying.PickUpOrder([], c.Id) { Tick = tick, TorsoSide = torsoSide })));
+        }
         bool carried = !c.CarriedBy.IsNone;
         if (carried && characters.FirstOrDefault(o => o.Id == c.CarriedBy) is not { IsPlayer: true }) return null;
         bool dead = c.Body is { Dead: true }, down = c.Down;
@@ -242,6 +253,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         mouse = p;
         EditorPointerUp(button);
         if (ContextMenuRelease(button, p)) return;
+        if (BodyFragmentLabelMouseUp(button, p)) return;
         if (button == MouseButton.Left && labelPress is { } labelled)
         {
             labelPress = null;

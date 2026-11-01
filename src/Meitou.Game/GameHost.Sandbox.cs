@@ -2,8 +2,10 @@ using System.Globalization;
 using System.Numerics;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
 using Meitou.Rendering;
 using Meitou.Simulation;
+using Meitou.Simulation.Bodies;
 using EngineKey = Meitou.Engine.Input.Key;
 
 namespace Meitou.Game;
@@ -86,6 +88,23 @@ sealed partial class GameHost
             heroYaw = MathF.Atan2(toVictim.X, toVictim.Y);
         }
         sandboxHero = population!.SpawnSandbox(world, record, heroAt, player: true, yaw: heroYaw, maleHuman: g.SandboxBare);
+        if (g.SandboxStats is { } level)
+        {
+            var hero = world.Characters.Cold(sandboxHero.Slot);
+            var stats = hero?.Stats ?? throw new InvalidOperationException("The sandbox hero has no attributes or skills.");
+            int count = 0;
+            for (int i = 1; i < StatsInfo.Count; i++)
+            {
+                var stat = (StatsEnumerated)i;
+                if (StatsInfo.StorageOf(stat) != stat) continue;
+                stats[stat] = level;
+                count++;
+            }
+            // Strength changes blood capacity; the newly spawned hero must still start at full blood.
+            if (hero?.Medical is { } medical && hero.Race is { } race)
+                medical.Blood = MedicalState.BloodCapacity(race, stats.Strength, medical.HasStatsObject, medical.ScaleK, medical.ScaleZ);
+            Console.WriteLine($"sandbox stats   hero: all {count} attributes and skills = {level.ToString(CultureInfo.InvariantCulture)}");
+        }
         if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2, maleHuman: g.SandboxBare);
         // n above 2: the rest stand idle in rings round the pair (the player's faction, so they keep out of the fight), 15 units apart, a look each;
         // --sandbox-races: then one of every person race, in the rings after them.

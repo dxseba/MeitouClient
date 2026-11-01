@@ -418,9 +418,11 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             else if (table.Next[i].Alive && table.Cold(i) is { DiedTick: >= 0 } cold)
             {
                 // A corpse that is carried or held in a bed or cage does not decay: its clock is kept at most 6 hours old, so it lies 6 more hours once let go.
-                if (!cold.CarriedBy.IsNone || cold.InSomething != Locks.HeldState.None) cold.DiedTick = Math.Max(cold.DiedTick, world.Tick - (long)(HeldCorpseHours * World.SecondsPerGameHour / world.TickSeconds));
+                if (!cold.CarriedBy.IsNone || !cold.TorsoPositiveCarriedBy.IsNone || cold.InSomething != Locks.HeldState.None) cold.DiedTick = Math.Max(cold.DiedTick, world.Tick - (long)(HeldCorpseHours * World.SecondsPerGameHour / world.TickSeconds));
                 // "corpse unloaded": a corpse in a zone of the map that is not active goes at once, carried or not (FUN_1405ccd90, after the decay test; Verified).
-                bool unloaded = world.LoadedZones is { } active && WorldLayout.ZoneOf(table.Next[i].Position.X, table.Next[i].Position.Z) is { X: >= 0 and < WorldLayout.ZoneCount, Y: >= 0 and < WorldLayout.ZoneCount } zone
+                // Either visible torso half keeps their shared identity alive; carrying the positive half need not move the negative half into an active zone.
+                bool positiveLoaded = cold.TorsoPositivePosition is { } positiveAt && world.LoadedZones is { } positiveZones && positiveZones.Contains(WorldLayout.ZoneOf(positiveAt.X, positiveAt.Z));
+                bool unloaded = cold.TorsoPositiveCarriedBy.IsNone && !positiveLoaded && world.LoadedZones is { } active && WorldLayout.ZoneOf(table.Next[i].Position.X, table.Next[i].Position.Z) is { X: >= 0 and < WorldLayout.ZoneCount, Y: >= 0 and < WorldLayout.ZoneCount } zone
                     && !active.Contains(zone);
                 if (!unloaded && world.Tick - cold.DiedTick <= CorpseTicksOf(world))
                 {

@@ -29,6 +29,8 @@ sealed class GameOptions
     public bool SandboxBare;
     public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead, SandboxSevereOnly, SandboxBisect;
     public float? SandboxYaw, SandboxPower, SandboxHitAngle;
+    /// <summary>Set every stored attribute and skill of the sandbox hero before the first tick.</summary>
+    public float? SandboxStats;
     public int? SandboxHeadWound, SandboxCutDirection;
     public ulong? SandboxBisectVariant;
     public Meitou.Simulation.Wounds.TorsoBisectionStyle SandboxBisectStyle;
@@ -102,6 +104,7 @@ sealed class GameOptions
           --list-starts              print the available starts and exit
           --sandbox [n]              animation sandbox: no world, a flat 1000x1000 wireframe floor (lines every 10, bold every 100) with 1 character (n = 2: two facing each other 30 units apart; more: the rest idle in rings round them, up to 1000); Z/X/C walk/run/free, [ ] fixed speed, P patrol, G fight, Y follow; works with --screenshot --ticks
           --sandbox-character <name> the CHARACTER or ANIMAL_CHARACTER record the sandbox spawns (default: the first member of the default new-game start)
+          --sandbox-stats <n>        set all hero attributes and skills to n (including values above 100); other fighters keep their stats
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), fight (the G key, with --sandbox 2), e.g. run,patrol (with --move-to or --screenshot)
           --sandbox-bisect          with --sandbox 2: force one lethal sideways chest cleave at tick 120 for visual inspection
           --sandbox-bisect-style <kind> auto (default), transverse, vertical, diagonal, or oblique; oblique crosses the trunk toward a shoulder
@@ -131,7 +134,7 @@ sealed class GameOptions
           --scene <name>             with --screenshot (and --load): stage a scene and save a frame every --scene-every ticks (default 30), --scene-frames of them (default 8):
                                      fight (enemies of --scene-npc spawned beside the leader and attacked), turret (the nearest town turret, enemies spawned in its range),
                                      bed (the leader sleeps in the nearest bed), acid (acid rain forced on the characters), bisect (with --sandbox 2 --sandbox-bisect: visible impact and falling halves), weapon-blood (ordinary sandbox combat, logs item blood), menu (the context menus of the nearest character,
-                                     door, container and cage, one frame each); the log prints the leader's state each frame; --scene-town <name> moves the squad to that town first (turret)
+                                     door, container and cage, one frame each), torso-carry (with --sandbox 3 --sandbox-bisect: independent pickups and put-downs), downed-attack (with --sandbox 2: the real body-part attack menu against a living knocked-out enemy); the log prints the leader's state each frame; --scene-town <name> moves the squad to that town first (turret)
           --no-precompile            compile methods on their first call only (by default a background thread compiles the game's methods ahead)
           --play-bench <dir>         with --load (or a new game): the game driven by a script (idle, camera orbit, zoom, pan, a long travel, time x2 and x5, talk, trade,
                                      a container, doors, a pick-up, path requests, a walk, a fight, loot, the panels, a horizon view, the overview), every frame measured
@@ -227,6 +230,10 @@ sealed class GameOptions
                 case "--sandbox-bisect": g.SandboxBisect = g.SandboxDummy = g.SandboxBare = true; break;
                 case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever-level": g.SandboxSever = true; g.SandboxSeverLevel = int.Parse(Next()); break;
+                case "--sandbox-stats":
+                    g.SandboxStats = float.Parse(Next(), CultureInfo.InvariantCulture);
+                    if (!float.IsFinite(g.SandboxStats.Value) || g.SandboxStats.Value < 0) throw new ArgumentException("--sandbox-stats must be non-negative and finite");
+                    break;
                 case "--sandbox-power": g.SandboxPower = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--sandbox-part": g.SandboxPart = Next(); break;
                 case "--sandbox-sever": g.SandboxSever = true; break;

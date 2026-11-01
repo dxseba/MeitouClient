@@ -40,6 +40,8 @@ public sealed partial class CombatSystem
         var ac = table.Cold(a);
         var dc = table.Cold(d);
         if (ac is null || dc is null || ac.Fighter is null || dc.Fighter is null || ac.Stats is null || dc.Stats is null || ac.Medical is null || dc.Medical is null || ac.Race is null || dc.Race is null) return;
+        if (dc.Medical.Dead || dc.Medical.Incapacitated && !(d == A.TargetSlot && AllowsIncapacitatedTarget(world, a, d, A.Picked, A.AllowIncapacitated))) return;
+        if (A.TargetBodyPart is not null && (d != A.TargetSlot || !ValidBodyPartTarget(world, a, A))) return;
         var tech = techniques[A.AttackTech];
         var prev = table.Previous;
         int direction = HitOutcomes.Facing(tech.DirectionOf(blow), HitOutcomes.Behind(table.Previous[a].Position, table.Previous[d].Position, table.Previous[d].Yaw));
@@ -101,11 +103,13 @@ public sealed partial class CombatSystem
         var events = hitEvents;   // Apply is serial, so one list serves every hit
         events.Clear();
         bool aliveBeforeHit = !dc.Medical.Dead;
+        bool wasIncapacitated = dc.Medical.Incapacitated;
         int partCount = CanDepositWeaponBlood(strikingItem, dc.Race, aliveBeforeHit) ? dc.Medical.Parts.Count : 0;
         Span<bool> organicBeforeHit = partCount <= 64 ? stackalloc bool[partCount] : new bool[partCount];
         for (int i = 0; i < partCount; i++) organicBeforeHit[i] = !dc.Medical.Parts[i].IsRobotic(dc.Race);
         var cover = new CoverRoll(world.Seed, Rng.Key(table.IdOf(d)), a, seq, blow);
-        var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events);
+        int? aimedPart = A.TargetBodyPart is { } bodyPart ? BodyPartIndex(dc, bodyPart) : null;
+        var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events, aimedPart);
         if ((uint)part < (uint)organicBeforeHit.Length)
             DepositWeaponBlood(strikingItem, dc.Race, damage, aliveBeforeHit, organicBeforeHit[part], mechanism);
         var cutTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
@@ -155,7 +159,7 @@ public sealed partial class CombatSystem
         GainCombatXp(ac, dc, XpEvent.HitDealt, XpEvent.HitTaken);
         Sound(world, SoundKind.Hit, d, a, prev[d].Position, heavy: D.HitHeavy, unarmed: fighter.Unarmed, robot: ac.Race.IsRobot);
         Splash(world, d, dc, -new Vector2(toAttacker.X, toAttacker.Y), damage.Cut + damage.Blunt + damage.Pierce);
-        if (knockout || death) Knockdown(world, d, dc, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce);
+        HitRagdoll(world, d, dc, part, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce, wasIncapacitated, knockout || death, prev[a].Position);
         if (death && world.Luckyren) dc.Burst = -new Vector2(toAttacker.X, toAttacker.Y);
         if (dc.Medical.Incapacitated) Sound(world, SoundKind.Down, d, a, prev[d].Position, fatal: death);
         // The police-hit rule first (the game's hit outcome runs before the damage), then the victim's faction's relation events (docs/game/factions-squads-towns.md 3.5).

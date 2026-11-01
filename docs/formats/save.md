@@ -466,6 +466,8 @@ Carry links (**Observed**, decompile: `FUN_1406280a0` writes, `FUN_140627b30` re
 (the partner, null when none), both always written. The reader links them when the partner resolves, else keeps the handle and links it later from the per-frame `FUN_140797ec0`
 (deferred until the partner is loaded). Meitou (`SaveCapture`, `CarrySystem.RestoreLinks`): the same keys; the link is made without a lift, checked every 20 ticks.
 
+Meitou torso fragments retain one corpse and inventory. GAMESTATE_CHARACTER int `meitou carry torso side` is 1 for a carrier holding the positive half; absent/0 is the ordinary or negative half. Both carriers can name the same corpse handle. String `meitou torso cut` holds four plane components and the full-body flag; `meitou torso positive` holds world x/y/z and yaw, all invariant finite floats. Optional `meitou torso positive release` retains a pending drop x/y/z until physics consumes it. These hydrate before carry restoration, including without a physical pose; the existing T2 ragdoll still holds both exact physical sides. Cut corpse owners referenced by saved carriers or queued positive-half pickup/loot orders load immediately, independently of the negative half's zone. Cut corpses outside normal platoons use a single NPC platoon marked `meitou torso corpse`; its corpse loads without a second inventory or AI squad.
+
 Meitou (`Saving/HeldSave`): reads building keys from the zones' GAMESTATE_BUILDING records when the town registers and writes them back into
 them (the visited zones' files, [Zone files](#zone-files)); the save ids of generated interiors are not mapped, so interior cages and
 beds keep rolled state. `in what` resolves only to a placed building; Meitou-only keys `meitou in something` (int) / `meitou in what` (fixture id)
@@ -493,7 +495,7 @@ A player character's order queue (the deque at `AITaskSytem` +0x40, [order queue
   save holds. A building handle is the building's instance (a build site, or a fixture whose id is the building's own, a bed too); a CHARACTER handle finds the character by its saved handle.
 - **Meitou keys**: string `meitou tjob<i>` (the order's site id: a build site, fixture or rock, which wins on load over a building handle, as `meitou pjob<i>`), int `meitou tjobK<i>` (the owner's
   detail code, `IOrderOwner.SaveKind`: a loot that opens the window, a bed named by a put-in order, a walk only to a container, a lock order done in place), each written only when set. Ground-item
-  pick-ups (a runtime item id) and the Medic / Rescue buttons' looks are not saved. **Unknown**: how the original consumes the second list after a load.
+  pick-ups (a runtime item id) and the Medic / Rescue buttons' looks are not saved. Optional string `meitou tjobD<i>` holds owner-specific detail text (`IOrderOwner.SaveText` / `LoadDetailText`): an aimed attack keeps the selected LOCATIONAL_DAMAGE id. The front attack order restores its intent; the swing itself restarts. Missing text preserves older orders. **Unknown**: how the original consumes the second list after a load.
 
 Meitou-only crime keys (`Saving/CrimeSave`, `LockSystem`, `FixtureRegistry`; the original's keys for these facts are **Unknown**), each written only while set and removed otherwise:
 - GAMESTATE_CHARACTER float `age`: the character's age (1 for people, an animal's growth, [animals](../game/animals.md#ageing)); **Verified** in vanilla saves.

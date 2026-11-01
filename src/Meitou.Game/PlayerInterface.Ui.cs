@@ -261,6 +261,7 @@ sealed partial class PlayerInterface
         AddInventoryDrag(controls);
         var nameTags = new List<UiControl>();   // the tags are on the original's Back layer: under every panel
         AddItemLabels(nameTags);
+        AddBodyFragmentLabels(nameTags);
         AddNameTags(nameTags);
         AddTaskBars(nameTags);
         controls.InsertRange(0, nameTags);

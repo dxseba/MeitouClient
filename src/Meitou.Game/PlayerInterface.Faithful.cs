@@ -22,6 +22,7 @@ sealed partial class PlayerInterface
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
         if (!UiVisible) return false;
+        if (key == Meitou.Engine.Input.Key.Escape && CloseContextMenu()) return true;
         if (key == Meitou.Engine.Input.Key.Escape && CancelInventoryDrag()) return true;
         if (key == Meitou.Engine.Input.Key.Escape)
         {

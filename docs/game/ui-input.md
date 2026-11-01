@@ -328,6 +328,8 @@ labels are stacked above the nearer one. No quantity. The owner (`GroundItem.Own
 platoon faction, else the `insideBuilding` building's `owner faction ID` (also for the verb, engine choice), none for a `not real` faction; items dropped or
 placed in play have none. Picking up another faction's item marks it stolen from that faction (`StolenFrom`); standing inside a building it also sets a pending Theft against the building's faction ([economy](economy.md#fencing-stealing-and-smuggling)).
 
+Meitou fragment labels (`PlayerInterface.BodyFragmentLabels`, engine addition): Alt also labels dead bodies and each independently carried torso half with owner and anatomy. Strong horizontal/side/front cuts use upper/lower, left/right (from the rig's left arm axis), or front/back; oblique cuts use fragment 1/2. Labels stack above item labels, keep the piece's identity after moving away from its mesh, and omit hidden, occluded, off-floor and distant pieces. Left click picks up the indicated half; a held right click offers its own Pick Up/Put Down and Loot. Loose disconnected arm/head chains and severed heads/jaws are inspection-only. A limb already represented by a ground item keeps one loot label with its owner name.
+
 ### Hover outline
 
 Meitou only (Advanced → Hover outline, `HoverOutline`, default on; the game has none). The character under the cursor is drawn alone into a
@@ -554,6 +556,8 @@ complete buildings with doors (Meitou's stand-in for the target's building handl
 the walls (`TownDutySystem.AmInsideTownWalls`: gate code, else the built-up area) and the lead (the last selected, as for the turret test) does not regard it as friendly; no 223 there.
 **Corpse Disposal** (136) on the player's corpse machine (function 11): with Shift the Corpse disposal job (137, finder 138), else each selected character carrying a dead body
 takes it to the nearest free incinerator (`DisposeCorpseOrder`; the order's condition 99 read as carrying a dead body, **engine reading**). Not built: Lock / Unlock of a cage (Pick Lock stands in), item menus beyond a ground item's Pick Up / Steal, the occupant's second menu and the unconscious message.
+
+Meitou `Attack body part` (engine addition): a living hostile target that is down or asleep, uncarried and uncaged offers a second menu of its present health parts; severed stumps are omitted. These living down/asleep NPCs publish immutable health rows even when uninspected; other detailed HUD fields keep their selection/inspection gate. Releasing right over the parent opens this menu without issuing an attack. Left click chooses a part; outside click or Esc cancels. Confirmation rechecks that the target is alive and eligible, then emits a picked `AttackOrder` with `AllowIncapacitated` and the canonical health-part ID in `TargetBodyPart`. Standing enemies retain the ordinary Attack Target verb; corpses and friends get no part attack.
 
 ### Edit boxes and keyboard focus
 

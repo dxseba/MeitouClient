@@ -17,7 +17,7 @@ sealed partial class PlayerInterface
     /// <summary>How long the command button is held on a target before the menu opens (<b>Observed</b>: 0.2 s, FUN_140800250).</summary>
     public const double ContextHoldSeconds = 0.2;
 
-    sealed record ContextMenu(string Title, Vector2 At, IReadOnlyList<(string Caption, Action Give)> Verbs);
+    sealed record ContextMenu(string Title, Vector2 At, IReadOnlyList<(string Caption, Action Give)> Verbs, bool DismissOnOutside = false);
     ContextMenu? contextMenu;
     // A right press on a target that has verbs: its menu (built again when the hold ends), where, when, and the order a quick click gives (null: none).
     (Func<Vector2, ContextMenu?> Menu, Vector2 At, long Since, Action? Quick)? contextPending;
@@ -30,7 +30,7 @@ sealed partial class PlayerInterface
     /// </summary>
     static readonly Dictionary<string, int> VerbOrders = new()
     {
-        ["Build"] = 2, ["Steal"] = 3, ["Attack Target"] = 5, ["Talk To"] = 12, ["Attack All"] = 16, ["First Aid"] = 25, ["Inventory"] = 26, ["Trade"] = 26, ["Loot"] = 26,
+        ["Build"] = 2, ["Steal"] = 3, ["Attack Target"] = 5, ["Attack body part"] = 5, ["Talk To"] = 12, ["Attack All"] = 16, ["First Aid"] = 25, ["Inventory"] = 26, ["Trade"] = 26, ["Loot"] = 26,
         ["Stand Up"] = 28, ["Follow"] = 31, ["Bodyguard"] = 45, ["Repairs"] = 60, ["Attack Unprovoked"] = 61, ["Put Down"] = 69, ["Open"] = 72, ["Close"] = 73, ["Pick Lock"] = 76,
         ["Lock"] = 77, ["Unlock"] = 78, ["Use"] = 87, ["Repair"] = 95, ["Dismantle"] = 96, ["Training"] = 97, ["Put in Bed"] = 99, ["Get in"] = 107, ["Put in"] = 108,
         ["Knock Out"] = 109, ["Set Free"] = 110, ["Break Out"] = 111, ["Auto-Haul"] = 124, ["Corpse Disposal"] = 136, ["Man Turret"] = 146, ["Capture"] = 166,
@@ -84,11 +84,12 @@ sealed partial class PlayerInterface
     /// The verbs the selection has for a character (<c>FUN_1407a6bc0</c>, docs/game/ui-input.md "Context menu verbs"), in the original's labels. Prisoners, carried bodies, the
     /// player's own, hostile and other characters each get their branch's verbs; then the medic verbs and the shackle verbs.
     /// </summary>
-    List<(string Caption, Action Give)> Verbs(CharacterSnapshot target)
+    List<(string Caption, Action Give)> Verbs(CharacterSnapshot target, int torsoSide = 0)
     {
         var verbs = new List<(string, Action)>();
         var selection = SelectedIds();
         if (selection.Count == 0) return verbs;
+        if (target.TorsoBisection is { IsValid: true }) return TorsoFragmentVerbs(target, torsoSide);
         var id = target.Id;
         bool down = target.Down;   // vfunc 0x30, FUN_1405c9e10, from the snapshot
         var carriers = Selected().Where(c => c.Carrying == id).Select(c => c.Id).ToArray();
@@ -108,6 +109,8 @@ sealed partial class PlayerInterface
         if (target.Prison is { } prison) PrisonerVerbs(verbs, target, prison, selection, down);
         else if (target.IsPlayer) OwnCharacterVerbs(verbs, target, selection, down);
         else OtherCharacterVerbs(verbs, target, selection, down);
+        if (CanChooseAttackPart(target) && AttackableParts(target).Any())
+            verbs.Add(("Attack body part", () => ChooseAttackPart(id, selection)));
         // The medic verbs, unless it is dead or a hostile one standing (the original: the lead's enemy test, vtable +0x3e8).
         if (target.Body is { Dead: false } && (down || target.IsPlayer || !Hostile(target)))
         {
@@ -179,10 +182,10 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>Loot (26), or Trade for the player's own character: opens the target's inventory beside the selection's. Offered when <see cref="CharacterSnapshot.CanOpenInventory"/> says the simulation will.</summary>
-    (string, Action) InventoryVerb(CharacterSnapshot target)
+    (string, Action) InventoryVerb(CharacterSnapshot target, int torsoSide = 0)
     {
         var id = target.Id;
-        return (target.IsPlayer ? "Trade" : "Loot", () => Say(new Meitou.Simulation.Carrying.OpenLootOrder([], id) { Tick = session.World.Tick }));
+        return (target.IsPlayer ? "Trade" : "Loot", () => Say(new Meitou.Simulation.Carrying.OpenLootOrder([], id) { Tick = session.World.Tick, TorsoSide = torsoSide }));
     }
 
     /// <summary>
@@ -366,7 +369,8 @@ sealed partial class PlayerInterface
     bool ContextPress(Vector2 p, Action? quick)
     {
         if (PickWhere(p, _ => true) is not { } id) return false;
-        return ContextPressOn(p, at => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } target ? Menu(target.Name, at, Verbs(target)) : null, quick);
+        int side = PickTorsoSide(id, p);
+        return ContextPressOn(p, at => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } target ? Menu(target.Name, at, Verbs(target, side)) : null, quick);
     }
 
     /// <summary>A right press on a target whose <paramref name="menu"/> has verbs (true): the hold timer starts and <paramref name="quick"/> waits for the release.</summary>
@@ -395,7 +399,7 @@ sealed partial class PlayerInterface
 
     /// <summary>
     /// A mouse button let go while the menu is open (<c>FUN_1407a7f10</c>, <c>FUN_1407ac8c0</c>): a verb row under the cursor gives its order, whichever button it is (the row's
-    /// release handler tests none), and the menu closes. The menu opens on the held command button and closes when that button is let go, so the right release always ends it;
+    /// release handler tests none), and the menu closes. A verb may replace it with a persistent second-step menu. Ordinary menus close on the command button release;
     /// a left release over a row acts, elsewhere nothing (the menu stays while the command button is held). True when the event was the menu's.
     /// </summary>
     bool ContextMenuRelease(MouseButton button, Vector2 p)
@@ -403,7 +407,7 @@ sealed partial class PlayerInterface
         if (contextMenu is null) return false;
         var row = UiVisible ? MyGuiPresentation.HitTest(ArrangeUi(), p.X, p.Y) : null;
         if (row is { Action: "meitou:context" }) { SoundForAction("context", row.Argument); ContextAction(row.Argument); return true; }
-        if (button != MouseButton.Right) return false;   // another button's release still ends what its press began (a drag, a window move)
+        if (button != MouseButton.Right && !(button == MouseButton.Left && contextMenu.DismissOnOutside)) return false;   // another button's release still ends what its press began (a drag, a window move)
         CloseContextMenu();
         return true;
     }

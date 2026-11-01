@@ -15,7 +15,7 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>The scenes <see cref="StageScene"/> knows.</summary>
-    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "weapon-blood"];
+    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "weapon-blood", "torso-carry", "downed-attack"];
 
     /// <summary>The menu scene's targets, one frame each.</summary>
     static readonly string[] SceneMenus = ["character", "door", "container", "cage"];
@@ -39,6 +39,8 @@ sealed partial class GameHost
         var at = leader.Position;
         switch (scene)
         {
+            case "downed-attack": return StageDownedAttack();
+            case "torso-carry": return StageTorsoCarry();
             case "bisect":
                 if (!IsSandbox || !g.SandboxBisect) throw new ArgumentException("--scene bisect needs --sandbox 2 --sandbox-bisect");
                 return session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe)?.Position;
@@ -159,9 +161,11 @@ sealed partial class GameHost
         int frames = scene == "menu" ? SceneMenus.Length : g.SceneFrames;
         for (int f = 0; f < frames; f++)
         {
+            if (scene == "downed-attack") StepDownedAttackScene(f);
+            if (scene == "torso-carry") StepTorsoCarryScene(f);
             if (scene != "menu") AdvanceScene(g.SceneEvery);
             var lead = playerSquad is null ? null : session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == playerSquad.Leader);
-            var watch = focus ?? lead?.Position;
+            var watch = scene == "torso-carry" ? TorsoCarryFocus() : focus ?? lead?.Position;
             if (watch is { } p)
             {
                 session.Camera.MovePivot(new Vector2(p.X, p.Z));
@@ -177,8 +181,10 @@ sealed partial class GameHost
             {
                 overlay.Target = target;
                 UpdateView(w, h);
+                if (g.UiPanel == "body-parts") player.SceneShowBodyPartLabels(camera.Target);
                 if (scene == "menu" && lead is not null && !player.OpenSceneMenu(SceneMenus[f], lead.Position)) Console.WriteLine($"scene     menu {SceneMenus[f]}: none on screen");
                 player.Draw(overlay, w, h);
+                if (g.UiPanel == "body-parts") Console.WriteLine("body labels   " + string.Join("; ", player.BodyFragmentLabelsDrawn.Select(p => p.Label.Name)));
             }
             display.EndFrame();
             display.Context.Finish();

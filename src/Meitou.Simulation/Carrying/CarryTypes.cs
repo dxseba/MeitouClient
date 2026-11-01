@@ -8,6 +8,8 @@ public sealed record PickUpOrder(IReadOnlyList<CharacterId> Carriers, CharacterI
 {
     /// <summary>The verb was Kidnap (246, <c>Task_Kidnapping</c>): a sleeping target may be taken too, and the lift rolls <see cref="CarrySystem.KidnapChance"/> first.</summary>
     public bool Kidnap { get; init; }
+    /// <summary>1 lifts the positive half of a bisected corpse; 0 or -1 lifts its ordinary/negative half.</summary>
+    public int TorsoSide { get; init; }
 }
 
 /// <summary>Orders the carriers (the selection when the list is empty) that carry someone to set it down where they stand (the original's <c>PUT_DOWN_OBJECT</c>, "Put Down").</summary>
@@ -17,13 +19,21 @@ public sealed record PutDownOrder(IReadOnlyList<CharacterId> Carriers) : OrderCo
 /// Orders one of the looters (the selection when the list is empty) to loot <see cref="Target"/>, a knocked-out or dead character: the nearest walks to it and takes everything from
 /// its inventory and backpack that fits its own (a take-all; worn gear stays, the loot window takes it). Looting someone of another faction in sight of its members is a theft.
 /// </summary>
-public sealed record LootOrder(IReadOnlyList<CharacterId> Looters, CharacterId Target) : OrderCommand;
+public sealed record LootOrder(IReadOnlyList<CharacterId> Looters, CharacterId Target) : OrderCommand
+{
+    /// <summary>1 approaches the positive torso half; 0/-1 approaches the ordinary body or negative half. Both use the corpse's single inventory.</summary>
+    public int TorsoSide { get; init; }
+}
 
 /// <summary>
 /// As <see cref="LootOrder"/>, but in reach the looter opens <see cref="Target"/>'s inventory in a window (<see cref="PlayerState.OpenLoot"/>) instead of taking all: items are then taken one at a
 /// time (<see cref="TakeLootItem"/>). Closed with <see cref="Items.CloseContainer"/>, or when the looter walks off, goes down, or the body comes round or is lifted.
 /// </summary>
-public sealed record OpenLootOrder(IReadOnlyList<CharacterId> Looters, CharacterId Target) : OrderCommand;
+public sealed record OpenLootOrder(IReadOnlyList<CharacterId> Looters, CharacterId Target) : OrderCommand
+{
+    /// <summary>Which torso half must stay in reach while accessing the shared inventory (1 positive, 0/-1 ordinary or negative).</summary>
+    public int TorsoSide { get; init; }
+}
 
 /// <summary>
 /// A right click on an item of the open loot (<see cref="Item"/>: worn gear and the bag's contents included, <see cref="Items.Inventory.All"/> order): <see cref="Count"/> units (0: until one

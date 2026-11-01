@@ -78,6 +78,8 @@ public struct CombatSlot
     public bool CircleState;
     /// <summary>The target is the player's pick (<see cref="AttackOrder.Picked"/>): it does not turn on a fighter that yields to it.</summary>
     public bool Picked;
+    public bool AllowIncapacitated;
+    public string? TargetBodyPart;
     /// <summary>The tick of its next target choice (<see cref="CombatSystem.PickSeconds"/>); 0: at once.</summary>
     public int PickTick;
     /// <summary>
@@ -157,6 +159,8 @@ public struct CombatSlot
         if (ListEpoch != 0 || JoinedEpoch != 0) { h.Add(ListEpoch); h.Add(JoinedEpoch); }   // only once a list was emptied, so worlds without it hash as before
         if (CircleState) h.Add(0x43697263);   // only when set, so worlds without crowded fights hash as before
         if (Picked) h.Add(true);   // only when set, so worlds without player picks hash as before
+        if (AllowIncapacitated) h.Add(0x446F776E);
+        if (TargetBodyPart is { } part) { h.Add(0x41696D50); h.Add(Rng.StableHash(part)); }
         h.Add(PickTick);
         h.Add(BlockTimerTick);
         h.Add(SlotsCleared);

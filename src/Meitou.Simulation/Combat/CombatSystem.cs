@@ -238,13 +238,14 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
         if (!table.TryResolveNext(attacker, out int a) || !table.TryResolveNext(target, out int t) || a == t) return false;
         var cold = table.Cold(a)!;
         var tc = table.Cold(t)!;
-        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || tc.Medical is null || cold.Medical.Incapacitated || tc.Medical.Incapacitated) return false;
+        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || cold.Medical.Incapacitated || !MayKeepAttackTarget(world, a, t, order.Picked, order.AllowIncapacitated)) return false;
+        if (!ValidBodyPartTarget(world, a, t, order.Picked, order.AllowIncapacitated, order.TargetBodyPart)) return false;
         if (!cold.CarriedBy.IsNone) return false;   // a carried mate does not fight (a prisoner neither: rows 5, 13 and 16 are not registered for the imprisoned; it may still be attacked, engine choice)
         // A fighter turns on no one it found no path to lately unless the player picked it (isPathImpossible in every finder's score, docs/game/combat.md "Target score"): a mate
         // that is called in on a sighting or an attack and cannot reach the enemy (a cage, a locked room) would otherwise stand at the nearest spot for ever.
         if (!order.Picked && PursuitSystem.PathImpossible(cold, target, now)) return false;
         var (row, source) = order.Picked ? (TaskType.FOCUSED_MELEE_ATTACK, TaskSource.Order) : order.Defensive ? (TaskType.ATTACK_ATTACKERS_OF, TaskSource.Reaction) : (TaskType.ATTACK_ENEMIES, TaskSource.Goal);
-        return TaskStart.Start(world, a, new TaskRequest(CharacterTask.Attack, row, order.Source ?? source) { Target = target, Job = order.Job }) == StartResult.Started;
+        return TaskStart.Start(world, a, new TaskRequest(CharacterTask.Attack, row, order.Source ?? source) { Target = target, Job = order.Job, Detail = new AttackFocus(order.AllowIncapacitated, order.TargetBodyPart) }) == StartResult.Started;
     }
 
     /// <summary>Whether the victim is in melee combat mode, read before an order engages anyone (an attack on a fighting character is a lesser assault).</summary>
@@ -261,9 +262,20 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
     sealed record PickedAttack(AttackOrder Order, bool VictimFighting, long Tick);
 
     // Saved: the pick is rebuilt from its attacker and target; the victim's combat mode is read when the order starts (a tick that is never the world's).
-    int IOrderOwner.SaveKind(OrderEntry order) => order.Detail is PickedAttack ? 0 : -1;
+    int IOrderOwner.SaveKind(OrderEntry order) => order.Detail is PickedAttack picked ? picked.Order.AllowIncapacitated ? 1 : 0 : -1;
+    void IOrderOwner.HashDetail(ref StateHasher hasher, OrderEntry order)
+    {
+        if (order.Detail is PickedAttack { Order.AllowIncapacitated: true }) hasher.Add(0x446F776E);
+        if (order.Detail is PickedAttack { Order.TargetBodyPart: { } part }) { hasher.Add(0x41696D50); hasher.Add(Rng.StableHash(part)); }
+    }
+    string? IOrderOwner.SaveText(OrderEntry order) => (order.Detail as PickedAttack)?.Order.TargetBodyPart;
     object? IOrderOwner.LoadDetail(World world, CharacterId self, TaskType row, int kind, CharacterId target) =>
-        new PickedAttack(new AttackOrder([self], target) { Picked = true, Tick = world.Tick }, false, -1);
+        RestorePickedAttack(world, self, kind, target, null);
+    object? IOrderOwner.LoadDetailText(World world, CharacterId self, TaskType row, int kind, CharacterId target, string? text) =>
+        RestorePickedAttack(world, self, kind, target, text);
+
+    static PickedAttack RestorePickedAttack(World world, CharacterId self, int kind, CharacterId target, string? part) =>
+        new(new AttackOrder([self], target) { Picked = true, AllowIncapacitated = kind == 1, TargetBodyPart = part, Tick = world.Tick }, false, -1);
 
     /// <summary>
     /// The attack order (row 5) needs a target that is there, awake and has a body (else it leaves the queue), and an attacker able to fight: a fighter, awake, not carried (<see cref="Engage"/>).
@@ -271,7 +283,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
     OrderCheck IOrderOwner.CanRun(World world, int slot, OrderEntry order)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(order.Target, out int t) || t == slot || table.Cold(t)!.Medical is not { Incapacitated: false }) return OrderCheck.Gone;
+        bool allow = order.Detail is PickedAttack { Order.AllowIncapacitated: true };
+        if (!table.TryResolveNext(order.Target, out int t) || t == slot || !MayKeepAttackTarget(world, slot, t, true, allow) || !ValidBodyPartTarget(world, slot, t, true, allow, (order.Detail as PickedAttack)?.Order.TargetBodyPart)) return OrderCheck.Gone;
         var cold = table.Cold(slot)!;
         return cold is { Fighter: not null, Stats: not null, Race: not null, Medical.Incapacitated: false } && cold.CarriedBy.IsNone ? OrderCheck.Run : OrderCheck.Blocked();
     }
@@ -306,6 +319,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
         s.TargetGeneration = target.Generation;
         (s.TaskSlot, s.TaskGeneration) = (t, target.Generation);
         s.Picked = picked;
+        var focus = request.Detail as AttackFocus;
+        s.AllowIncapacitated = picked && (focus?.AllowIncapacitated ?? request.Detail is true);
+        s.TargetBodyPart = picked && s.AllowIncapacitated ? focus?.TargetBodyPart : null;
         s.PickTick = now + PickTicks(world, cold);
         s.ReadyTick = now;   // no wait before the first swing (startupState enters the attack at once)
         // The fight's first path is asked for at once: the wait an idle or wandering character was in (3 to 10 s) is not the pursuit's repath timer (PursuitSystem), and left in
@@ -343,6 +359,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
             s.NextBlow = 0;
             s.Engaged = false;
             s.Picked = false;
+            s.AllowIncapacitated = false;
+            s.TargetBodyPart = null;
         }
     }
 
@@ -367,6 +385,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
         var cold = table.Cold(slot)!;
         if (cold.InCombat) s.ListEpoch++;
         s.TaskSlot = -1;
+        s.AllowIncapacitated = false;
+        s.TargetBodyPart = null;
         EndFight(table, slot);
     }
 
@@ -412,7 +432,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
             if (t < 0 || t >= prev.Length || !prev[t].Alive || prev[t].Generation != s.TargetGeneration) continue;
             var cold = table.Cold(i)!;
             var from = new Vector2(prev[i].Position.X, prev[i].Position.Z);
-            var to = new Vector2(prev[t].Position.X, prev[t].Position.Z);
+            var targetPoint = TargetPoint(world, s, prev[t].Position);
+            var to = new Vector2(targetPoint.X, targetPoint.Z);
             var delta = to - from;
             float distance = delta.Length();
             if (distance < 1e-3f) continue;
@@ -426,8 +447,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
             // A crossbowman stands while it aims or reloads and walks up only while closing in.
             bool shooting = s.Ranged && s.RangedState != (byte)RangedStates.Closing;
             bool busy = s.Down || s.AttackTech >= 0 || s.ReactTech >= 0 || now < s.StunUntil || shooting;
-            float gap = distance - CombatTuning.Footprint(cold) - CombatTuning.Footprint(table.Cold(t));
-            float stand = CombatTuning.StandGap(s.Reach, cold.Fighter?.WeaponLength ?? 0, cold.CombatRunning);
+            float gap = distance - CombatTuning.Footprint(cold) - (s.TargetBodyPart is null ? CombatTuning.Footprint(table.Cold(t)) : 0);
+            float stand = s.TargetBodyPart is null ? CombatTuning.StandGap(s.Reach, cold.Fighter?.WeaponLength ?? 0, cold.CombatRunning) : 1;
             if (busy || gap <= stand)
             {
                 n.Velocity = default;

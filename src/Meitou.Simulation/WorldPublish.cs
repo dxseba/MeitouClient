@@ -171,7 +171,9 @@ public sealed partial class World
             s.BloodAmounts = cold?.Medical is { } bloodMedical ? Bodies.MedicalState.BloodAmounts(bloodMedical) : 0UL;
             s.Knockdown = cold?.Knockdown ?? default;
             s.ClosedSlots = cold is null || !detailed ? [] : ClosedSlotsOf(cold);
-            s.HealthParts = detailed && cold!.Medical is { } health && cold.Race is { } anatomy ? HealthPartsOf(health, anatomy) : [];
+            s.HealthParts = cold is { Medical: { } health, Race: { } anatomy }
+                && (detailed || !cold.IsPlayer && !health.Dead && (CharacterFacts.Down(cold) || Carrying.CarrySystem.Asleep(table, i)))
+                ? HealthPartsOf(health, anatomy) : [];
             s.ItemGrid = (selected || id == Player.OpenLoot || cold is { IsPlayer: true } && Player.InventoryShown.Contains(id)) && cold!.Inventory is { } grid ? new InventoryView(grid.Width, grid.Height, grid.Backpack?.Contents?.Width ?? 0, grid.Backpack?.Contents?.Height ?? 0,
                 ItemsOf(grid, cold.Faction, population))
                 { TotalWeight = grid.ContentWeight(), CarryCapacity = cold.Stats is { } strength && systems.OfType<BodySystem>().FirstOrDefault() is { } bodies
@@ -193,6 +195,11 @@ public sealed partial class World
             s.CarriedBy = cold?.CarriedBy ?? CharacterId.None;
             s.Carry = cold is { CarriedBy.IsNone: false } ? cold.CarryAttach ?? Carrying.CarryPose.Fallback : null;
             s.Carrying = cold?.Carrying ?? CharacterId.None;
+            s.CarryingTorsoSide = cold?.CarryingTorsoSide ?? 0;
+            s.TorsoPositivePosition = cold?.TorsoPositivePosition;
+            s.TorsoPositiveYaw = cold?.TorsoPositiveYaw ?? 0;
+            s.TorsoPositiveCarriedBy = cold?.TorsoPositiveCarriedBy ?? CharacterId.None;
+            s.TorsoPositiveCarry = cold is { TorsoPositiveCarriedBy.IsNone: false } ? cold.TorsoPositiveCarryAttach ?? Carrying.CarryPose.Fallback : null;
             s.HeldTool = state[i].Task == (byte)CharacterTask.Operate && cold is { OperateSite: not null, Appearance.Animal: null } ? cold.OperateTool : null;
             s.Task = (CharacterTask)state[i].Task;
             s.PickingLock = cold?.PickingLock is not null;
@@ -235,6 +242,7 @@ public sealed partial class World
                 LockLevel = cold.InWhat is { } locked && Fixtures.Find(locked)?.Lock is { } cageLock ? cageLock.Level : -1 } : null;
             s.Ragdoll = ragdolls?.Publish(id);
             s.TorsoRagdoll = ragdolls?.PublishTorso(id);
+            s.TorsoBisection = cold?.TorsoBisection;
             s.DetachedRagdolls = ragdolls?.PublishDetached(id) ?? [];
             s.StealthKoChance = koSlot >= 0 && i != koSlot && cold is { IsPlayer: false } && Carrying.CarrySystem.CanBeKnockedOut(cold)
                 ? Carrying.CarrySystem.StealthKoChance(table.Cold(koSlot)!, cold, aggro?.Spotted(i, table.IdOf(koSlot)) == true) : null;

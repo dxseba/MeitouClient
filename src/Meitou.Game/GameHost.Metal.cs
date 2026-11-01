@@ -465,11 +465,13 @@ sealed partial class GameHost
                 assets.Find("credits.txt") is { } creditsFile ? File.ReadAllText(creditsFile) : "");
             // The picks the interface asks the host for: the drawn character meshes, the buildings' floors and their closed shells.
             hud.MeshHit = (id, origin, direction) => TorsoMeshHit(characters, id, origin, direction);
+            hud.TorsoSideHit = (id, origin, direction) => TorsoSideHit(characters, id, origin, direction);
+            hud.BodyFragmentLabels = () => characters is null ? [] : BodyFragmentLabels(characters);
             hud.Floor = (() => viewedFloor, StepFloor);
             hud.BuildingMoveHit = (origin, direction, distance) => objects?.MoveHit(origin, direction, viewedFloor, distance);
             hud.SurfaceMoveHit = SurfaceMoveHit;
             hud.ClosedBuildingHit = (origin, direction, distance) => objects?.ClosedBuildingHit(origin, direction, distance);
-            hud.HiddenInWorld = hiddenIndoors.Contains;
+            hud.HiddenInWorld = CharacterHidden;
             hud.ShownInteriorHit = (origin, direction, distance) => objects?.ShownInteriorHit(origin, direction, distance);
             hud.AboveViewedFloor = AboveViewedFloor;
             hud.GroundItemShape = GroundShape;
@@ -1319,10 +1321,9 @@ sealed partial class GameHost
             if (outlining)
             {
                 if (highlighting)
-                    hoverKeys.AddRange(hud!.HighlightTargets(camera.Target, PlayerInterface.HighlightRadius)
-                        .Select(t => (DrawKey(t.Id), t.Colour)));
+                    hoverKeys.AddRange(TorsoHighlightKeys(hud!.HighlightTargets(camera.Target, PlayerInterface.HighlightRadius)));
                 else if (hud!.HoverTarget is { } hover)
-                    hoverKeys.Add((DrawKey(hover.Id), hover.Colour));
+                    hoverKeys.Add((TorsoDrawKey(hover.Id, hud.HoverTorsoSide), hover.Colour));
             }
             gpu.HoverKeys = hoverKeys;
             gpu.HoverOutline = hoverOutline;

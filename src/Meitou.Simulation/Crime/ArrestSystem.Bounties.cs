@@ -177,7 +177,7 @@ public sealed partial class ArrestSystem : IOrderOwner
     /// <summary>Put in prison 108 needs a player character carrying someone (else it leaves the queue), awake and free, and a free cage ("no free cage nearby", posted).</summary>
     OrderCheck IOrderOwner.CanRun(World world, int slot, OrderEntry order)
     {
-        if (Carry is null || world.Characters.Cold(slot) is not { IsPlayer: true, Carrying.IsNone: false } c) return OrderCheck.Gone;
+        if (Carry is null || world.Characters.Cold(slot) is not { IsPlayer: true, Carrying.IsNone: false } c || Carrying.CarrySystem.CarriesTorsoFragment(world, c)) return OrderCheck.Gone;
         if (c is not { IsImprisoned: false, Medical.Incapacitated: false }) return OrderCheck.Blocked();
         return CageFor(world, slot, c, order.Site) is null ? OrderCheck.Blocked($"{c.Name}: no free cage nearby", posted: true) : OrderCheck.Run;
     }
@@ -224,7 +224,7 @@ public sealed partial class ArrestSystem : IOrderOwner
     bool StepCaging(World world, Caging k)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(k.Carrier, out int s) || table.Cold(s) is not { Medical.Incapacitated: false } c || c.Carrying != k.Captive) return false;
+        if (!table.TryResolveNext(k.Carrier, out int s) || table.Cold(s) is not { Medical.Incapacitated: false } c || c.Carrying != k.Captive || Carrying.CarrySystem.CarriesTorsoFragment(world, c)) return false;
         ref var n = ref table.Next[s];
         var cage = world.Fixtures.Find(k.Cage);
         if (cage is null || !FixtureRegistry.IsFree(table, cage))
@@ -328,6 +328,7 @@ public sealed partial class ArrestSystem : IOrderOwner
         var table = world.Characters;
         if (Carry is null || !table.TryResolveNext(guard, out int g) || table.Cold(g) is not { IsPlayer: false, Medical.Incapacitated: false, Carrying.IsNone: true } gc || Busy(guard)) return false;
         if (!table.TryResolveNext(carrier, out int c) || table.Cold(c) is not { } cc || !table.TryResolveNext(cc.Carrying, out int t) || table.Cold(t) is not { } tc) return false;
+        if (Carrying.CarrySystem.CarriesTorsoFragment(world, cc)) return false;
         var target = cc.Carrying;
         Carry.LetGo(world, c);
         var arrest = new Arrest { Guard = guard, Target = target, Faction = gc.Faction, Phase = ArrestPhase.Fight, Enslave = enslave };

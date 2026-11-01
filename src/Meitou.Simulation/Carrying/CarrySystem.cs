@@ -95,7 +95,8 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     {
         var table = world.Characters;
         var b = table.Cold(body)!;
-        return CanBeLifted(world, b) || table.Cold(carrier)!.Snatching && Snatchable(b) && b.CarriedBy != table.IdOf(carrier);
+        int side = table.Cold(carrier)!.CarryTargetTorsoSide;
+        return CanBeLifted(world, b, side) || table.Cold(carrier)!.Snatching && Snatchable(b, side) && Holder(b, side) != table.IdOf(carrier);
     }
 
     static bool AwakeMate(CharacterCold cold) =>
@@ -131,7 +132,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
 
     /// <summary>Whether slot <paramref name="i"/>'s loot task is the walk of an <see cref="OpenLootOrder"/> (it opens the window instead of taking all).</summary>
     static bool Opening(World world, int i) =>
-        world.Player.LootWalker == world.Characters.IdOf(i) && world.Player.OpeningLoot == world.Characters.Cold(i)!.CarryTarget;
+        world.Player.LootWalker == world.Characters.IdOf(i) && world.Player.OpeningLoot == world.Characters.Cold(i)!.CarryTarget && world.Player.LootTorsoSide == world.Characters.Cold(i)!.CarryTargetTorsoSide;
 
     /// <summary>
     /// Whether <paramref name="a"/> regards <paramref name="b"/> as friendly for the put-down KO: the same faction, or allied factions (relation 50 or more) when a table is known
@@ -160,22 +161,22 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
                 case PickUpOrder order:
                 {
                     // The order's lift (225 Lifting/Snatching Order) may take a body another carries; a kidnap (246) may not. The nearest of the characters that can lift it gets it.
-                    var lift = new OrderEntry(order.Kidnap ? TaskType.KIDNAP_ORDER : TaskType.LIFT_PERSON_PLAYER_ORDER, this) { Target = order.Target };
-                    if (table.TryResolveNext(order.Target, out int body) && LiftOf(world, lift, body) && Nearest(table, Who(world, order.Carriers), body, s => PlayerOrders.CanRun(world, s, lift).CanRun) is int carrier)
+                    var lift = new OrderEntry(order.Kidnap ? TaskType.KIDNAP_ORDER : TaskType.LIFT_PERSON_PLAYER_ORDER, this) { Target = order.Target, Detail = order.TorsoSide > 0 ? PositiveTorso : null };
+                    if (table.TryResolveNext(order.Target, out int body) && LiftOf(world, lift, body) && Nearest(table, Who(world, order.Carriers), body, s => PlayerOrders.CanRun(world, s, lift).CanRun, order.TorsoSide) is int carrier)
                         PlayerOrders.Give(world, carrier, lift, order.Queued);
                     break;
                 }
                 case LootOrder loot:
                 {
-                    var entry = new OrderEntry(TaskType.LOOT_TARGET, this) { Target = loot.Target };
-                    if (table.TryResolveNext(loot.Target, out int victim) && CanBeLooted(table.Cold(victim)!) && Nearest(table, Who(world, loot.Looters), victim, s => PlayerOrders.CanRun(world, s, entry).CanRun) is int looter)
+                    var entry = new OrderEntry(TaskType.LOOT_TARGET, this) { Target = loot.Target, Detail = loot.TorsoSide > 0 ? PositiveLoot : null };
+                    if (table.TryResolveNext(loot.Target, out int victim) && CanBeLooted(table.Cold(victim)!) && Nearest(table, Who(world, loot.Looters), victim, s => PlayerOrders.CanRun(world, s, entry).CanRun, loot.TorsoSide) is int looter)
                         PlayerOrders.Give(world, looter, entry, loot.Queued);
                     break;
                 }
                 case OpenLootOrder open:
                 {
-                    var entry = new OrderEntry(TaskType.LOOT_TARGET, this) { Target = open.Target, Detail = OpenInventory };
-                    if (table.TryResolveNext(open.Target, out int body2) && Openable(table, body2) && Nearest(table, Who(world, open.Looters), body2, s => PlayerOrders.CanRun(world, s, entry).CanRun) is int opener)
+                    var entry = new OrderEntry(TaskType.LOOT_TARGET, this) { Target = open.Target, Detail = open.TorsoSide > 0 ? PositiveInventory : OpenInventory };
+                    if (table.TryResolveNext(open.Target, out int body2) && Openable(table, body2) && Nearest(table, Who(world, open.Looters), body2, s => PlayerOrders.CanRun(world, s, entry).CanRun, open.TorsoSide) is int opener)
                         PlayerOrders.Give(world, opener, entry, open.Queued);
                     break;
                 }
@@ -187,6 +188,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
                     break;
                 case CloseContainer:
                     world.Player.OpenLoot = world.Player.OpeningLoot = CharacterId.None;
+                    world.Player.LootTorsoSide = 0;
                     break;
                 case StealthKoOrder ko:
                     BeginKnockOut(world, ko);
@@ -208,19 +210,26 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         }
     }
 
-    /// <summary>The <see cref="OrderEntry.Detail"/> of the Open Inventory order (a loot that opens the window) and of the Rescue button's one-shot order (the job's look, then a lift).</summary>
-    static readonly object OpenInventory = new(), RescueButton = new();
+    /// <summary>Order details for the inventory window, one-shot rescue search and the independently carried positive torso half.</summary>
+    static readonly object OpenInventory = new(), RescueButton = new(), PositiveTorso = new(), PositiveLoot = new(), PositiveInventory = new();
 
-    // Saved: the Open Inventory loot is kind 1; the Rescue button's look (row None) is not saved.
-    int IOrderOwner.SaveKind(OrderEntry order) => order.Detail is null ? 0 : order.Detail == OpenInventory ? 1 : -1;
-    object? IOrderOwner.LoadDetail(World world, CharacterId self, TaskType row, int kind, CharacterId target) => kind == 1 ? OpenInventory : null;
+    // Saved: inventory window 1, positive lift 2, positive take-all 3, positive inventory window 4. The one-shot rescue search is not saved.
+    int IOrderOwner.SaveKind(OrderEntry order) => order.Detail is null ? 0 : order.Detail == OpenInventory ? 1 : order.Detail == PositiveTorso ? 2 : order.Detail == PositiveLoot ? 3 : order.Detail == PositiveInventory ? 4 : -1;
+    object? IOrderOwner.LoadDetail(World world, CharacterId self, TaskType row, int kind, CharacterId target) => kind == 1 ? OpenInventory : kind == 2 ? PositiveTorso : kind == 3 ? PositiveLoot : kind == 4 ? PositiveInventory : null;
+    void IOrderOwner.HashDetail(ref StateHasher hasher, OrderEntry order)
+    {
+        if (order.Detail == PositiveTorso) hasher.Add(0x506F7354);
+        else if (order.Detail == PositiveLoot) hasher.Add(0x506F734C);
+        else if (order.Detail == PositiveInventory) hasher.Add(0x506F7349);
+    }
 
     /// <summary>Whether <paramref name="body"/> can be taken by the lift order (a kidnap's sleeper too; a snatch from another carrier only by the order 225).</summary>
     static bool LiftOf(World world, OrderEntry lift, int body)
     {
         var bc = world.Characters.Cold(body)!;
         bool kidnap = lift.Row == TaskType.KIDNAP_ORDER;
-        return CanBeLifted(world, bc) || kidnap && CanBeKidnapped(world.Characters, body) || !kidnap && Snatchable(bc);
+        int side = lift.Detail == PositiveTorso ? 1 : 0;
+        return CanBeLifted(world, bc, side) || side == 0 && kidnap && CanBeKidnapped(world.Characters, body) || !kidnap && Snatchable(bc, side);
     }
 
     /// <summary>
@@ -252,7 +261,8 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
                 if (!LiftOf(world, order, target)) return OrderCheck.Gone;
                 return CanCarry(world, cold, order.Row, ordered: true) && cold.Carrying != order.Target ? OrderCheck.Run : OrderCheck.Blocked();
             case TaskType.LOOT_TARGET:
-                if (order.Detail == OpenInventory ? !Openable(table, target) : !CanBeLooted(tc)) return OrderCheck.Gone;
+                int lootSide = LootSide(order.Detail);
+                if (!ValidLootSide(tc, lootSide) || (OpensInventory(order.Detail) ? !Openable(table, target) : !CanBeLooted(tc))) return OrderCheck.Gone;
                 return cold is { Medical.Incapacitated: false, Inventory: not null } && cold.CarriedBy.IsNone ? OrderCheck.Run : OrderCheck.Blocked();
             case TaskType.STEALTH_KNOCKOUT:
                 if (!CanBeKnockedOut(tc)) return OrderCheck.Gone;
@@ -280,15 +290,19 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
                 {
                     cold.Kidnapping = order.Row == TaskType.KIDNAP_ORDER;
                     cold.Snatching = !cold.Kidnapping;
+                    cold.CarryTargetTorsoSide = order.Detail == PositiveTorso ? 1 : 0;
                 }
                 break;
-            case TaskType.LOOT_TARGET when order.Detail == OpenInventory:
+            case TaskType.LOOT_TARGET when OpensInventory(order.Detail):
                 Start(world, slot, CharacterTask.Loot, TaskType.LOOT_TARGET, TaskSource.Order, order.Target, CharacterTask.Idle);
+                cold.CarryTargetTorsoSide = LootSide(order.Detail);
                 (world.Player.OpenLoot, world.Player.OpeningLoot, world.Player.LootWalker) = (CharacterId.None, order.Target, table.IdOf(slot));
+                world.Player.LootTorsoSide = cold.CarryTargetTorsoSide;
                 break;
             case TaskType.LOOT_TARGET:
                 if (world.Player.LootWalker == table.IdOf(slot)) world.Player.OpeningLoot = CharacterId.None;
                 Start(world, slot, CharacterTask.Loot, TaskType.LOOT_TARGET, TaskSource.Order, order.Target, CharacterTask.Idle);
+                cold.CarryTargetTorsoSide = LootSide(order.Detail);
                 break;
             case TaskType.STEALTH_KNOCKOUT:
                 Start(world, slot, CharacterTask.StealthKo, TaskType.STEALTH_KNOCKOUT, TaskSource.Order, order.Target, CharacterTask.Idle);
@@ -301,15 +315,16 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     /// afterwards: false when it cannot carry or the body cannot be lifted. With <paramref name="kidnap"/> a sleeper may be taken too (<see cref="CanBeKidnapped"/>): the lift is then
     /// a kidnap, which rolls on arrival. A job's lift (<paramref name="source"/> <see cref="TaskSource.Job"/>, a carrying errand) names its <paramref name="job"/> and <paramref name="row"/>.
     /// </summary>
-    public bool BeginPickUp(World world, int carrier, CharacterId body, CharacterTask resume = CharacterTask.Idle, bool kidnap = false, TaskSource source = TaskSource.Npc, int job = -1, TaskType? row = null)
+    public bool BeginPickUp(World world, int carrier, CharacterId body, CharacterTask resume = CharacterTask.Idle, bool kidnap = false, TaskSource source = TaskSource.Npc, int job = -1, TaskType? row = null, int torsoSide = 0)
     {
         var table = world.Characters;
         var lift = kidnap ? TaskType.KIDNAP_ORDER : TaskType.LIFT_PERSON_PLAYER_ORDER;
         if (!table.TryResolveNext(body, out int b) || b == carrier || table.Cold(carrier) is not { } c || !CanCarry(world, c, lift)) return false;
-        bool asleep = !CanBeLifted(table.Cold(b)!);
+        bool asleep = !CanBeLifted(table.Cold(b)!, torsoSide);
         if (asleep && !(kidnap && CanBeKidnapped(table, b))) return false;
         if (!Start(world, carrier, CharacterTask.PickUp, row ?? lift, source, body, resume, job)) return false;
         c.Kidnapping = asleep;
+        c.CarryTargetTorsoSide = torsoSide > 0 ? 1 : 0;
         return true;
     }
 
@@ -332,6 +347,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         table.Next[slot].Task = (byte)CharacterTask.PutDown;
         table.Next[slot].TaskTime = 0;
         cold.CarryTarget = cold.Carrying;
+        cold.CarryTargetTorsoSide = cold.CarryingTorsoSide;
         cold.LiftTime = 0;
     }
 
@@ -364,14 +380,14 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
 
 
     /// <summary>The slot among <paramref name="ids"/> that <paramref name="accept"/> takes and is nearest the target (ties: the first listed).</summary>
-    static int? Nearest(CharacterTable table, IReadOnlyList<CharacterId> ids, int target, Func<int, bool> accept)
+    static int? Nearest(CharacterTable table, IReadOnlyList<CharacterId> ids, int target, Func<int, bool> accept, int torsoSide = 0)
     {
         int? best = null;
         float bestD = float.MaxValue;
         foreach (var id in ids)
         {
             if (!table.TryResolveNext(id, out int s) || !accept(s)) continue;
-            float d = Gap(table.Next[s], table.Next[target]);
+            float d = GapTo(table.Next[s], TargetPosition(table, target, torsoSide));
             if (d < bestD) { best = s; bestD = d; }
         }
         return best;
@@ -403,6 +419,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     {
         var cold = world.Characters.Cold(slot)!;
         cold.CarryTarget = CharacterId.None;
+        cold.CarryTargetTorsoSide = 0;
         cold.LiftTime = -1;
         cold.LootFlags = LootStart.None;
         if (reason == TaskEnd.Done) return;
@@ -422,6 +439,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         n.Mode = SpeedMode.Free;
         n.TaskTime = 0;
         cold.CarryTarget = target;
+        cold.CarryTargetTorsoSide = 0;
         cold.LiftTime = -1;
         cold.Kidnapping = false;
         cold.Snatching = false;
@@ -439,6 +457,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         }
         var cold = world.Characters.Cold(slot)!;
         cold.CarryTarget = CharacterId.None;
+        cold.CarryTargetTorsoSide = 0;
         cold.LiftTime = -1;
         cold.LootFlags = LootStart.None;
     }
@@ -458,13 +477,14 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
             var cold = table.Cold(i)!;
             bool lifting = n.Task == (byte)CharacterTask.PickUp;
             if (cold.Medical is not { Incapacitated: false } || cold.InCombat || !table.TryResolveNext(cold.CarryTarget, out int t)
-                || (lifting ? cold.LiftTime < 0 && !(CanCarry(world, cold, cold.Kidnapping ? TaskType.KIDNAP_ORDER : TaskType.LIFT_PERSON_PLAYER_ORDER) && (Liftable(world, i, t) || cold.Kidnapping && CanBeKidnapped(table, t))) : !(Opening(world, i) ? Openable(table, t) : CanBeLooted(table.Cold(t)!))))
+                || (lifting ? cold.LiftTime < 0 && !(CanCarry(world, cold, cold.Kidnapping ? TaskType.KIDNAP_ORDER : TaskType.LIFT_PERSON_PLAYER_ORDER) && (Liftable(world, i, t) || cold.Kidnapping && CanBeKidnapped(table, t))) : !(ValidLootSide(table.Cold(t)!, cold.CarryTargetTorsoSide) && (Opening(world, i) ? Openable(table, t) : CanBeLooted(table.Cold(t)!)))))
             {
                 if (!(lifting && cold.LiftTime >= 0)) End(world, i);   // a lift under way is finished or broken off in SlowWorld
                 continue;
             }
             const ushort Path = (ushort)MoveFlags.AnyPath;
-            if (Gap(next[i], next[t]) <= (lifting ? ReachOf(world, table.Cold(t)!) : Settings.Reach))
+            var targetAt = TargetPosition(table, t, cold.CarryTargetTorsoSide);
+            if (GapTo(next[i], targetAt) <= (lifting ? ReachOf(world, table.Cold(t)!) : Settings.Reach))
             {
                 if ((n.Flags & Path) != 0)
                 {
@@ -478,7 +498,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
             }
             if (lifting && cold.LiftTime >= 0) continue;   // lifting: it does not walk after the body
             n.TaskTime -= dt;
-            var goal = new Vector2(next[t].Position.X, next[t].Position.Z);
+            var goal = new Vector2(targetAt.X, targetAt.Z);
             bool asking = (n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
             bool stale = (n.Flags & (ushort)MoveFlags.HasPath) == 0 || Vector2.DistanceSquared(goal, n.Goal) > PursuitSystem.RepathDistance * PursuitSystem.RepathDistance;
             if (asking || !stale || n.TaskTime > 0) continue;
@@ -493,6 +513,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
 
     public void SlowWorld(World world)
     {
+        SeedTorsoFallbackPositions(world);
         var table = world.Characters;
         var next = table.Next;
         float dt = world.TickSeconds;
@@ -543,12 +564,14 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
             }
             var hand = link.CarryPartner;
             if (!bySave.TryGetValue((hand.C, hand.I), out int b) || b == i) continue;
-            link.CarryPartner = Meitou.Data.Save.Hand.Null;
             var body = table.Cold(b)!;
-            body.Save?.CarryPartner = Meitou.Data.Save.Hand.Null;
-            if (!cold.Carrying.IsNone || !body.CarriedBy.IsNone || cold.Medical is not { Incapacitated: false }) continue;
+            int side = link.CarryTorsoSide == 1 ? 1 : 0;
+            if (side == 1 && !HasPositiveTorso(body)) continue;   // wait until the cut's saved state is available
+            link.CarryPartner = Meitou.Data.Save.Hand.Null;
+            if (side == 0) body.Save?.CarryPartner = Meitou.Data.Save.Hand.Null;
+            if (!cold.Carrying.IsNone || !Holder(body, side).IsNone || cold.Medical is not { Incapacitated: false }) continue;
             if (body.Medical is { Incapacitated: false } && Friendly(cold, body)) body.CarriedAwake = true;
-            Link(table, i, b);
+            Link(table, i, b, side);
         }
     }
 
@@ -568,12 +591,12 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
             }
         }
         cold.LiftTime += dt;
-        bool attached = !cold.Carrying.IsNone && cold.Carrying == cold.CarryTarget;
+        bool attached = !cold.Carrying.IsNone && cold.Carrying == cold.CarryTarget && cold.CarryingTorsoSide == cold.CarryTargetTorsoSide;
         if (!attached && cold.LiftTime > CarrySettings.AttachAt * LiftSeconds)
         {
             // The body is attached once, at 0.4 of the clip, if it can still be lifted and is still near (the reach was tested when the clip started).
             if (!table.TryResolveNext(cold.CarryTarget, out int b) || !CanCarry(world, cold, cold.Kidnapping ? TaskType.KIDNAP_ORDER : TaskType.LIFT_PERSON_PLAYER_ORDER) || !Liftable(world, i, b)
-                || Gap(table.Next[i], table.Next[b]) > 2 * ReachOf(world, table.Cold(b)!))   // pushed about while lifting: some slack, not a pick-up from afar
+                || GapTo(table.Next[i], TargetPosition(table, b, cold.CarryTargetTorsoSide)) > 2 * ReachOf(world, table.Cold(b)!))   // pushed about while lifting: some slack, not a pick-up from afar
             {
                 End(world, i);
                 return;
@@ -588,14 +611,14 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
             if (table.Cold(b)!.InSomething == Locks.HeldState.Bed) world.Fixtures.LeaveBed(world, cold.CarryTarget);
             var body = table.Cold(b)!;
             // A snatch: the body's carrier lets go of it first (FUN_14034fbe0's unlink, as a drop: no put-down knock-out).
-            if (table.TryResolveNext(body.CarriedBy, out int holder)) Unlink(world, holder, b, drop: true);
+            if (table.TryResolveNext(Holder(body, cold.CarryTargetTorsoSide), out int holder)) Unlink(world, holder, b, drop: true);
             if (body.Medical is { Incapacitated: false } && Friendly(cold, body))
             {
                 // A squad mate lifted awake: it leaves its fight and task and rides until put down.
                 TaskStart.End(world, b, TaskEnd.Stopped);
                 body.CarriedAwake = true;
             }
-            Link(table, i, b);
+            Link(table, i, b, cold.CarryTargetTorsoSide);
         }
         else if (!attached && before > CarrySettings.AttachAt * LiftSeconds) { End(world, i); return; }   // dropped again mid-lift
         if (cold.LiftTime >= CarrySettings.DoneAt * LiftSeconds) End(world, i);
@@ -618,11 +641,20 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     }
 
     /// <summary>Links a carrier and a body (serial). The body stops whatever it did and takes the carrier's place.</summary>
-    static void Link(CharacterTable table, int carrier, int body)
+    static void Link(CharacterTable table, int carrier, int body, int torsoSide = 0)
     {
         var c = table.Cold(carrier)!;
         var b = table.Cold(body)!;
         c.Carrying = table.IdOf(body);
+        c.CarryingTorsoSide = torsoSide > 0 ? 1 : 0;
+        if (c.CarryingTorsoSide == 1)
+        {
+            b.TorsoPositiveCarriedBy = table.IdOf(carrier);
+            b.TorsoPositivePosition = table.Next[carrier].Position;
+            b.TorsoPositiveYaw = table.Next[carrier].Yaw;
+            b.TorsoPositiveReleaseAt = null;
+            return;
+        }
         b.CarriedBy = table.IdOf(carrier);
         TaskStart.Stand(table, body);
         ref var n = ref table.Next[body];
@@ -643,7 +675,13 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         var table = world.Characters;
         var c = table.Cold(carrier)!;
         var b = table.Cold(body)!;
+        if (c.CarryingTorsoSide == 1)
+        {
+            UnlinkPositive(world, carrier, body, drop);
+            return;
+        }
         c.Carrying = CharacterId.None;
+        c.CarryingTorsoSide = 0;
         b.CarriedBy = CharacterId.None;
         b.CarriedAwake = false;
         ref var bn = ref table.Next[body];
@@ -677,12 +715,19 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         {
             if (!next[i].Alive) continue;
             var cold = table.Cold(i)!;
-            if (!cold.CarriedBy.IsNone && (!table.TryResolveNext(cold.CarriedBy, out int k) || table.Cold(k)!.Carrying != table.IdOf(i)))
+            if (!cold.CarriedBy.IsNone && (!table.TryResolveNext(cold.CarriedBy, out int k) || table.Cold(k)!.Carrying != table.IdOf(i) || table.Cold(k)!.CarryingTorsoSide != 0))
                 (cold.CarriedBy, cold.CarriedAwake) = (CharacterId.None, false);   // the carrier is gone: the body stays where it was
+            if (!cold.TorsoPositiveCarriedBy.IsNone && (!table.TryResolveNext(cold.TorsoPositiveCarriedBy, out int positiveCarrier)
+                || table.Cold(positiveCarrier)!.Carrying != table.IdOf(i) || table.Cold(positiveCarrier)!.CarryingTorsoSide != 1))
+            {
+                cold.TorsoPositiveCarriedBy = CharacterId.None;
+                cold.TorsoPositiveCarryAttach = null;
+            }
             if (cold.Carrying.IsNone) continue;
-            if (!table.TryResolveNext(cold.Carrying, out int b) || table.Cold(b)!.CarriedBy != table.IdOf(i))
+            if (!table.TryResolveNext(cold.Carrying, out int b) || Holder(table.Cold(b)!, cold.CarryingTorsoSide) != table.IdOf(i))
             {
                 cold.Carrying = CharacterId.None;   // the body is gone (a corpse removed, a zone unloaded)
+                cold.CarryingTorsoSide = 0;
                 continue;
             }
             var body = table.Cold(b)!;
@@ -699,6 +744,12 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
                 if (Friendly(cold, body)) { Unlink(world, i, b, drop: false); continue; }
                 KnockOutHeld(cold, body);
             }
+            if (cold.CarryingTorsoSide == 1)
+            {
+                body.TorsoPositivePosition = next[i].Position;
+                body.TorsoPositiveYaw = next[i].Yaw;
+                continue;
+            }
             ref var bn = ref next[b];
             bn.Position = next[i].Position;
             bn.Yaw = next[i].Yaw;
@@ -711,10 +762,10 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     void Loot(World world, CharacterTable table, int i, float dt)
     {
         var cold = table.Cold(i)!;
-        if (!table.TryResolveNext(cold.CarryTarget, out int t) || Gap(table.Next[i], table.Next[t]) > ReachOf(world, table.Cold(t)!)) return;   // still walking (Schedule ends a loot whose target went)
+        if (!table.TryResolveNext(cold.CarryTarget, out int t) || GapTo(table.Next[i], TargetPosition(table, t, cold.CarryTargetTorsoSide)) > ReachOf(world, table.Cold(t)!)) return;   // still walking (Schedule ends a loot whose target went)
         var victim = table.Cold(t)!;
         bool opening = Opening(world, i);
-        if (cold.Inventory is not { } bag || !(opening ? Openable(table, t) : CanBeLooted(victim)))
+        if (cold.Inventory is not { } bag || !ValidLootSide(victim, cold.CarryTargetTorsoSide) || !(opening ? Openable(table, t) : CanBeLooted(victim)))
         {
             End(world, i);
             return;
@@ -733,6 +784,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         if (opening)
         {
             // An open-loot order: the window opens instead of a take-all.
+            player.LootTorsoSide = cold.CarryTargetTorsoSide;
             (player.OpenLoot, player.LootOpener, player.OpeningLoot) = (player.OpeningLoot, player.LootWalker, CharacterId.None);
             End(world, i);
             return;
@@ -773,10 +825,11 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     {
         var player = world.Player;
         var table = world.Characters;
-        if (!player.OpeningLoot.IsNone && (!table.TryResolveNext(player.LootWalker, out int w) || table.Next[w].Task != (byte)CharacterTask.Loot || table.Cold(w)!.CarryTarget != player.OpeningLoot))
+        if (!player.OpeningLoot.IsNone && (!table.TryResolveNext(player.LootWalker, out int w) || table.Next[w].Task != (byte)CharacterTask.Loot || table.Cold(w)!.CarryTarget != player.OpeningLoot || table.Cold(w)!.CarryTargetTorsoSide != player.LootTorsoSide))
             player.OpeningLoot = CharacterId.None;
         if (!player.OpenLoot.IsNone && OpenLootPair(world) is null) player.OpenLoot = CharacterId.None;
         if (player.OpenLoot.IsNone) seenLoot = CharacterId.None;
+        if (player.OpenLoot.IsNone && player.OpeningLoot.IsNone) player.LootTorsoSide = 0;
     }
 
     /// <summary>The open loot's looter and body slots while it may stay open (see <see cref="LootWindow"/>), else null.</summary>
@@ -784,9 +837,9 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     {
         var player = world.Player;
         var table = world.Characters;
-        return table.TryResolveNext(player.OpenLoot, out int t) && table.Cold(t) is { } body && Openable(table, t)
+        return table.TryResolveNext(player.OpenLoot, out int t) && table.Cold(t) is { } body && ValidLootSide(body, player.LootTorsoSide) && Openable(table, t)
             && table.TryResolveNext(player.LootOpener, out int o) && table.Cold(o) is { Medical.Incapacitated: false, Inventory: not null } looter && looter.CarriedBy.IsNone
-            && Gap(table.Next[o], table.Next[t]) <= ReachOf(world, body) * 1.5f ? (o, t) : null;
+            && GapTo(table.Next[o], TargetPosition(table, t, player.LootTorsoSide)) <= ReachOf(world, body) * 1.5f ? (o, t) : null;
     }
 
     /// <summary>

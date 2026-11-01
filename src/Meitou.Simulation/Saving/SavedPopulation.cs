@@ -292,6 +292,8 @@ internal static class SavedCharacters
         {
             cold.Save.CarryPartner = Hand.Read(carry, "carrying");
             cold.Save.CarryIsCarrier = carry.Bools.GetValueOrDefault("carrying");
+            cold.Save.CarryTorsoSide = TorsoCarrySave.Side(carry);
+            TorsoCarrySave.Read(carry, cold);
         }
         // The body: the saved stats and medical state go to the body systems, the rest of the assembly (inventory, fighter) is made as for a new character.
         if (race is not null && stats is not null && medical is not null)

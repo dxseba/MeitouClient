@@ -121,7 +121,7 @@ public sealed class BedSystem(PopulationData data, BedSettings? settings = null)
             if (c.InSomething == HeldState.Bed && c.InWhat == order.Site) return OrderCheck.Run;   // lies in it already
             return CanWalk(c) && c.Carrying.IsNone ? OrderCheck.Run : OrderCheck.Blocked();
         }
-        if (c.Carrying.IsNone) return OrderCheck.Gone;
+        if (c.Carrying.IsNone || Carrying.CarrySystem.CarriesTorsoFragment(world, c)) return OrderCheck.Gone;
         if (!CanWalk(c)) return OrderCheck.Blocked();
         return BedFor(world, slot, order) is { Kind: FixtureKind.Bed } ? OrderCheck.Run : OrderCheck.Blocked(c.IsPlayer ? $"{c.Name}: no free bed nearby" : null, posted: true);
     }
@@ -220,6 +220,7 @@ public sealed class BedSystem(PopulationData data, BedSettings? settings = null)
         var id = table.IdOf(slot);
         var c = table.Cold(slot)!;
         trips.RemoveAll(t => t.Character == id);
+        if (Carrying.CarrySystem.CarriesTorsoFragment(world, c)) return;
         var trip = new BedTrip { Character = id, Bed = bed.Id, Body = c.Carrying, Fixed = fixedBed };
         trips.Add(trip);
         WalkTo(world, slot, bed);
@@ -262,7 +263,7 @@ public sealed class BedSystem(PopulationData data, BedSettings? settings = null)
         var table = world.Characters;
         if (!table.TryResolveNext(t.Character, out int s) || table.Cold(s) is not { } c || !CanWalk(c)) return false;
         bool carrying = !t.Body.IsNone;
-        if (carrying ? c.Carrying != t.Body : c.InSomething != HeldState.None) return false;
+        if (carrying ? c.Carrying != t.Body || Carrying.CarrySystem.CarriesTorsoFragment(world, c) : c.InSomething != HeldState.None) return false;
         ref var n = ref table.Next[s];
         var bed = world.Fixtures.Find(t.Bed);
         if (bed is null || !FixtureRegistry.IsFree(table, bed))
@@ -318,7 +319,7 @@ public sealed class BedSystem(PopulationData data, BedSettings? settings = null)
     bool LayIn(World world, int s, CharacterCold c, CharacterId body, Fixture bed)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(body, out int b) || table.Cold(b) is not { } bc) return false;
+        if (Carrying.CarrySystem.CarriesTorsoFragment(world, c) || !table.TryResolveNext(body, out int b) || table.Cold(b) is not { } bc) return false;
         int cost = Cost(world, bed, c.Faction);
         if (cost != 0 && Cost(world, bed, bc.Faction) is var own and >= 0 && own < cost) cost = own;
         if (!Pay(world, s, bed, cost)) return false;
@@ -435,7 +436,7 @@ public sealed class BedSystem(PopulationData data, BedSettings? settings = null)
     {
         var table = world.Characters;
         if (Carry is null || table.Cold(slot) is not { Carrying.IsNone: false } c || !CanWalk(c) || trips.Exists(t => t.Character == table.IdOf(slot))) return null;
-        if (!table.TryResolveNext(c.Carrying, out int b) || table.Cold(b) is not { } bc || bc.Fighter is { IsAnimal: true }) return null;
+        if (Carrying.CarrySystem.CarriesTorsoFragment(world, c) || !table.TryResolveNext(c.Carrying, out int b) || table.Cold(b) is not { } bc || bc.Fighter is { IsAnimal: true }) return null;
         if (data.Relations.Contains(bc.Faction) && data.Relations.Contains(c.Faction) && data.Relations.IsHostile(bc.Faction, c.Faction)) return null;
         return world.Fixtures.FindBed(world, slot, data.Relations, f => Reserved(f, table.IdOf(slot)));
     }

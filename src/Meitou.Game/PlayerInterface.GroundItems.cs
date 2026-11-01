@@ -80,7 +80,7 @@ sealed partial class PlayerInterface
         if (SelectedIds().Count == 0 || PickGroundItem(p) is not { } item) return false;
         void Quick() => Say(new Meitou.Simulation.Items.PickUpItemOrder([], item) { Tick = session.World.Tick });
         if (session.CurrentSnapshot.GroundItems.FirstOrDefault(g => g.Id == item) is not { Name: { } name } g
-            || !ContextPressOn(p, at => Menu(name, at, [(Stealing(g) ? "Steal" : "Pick Up", Quick)]), Quick)) Quick();
+            || !ContextPressOn(p, at => Menu(GroundLabelName(g), at, [(Stealing(g) ? "Steal" : "Pick Up", Quick)]), Quick)) Quick();
         return true;
     }
 
@@ -109,8 +109,9 @@ sealed partial class PlayerInterface
         if (HighlightFocus is not { } focus || uiPainter is not { } painter || EditorOpen) return;
         float scale = Height / 1080f, height = Height * 0.0259259f, em = 20 * 50f / 72f * scale;
         var near = new List<(Meitou.Simulation.Items.GroundItemSnapshot Item, float Distance, Vector2 At)>();
-        foreach (var g in session.CurrentSnapshot.GroundItems)
+        foreach (var original in session.CurrentSnapshot.GroundItems)
         {
+            var g = original with { Name = GroundLabelName(original) };
             if (g.Name.Length == 0 || GroundItemHidden?.Invoke(g.Id) == true || Vector3.DistanceSquared(focus, g.Position) > HighlightRadius * HighlightRadius) continue;
             var middle = g.Position + new Vector3(0, 0.5f, 0);
             if (Project(middle) is not { } at || Ray(at) is not { } ray) continue;
@@ -147,6 +148,17 @@ sealed partial class PlayerInterface
         }
     }
 
+    /// <summary>A severed limb keeps one ordinary loot label, with its owner's name rather than a second fragment label.</summary>
+    internal string GroundLabelName(Meitou.Simulation.Items.GroundItemSnapshot item)
+    {
+        foreach (var owner in session.CurrentSnapshot.Characters)
+        {
+            var part = owner.DetachedRagdolls.FirstOrDefault(p => p.GroundItemId == item.Id);
+            if (part is not null) return owner.Name + " — " + Loc.Tr(BodyFragmentNames.Part(part.Part));
+            if (item.Fall is { } fall && fall.Character == owner.Id) return owner.Name + " — " + Loc.Tr(item.Name);
+        }
+        return item.Name;
+    }
     /// <summary>Picking the item up would be stealing it: its owner's faction (<see cref="Meitou.Simulation.Items.GroundItem.OwnedBy"/>) is not the player's.</summary>
     bool Stealing(Meitou.Simulation.Items.GroundItemSnapshot g) => g.OwnedBy >= 0 && g.OwnedBy != session.World.Player.Faction;
 

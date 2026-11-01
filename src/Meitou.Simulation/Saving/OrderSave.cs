@@ -11,7 +11,10 @@ namespace Meitou.Simulation.Saving;
 /// One queued order as a save holds it: the row, the point, the target handle exactly as read (<see cref="Hand"/>: a character, a building or the null handle), Meitou's own site id and
 /// detail code when it wrote them, and what a read could settle at once (<see cref="InstanceKey"/>, the building a handle names; <see cref="Lost"/>, a handle that names nothing this save holds).
 /// </summary>
-public sealed record SavedOrder(TaskType Row, Vector3 Point, Hand Hand, string? Site, string? InstanceKey, int Kind, bool Lost);
+public sealed record SavedOrder(TaskType Row, Vector3 Point, Hand Hand, string? Site, string? InstanceKey, int Kind, bool Lost)
+{
+    public string? DetailText { get; init; }
+}
 
 /// <summary>
 /// A player character's order queue in its GAMESTATE_AI record <c>ai</c>, next to the perma-jobs (<see cref="PermaJobSave"/>; <b>Verified</b>, <c>AITaskSytem</c> vfuncs 1 and 2, writer
@@ -23,7 +26,7 @@ public sealed record SavedOrder(TaskType Row, Vector3 Point, Hand Hand, string? 
 /// </summary>
 public static class OrderSave
 {
-    const string Type = "tjob", Point = "tjobP", Target = "tjobT", MeitouSite = "meitou tjob", MeitouKind = "meitou tjobK";
+    const string Type = "tjob", Point = "tjobP", Target = "tjobT", MeitouSite = "meitou tjob", MeitouKind = "meitou tjobK", MeitouDetail = "meitou tjobD";
 
     /// <summary>
     /// Writes the queue (or, for a character loaded and not decided yet, the orders it was loaded with) over the old keys. A target character's handle is given to <paramref name="target"/> to
@@ -39,7 +42,7 @@ public static class OrderSave
         {
             foreach (var o in pending)
             {
-                Put(ai, i, o.Row, o.Point, o.Hand, o.Site, o.Kind);
+                Put(ai, i, o.Row, o.Point, o.Hand, o.Site, o.Kind, o.DetailText);
                 i++;
             }
             return;
@@ -48,19 +51,20 @@ public static class OrderSave
         {
             int kind = e.Row == TaskType.None ? -1 : e.Owner.SaveKind(e);
             if (kind < 0) continue;
-            Put(ai, i, SavedRow(e.Row), e.Point, e.Site is { } site ? SiteHand(world, site, buildings) : Hand.Null, e.Site, kind);
+            Put(ai, i, SavedRow(e.Row), e.Point, e.Site is { } site ? SiteHand(world, site, buildings) : Hand.Null, e.Site, kind, e.Owner.SaveText(e));
             if (!e.Target.IsNone) target(ai, Target + i, e.Target);
             i++;
         }
     }
 
-    static void Put(FcsRecord ai, int i, TaskType row, Vector3 point, Hand hand, string? site, int kind)
+    static void Put(FcsRecord ai, int i, TaskType row, Vector3 point, Hand hand, string? site, int kind, string? detail)
     {
         ai.Ints[Type + i] = (int)row;
         ai.Vector3s[Point + i] = point;
         hand.Write(ai, Target + i);
         if (site is not null) ai.Strings[MeitouSite + i] = site;
         if (kind != 0) ai.Ints[MeitouKind + i] = kind;
+        if (detail is not null) ai.Strings[MeitouDetail + i] = detail;
     }
 
     /// <summary>The row as the original numbers it: the Sleep order is 258 <c>USE_BED_ORDER</c> (Meitou's row 98 is the task it starts); the other rows are the same.</summary>
@@ -94,7 +98,7 @@ public static class OrderSave
                 if (hand.Type == (int)FcsRecordType.BUILDING && handles.Building(hand) is { } b && instanceOf.TryGetValue(b, out var instance)) key = instance;
                 else lost = true;
             }
-            (orders ??= []).Add(new SavedOrder((TaskType)row, point, hand, site, key, ai.Ints.GetValueOrDefault(MeitouKind + i), lost));
+            (orders ??= []).Add(new SavedOrder((TaskType)row, point, hand, site, key, ai.Ints.GetValueOrDefault(MeitouKind + i), lost) { DetailText = ai.Strings.GetValueOrDefault(MeitouDetail + i) });
         }
         cold.SavedOrders = orders;
     }
@@ -118,7 +122,7 @@ public static class OrderSave
             if (o is { Hand: { IsNull: false, Type: (int)FcsRecordType.CHARACTER } } && (target = Find(table, o.Hand)).IsNone) continue;
             string? site = null;
             if ((o.Site ?? o.InstanceKey) is not null && (site = SiteOf(world, o)) is null) continue;
-            cold.OrderQueue.Add(new OrderEntry(row, owner) { Target = target, Site = site, Point = o.Point, Detail = owner.LoadDetail(world, self, row, o.Kind, target) });
+            cold.OrderQueue.Add(new OrderEntry(row, owner) { Target = target, Site = site, Point = o.Point, Detail = owner.LoadDetailText(world, self, row, o.Kind, target, o.DetailText) });
         }
         DecisionSystem.Request(cold);
     }

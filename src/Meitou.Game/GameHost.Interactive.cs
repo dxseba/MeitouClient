@@ -635,9 +635,9 @@ sealed partial class GameHost
             // Hover outline (Advanced, Meitou only): not in the free camera, with the interface hidden, or in saved pictures.
             bool outlining = config.HoverOutline && !session.Camera.IsFree && !interfaceHidden && !cinema.Clean && !screenshotRequested && takeFile is null;
             if (outlining && highlighting)
-                gpu.HoverKeys = [.. player.HighlightTargets(camera.Target, PlayerInterface.HighlightRadius).Select(t => (DrawKey(t.Id), t.Colour))];
+                gpu.HoverKeys = [.. TorsoHighlightKeys(player.HighlightTargets(camera.Target, PlayerInterface.HighlightRadius))];
             else
-                gpu.HoverKeys = outlining && pointerWorld && player.HoverTarget is { } hover ? [(DrawKey(hover.Id), hover.Colour)] : [];
+                gpu.HoverKeys = outlining && pointerWorld && player.HoverTarget is { } hover ? [(TorsoDrawKey(hover.Id, player.HoverTorsoSide), hover.Colour)] : [];
             BenchLap(5);
             bool began = display.BeginFrame(size.X, size.Y);
             if (began)

@@ -37,7 +37,7 @@ public sealed class SaveLoadOptions
 /// holds (towns, war state, weather (the host restores it), research, zone buildings, items, appearance sliders) stays in <see cref="LoadedSave.Source"/> for <see cref="SaveCapture"/> to carry on.
 /// Call it on a world that has not run a tick yet and holds no characters.
 /// </summary>
-public static class SaveLoader
+public static partial class SaveLoader
 {
     /// <summary>Characters of the last load by handle, for side files keyed by character.</summary>
     public static readonly System.Collections.Concurrent.ConcurrentDictionary<(int C, int I), CharacterId> LastSpawned = new();
@@ -135,12 +135,14 @@ public static class SaveLoader
         var campaignHomes = WarSave.PlatoonHomes(context.Wars.Values);
         foreach (var platoon in save.Platoons)
         {
+            if (platoon.Record.Bools.GetValueOrDefault(TorsoCarrySave.StandaloneKey)) continue;   // fragment owners load below, without an extra squad
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;
             if (mine && platoon.IsLoaded)
                 LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly, context);
             else if (!mine && options.NpcPlatoons)
                 LoadNpcPlatoon(world, platoon, data, loaded, context, campaignHomes.TryGetValue((platoon.Handle.C, platoon.Handle.CS), out var home) ? home : null);
         }
+        LoadCarriedTorsoOwners(world, save, data, options, loaded, playerIndex, races, parts, assembly, context);
         if (loaded.PlayerPlatoons.Count > 0) world.Player.Squad = loaded.PlayerPlatoons[0].Squad.Id;
         // Stolen items name their owners once those are made (the rest as NPC platoons are).
         context.ResolveOwners(world);

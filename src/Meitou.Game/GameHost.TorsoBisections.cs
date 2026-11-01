@@ -83,7 +83,7 @@ sealed partial class GameHost
             var negative = Blend(previous?.Negative, ragdoll.Negative, session.SimulationAlpha,
                 ref Slot(ref torsoNegativePoses, c.Id.Slot), ref Slot(ref torsoNegativeSpare, c.Id.Slot));
             list.Add(instance with { Key = lower, Bones = negative, FreezeFrom = null, TorsoCut = new(cut.Plane, -1, cut.FullBody) });
-            list.Add(instance with { Key = upper, Bones = positive, FreezeFrom = null, TorsoCut = new(cut.Plane, 1, cut.FullBody) });
+            list.Add(instance with { Key = upper, Bones = positive, FreezeFrom = null, Hidden = hiddenTorsoPositive.Contains(c.Id), TorsoCut = new(cut.Plane, 1, cut.FullBody) });
             if (!gutFalls.ContainsKey(c.Id) && !gutsSpilled.Contains(c.Id)
                 && renderer.TorsoCutPosition(lower, new CharacterTorsoCut(cut.Plane, -1, cut.FullBody)) is { } cutAt)
             {
@@ -159,9 +159,33 @@ sealed partial class GameHost
         float age = TorsoAge(c.Id);
         float s = Math.Clamp(age / 1.1f, 0, 1);
         float ease = s * s * (3 - 2 * s);
-        Vector3 delta = c.Position - fall.Origin;
         for (int side = -1; side <= 1; side += 2)
         {
+            var holder = side > 0 ? c.TorsoPositiveCarriedBy : c.CarriedBy;
+            var attachment = side > 0 ? c.TorsoPositiveCarry : c.Carry;
+            if (!holder.IsNone && session.CurrentSnapshot.Characters.FirstOrDefault(other => other.Id == holder) is { } carrier)
+            {
+                var carrierAt = carrier.Position;
+                float yaw = DrawnYaw(carrier);
+                IndexPrevious();
+                if (previousById.TryGetValue(holder, out var oldCarrier) && !Reanchored(oldCarrier, carrier))
+                {
+                    carrierAt = Vector3.Lerp(oldCarrier.Position, carrierAt, session.SimulationAlpha);
+                    yaw = Meitou.Engine.Time.Interp.LerpAngle(DrawnYaw(oldCarrier), yaw, session.SimulationAlpha);
+                }
+                var held = (attachment ?? Meitou.Simulation.Carrying.CarryPose.Fallback).World(carrierAt, yaw);
+                var pivot = side > 0 ? fall.PositivePivot : fall.NegativePivot;
+                var placed = fall.World * Matrix4x4.CreateTranslation(-pivot)
+                    * Matrix4x4.CreateFromQuaternion(held.Rotation) * Matrix4x4.CreateTranslation(held.Position);
+                list.Add(instance with
+                {
+                    Key = side > 0 ? upper : lower, Position = held.Position, World = placed, Hidden = side > 0 ? hiddenTorsoPositive.Contains(c.Id) : instance.Hidden,
+                    FreezeFrom = lower, Bones = null, Rotation = null, TorsoCut = new(cut.Plane, side, cut.FullBody),
+                });
+                continue;
+            }
+            // The uncarried half keeps its own world anchor while the other one is transported.
+            Vector3 delta = (side > 0 ? c.TorsoPositivePosition ?? fall.Origin : c.Position) - fall.Origin;
             var turn = Quaternion.Slerp(Quaternion.Identity, side > 0 ? fall.PositiveTurn : fall.NegativeTurn, ease);
             var rotation = Matrix4x4.CreateFromQuaternion(turn);
             var piecePivot = side > 0 ? fall.PositivePivot : fall.NegativePivot;
@@ -173,19 +197,40 @@ sealed partial class GameHost
             var placement = fall.World * Matrix4x4.CreateTranslation(-piecePivot) * rotation * Matrix4x4.CreateTranslation(at);
             list.Add(instance with
             {
-                Key = side > 0 ? upper : lower, Position = at, World = placement,
+                Key = side > 0 ? upper : lower, Position = at, World = placement, Hidden = side > 0 ? hiddenTorsoPositive.Contains(c.Id) : instance.Hidden,
                 FreezeFrom = lower, Bones = null, Rotation = null, TorsoCut = new(cut.Plane, side, cut.FullBody),
             });
         }
+    }
+
+    bool CharacterHidden(CharacterId id) => hiddenIndoors.Contains(id) && (torsoCuts.Of(id) is null || hiddenTorsoPositive.Contains(id));
+
+    IEnumerable<(long Key, Vector4 Colour)> TorsoHighlightKeys(IEnumerable<(CharacterId Id, Vector4 Colour)> characters)
+    {
+        foreach (var (id, colour) in characters)
+        {
+            if (!hiddenIndoors.Contains(id)) yield return (DrawKey(id), colour);
+            if (torsoCuts.Of(id) is not null && !hiddenTorsoPositive.Contains(id)) yield return (TorsoDrawKey(id, 1), colour);
+        }
+    }
+
+    long TorsoDrawKey(CharacterId id, int side) => DrawKey(id) ^ (side == 1 ? 1L << 52 : 0);
+
+    int TorsoSideHit(Meitou.Rendering.Characters.CharacterRenderer? renderer, CharacterId id, Vector3 origin, Vector3 direction)
+    {
+        if (renderer is null || torsoCuts.Of(id) is null) return 0;
+        float negative = hiddenIndoors.Contains(id) ? float.PositiveInfinity : renderer.RayHit(TorsoDrawKey(id, 0), origin, direction) ?? float.PositiveInfinity;
+        float positive = hiddenTorsoPositive.Contains(id) ? float.PositiveInfinity : renderer.RayHit(TorsoDrawKey(id, 1), origin, direction) ?? float.PositiveInfinity;
+        return positive < negative ? 1 : 0;
     }
 
     float? TorsoMeshHit(Meitou.Rendering.Characters.CharacterRenderer? renderer, CharacterId id, Vector3 origin, Vector3 direction)
     {
         if (renderer is null) return null;
         long lower = DrawKey(id);
-        float? hit = renderer.RayHit(lower, origin, direction);
+        float? hit = hiddenIndoors.Contains(id) ? float.PositiveInfinity : renderer.RayHit(lower, origin, direction);
         if (torsoCuts.Of(id) is null) return hit;
-        float? upper = renderer.RayHit(lower ^ (1L << 52), origin, direction);
+        float? upper = hiddenTorsoPositive.Contains(id) ? float.PositiveInfinity : renderer.RayHit(lower ^ (1L << 52), origin, direction);
         return MathF.Min(hit ?? float.PositiveInfinity, upper ?? float.PositiveInfinity);
     }
 

@@ -199,6 +199,8 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             if (!table.TryResolveNext(id, out _)) Destroy(ragdolls[id]);
         order.RemoveAll(id => !ragdolls.ContainsKey(id));
 
+        ApplyHitImpacts(world);
+
         // 1. Masks, building and pinning.
         var next = table.Next;
         for (int i = 0; i < next.Length; i++)
@@ -211,12 +213,20 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             bool advanced = options is { AdvancedRagdolls: true };
             var (launch, push) = !advanced ? default : cold.Blow ?? (table.Previous[i].Velocity, Vector3.Zero);
             cold.Blow = null;
-            cold.CarryAttach = cold.CarriedBy.IsNone ? null : AttachOf(table, cold);
+            cold.CarryAttach = cold.CarriedBy.IsNone ? null : AttachOf(table, cold, cold.CarriedBy);
+            cold.TorsoPositiveCarryAttach = cold.TorsoPositiveCarriedBy.IsNone ? null : AttachOf(table, cold, cold.TorsoPositiveCarriedBy);
             var id = table.IdOf(i);
             PrepareDetached(world, id, cold, ref next[i], (launch, push), advanced);
             ragdolls.TryGetValue(id, out var r);
-            if (advanced && cold.TorsoBisection is { IsValid: true } cut && cold.Medical is { Dead: true }
-                && PrepareTorsoRagdoll(world, id, cold, ref next[i], cut, (launch, push), env)) continue;
+            if (advanced && cold.TorsoBisection is { IsValid: true } cut && cold.Medical is { Dead: true })
+            {
+                if (PrepareTorsoRagdoll(world, id, cold, ref next[i], cut, (launch, push), env)) continue;
+                if (cold.TorsoPositivePosition is null)
+                {
+                    cold.TorsoPositivePosition = next[i].Position;
+                    cold.TorsoPositiveYaw = next[i].Yaw;
+                }
+            }
             // The look's ragdoll file asked only of a character that wants one (two cache lookups per standing character every tick were most of this loop in a big battle).
             var wanted = cold.Appearance is null ? RagdollPart.None : Wanted(cold);
             if (wanted != RagdollPart.None && !HasRagdoll(cold)) wanted = RagdollPart.None;
@@ -328,9 +338,9 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
     }
 
     /// <summary>Where a carried body hangs: on its carrier's attach bone as the carrier's animation poses it now; null without the carrier's skeleton or that bone.</summary>
-    CarryAttach? AttachOf(CharacterTable table, CharacterCold cold)
+    CarryAttach? AttachOf(CharacterTable table, CharacterCold cold, CharacterId holder)
     {
-        if (!table.TryResolveNext(cold.CarriedBy, out int slot) || table.Cold(slot) is not { Appearance: { } look } carrier || rigs.For(look) is not { } setup) return null;
+        if (!table.TryResolveNext(holder, out int slot) || table.Cold(slot) is not { Appearance: { } look } carrier || rigs.For(look) is not { } setup) return null;
         if (setup.Rig.Handle(CarrySystem.AttachBone) is not int bone) return null;
         var scratch = setup.Rig.Rent();
         try
@@ -812,6 +822,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
 
     public void Hash(ref StateHasher hasher)
     {
+        HashHitImpacts(ref hasher);
         HashTorsoRagdolls(ref hasher);
         HashDetached(ref hasher);
         if (ragdolls.Count == 0) return;
@@ -836,6 +847,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
 
     public void Dispose()
     {
+        hitImpacts.Clear();
         DisposeDetached();
         physics.Dispose();
         threads?.Dispose();

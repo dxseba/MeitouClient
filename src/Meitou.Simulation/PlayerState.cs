@@ -44,6 +44,8 @@ public sealed class PlayerState
     public CharacterId LootOpener { get; set; } = CharacterId.None;
     public CharacterId OpeningLoot { get; set; } = CharacterId.None;
     public CharacterId LootWalker { get; set; } = CharacterId.None;
+    /// <summary>The opening/open inventory's contact half: 1 positive, 0 ordinary or negative. Runtime UI state, as the loot window itself.</summary>
+    public int LootTorsoSide { get; set; }
     /// <summary>The door (<see cref="Locks.Fixture.Id"/>) a character is walking to open or close (<see cref="Locks.DoorOrder"/>), and who. Not hashed and not saved, as the container walk.</summary>
     public string? DoorTarget { get; set; }
     public CharacterId DoorWalker { get; set; } = CharacterId.None;

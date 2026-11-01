@@ -46,6 +46,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox [n]` | 1 to 1000 | off; 1 when bare | Animation sandbox on a flat wireframe floor. n = 2: two facing each other; more: the rest idle in rings. |
 | `--sandbox-character <name>` | CHARACTER or ANIMAL_CHARACTER name or id | first member of the default start | Character the sandbox spawns. |
 | `--sandbox-mode <list>` | walk, run, free, a speed in u/s, patrol, fight (comma list) | none (idle) | The sandbox hero's start state, e.g. `run,patrol`. |
+| `--sandbox-stats <n>` | non-negative finite number | from character data | Sets all 34 stored hero attributes and skills to n, including values above 100, before the first tick. Starts with full blood at the new strength; other fighters keep their stats. |
 | `--sandbox-power <n>` | number | off | The hero's melee damage, 100 being normal: 1000 hits ten times as hard. |
 | `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Fighters are male humans. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
 | `--sandbox-part <name>` | head, chest, stomach, left arm... | off | With `--sandbox-dummy`: test hits only on that body part. |
@@ -76,7 +77,10 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--battle-map <map>` | plateau, mesa, fog, sandbox, or x,z | plateau | Where the battle is fought. `mesa` is the duel spot; `fog` a plateau in the Fog Islands; `sandbox` is the flat floor. |
 | `--battle-width <a>[,<b>]` | counts | rows as given | Fighters per row for each side (one value: both). |
 | `--battle-no-fear` | | off | Nobody in the battle runs away. |
-| `--scene <name>` | fight, turret, bed, acid, menu, bisect, weapon-blood | none | With `--screenshot`: stage a scene and save frames (`bisect` uses `--sandbox 2 --sandbox-bisect`; `weapon-blood` follows ordinary sandbox combat and logs hip/back item coverage; other scenes usually use `--load`). |
+| `--scene <name>` | fight, turret, bed, acid, menu, bisect, weapon-blood, torso-carry, downed-attack | none | With `--screenshot`: stage a scene and save frames (`bisect` uses `--sandbox 2 --sandbox-bisect`; `weapon-blood` follows ordinary sandbox combat and logs hip/back item coverage; other scenes usually use `--load`). |
+| `--scene torso-carry` | with `--sandbox 3 --sandbox-bisect` | | Five frames exercise rendered half selection, positive pickup, both halves held by separate carriers, and each put-down. Use `--scene-frames 5`. |
+| `--scene downed-attack` | with `--sandbox 2` | | Knocks out a living enemy, issues the real Attack body part submenu and captures its first real melee hit; excludes dummy wounds. |
+| `--ui-panel body-parts` | with a scene | off | Show the ordinary Alt body-part labels in native scene captures without keyboard input. |
 | `--scene-frames <n>` | 1 to 200 | 8 | Frames saved. |
 | `--scene-every <n>` | 1 or more | 30 | Control ticks between saved frames. |
 | `--scene-npc <record>` | CHARACTER name or id | Bandit | Enemies spawned by the fight and turret scenes. |

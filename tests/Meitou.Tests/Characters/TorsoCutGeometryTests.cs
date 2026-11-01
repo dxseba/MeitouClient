@@ -9,7 +9,7 @@ using Meitou.Simulation.Wounds;
 
 namespace Meitou.Tests.Characters;
 
-public class TorsoCutGeometryTests
+public partial class TorsoCutGeometryTests
 {
     static Vertex[] Box(Vector3 min, Vector3 max, uint bone = 0, uint morphSlot = 0)
     {
@@ -134,6 +134,60 @@ public class TorsoCutGeometryTests
         }
     }
 
+    [Fact]
+    public void A_concave_full_body_section_has_solid_recessed_flesh_without_bridging_its_open_gap()
+    {
+        Vector2[] outline = [new(-2, -2), new(2, -2), new(2, 2), new(1, 2), new(1, -1), new(-1, -1), new(-1, 2), new(-2, 2)];
+        Vertex V(Vector2 p, float z) => new() { Position = new(p, z), Bones = 0, Weights = Vector4.UnitX };
+        var source = new List<Vertex>();
+        void Quad(Vertex a, Vertex b, Vertex c, Vertex d) => source.AddRange([a, b, c, b, d, c]);
+        for (int i = 0; i < outline.Length; i++)
+        {
+            var a = outline[i]; var b = outline[(i + 1) % outline.Length];
+            Quad(V(a, -0.3f), V(b, -0.3f), V(a, 0.3f), V(b, 0.3f));
+        }
+        foreach (float z in new[] { -0.3f, 0.3f })
+            foreach (var (min, max) in new[] { (new Vector2(-2, -2), new Vector2(2, -1)), (new Vector2(-2, -1), new Vector2(-1, 2)), (new Vector2(1, -1), new Vector2(2, 2)) })
+                Quad(V(min, z), V(new(max.X, min.Y), z), V(new(min.X, max.Y), z), V(max, z));
+        var cut = new CharacterTorsoCut(new(0, 0, 1, 0), 1, true);
+        var cap = Assert.IsType<Vertex[]>(TorsoCutSurface.Build(source.ToArray(), [0], cut));
+        var floor = Enumerable.Range(0, cap.Length / 3).Select(i => cap[(i * 3)..(i * 3 + 3)]).Where(t => t.All(p => p.Uv.X == TorsoCutSurface.BackingBand)).ToArray();
+        Assert.NotEmpty(floor);
+        float covered = 0;
+        foreach (var triangle in floor)
+        {
+            Assert.All(triangle, p => Assert.InRange(p.Position.Z, 0.008f, 0.25f));
+            Vector2 a = new(triangle[0].Position.X, triangle[0].Position.Y), b = new(triangle[1].Position.X, triangle[1].Position.Y), c = new(triangle[2].Position.X, triangle[2].Position.Y);
+            static float Cross(Vector2 x, Vector2 y) => x.X * y.Y - x.Y * y.X;
+            covered += MathF.Abs(Cross(b - a, c - a)) * 0.5f;
+            var centre = (a + b + c) / 3;
+            Assert.False(centre.X is > -0.85f and < 0.85f && centre.Y > -0.85f, "Backing crosses the open gap of the U-shaped fragment.");
+        }
+        Assert.InRange(covered, 5, 10);
+    }
+
+    [Fact]
+    public void Limb_sections_have_bone_and_marrow_and_keep_their_physical_components_separate()
+    {
+        Vertex[] source = [.. Box(new(-3, 0, -0.5f), new(-1, 2, 0.5f)), .. Box(new(1, 0, -0.5f), new(3, 2, 0.5f), 1)];
+        uint[] groups = [1u | 2u << 4];
+        var cut = new CharacterTorsoCut(new(0, 0, 1, 0), 1, true);
+        var cap = Assert.IsType<Vertex[]>(TorsoCutSurface.Build(source, groups, cut, components: [7, 9]));
+        Assert.Contains(cap, p => p.Colour.X > 0.6f && p.Colour.Y > 0.5f);
+        Assert.Contains(cap, p => p.Colour.X is > 0.29f and < 0.31f && p.Colour.Y is > 0.05f and < 0.06f);
+        Assert.Contains(cap, p => p.Uv.X == 2);
+        for (int i = 0; i < cap.Length; i += 3)
+        {
+            var triangle = cap[i..(i + 3)];
+            Assert.True(triangle.All(p => p.Position.X < -0.8f) || triangle.All(p => p.Position.X > 0.8f));
+            int expected = triangle[0].Position.X < 0 ? 0 : 1;
+            Assert.All(triangle, p =>
+            {
+                Assert.Equal(expected, (int)(p.Bones & 255));
+                Assert.Equal(Vector4.UnitX, p.Weights);
+            });
+        }
+    }
     [Fact]
     public void Full_body_caps_and_picking_support_front_back_and_opposite_diagonal_planes()
     {
@@ -321,7 +375,8 @@ public class TorsoCutGeometryTests
                 if (sampleCase.Torso) Assert.Contains(rim, v => v.Position.Y is >= 11 and <= 14 && MathF.Abs(v.Position.X) < 1.5f && MathF.Abs(v.Position.Z) < 1.5f);
                 foreach (var vertex in rim) Assert.InRange(MathF.Abs(Vector3.Dot(normal, vertex.Position) + plane.W), 0, 0.04f);
                 Assert.Contains(source, vertex => (Vector3.Dot(normal, vertex.Position) + plane.W) * side > 0.05f);
-                int triangles = cap.Length / 3, stride = Math.Max(1, triangles / 96);
+                CheckSectionBacking(cap, source, plane, side, sample);
+                int triangles = cap.Length / 3, stride = Math.Max(1, cap.Count(p => p.Uv.X < TorsoCutSurface.BackingBand) / 3 / 96), rimTriangle = 0;
                 for (int triangle = 0; triangle < triangles; triangle++)
                 {
                     var a = cap[triangle * 3]; var b = cap[triangle * 3 + 1]; var c = cap[triangle * 3 + 2];
@@ -331,7 +386,7 @@ public class TorsoCutGeometryTests
                         float distance = SectionDistance((outer[0].Position + outer[1].Position) / 2, intersections);
                         Assert.True(distance <= 0.05f, sample + $" bridges unrelated section edges ({distance})");
                     }
-                    if (triangle % stride == 0)
+                    if (a.Uv.X < TorsoCutSurface.BackingBand && b.Uv.X < TorsoCutSurface.BackingBand && c.Uv.X < TorsoCutSurface.BackingBand && rimTriangle++ % stride == 0)
                         Assert.True(SectionDistance((a.Position + b.Position + c.Position) / 3, intersections) <= 0.38f, sample + " stretches flesh across a neck, limb or pelvis gap");
                 }
             }

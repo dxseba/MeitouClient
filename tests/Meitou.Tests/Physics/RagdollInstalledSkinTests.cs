@@ -17,7 +17,7 @@ using SimWorld = Meitou.Simulation.World;
 
 namespace Meitou.Tests.Physics;
 
-public class RagdollInstalledSkinTests(ITestOutputHelper output)
+public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
 {
     sealed class Flat : IRagdollEnvironment
     {

@@ -29,7 +29,7 @@ public sealed partial class CombatSystem
         public CombatSlot[] Read;
         public FactionRelations? Relations;
         public int Self, Target, Faction, Squad, Count;
-        public bool HitsSlaves;
+        public bool HitsSlaves, AllowIncapacitated;
         public Vector2 From, Centre, Forward;
         public float Y, Half, High, Deep;
         public ZoneSlots Slots;
@@ -48,17 +48,20 @@ public sealed partial class CombatSystem
     void Strike(World world, int i, in CombatSlot s, CharacterCold cold, CombatTechnique tech, int blow, EffectBuffer effects)
     {
         var zone = ZoneOf(world, i, s, cold, tech, blow);
+        if (StrikeBodyPart(world, i, s, zone, blow, effects)) return;
         var scan = new ZoneScan
         {
             Table = world.Characters, Read = read, Relations = Relations, Self = i, Target = s.TargetSlot, Faction = cold.Faction, Squad = cold.SquadId,
             From = zone.From, Centre = zone.Centre, Forward = zone.Forward, Y = zone.Y, Half = zone.Half, High = zone.High, Deep = zone.Deep,
+            AllowIncapacitated = AllowsIncapacitatedTarget(world, i, s.TargetSlot, s.Picked, s.AllowIncapacitated),
             HitsSlaves = Relations is { } rel && rel.Contains(cold.Faction) && cold.Faction != rel.PlayerFaction && !rel.Factions[cold.Faction].AntiSlavery,
         };
         world.Grid.Query(scan.Centre.X, scan.Centre.Y, zone.Deep + scan.Half + RangedTuning.MaxBodyRadius, ref scan, static (int c, ref ZoneScan z) =>
         {
             if (c == z.Self || z.Count == ZoneCapacity) return;
             var state = z.Table.Previous;
-            if (!state[c].Alive || z.Read[c].Down || z.Table.Cold(c) is not { Medical.Incapacitated: false } tc) return;
+            if (!state[c].Alive || z.Table.Cold(c) is not { Medical: { Dead: false } medical } tc) return;
+            if ((z.Read[c].Down || medical.Incapacitated) && !(c == z.Target && z.AllowIncapacitated)) return;
             if (c != z.Target)
             {
                 if (tc.Faction == z.Faction || z.Squad >= 0 && tc.SquadId == z.Squad) return;

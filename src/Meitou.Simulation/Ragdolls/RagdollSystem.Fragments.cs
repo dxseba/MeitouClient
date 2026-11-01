@@ -20,8 +20,8 @@ public sealed partial class RagdollSystem
         public required RigidTransform[] PositiveOffsets, NegativeOffsets;
         public TorsoRagdollPose? Published;
         public Matrix4x4 PublishedIn;
-        public bool Carried;
-        public bool[]? CarriedBodies;
+        public bool NegativeCarried, PositiveCarried;
+        public bool[]? NegativeCarriedBodies, PositiveCarriedBodies;
     }
 
     readonly Dictionary<CharacterId, TorsoFragments> torsoRagdolls = [];
@@ -45,7 +45,7 @@ public sealed partial class RagdollSystem
         {
             if (existing.Cut == cut)
             {
-                UpdateTorsoCarry(existing, cold, hot);
+                UpdateTorsoCarry(world, existing, cold, hot);
                 CoverTorso(existing, env, world.Tick);
                 return true;
             }
@@ -81,7 +81,7 @@ public sealed partial class RagdollSystem
         if (cold.Save is { } save) save.Ragdoll = null;
         bool restore = saved?.Torso is { } stored && stored.Cut == cut
             && stored.Positive.Pose.Length == positiveDefinition.Bodies.Length && stored.Negative.Pose.Length == negativeDefinition.Bodies.Length
-            && SavedNear(stored.Negative, hot.Position);
+            && SavedFragmentRootNear(stored.Negative, negativeDefinition.Root, hot.Position) && FiniteFragment(stored.Positive);
         if (!restore && saved is { Torso: null } legacy && legacy.Pose.Length == source.Bodies.Length && SavedNear(legacy, hot.Position))
             original = legacy.Pose;
 
@@ -114,6 +114,8 @@ public sealed partial class RagdollSystem
             Restore(positive, saved!.Torso!.Positive);
             Restore(negative, saved.Torso.Negative);
         }
+        if (!restore && cold.TorsoPositiveCarriedBy.IsNone && cold.TorsoPositivePosition is { } retained)
+            Shift(positive, retained - positive.Pose[positive.Definition.Root].Position);
         if (!positive.Frozen) SetTone(positive, Tone.Dead);
         if (!negative.Frozen) SetTone(negative, Tone.Dead);
         var boneWorld = InitialBoneWorld(prototype, cold, placement, source, original);
@@ -127,7 +129,7 @@ public sealed partial class RagdollSystem
         };
         torsoRagdolls[id] = fragments;
         torsoOrder.Add(id);
-        UpdateTorsoCarry(fragments, cold, hot);
+        UpdateTorsoCarry(world, fragments, cold, hot);
         CoverTorso(fragments, env, world.Tick);
         return true;
 
@@ -240,51 +242,7 @@ public sealed partial class RagdollSystem
     static bool Axial(string name) => name == "Bip01" || name.Contains("Pelvis", StringComparison.Ordinal) || name.Contains("Spine", StringComparison.Ordinal)
         || name.Contains("Neck", StringComparison.Ordinal) || name.Contains("Head", StringComparison.Ordinal) || name.Contains("Jaw", StringComparison.Ordinal);
 
-    // Carrying takes only the component that contains the logical corpse's root. A severed shoulder chain remains on the ground.
-    void UpdateTorsoCarry(TorsoFragments fragments, CharacterCold cold, in CharacterHot hot)
-    {
-        bool carried = !cold.CarriedBy.IsNone;
-        if (!carried && !fragments.Carried) return;
-        var piece = fragments.Negative;
-        if (carried != fragments.Carried)
-        {
-            fragments.CarriedBodies ??= RootComponent(piece.Definition);
-            foreach (var joint in piece.Joints) physics.Simulation.Solver.Remove(joint);
-            piece.Joints.Clear();
-            SetTone(piece, Tone.None);
-            var kinds = Shapes(piece.Definition);
-            for (int b = 0; b < piece.Bodies.Length; b++)
-            {
-                if (piece.Bodies[b] is not { } handle) continue;
-                var body = physics.Simulation.Bodies[handle];
-                if (fragments.CarriedBodies[b])
-                {
-                    if (carried) body.BecomeKinematic();
-                    else body.SetLocalInertia(kinds[b].Inertia);
-                    body.Velocity = default;
-                    body.Awake = true;
-                }
-                piece.Dynamic[b] = !body.Kinematic;
-            }
-            piece.Frozen = false;
-            piece.Age = 0;
-            foreach (var joint in piece.Definition.Joints)
-                if (piece.Dynamic[joint.A] || piece.Dynamic[joint.B]) AddJoint(piece, joint);
-            SetTone(piece, Tone.Dead);
-            fragments.Carried = carried;
-        }
-        if (!carried) return;
-        var target = Animated(piece, cold, Placement(piece, cold, hot));
-        for (int b = 0; b < piece.Bodies.Length; b++)
-        {
-            if (!fragments.CarriedBodies![b] || piece.Bodies[b] is not { } handle) continue;
-            var body = physics.Simulation.Bodies[handle];
-            body.Pose = new RigidPose(target[b].Position, target[b].Rotation);
-            body.Velocity = default;
-            piece.Pose[b] = target[b];
-        }
-    }
-
+    // Carrying pins the root component of each cut side independently; disconnected shoulder chains remain free.
     static bool[] RootComponent(RagdollDefinition definition)
     {
         var component = new bool[definition.Bodies.Length];
@@ -332,10 +290,11 @@ public sealed partial class RagdollSystem
             if (!world.Characters.TryResolveNext(id, out int slot)) continue;
             var cold = world.Characters.Cold(slot)!;
             bool moving = !f.Positive.Frozen || !f.Negative.Frozen;
-            Finish(f.Positive, false);
-            Finish(f.Negative, f.Carried);
+            Finish(f.Positive, f.PositiveCarried);
+            Finish(f.Negative, f.NegativeCarried);
             ref var hot = ref world.Characters.Next[slot];
-            if (!f.Carried) hot.Position = f.Negative.Pose[f.Negative.Definition.Root].Position;
+            if (!f.NegativeCarried) hot.Position = f.Negative.Pose[f.Negative.Definition.Root].Position;
+            cold.TorsoPositivePosition = f.Positive.Pose[f.Positive.Definition.Root].Position;
             hot.Velocity = Vector3.Zero;
             var placement = Placement(f.Negative, cold, hot);
             if (moving || f.Published is null || f.PublishedIn != placement)

@@ -51,6 +51,16 @@ public interface IOrderOwner
 
     /// <summary>The detail a saved order of the code <paramref name="kind"/> gets back (the inverse of <see cref="SaveKind"/>); <paramref name="self"/> is the character holding the order.</summary>
     object? LoadDetail(World world, CharacterId self, TaskType row, int kind, CharacterId target) => null;
+
+    /// <summary>Optional invariant text belonging to this order's detail, such as a chosen anatomical part id.</summary>
+    string? SaveText(OrderEntry order) => null;
+
+    /// <summary>Restores the text together with the existing kind; owners without text keep their legacy detail contract.</summary>
+    object? LoadDetailText(World world, CharacterId self, TaskType row, int kind, CharacterId target, string? text) =>
+        LoadDetail(world, self, row, kind, target);
+
+    /// <summary>Adds an owner's extra target identity to the queue hash when its detail distinguishes otherwise equal orders.</summary>
+    void HashDetail(ref StateHasher hasher, OrderEntry order) { }
 }
 
 /// <summary>
@@ -108,6 +118,7 @@ public sealed class OrderQueue : IReadOnlyList<OrderEntry>
             hasher.Add(e.Target);
             hasher.Add(e.Site is { } site ? Rng.StableHash(site) : 0UL);
             hasher.Add(e.Point);
+            e.Owner.HashDetail(ref hasher, e);
         }
     }
 }

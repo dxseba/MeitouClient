@@ -30,6 +30,7 @@ sealed partial class GameHost
     /// those inside a building seen from outside, whose interior is not drawn (a construction site is open, so its builders stay).
     /// </summary>
     readonly HashSet<CharacterId> hiddenIndoors = [];
+    readonly HashSet<CharacterId> hiddenTorsoPositive = [];
     // The followed character and the floor it was last seen on (game: PI+0x270 / +0x290): the viewed floor follows that floor's changes only.
     CharacterId? floorFollow;
     int followedFloor = -1;
@@ -49,6 +50,7 @@ sealed partial class GameHost
         interiorView.Clear();
         viewed.Clear();
         hiddenIndoors.Clear();
+        hiddenTorsoPositive.Clear();
         var characters = session.CurrentSnapshot.Characters;
         FollowFloor(objects);
         foreach (var c in characters)
@@ -60,6 +62,20 @@ sealed partial class GameHost
         session.Camera.Floors ??= CameraFloor;
         foreach (var c in characters)
         {
+            if (c.TorsoBisection is { IsValid: true })
+            {
+                var positive = c.TorsoPositivePosition ?? c.Position;
+                if (c.TorsoRagdoll is null && !c.TorsoPositiveCarriedBy.IsNone
+                    && characters.FirstOrDefault(other => other.Id == c.TorsoPositiveCarriedBy) is { } carrier)
+                    positive = (c.TorsoPositiveCarry ?? Meitou.Simulation.Carrying.CarryPose.Fallback).World(DrawnPosition(carrier), DrawnYaw(carrier)).Position;
+                if (ViewedAt(positive) is { } positiveView)
+                {
+                    int shown = interiorView[positiveView.PlacementId];
+                    if (shown < 3 && positiveView.FloorAt(positive) > shown) hiddenTorsoPositive.Add(c.Id);
+                }
+                else if (objects.InteriorAt(positive) is { } closedPositive && objects.Construction?.ContainsKey(closedPositive.PlacementId) != true)
+                    hiddenTorsoPositive.Add(c.Id);
+            }
             var at = DrawnPosition(c);
             if (ViewedAt(at) is { } inView)
             {

@@ -293,7 +293,7 @@ public sealed partial class CombatSystem : IProjectileSource
         // Ranged mode takes the crossbow however close the target is (between swings): melee is x0.1 against shooting's 1, and a threat within 40 refuses the shooting rows.
         bool rangedMode = Orders.RangedMode(cold);
         // Block does not stop it: neither the shooting desire (FUN_140598260) nor the gate reads isDefensiveMode.
-        bool want = can && rangedMode && !ImmediateThreat(world, i) && (s.Ranged || s.AttackTech < 0);
+        bool want = can && rangedMode && !GroundTarget(world, i, s) && !ImmediateThreat(world, i) && (s.Ranged || s.AttackTech < 0);
         if (want == s.Ranged) return;
         s.Ranged = want;
         if (!want) cold.RangedCombatMode = false;
@@ -643,6 +643,7 @@ public sealed partial class CombatSystem : IProjectileSource
         float toughness = dc.Stats is { } ds ? ds[StatsEnumerated.Toughness] * dc.Medical.StatMultiplier(StatsEnumerated.Toughness) : 0;
         ReadOnlySpan<ArmourPiece> armour = dc.Fighter is { } df ? df.Armour : default;
         var cover = new BoltCover(world.Seed, Rng.Key(table.IdOf(v)), p.Id);
+        bool wasIncapacitated = dc.Medical.Incapacitated;
         var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, armour, cover, toughness, false, true, combat, events);
         FloatHit(world, v, dc, p.ShooterIsPlayer, part, damage, absorbed);
         Sound(world, SoundKind.BoltHit, v, p.Shooter, prev[v].Position, armoured: absorbed.Cut + absorbed.Blunt + absorbed.Pierce > 0, robot: false);
@@ -670,7 +671,7 @@ public sealed partial class CombatSystem : IProjectileSource
         }
         PublishHit(world, CombatHitSource.Bolt, p.Shooter < prev.Length && prev[p.Shooter].Alive && prev[p.Shooter].Generation == p.ShooterGeneration ? table.IdOf(p.Shooter) : CharacterId.None,
             v, dc.Medical, part, damage, new Vector2(p.Direction.X, p.Direction.Z), events, mechanism: CombatWoundMechanism.Thrust);
-        if (knockout || death) Knockdown(world, v, dc, new Vector2(p.Direction.X, p.Direction.Z), damage.Cut + damage.Blunt + damage.Pierce);
+        HitRagdoll(world, v, dc, part, new Vector2(p.Direction.X, p.Direction.Z), damage.Cut + damage.Blunt + damage.Pierce, wasIncapacitated, knockout || death);
         if (dc.Medical.Incapacitated)
         {
             D.Down = true;

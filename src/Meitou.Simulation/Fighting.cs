@@ -47,12 +47,14 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         int t = st.TargetSlot;
         if (t < 0 || t >= table.HighWater || !next[t].Alive || next[t].Generation != st.TargetGeneration) return;
         const ushort Path = (ushort)MoveFlags.AnyPath;
-        var d = next[t].Position - n.Position;
+        var targetPoint = combat.TargetPoint(world, st, next[t].Position);
+        bool aimedPart = st.TargetBodyPart is not null;
+        var d = targetPoint - n.Position;
         var cold = table.Cold(i)!;
         var tc = table.Cold(t);
         float endReach = st.Reach > 0 ? st.Reach : CombatTuning.StandGap(st.Reach, cold.Fighter?.WeaponLength ?? 0, false);   // the longest gap a swing starts at (3D, CombatTuning.Gap); a path ending within it still brings it to a swing
         NotePathFailure(world, i, cold, new CharacterId(t, next[t].Generation), endReach);
-        float gap = MathF.Sqrt(d.X * d.X + d.Z * d.Z) - CombatTuning.Footprint(cold) - CombatTuning.Footprint(tc);
+        float gap = MathF.Sqrt(d.X * d.X + d.Z * d.Z) - CombatTuning.Footprint(cold) - (aimedPart ? 0 : CombatTuning.Footprint(tc));
         // It runs at the target out of the combat stance from RunGap, back to its footwork under FootworkGap, and after a target that keeps moving away at any gap.
         var tv = next[t].Velocity;
         bool away = tc is { InCombat: false } && tv.X * tv.X + tv.Z * tv.Z > CombatTuning.FleeingSpeed * CombatTuning.FleeingSpeed;
@@ -62,20 +64,20 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         bool fleeing = cold.TargetFleeingTime >= CombatTuning.FleeingSeconds;
         if (fleeing) cold.CombatRunning = true;
         // In its footwork it faces its target whichever way its path takes it, and side-steps (docs/animation.md "Side steps"; MovementSystem).
-        if (!cold.CombatRunning) cold.FaceSlot = t;
+        if (!cold.CombatRunning && !aimedPart) cold.FaceSlot = t;
         n.TaskTime -= dt;
         // Its swings are measured to where a target that is not fighting will be (CombatSystem.StartAttack's aim, AimLeadSeconds ahead), so standing and the run past are too:
         // stood within reach of the target itself, a runner's aim point would be out of reach and the chaser would stand there idle while the runner got away.
-        var aim = tc is { InCombat: false } ? next[t].Position + tv * CombatTuning.AimLeadSeconds : next[t].Position;
+        var aim = aimedPart ? targetPoint : tc is { InCombat: false } ? next[t].Position + tv * CombatTuning.AimLeadSeconds : next[t].Position;
         var da = aim - n.Position;
-        float aimGap = MathF.Sqrt(da.X * da.X + da.Z * da.Z) - CombatTuning.Footprint(cold) - CombatTuning.Footprint(tc);
+        float aimGap = MathF.Sqrt(da.X * da.X + da.Z * da.Z) - CombatTuning.Footprint(cold) - (aimedPart ? 0 : CombatTuning.Footprint(tc));
         // After a fleeing target it aims ahead of it (CombatTuning.LeadBase), so a faster chaser runs past; the lead follows the target's velocity, so it swings round
         // when the target turns. Engine rules: the lead and the run past hold only while the chaser is behind the nearer of the lead and aim points; once level with it
         // it turns on the target and stops with the aim point within reach, so the runner comes into its swing. A path's goal is reached and stopped at, and a
         // fighter's speed ramps up again slowly, so the goal is put RepathSeconds of the runner's way past the lead (the lead moves that far before the next path).
         // Bodies are solid here (the original's chaser runs through its runner), so the goal is also put PassWidth beside the runner's track, on the chaser's side
         // (by slot when dead behind), for the chaser to pass the runner rather than push it along.
-        var goal = new Vector2(next[t].Position.X, next[t].Position.Z);
+        var goal = new Vector2(targetPoint.X, targetPoint.Z);
         float lead = fleeing && cold.Fighter is not null && cold.Stats is not null && cold.Medical is not null
             ? (1 - combat.AttackRate(world, i, cold)) * CombatTuning.LeadSlope + CombatTuning.LeadBase : 0;
         var level = next[t].Position + tv * MathF.Min(lead, CombatTuning.AimLeadSeconds) - n.Position;
@@ -91,8 +93,8 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         }
         // In its footwork with a clear line to the target, the fight steering moves it (docs/game/combat.md "Fight steering"): its state sets the band, no paths.
         if (Steer(world, i, ref n, cold, st, t, holding)) return;
-        float stand = CombatTuning.StandGap(st.Reach, cold.Fighter?.WeaponLength ?? 0, cold.CombatRunning);
-        if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || world.Tick < st.StunUntil || shooting || !st.Ranged && !behind && aimGap <= stand && CombatTuning.Gap(n.Position, aim, cold, tc) <= endReach || holding)
+        float stand = aimedPart ? 1 : CombatTuning.StandGap(st.Reach, cold.Fighter?.WeaponLength ?? 0, cold.CombatRunning);
+        if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || world.Tick < st.StunUntil || shooting || !st.Ranged && !behind && aimGap <= stand && (aimedPart ? CombatSystem.PartTargetGap(n.Position, aim, cold) : CombatTuning.Gap(n.Position, aim, cold, tc)) <= endReach || holding)
         {
             // In reach, mid-swing or staggered (the hit reaction carries it), or holding position: stand and fight.
             if ((n.Flags & Path) != 0)
@@ -126,11 +128,11 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
             var ahead = goal + new Vector2(tv.X, tv.Z) * (lead + RepathSeconds) + across * (side > 0 || side == 0 && (i & 1) == 0 ? pass : -pass);
             if (world.Walkability.IsWalkable(ahead.X, ahead.Y, next[t].Position.Y)) goal = ahead;   // off the navmesh (a wall, a cliff) it goes for the target itself
         }
-        bool stale = (n.Flags & (ushort)MoveFlags.HasPath) == 0 || Vector2.DistanceSquared(goal, n.Goal) > RepathDistance * RepathDistance;
+        bool stale = (n.Flags & (ushort)MoveFlags.HasPath) == 0 || Vector2.DistanceSquared(goal, n.Goal) > (aimedPart ? 2 * 2 : RepathDistance * RepathDistance);
         if (!stale) return;
         n.Goal = goal;
-        (cold.GoalHeight, cold.GoalHeightAt) = (next[t].Position.Y, goal);   // the floor the target stands on (a target upstairs is walked to up the stairs, not to the ground below it)
-        cold.PursuitGoal = new Vector3(goal.X, next[t].Position.Y, goal.Y);
+        (cold.GoalHeight, cold.GoalHeightAt) = (targetPoint.Y, goal);   // the floor the target stands on (a target upstairs is walked to up the stairs, not to the ground below it)
+        cold.PursuitGoal = new Vector3(goal.X, targetPoint.Y, goal.Y);
         n.Mode = SpeedMode.Free;
         n.Flags |= (ushort)MoveFlags.NeedPath;
         n.TaskTime = RepathSeconds;
@@ -148,7 +150,7 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         steer.Active = false;
         // A swing has no steering: the movement is animation driven (the attack start and every swing tick set the movement's lock, FUN_14065e240; CharMovement update
         // FUN_14065ffa0 then moves it by the clip's root motion only), so it stands in its place (MovementSystem turns it, CombatSystem.SwingAim).
-        if (cold.CombatRunning || st.Ranged || holding || st.Down || st.AttackTech >= 0) return false;
+        if (st.TargetBodyPart is not null || cold.CombatRunning || st.Ranged || holding || st.Down || st.AttackTech >= 0) return false;
         // A fighter on a path chase tests the line every tick (CombatClassAI update FUN_14060d6a0, in the chase states); one in its footwork only when it decides again, about
         // every RepathSeconds. A blocked line met at a new pick or in the footwork starts a chase of at least PathChaseSeconds (FUN_14060c8b0, timer +0x14c), a holder's not.
         bool chasing = steer.ChaseTarget == t;

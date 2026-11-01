@@ -228,6 +228,7 @@ public sealed class CharacterSnapshot
     public SkillSummary? Skills { get; internal set; }
     public IReadOnlyList<float> AllSkills { get; internal set; } = [];
     public IReadOnlyList<float> SkillXpMultipliers { get; internal set; } = [];
+    /// <summary>Immutable health rows for the selection/inspector and living down/asleep NPCs whose attack menu chooses a present part.</summary>
     public IReadOnlyList<HealthPartView> HealthParts { get; internal set; } = [];
     /// <summary>The limbs' states (<c>MedicalState.LimbBits</c>: limb slot k's <c>LimbState</c> in bits 2k..2k+1; 0 when every limb is the original).</summary>
     public int LimbBits { get; internal set; }
@@ -247,6 +248,11 @@ public sealed class CharacterSnapshot
     public CharacterId CarriedBy { get; internal set; } = CharacterId.None;
     /// <summary>Where a carried body hangs, in its carrier's frame (on the carrier's <c>Bip01 L UpperArm</c>); null when not carried.</summary>
     public Carrying.CarryAttach? Carry { get; internal set; }
+    /// <summary>The positive torso half's physical root in world space, independent of the logical negative half.</summary>
+    public Vector3? TorsoPositivePosition { get; internal set; }
+    public float TorsoPositiveYaw { get; internal set; }
+    public CharacterId TorsoPositiveCarriedBy { get; internal set; } = CharacterId.None;
+    public Carrying.CarryAttach? TorsoPositiveCarry { get; internal set; }
     /// <summary>The ITEM (string id) held in the <c>hands</c> point while operating: the functionality's <c>special tool</c> (docs/game/buildings-production.md "Production"); null for none.</summary>
     public string? HeldTool { get; internal set; }
     /// <summary>The size the body is drawn at: an animal's lerp(age, <c>scale min</c>, <c>scale max</c>) (its <c>MedicalState.ScaleK</c>), 1 for people.</summary>
@@ -287,6 +293,8 @@ public sealed class CharacterSnapshot
     public uint PortraitSerial { get; internal set; }
     /// <summary>The character this one carries (none when not carrying).</summary>
     public CharacterId Carrying { get; internal set; } = CharacterId.None;
+    /// <summary>0: ordinary body/negative cut half; 1: the independently carried positive torso half.</summary>
+    public int CarryingTorsoSide { get; internal set; }
     /// <summary>The goal the AI is acting out, in the game's words (<c>Patrolling town</c>, <c>Shopkeeper</c>); null when the AI does not run the character now.</summary>
     public string? Activity { get; internal set; }
     /// <summary>A player character's last decision (<see cref="DecisionSystem.Tracing"/>: which source won and why each one before it could not run); null while tracing is off. Debug only.</summary>
@@ -345,6 +353,8 @@ public sealed class CharacterSnapshot
     public BonePose? Ragdoll { get; internal set; }
     /// <summary>Independent articulated torso-cut halves; null when Advanced Ragdolls is off or no physical cut is available.</summary>
     public Ragdolls.TorsoRagdollPose? TorsoRagdoll { get; internal set; }
+    /// <summary>The logical cut, including when a compatible physical ragdoll is unavailable.</summary>
+    public Wounds.TorsoBisectionState? TorsoBisection { get; internal set; }
     /// <summary>Independent physical head/limb pieces, in this snapshot owner's drawn model space.</summary>
     public IReadOnlyList<Ragdolls.DetachedRagdollPose> DetachedRagdolls { get; internal set; } = [];
 }
