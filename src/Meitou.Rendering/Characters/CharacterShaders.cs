@@ -566,7 +566,7 @@ static class CharacterShaders
                 float open = distance(vSkinPos, vec3(0.3, 18.85, 0.65)) + 0.03 * sin(vSkinPos.x * 31.0 + vSkinPos.y * 13.0) + 0.02 * sin(vSkinPos.y * 47.0);
                 if (vAnatomy == 0u)
                 {
-                    if (vHeadOpen >= 2u && open < 0.2) discard;
+                    if (vHeadOpen >= 2u && open < 0.26) discard;
                     float wet = 1.0 - smoothstep(0.32, 0.42, open), bone = 1.0 - smoothstep(0.29, 0.33, open);
                     albedo = mix(mix(albedo, vec3(0.3, 0.02, 0.025), wet), vec3(0.68, 0.6, 0.47), bone);
                     gloss = mix(gloss, 0.75, wet);
