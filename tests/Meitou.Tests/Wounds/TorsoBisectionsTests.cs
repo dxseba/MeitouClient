@@ -200,12 +200,23 @@ public class TorsoBisectionsTests
     public void Full_body_vertical_and_steep_planes_round_trip_without_transverse_normal_clamping()
     {
         var diagonalNormal = Vector3.Normalize(new Vector3(0.95f, 0.2f, -0.13f));
-        TorsoBisectionState[] states = [FullBody, new(new(diagonalNormal, -Vector3.Dot(diagonalNormal, new(0.17f, 12.5f, -0.09f))), true), Flat];
+        TorsoBisectionState OffsetPlane(Vector3 normal, float offset)
+        {
+            normal = Vector3.Normalize(normal);
+            var across = Vector3.Normalize(new Vector3(normal.X, 0, normal.Z));
+            var anchor = new Vector3(0, 12.5f, 0) + across * offset;
+            return new(new(normal, -Vector3.Dot(normal, anchor)), true);
+        }
+        TorsoBisectionState[] states = [FullBody, new(new(diagonalNormal, -Vector3.Dot(diagonalNormal, new(0.17f, 12.5f, -0.09f))), true), Flat,
+            OffsetPlane(Vector3.UnitZ, 0.8f), OffsetPlane(-Vector3.UnitZ, -0.8f),
+            OffsetPlane(new(0.6f, 0.7f, 0.8f), -0.8f), OffsetPlane(new(-0.8f, -0.7f, 0.6f), 0.8f)];
         var source = new TorsoBisections();
         for (int i = 0; i < states.Length; i++) Assert.True(source.Set(new(i, 1), states[i]));
         var lines = source.Write(id => (12, id.Slot + 1)).ToArray();
         var after = new TorsoBisections();
-        Assert.Equal(states.Length, after.Read(lines, h => new(h.I + 10, 4)).Restored);
+        Assert.Equal(states.Length, after.Read(lines, _ => null).Pending);
+        Assert.Equal(lines, after.Write(_ => null).ToArray());
+        Assert.Equal(states.Length, after.Refresh(h => new(h.I + 10, 4)).Count);
         for (int i = 0; i < states.Length; i++) Assert.Equal(states[i], after.Of(new(i + 11, 4)));
         Assert.True(after.Of(new(11, 4))!.Value.FullBody);
         Assert.True(after.Of(new(12, 4))!.Value.FullBody);

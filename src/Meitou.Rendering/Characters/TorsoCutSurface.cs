@@ -70,6 +70,23 @@ static class TorsoCutSurface
     static Vector3 Round(Vector3 p) => new(MathF.Round(p.X, 4), MathF.Round(p.Y, 4), MathF.Round(p.Z, 4));
     readonly record struct Point(Vector3 Position, Vector3 Morph, uint Bones, Vector4 Weights);
 
+    static Point Interpolate(Point a, Point b, float t)
+    {
+        var weights = new Dictionary<uint, float>();
+        for (int k = 0; k < 4; k++)
+        {
+            uint ba = a.Bones >> (8 * k) & 255, bb = b.Bones >> (8 * k) & 255;
+            weights[ba] = weights.GetValueOrDefault(ba) + a.Weights[k] * (1 - t);
+            weights[bb] = weights.GetValueOrDefault(bb) + b.Weights[k] * t;
+        }
+        var top = weights.Where(p => p.Value > 0).OrderByDescending(p => p.Value).Take(4).ToArray();
+        float sum = top.Sum(p => p.Value);
+        uint bones = 0;
+        var w = Vector4.Zero;
+        for (int k = 0; k < top.Length; k++) { bones |= top[k].Key << (k * 8); w[k] = top[k].Value / sum; }
+        return new(Vector3.Lerp(a.Position, b.Position, t), Vector3.Lerp(a.Morph, b.Morph, t), bones, w);
+    }
+
     /// <summary>Kept body samples and exact cut-edge samples, with the body morph applied once before skinning.</summary>
     public static IEnumerable<Vertex> KeptVertices(Vertex[] source, uint[] groups, CharacterTorsoCut cut, Vector4[]? morphs = null)
     {
@@ -136,19 +153,7 @@ static class TorsoCutSurface
         }
         Point Edge(in Vertex a, in Vertex b, float t)
         {
-            var weights = new Dictionary<uint, float>();
-            for (int k = 0; k < 4; k++)
-            {
-                uint ba = a.Bones >> (8 * k) & 255, bb = b.Bones >> (8 * k) & 255;
-                weights[ba] = weights.GetValueOrDefault(ba) + a.Weights[k] * (1 - t);
-                weights[bb] = weights.GetValueOrDefault(bb) + b.Weights[k] * t;
-            }
-            var top = weights.Where(p => p.Value > 0).OrderByDescending(p => p.Value).Take(4).ToArray();
-            float sum = top.Sum(p => p.Value);
-            uint bones = 0;
-            var w = Vector4.Zero;
-            for (int k = 0; k < top.Length; k++) { bones |= top[k].Key << (k * 8); w[k] = top[k].Value / sum; }
-            return new(Vector3.Lerp(a.Position, b.Position, t), Vector3.Lerp(Delta(a), Delta(b), t), bones, w);
+            return Interpolate(new(a.Position, Delta(a), a.Bones, a.Weights), new(b.Position, Delta(b), b.Bones, b.Weights), t);
         }
         for (int triangle = 0; triangle + 2 < source.Length; triangle += 3)
         {
@@ -174,6 +179,39 @@ static class TorsoCutSurface
         var rims = new List<(List<Point> Points, float Area)>();
         if (normalized.FullBody)
         {
+            // Separate skin pieces can overlap: the installed Hiver head is an open neck tube inserted into
+            // the closed torso. Split actual section-edge crossings so its visible head outline joins the body.
+            Vector2 Project(int i) => new(Vector3.Dot(points[i].Position, u), Vector3.Dot(points[i].Position, v));
+            var segments = Enumerable.Range(0, points.Count).SelectMany(a => adjacent[a].Where(b => a < b).Select(b => (A: a, B: b, From: Project(a), To: Project(b)))).ToArray();
+            var splits = segments.Select(s => new List<(float At, int Index)> { (0, s.A), (1, s.B) }).ToArray();
+            static float Cross(Vector2 a, Vector2 b) => a.X * b.Y - a.Y * b.X;
+            bool crossed = false;
+            for (int first = 0; first < segments.Length; first++)
+                for (int second = first + 1; second < segments.Length; second++)
+                {
+                    var a = segments[first]; var b = segments[second];
+                    if (a.A == b.A || a.A == b.B || a.B == b.A || a.B == b.B
+                        || MathF.Max(a.From.X, a.To.X) + 1e-5f < MathF.Min(b.From.X, b.To.X) || MathF.Max(b.From.X, b.To.X) + 1e-5f < MathF.Min(a.From.X, a.To.X)
+                        || MathF.Max(a.From.Y, a.To.Y) + 1e-5f < MathF.Min(b.From.Y, b.To.Y) || MathF.Max(b.From.Y, b.To.Y) + 1e-5f < MathF.Min(a.From.Y, a.To.Y)) continue;
+                    var stepA = a.To - a.From; var stepB = b.To - b.From;
+                    float denominator = Cross(stepA, stepB);
+                    if (MathF.Abs(denominator) < 1e-10f) continue;
+                    float ta = Cross(b.From - a.From, stepB) / denominator, tb = Cross(b.From - a.From, stepA) / denominator;
+                    if (ta < -1e-5f || ta > 1.00001f || tb < -1e-5f || tb > 1.00001f) continue;
+                    ta = Math.Clamp(ta, 0, 1); tb = Math.Clamp(tb, 0, 1);
+                    int at = Add(Interpolate(points[a.A], points[a.B], ta));
+                    splits[first].Add((ta, at)); splits[second].Add((tb, at));
+                    crossed = true;
+                }
+            if (crossed)
+            {
+                foreach (var neighbours in adjacent) neighbours.Clear();
+                foreach (var split in splits)
+                {
+                    var order = split.OrderBy(p => p.At).Select(p => p.Index).Distinct().ToArray();
+                    for (int i = 1; i < order.Length; i++) { adjacent[order[i - 1]].Add(order[i]); adjacent[order[i]].Add(order[i - 1]); }
+                }
+            }
             // Open mouth/eyelid edges can touch a valid skin loop. Remove only their dangling chains, then
             // walk the bounded faces of the remaining planar graph; a shared seam need not have degree two.
             var dangling = new Queue<int>(Enumerable.Range(0, points.Count).Where(i => adjacent[i].Count < 2));

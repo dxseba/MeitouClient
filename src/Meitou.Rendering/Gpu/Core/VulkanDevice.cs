@@ -460,21 +460,30 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// <summary>Whether the loader (or <paramref name="layer"/>, for an extension a layer provides) has the instance extension.</summary>
     bool InstanceExtensionAvailable(string name, string? layer = null)
     {
-        uint n = 0;
         var layerName = layer is null ? null : (byte*)SilkMarshal.StringToPtr(layer);
         try
         {
-            Vk.EnumerateInstanceExtensionProperties(layerName, &n, null);
-            var exts = new ExtensionProperties[n];
-            fixed (ExtensionProperties* p = exts)
+            // The list may change between the count and fill calls. Retry incomplete results with a fresh capacity.
+            for (int attempt = 0; attempt < 3; attempt++)
             {
-                Vk.EnumerateInstanceExtensionProperties(layerName, &n, p);
-                for (int i = 0; i < n; i++)
+                uint capacity = 0;
+                var counted = Vk.EnumerateInstanceExtensionProperties(layerName, &capacity, null);
+                if (counted is not (Result.Success or Result.Incomplete) || capacity == 0) return false;
+                var exts = new ExtensionProperties[capacity];
+                fixed (ExtensionProperties* p = exts)
                 {
-                    if (Marshal.PtrToStringAnsi((nint)p[i].ExtensionName) == name)
+                    uint written = capacity;
+                    var filled = Vk.EnumerateInstanceExtensionProperties(layerName, &written, p);
+                    if (filled is not (Result.Success or Result.Incomplete)) return false;
+                    uint count = Math.Min(written, (uint)exts.Length);
+                    for (int i = 0; i < count; i++)
                     {
-                        return true;
+                        if (Marshal.PtrToStringAnsi((nint)p[i].ExtensionName) == name)
+                        {
+                            return true;
+                        }
                     }
+                    if (filled == Result.Success) return false;
                 }
             }
             return false;

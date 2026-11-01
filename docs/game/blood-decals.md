@@ -132,6 +132,8 @@ characters carry blood on their skin, not only on the ground.
 - **Observed** (sandbox, a dressed character): a stump under a coat or trousers is not visible at all; the blood shows on a bare stump and on a fallen limb. The ground limb of the
   sandbox is white without a material because the sandbox has no world-object layer, so the debris path (no material) drew it.
 
+The loose bowel is uploaded with packed `GpuVertex.ObjectSize` (44-byte) vertices, matching the debris pass; raw `Vertex` bytes use another stride and draw stretched triangles. Procedural character caps retain raw float attributes because their tangent holds bind-space coordinates and anatomy layer tags.
+
 ## Blood on surfaces (Meitou)
 
 The `bloodsurfaces` switch (Meitou, default; Faithful: terrain only, as the game): the same marks also land on walls, buildings, rocks and other static objects. **Observed** (Hub battle, sandbox screenshots), not a game behaviour.
@@ -151,4 +153,4 @@ The `bloodsurfaces` switch (Meitou, default; Faithful: terrain only, as the game
 
 The item keeps its stain through draw/sheath, transfers, quantity copies and equipment refresh. Snapshots publish the exact hip/back combat items' blood; the host forwards it to the [character renderer](../character-renderer.md#weapon-blood). Native item saves use Meitou's optional Vector4 `meitou weapon blood` key: finite components clamp to 0..1, zero/nonfinite coverage loads clean; clean items omit it. Native item paths cover inventory, bags, machines and ground items; ground-zone reuse compares the typed stain. Chest/shop JSON keeps optional `B:[r,g,b,amount]`, omitted when clean and normalized through `SaveItem`. This is a Meitou extension, not an observed original-game weapon effect.
 
-**Verified** (`WeaponBloodCombatTests`, `WeaponBloodEquipmentTests`, `WeaponBloodSaveTests`): delivered damage and weapon-contact gates, independent same-record items, armour reduction, multiple victims, organic severing versus destroyed prosthetics, execution, colour accumulation and saturation; slot changes, arm-driven weapon selection, transfers and immutable snapshots; native FCS byte round trips, clean/legacy/invalid data, same-zone ground changes, nested chest JSON and shop-stock restoration. Fixtures are synthetic and use no personal saves.
+**Verified** (`WeaponBloodCombatTests`, `WeaponBloodEquipmentTests`, `WeaponBloodSaveTests`): delivered damage and weapon-contact gates, independent same-record items, armour reduction, multiple victims, organic severing versus destroyed prosthetics, execution, colour accumulation and saturation; slot changes, arm-driven weapon selection, transfers and the unchanged shown snapshot pair; native FCS byte round trips, clean/legacy/invalid data, same-zone ground changes, nested chest JSON and shop-stock restoration. Fixtures are synthetic and use no personal saves.

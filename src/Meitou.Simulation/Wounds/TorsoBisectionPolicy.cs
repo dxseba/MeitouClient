@@ -5,7 +5,7 @@ using Meitou.Simulation.Combat;
 
 namespace Meitou.Simulation.Wounds;
 
-public enum TorsoBisectionStyle { Auto = 0, Transverse = 1, Vertical = 2, Diagonal = 3 }
+public enum TorsoBisectionStyle { Auto = 0, Transverse = 1, Vertical = 2, Diagonal = 3, Oblique = 4 }
 
 /// <summary>The delivered chest hit and the victim's state before it landed.</summary>
 public readonly record struct TorsoBisectionInput(CombatHitSource Source, CombatWoundMechanism Mechanism,
@@ -26,6 +26,8 @@ public static class TorsoBisectionPolicy
     public const float ObliqueDiagonalMinimumTiltDegrees = 18, ObliqueDiagonalMaximumTiltDegrees = 35;
     public const float LongDiagonalPivotMinimum = 10.2f, LongDiagonalPivotMaximum = 11.5f, LongDiagonalOffsetScale = 0.8f;
     public const float ObliqueDiagonalPivotMinimum = 11.8f, ObliqueDiagonalPivotMaximum = 14, ObliqueDiagonalOffsetScale = 1.1f;
+    public const float ObliqueMinimumTiltDegrees = 40, ObliqueMaximumTiltDegrees = 60;
+    public const float ObliquePivotMinimum = 12, ObliquePivotMaximum = 13.2f, ObliqueOffsetScale = 0.25f;
 
     public static float Chance(in TorsoBisectionInput input)
     {
@@ -52,19 +54,23 @@ public static class TorsoBisectionPolicy
         TorsoBisectionStyle.Auto => cutDirection is 1 or 2 or 3 or 7 or 9,
         TorsoBisectionStyle.Transverse => cutDirection is 2 or 3 or 9,
         TorsoBisectionStyle.Vertical or TorsoBisectionStyle.Diagonal => cutDirection is 1 or 7,
+        TorsoBisectionStyle.Oblique => cutDirection is 1 or 2 or 3 or 7 or 9,
         _ => false,
     };
 
-    /// <summary>Sideways blows retain the transverse fit; downward planes turn with the incoming blow and vary between vertical, long diagonal and oblique cuts.</summary>
+    /// <summary>Eligible blows may cleave across the torso; other sideways cuts retain the transverse fit and downward cuts can continue lengthwise.</summary>
     public static TorsoBisectionState StateForDirection(int cutDirection, ulong visualSeed = 0, Vector2 travel = default,
         float victimYaw = 0, TorsoBisectionStyle style = TorsoBisectionStyle.Auto)
     {
         if (!SupportsStyle(cutDirection, style)) return default;
         ulong styleBits = Rng.Mix(visualSeed ^ 0x4C4F4E4743555453UL);
         if (style == TorsoBisectionStyle.Auto)
+        {
+            float choice = Rng.Float(styleBits);
             style = cutDirection is 1 or 7
-                ? Rng.Float(styleBits) < 0.5f ? TorsoBisectionStyle.Vertical : TorsoBisectionStyle.Diagonal
-                : TorsoBisectionStyle.Transverse;
+                ? choice < 1f / 3 ? TorsoBisectionStyle.Vertical : choice < 2f / 3 ? TorsoBisectionStyle.Diagonal : TorsoBisectionStyle.Oblique
+                : choice < 1f / 3 ? TorsoBisectionStyle.Oblique : TorsoBisectionStyle.Transverse;
+        }
         if (style == TorsoBisectionStyle.Transverse) return new(PlaneForDirection(cutDirection, visualSeed, travel, victimYaw));
 
         ulong offsetBits = Rng.Mix(styleBits), angleBits = Rng.Mix(offsetBits), pivotBits = Rng.Mix(angleBits), slopeBits = Rng.Mix(pivotBits);
@@ -95,6 +101,14 @@ public static class TorsoBisectionPolicy
             slope = MathF.Tan((minimumTilt + (maximumTilt - minimumTilt) * Rng.Float(slopeBits)) * MathF.PI / 180);
             if (Rng.Float(Rng.Mix(slopeBits)) < 0.5f) slope = -slope;
             offsetScale = oblique ? ObliqueDiagonalOffsetScale : LongDiagonalOffsetScale;
+        }
+        else if (style == TorsoBisectionStyle.Oblique)
+        {
+            pivot = ObliquePivotMinimum + (ObliquePivotMaximum - ObliquePivotMinimum) * Rng.Float(pivotBits);
+            slope = MathF.Tan((ObliqueMinimumTiltDegrees + (ObliqueMaximumTiltDegrees - ObliqueMinimumTiltDegrees) * Rng.Float(slopeBits)) * MathF.PI / 180);
+            bool negative = cutDirection == 3 || cutDirection != 2 && Rng.Float(Rng.Mix(slopeBits)) < 0.5f;
+            if (negative) slope = -slope;
+            offsetScale = ObliqueOffsetScale;
         }
         float offset = (Rng.Float(offsetBits) * 2 - 1) * radius * offsetScale;
         var normal = Vector3.Normalize(new Vector3(horizontal.X, slope, horizontal.Y));

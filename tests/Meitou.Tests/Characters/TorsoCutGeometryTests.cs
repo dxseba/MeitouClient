@@ -135,6 +135,33 @@ public class TorsoCutGeometryTests
     }
 
     [Fact]
+    public void Full_body_caps_and_picking_support_front_back_and_opposite_diagonal_planes()
+    {
+        var source = Box(new(-1, -1, -1), new(1, 1, 1));
+        Vector3[] normals = [Vector3.UnitX, -Vector3.UnitX, Vector3.UnitZ, -Vector3.UnitZ, new(1, 0.7f, 1), new(-1, -0.7f, 1)];
+        foreach (var raw in normals)
+        {
+            var normal = Vector3.Normalize(raw);
+            var cut = new CharacterTorsoCut(new(normal, 0), 1, true);
+            var opposite = new CharacterTorsoCut(-cut.Plane, -1, true);
+            var cap = TorsoCutSurface.Build(source, [0], cut)!;
+            var sameHalf = TorsoCutSurface.Build(source, [0], opposite)!;
+            Assert.NotNull(cap);
+            Assert.NotNull(sameHalf);
+            Assert.Equal(cap.Length, sameHalf.Length);
+            Assert.All(cap, v =>
+            {
+                Assert.True(float.IsFinite(v.Position.LengthSquared()));
+                Assert.True(Vector3.Dot(v.Normal, normal) <= 1e-5f);
+                Assert.Contains(sameHalf, other => Vector3.DistanceSquared(v.Position, other.Position) <= 2.5e-9f);
+            });
+            Assert.Equal(3, TorsoCutSurface.RayBox(-normal * 3, normal, new(-1), new(1), 3, cut)!.Value, 1e-5f);
+            var parallel = Vector3.Normalize(Vector3.Cross(normal, MathF.Abs(normal.Y) < 0.8f ? Vector3.UnitY : Vector3.UnitX));
+            Assert.Null(TorsoCutSurface.RayBox(-normal * 0.5f, parallel, new(-1), new(1), 6, cut));
+        }
+    }
+
+    [Fact]
     public void Soft_tissue_cutoff_keeps_complete_triangles_without_joining_later_organ_faces()
     {
         static EcorcheVertex V(float x, float y) => new(new(x, y, 0), Vector3.UnitZ, default);
@@ -232,29 +259,116 @@ public class TorsoCutGeometryTests
 
     static void CheckInstalledFullBody(Vertex[] source, uint[] groups, string file)
     {
-        foreach (var style in new[] { TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal })
-            for (ulong seed = 0; seed < 4; seed++)
+        var cases = new List<(string Name, Vector4 Plane, bool Head, bool Leg, bool Torso)>
+        {
+            ("centre left/right", new(1, 0, 0, 0), true, false, false),
+            ("centre front/back", new(0, 0, 1, 0), true, true, false),
+            ("long chest/pelvis/leg", new(1, 0.20f, 0, -2.2f), false, true, false),
+        };
+        // Couple direction, offset, tilt and pivot to cover the new envelope without a large Cartesian product.
+        for (int direction = 0; direction < 8; direction++)
+        {
+            float angle = direction * MathF.PI / 4;
+            var horizontal = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+            float radius = 1 / MathF.Sqrt(horizontal.X * horizontal.X / (0.70f * 0.70f) + horizontal.Y * horizontal.Y / (0.40f * 0.40f));
+            if (direction % 2 == 0)
             {
-                var state = TorsoBisectionPolicy.StateForDirection(seed % 2 == 0 ? 1 : 7, seed, new(0.4f, -0.9f), 0.3f, style);
-                Assert.True(state.FullBody);
-                foreach (int side in new[] { -1, 1 })
+                float offset = (direction % 4 == 0 ? 1 : -1) * radius;
+                cases.Add(($"vertical extreme {direction}", new(horizontal.X, 0, horizontal.Y, -offset), false, false, false));
+            }
+            bool oblique = direction % 2 != 0;
+            float tilt = (oblique ? 35 : 16) * MathF.PI / 180 * (direction % 4 < 2 ? 1 : -1);
+            float pivot = oblique ? direction < 4 ? 11.8f : 14 : direction < 4 ? 10.2f : 11.5f;
+            float useOffset = direction % 3 == 0 ? 0 : (direction % 3 == 1 ? 1 : -1) * (oblique ? 1.1f : 0.8f) * radius;
+            var normal = Vector3.Normalize(new(horizontal.X, MathF.Tan(tilt), horizontal.Y));
+            cases.Add(($"diagonal extreme {direction}", new(normal, -Vector3.Dot(normal, new(horizontal.X * useOffset, pivot, horizontal.Y * useOffset))), false, false, false));
+        }
+        for (ulong seed = 0; seed < 8; seed++)
+        {
+            float angle = seed * MathF.PI / 4;
+            var style = seed % 2 == 0 ? TorsoBisectionStyle.Vertical : TorsoBisectionStyle.Diagonal;
+            var state = TorsoBisectionPolicy.StateForDirection(seed % 3 == 0 ? 7 : 1, seed, new(MathF.Sin(angle), MathF.Cos(angle)), angle * 0.3f, style);
+            Assert.True(state.FullBody);
+            cases.Add(($"policy {style} seed {seed}", state.Plane, false, false, false));
+        }
+        (float Tilt, float Pivot, float Azimuth, float Offset)[] torsoCuts = [(40, 12, 0, 1), (-40, 13.2f, 0, -1), (60, 12, 25, -1), (-60, 13.2f, -25, 1)];
+        foreach (var torso in torsoCuts)
+        {
+            float azimuth = torso.Azimuth * MathF.PI / 180;
+            var horizontal = new Vector2(MathF.Cos(azimuth), MathF.Sin(azimuth));
+            float radius = 1 / MathF.Sqrt(horizontal.X * horizontal.X / (0.70f * 0.70f) + horizontal.Y * horizontal.Y / (0.40f * 0.40f));
+            float offset = torso.Offset * radius * 0.25f;
+            var normal = Vector3.Normalize(new(horizontal.X, MathF.Tan(torso.Tilt * MathF.PI / 180), horizontal.Y));
+            cases.Add(($"torso oblique {torso.Tilt} pivot {torso.Pivot}", new(normal, -Vector3.Dot(normal, new(horizontal.X * offset, torso.Pivot, horizontal.Y * offset))), false, false, true));
+        }
+        foreach (var sampleCase in cases)
+        {
+            var plane = sampleCase.Plane / new Vector3(sampleCase.Plane.X, sampleCase.Plane.Y, sampleCase.Plane.Z).Length();
+            var normal = new Vector3(plane.X, plane.Y, plane.Z);
+            var intersections = SectionSegments(source, plane);
+            Assert.NotEmpty(intersections);
+            foreach (int side in new[] { -1, 1 })
+            {
+                string sample = $"{file}: {sampleCase.Name} side {side}";
+                var cut = new CharacterTorsoCut(plane, side, true);
+                var cap = TorsoCutSurface.Build(source, groups, cut);
+                Assert.True(cap is { Length: >= 12 and <= 32768 }, sample + " did not fit a bounded full-body cap");
+                Assert.All(cap!, v => Assert.True(float.IsFinite(v.Position.LengthSquared()), sample + " produced a nonfinite cap"));
+                var rim = cap!.Where(v => v.Uv.X < 0.5f).ToArray();
+                if (sampleCase.Leg) Assert.True(rim.Min(v => v.Position.Y) < 10, sample + " did not continue through the pelvis into a leg");
+                if (sampleCase.Head) Assert.True(rim.Max(v => v.Position.Y) > 17.5f, sample + " did not cap the sliced head");
+                if (sampleCase.Leg) Assert.True(rim.Max(v => v.Position.Y) > 13.5f, sample + " did not reach the chest");
+                if (sampleCase.Torso) Assert.Contains(rim, v => v.Position.Y is >= 11 and <= 14 && MathF.Abs(v.Position.X) < 1.5f && MathF.Abs(v.Position.Z) < 1.5f);
+                foreach (var vertex in rim) Assert.InRange(MathF.Abs(Vector3.Dot(normal, vertex.Position) + plane.W), 0, 0.04f);
+                Assert.Contains(source, vertex => (Vector3.Dot(normal, vertex.Position) + plane.W) * side > 0.05f);
+                int triangles = cap.Length / 3, stride = Math.Max(1, triangles / 96);
+                for (int triangle = 0; triangle < triangles; triangle++)
                 {
-                    string sample = $"{file}: {style} seed {seed} side {side}";
-                    var cap = TorsoCutSurface.Build(source, groups, new(state.Plane, side, true));
-                    Assert.True(cap is { Length: >= 12 and <= 32768 }, sample + " did not fit a bounded full-body cap");
-                    Assert.All(cap!, v => Assert.True(float.IsFinite(v.Position.LengthSquared()), sample + " produced a nonfinite cap"));
-                    var rim = cap!.Where(v => v.Uv.X < 0.5f).ToArray();
-                    Assert.True(rim.Min(v => v.Position.Y) < 10, sample + " did not continue through the pelvis into a leg");
-                    Assert.True(rim.Max(v => v.Position.Y) > 13.5f, sample + " did not reach the chest");
-                    if (style == TorsoBisectionStyle.Vertical) Assert.True(rim.Max(v => v.Position.Y) > 17.5f, sample + " did not cap the sliced head");
-                    foreach (var v in rim)
-                        Assert.InRange(MathF.Abs(Vector3.Dot(new(state.Plane.X, state.Plane.Y, state.Plane.Z), v.Position) + state.Plane.W), 0, 0.04f);
-                    for (int i = 0; i < cap.Length; i += 3)
+                    var a = cap[triangle * 3]; var b = cap[triangle * 3 + 1]; var c = cap[triangle * 3 + 2];
+                    var outer = new[] { a, b, c }.Where(v => v.Uv.X < 0.5f).ToArray();
+                    if (outer.Length == 2)
                     {
-                        Assert.Equal(cap[i].Uv.Y, cap[i + 1].Uv.Y);
-                        Assert.Equal(cap[i].Uv.Y, cap[i + 2].Uv.Y);
+                        float distance = SectionDistance((outer[0].Position + outer[1].Position) / 2, intersections);
+                        Assert.True(distance <= 0.05f, sample + $" bridges unrelated section edges ({distance})");
                     }
+                    if (triangle % stride == 0)
+                        Assert.True(SectionDistance((a.Position + b.Position + c.Position) / 3, intersections) <= 0.38f, sample + " stretches flesh across a neck, limb or pelvis gap");
                 }
             }
+        }
+    }
+
+    static List<(Vector3 A, Vector3 B)> SectionSegments(Vertex[] source, Vector4 plane)
+    {
+        var result = new List<(Vector3, Vector3)>();
+        var normal = new Vector3(plane.X, plane.Y, plane.Z);
+        for (int triangle = 0; triangle + 2 < source.Length; triangle += 3)
+        {
+            var points = new List<Vector3>(3);
+            for (int edge = 0; edge < 3; edge++)
+            {
+                var a = source[triangle + edge].Position; var b = source[triangle + (edge + 1) % 3].Position;
+                float da = Vector3.Dot(normal, a) + plane.W, db = Vector3.Dot(normal, b) + plane.W;
+                if (MathF.Abs(da) <= 1e-5f) points.Add(a);
+                else if ((da < 0) != (db < 0)) points.Add(Vector3.Lerp(a, b, da / (da - db)));
+            }
+            if (points.Count == 2) result.Add((points[0], points[1]));
+            else if (points.Count == 3)
+                for (int edge = 0; edge < 3; edge++) result.Add((points[edge], points[(edge + 1) % 3]));
+        }
+        return result;
+    }
+
+    static float SectionDistance(Vector3 point, List<(Vector3 A, Vector3 B)> segments)
+    {
+        float nearest = float.MaxValue;
+        foreach (var (a, b) in segments)
+        {
+            var delta = b - a;
+            float length = delta.LengthSquared();
+            float along = length > 1e-12f ? Math.Clamp(Vector3.Dot(point - a, delta) / length, 0, 1) : 0;
+            nearest = MathF.Min(nearest, Vector3.DistanceSquared(point, a + delta * along));
+        }
+        return MathF.Sqrt(nearest);
     }
 }

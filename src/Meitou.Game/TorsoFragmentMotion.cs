@@ -46,6 +46,25 @@ static class TorsoFragmentMotion
         return Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(Matrix4x4.Transpose(source) * target));
     }
 
+    /// <summary>Lays the actual body axis flat while keeping an oblique cut's exposed face upward.</summary>
+    public static Quaternion LyingTurn(Vector3 bodyUp, Vector3 planeNormal, int side)
+    {
+        bodyUp = Unit(bodyUp, Vector3.UnitY);
+        var normal = Unit(planeNormal, Vector3.UnitX);
+        var across = normal - bodyUp * Vector3.Dot(normal, bodyUp);
+        if (across.LengthSquared() < 1e-8f)
+        {
+            var axis = MathF.Abs(bodyUp.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitZ;
+            across = axis - bodyUp * Vector3.Dot(axis, bodyUp);
+        }
+        across = Unit(across, Vector3.UnitX);
+        var targetUp = Unit(Vector3.Cross(Across(normal), Vector3.UnitY), Vector3.UnitZ);
+        var targetAcross = side > 0 ? -Vector3.UnitY : Vector3.UnitY;
+        var source = Frame(bodyUp, across, Vector3.Cross(bodyUp, across));
+        var target = Frame(targetUp, targetAcross, Vector3.Cross(targetUp, targetAcross));
+        return Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(Matrix4x4.Transpose(source) * target));
+    }
+
     public static float Bottom(ReadOnlySpan<(Vector3 Point, float Radius)> bounds, Quaternion rotation)
     {
         float bottom = 0;

@@ -117,8 +117,9 @@ sealed partial class GameHost
                 negativePivot = TorsoFragmentMotion.LowestPivot(negativePoints, feet);
                 positiveBounds = [.. positivePoints.Select(p => (p - positivePivot, 0.15f))];
                 negativeBounds = [.. negativePoints.Select(p => (p - negativePivot, 0.15f))];
-                positiveTurn = TorsoFragmentMotion.OutwardTurn(head - feet, normal, 1);
-                negativeTurn = TorsoFragmentMotion.OutwardTurn(head - feet, normal, -1);
+                bool crossesTorso = MathF.Abs(cut.Plane.Y) >= 0.6f;
+                positiveTurn = crossesTorso ? TorsoFragmentMotion.LyingTurn(head - feet, normal, 1) : TorsoFragmentMotion.OutwardTurn(head - feet, normal, 1);
+                negativeTurn = crossesTorso ? TorsoFragmentMotion.LyingTurn(head - feet, normal, -1) : TorsoFragmentMotion.OutwardTurn(head - feet, normal, -1);
             }
             if (!renderer.HoldPose(lower, lower) || !renderer.HoldPose(upper, lower))
             {

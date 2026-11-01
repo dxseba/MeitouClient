@@ -406,11 +406,12 @@ public sealed unsafe class DebrisRenderer : IDisposable
         var centre = (min + max) / 2;
         var vertices = loose.Select(v => new Vertex { Position = v.Position - centre, Normal = v.Normal, Uv = v.Uv, Colour = Vector4.One }).ToArray();
         var indices = Enumerable.Range(0, vertices.Length).Select(i => (uint)i).ToArray();
-        var vb = DeviceBuffer.Create(gpu, (ulong)(vertices.Length * Rendering.Vertex.Size), BufferUse.Vertex, "debris bowel");
+        var packed = GpuVertex.PackObject(vertices);
+        var vb = DeviceBuffer.Create(gpu, (ulong)packed.Length, BufferUse.Vertex, "debris bowel");
         var ib = DeviceBuffer.Create(gpu, (ulong)indices.Length * sizeof(uint), BufferUse.Index, "debris bowel");
         using (var batch = gpu.Uploads.Begin())
         {
-            batch.Write(vb, 0, MemoryMarshal.AsBytes(vertices.AsSpan()));
+            batch.Write(vb, 0, packed);
             batch.Write(ib, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
         }
         return new Mesh(vb, ib, [(0, (uint)indices.Length, 0, null, -1f)], (max - min) / 2);

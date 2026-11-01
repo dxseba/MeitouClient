@@ -9,6 +9,11 @@ public class TorsoFragmentMotionTests
     [InlineData(1f, 0f, 0f)]
     [InlineData(1f, 0.24f, 0.2f)]
     [InlineData(1f, -0.2f, -0.15f)]
+    [InlineData(0f, 0f, 1f)]
+    [InlineData(0f, 0f, -1f)]
+    [InlineData(-1f, 0f, 0f)]
+    [InlineData(0.6f, 0.7f, 0.8f)]
+    [InlineData(-0.8f, -0.7f, 0.6f)]
     public void Long_fragments_show_both_exposed_faces_upward_and_lie_along_the_same_ground_tangent(float x, float y, float z)
     {
         var normal = Vector3.Normalize(new Vector3(x, y, z));
@@ -17,6 +22,7 @@ public class TorsoFragmentMotionTests
         foreach (int side in new[] { -1, 1 })
         {
             var turn = TorsoFragmentMotion.OutwardTurn(Vector3.UnitY, normal, side);
+            Assert.True(float.IsFinite(turn.LengthSquared()));
             var cutFace = Vector3.Transform(-side * normal, turn);
             Assert.InRange(Vector3.Distance(Vector3.UnitY, cutFace), 0, 0.00001f);
             var along = Vector3.Transform(up, turn);
@@ -24,6 +30,30 @@ public class TorsoFragmentMotionTests
             if (forward is { } other) Assert.InRange(Vector3.Distance(other, along), 0, 0.00001f);
             forward = along;
         }
+    }
+
+    [Theory]
+    [InlineData(40f, 1f)]
+    [InlineData(40f, -1f)]
+    [InlineData(60f, 1f)]
+    [InlineData(60f, -1f)]
+    public void Oblique_fragments_lie_flat_with_upward_exposure_even_from_a_leaning_pose(float degrees, float slopeSign)
+    {
+        float angle = degrees * MathF.PI / 180;
+        var normal = new Vector3(0.6f * MathF.Cos(angle), slopeSign * MathF.Sin(angle), 0.8f * MathF.Cos(angle));
+        var groundTangent = Vector3.Normalize(Vector3.Cross(TorsoFragmentMotion.Across(normal), Vector3.UnitY));
+        foreach (var bodyUp in new[] { Vector3.UnitY, Vector3.Normalize(new Vector3(0.2f, 1, 0.1f)) })
+            foreach (int side in new[] { -1, 1 })
+            {
+                var turn = TorsoFragmentMotion.LyingTurn(bodyUp, normal, side);
+                Assert.True(float.IsFinite(turn.LengthSquared()));
+                Assert.InRange(Vector3.Distance(groundTangent, Vector3.Transform(bodyUp, turn)), 0, 0.00001f);
+                var cutFace = Vector3.Transform(-side * normal, turn);
+                float dot = Vector3.Dot(normal, bodyUp);
+                float exposure = MathF.Sqrt(1 - dot * dot);
+                Assert.True(cutFace.Y > 0.1f);
+                Assert.InRange(MathF.Abs(cutFace.Y - exposure), 0, 0.00001f);
+            }
     }
 
     [Fact]
@@ -37,20 +67,49 @@ public class TorsoFragmentMotionTests
     }
 
     [Theory]
-    [InlineData(-1)]
-    [InlineData(1)]
-    public void Surface_bounds_keep_both_turned_fragments_above_the_floor(int side)
+    [InlineData(-1, 1f, 0f, 0f, 0f, false)]
+    [InlineData(1, 1f, 0f, 0f, 0f, false)]
+    [InlineData(-1, 0f, 0f, 1f, 0.8f, false)]
+    [InlineData(1, 0f, 0f, -1f, -0.8f, false)]
+    [InlineData(-1, 0.6f, 0.7f, 0.8f, -0.8f, false)]
+    [InlineData(1, -0.8f, -0.7f, 0.6f, 0.8f, false)]
+    [InlineData(-1, 0f, 0.8390996f, 1f, 0.8f, true)]
+    [InlineData(1, 1f, -0.8390996f, 0f, -0.8f, true)]
+    [InlineData(-1, 0.6f, 1.7320508f, 0.8f, -0.8f, true)]
+    [InlineData(1, -0.8f, -1.7320508f, 0.6f, 0.8f, true)]
+    public void Surface_bounds_keep_turned_offset_fragments_above_the_floor(int side, float x, float y, float z, float offset, bool lying)
     {
-        var points = new List<Vector3>();
-        foreach (float x in new[] { side > 0 ? 0f : -2f, side > 0 ? 2f : 0f })
-            foreach (float y in new[] { 0f, 20f })
-                foreach (float z in new[] { -1f, 1f }) points.Add(new(x, y, z));
+        var normal = Vector3.Normalize(new Vector3(x, y, z));
+        var anchor = new Vector3(0, 10, 0) + TorsoFragmentMotion.Across(normal) * offset;
+        var corners = new List<Vector3>();
+        foreach (float cx in new[] { -2f, 2f })
+            foreach (float cy in new[] { 0f, 20f })
+                foreach (float cz in new[] { -1f, 1f }) corners.Add(new(cx, cy, cz));
+        float Distance(Vector3 point) => Vector3.Dot(normal, point - anchor);
+        var points = corners.Where(p => side * Distance(p) >= 0).ToList();
+        // Each corner has three box edges. Include their plane intersections as the cut fragment's support points.
+        for (int i = 0; i < corners.Count; i++)
+            foreach (int bit in new[] { 1, 2, 4 })
+            {
+                int j = i ^ bit;
+                if (j <= i) continue;
+                float a = Distance(corners[i]), b = Distance(corners[j]);
+                if (a * b < 0) points.Add(Vector3.Lerp(corners[i], corners[j], a / (a - b)));
+            }
+        Assert.NotEmpty(points);
         var pivot = TorsoFragmentMotion.LowestPivot(points.ToArray(), default);
+        Assert.True(float.IsFinite(pivot.LengthSquared()));
         (Vector3 Point, float Radius)[] bounds = [.. points.Select(p => (p - pivot, 0.15f))];
-        var turn = TorsoFragmentMotion.OutwardTurn(Vector3.UnitY, Vector3.UnitX, side);
-        float floorLift = -TorsoFragmentMotion.Bottom(bounds, turn) + 0.1f;
-        foreach (var (point, radius) in bounds)
-            Assert.True(Vector3.Transform(point, turn).Y + floorLift - radius >= 0.09999f);
+        var finalTurn = lying ? TorsoFragmentMotion.LyingTurn(Vector3.UnitY, normal, side)
+            : TorsoFragmentMotion.OutwardTurn(Vector3.UnitY, normal, side);
+        foreach (float progress in new[] { 0f, 0.5f, 1f })
+        {
+            var turn = Quaternion.Slerp(Quaternion.Identity, finalTurn, progress);
+            float floorLift = -TorsoFragmentMotion.Bottom(bounds, turn) + 0.1f;
+            Assert.True(float.IsFinite(floorLift));
+            foreach (var (point, radius) in bounds)
+                Assert.True(Vector3.Transform(point, turn).Y + floorLift - radius >= 0.09999f);
+        }
     }
 
     [Fact]
@@ -59,9 +118,11 @@ public class TorsoFragmentMotionTests
         foreach (var normal in new[] { Vector3.UnitX, Vector3.UnitY, -Vector3.UnitY, Vector3.UnitZ })
             foreach (var up in new[] { Vector3.Zero, normal, new Vector3(float.NaN, 0, 0) })
             {
-                var turn = TorsoFragmentMotion.OutwardTurn(up, normal, 1);
-                Assert.True(float.IsFinite(turn.LengthSquared()));
-                Assert.InRange(turn.LengthSquared(), 0.99999f, 1.00001f);
+                foreach (var turn in new[] { TorsoFragmentMotion.OutwardTurn(up, normal, 1), TorsoFragmentMotion.LyingTurn(up, normal, 1) })
+                {
+                    Assert.True(float.IsFinite(turn.LengthSquared()));
+                    Assert.InRange(turn.LengthSquared(), 0.99999f, 1.00001f);
+                }
             }
     }
 }

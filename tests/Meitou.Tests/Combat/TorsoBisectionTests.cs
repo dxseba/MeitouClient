@@ -138,10 +138,10 @@ public class TorsoBisectionTests
     }
 
     [Fact]
-    public void Downward_cleaves_choose_vertical_or_long_diagonal_modes_without_changing_sideways_planes()
+    public void Eligible_native_axes_choose_oblique_cleaves_alongside_their_existing_families()
     {
-        bool vertical = false, diagonal = false;
-        foreach (ulong seed in Enumerable.Range(0, 64).Select(i => (ulong)i))
+        bool vertical = false, diagonal = false, downwardOblique = false, sidewaysOblique = false, transverse = false;
+        foreach (ulong seed in Enumerable.Range(0, 128).Select(i => (ulong)i))
         {
             foreach (int direction in new[] { 1, 7 })
             {
@@ -149,51 +149,175 @@ public class TorsoBisectionTests
                 Assert.True(state.FullBody);
                 Assert.True(state.IsValid);
                 vertical |= state.Plane.Y == 0;
-                diagonal |= MathF.Abs(state.Plane.Y) > 0.1f;
+                float tilt = MathF.Asin(MathF.Abs(state.Plane.Y)) * 180 / MathF.PI;
+                diagonal |= tilt is >= 8 and <= 35.0001f;
+                downwardOblique |= tilt >= TorsoBisectionPolicy.ObliqueMinimumTiltDegrees - 0.0001f;
             }
             foreach (int direction in new[] { 2, 3, 9 })
             {
                 var state = TorsoBisectionPolicy.StateForDirection(direction, seed, Vector2.UnitX);
-                Assert.False(state.FullBody);
-                Assert.Equal(TorsoBisectionPolicy.PlaneForDirection(direction, seed, Vector2.UnitX), state.Plane);
+                var explicitTransverse = TorsoBisectionPolicy.StateForDirection(direction, seed, Vector2.UnitX, style: TorsoBisectionStyle.Transverse);
+                Assert.False(explicitTransverse.FullBody);
+                Assert.Equal(TorsoBisectionPolicy.PlaneForDirection(direction, seed, Vector2.UnitX), explicitTransverse.Plane);
+                if (state.FullBody)
+                {
+                    sidewaysOblique = true;
+                    Assert.Equal(TorsoBisectionPolicy.StateForDirection(direction, seed, Vector2.UnitX, style: TorsoBisectionStyle.Oblique), state);
+                }
+                else
+                {
+                    transverse = true;
+                    Assert.Equal(explicitTransverse, state);
+                }
             }
         }
         Assert.True(vertical);
         Assert.True(diagonal);
+        Assert.True(downwardOblique && sidewaysOblique && transverse);
         Assert.False(TorsoBisectionPolicy.StateForDirection(5, 1).IsValid);
         Assert.False(TorsoBisectionPolicy.StateForDirection(1, 1, style: TorsoBisectionStyle.Transverse).IsValid);
     }
 
     [Fact]
-    public void Longitudinal_planes_stay_through_the_centre_and_diagonal_planes_continue_towards_one_leg()
+    public void Full_body_planes_follow_the_entire_local_approach_angle_and_ignore_world_rotation()
     {
-        foreach (ulong seed in Enumerable.Range(0, 64).Select(i => (ulong)i))
-            foreach (var travel in new[] { Vector2.UnitX, Vector2.UnitY, -Vector2.UnitY })
-                foreach (var style in new[] { TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal })
-                {
-                    var state = TorsoBisectionPolicy.StateForDirection(1, seed, travel, 0.4f, style);
-                    Assert.Equal(state, TorsoBisectionPolicy.StateForDirection(1, seed, travel, 0.4f, style));
-                    Assert.True(state.IsValid);
-                    Assert.True(state.FullBody);
-                    var p = state.Plane;
-                    Assert.True(MathF.Abs(p.X) > 0.9f);
-                    float At(float y) => (-p.W - p.Y * y) / p.X;
-                    Assert.InRange(MathF.Abs(At(14)), 0, 1.5f);
-                    Assert.InRange(MathF.Abs(At(10.5f)), 0, 0.5f);
-                    if (style == TorsoBisectionStyle.Vertical)
-                    {
-                        Assert.Equal(0, p.Y);
-                        Assert.InRange(MathF.Abs(At(5)), 0, 0.25f);
-                    }
-                    else Assert.InRange(MathF.Abs(At(5)), 0.5f, 1.8f);
-                }
+        float largestJitter = 0;
+        foreach (ulong seed in Enumerable.Range(0, 32).Select(i => (ulong)i))
+        foreach (var style in new[] { TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal, TorsoBisectionStyle.Oblique })
+        {
+            var baseline = TorsoBisectionPolicy.StateForDirection(1, seed, -Vector2.UnitY, style: style).Plane;
+            foreach (int degrees in new[] { 0, 45, 90, 135, 180, 225, 270, 315 })
+            {
+                float angle = degrees * MathF.PI / 180, yaw = 0.7f;
+                var travel = Rotate(-Vector2.UnitY, angle);
+                var state = TorsoBisectionPolicy.StateForDirection(1, seed, travel, style: style);
+                Assert.True(state.IsValid);
+                Assert.True(state.FullBody);
+                var p = state.Plane;
+                var expected = Rotate(new(baseline.X, baseline.Z), angle);
+                Assert.InRange(Vector2.Distance(expected, new(p.X, p.Z)), 0, 0.000002f);
+                Assert.InRange(MathF.Abs(baseline.Y - p.Y), 0, 0.000002f);
+                var horizontal = Vector2.Normalize(new(p.X, p.Z));
+                float alignment = Vector2.Dot(horizontal, new(travel.Y, -travel.X));
+                Assert.True(alignment >= MathF.Cos(TorsoBisectionPolicy.FullBodyAzimuthDegrees * MathF.PI / 180) - 0.000002f);
+                largestJitter = MathF.Max(largestJitter, MathF.Acos(Math.Clamp(alignment, -1, 1)) * 180 / MathF.PI);
+                var turnedWorld = TorsoBisectionPolicy.StateForDirection(1, seed, Rotate(travel, -yaw), yaw, style);
+                Assert.InRange(Vector4.Distance(p, turnedWorld.Plane), 0, 0.00001f);
+                Assert.Equal(state, TorsoBisectionPolicy.StateForDirection(7, seed, travel, style: style));
+            }
+            Assert.Equal(TorsoBisectionPolicy.StateForDirection(1, seed, style: style),
+                TorsoBisectionPolicy.StateForDirection(1, seed, new(float.NaN, 1), float.NaN, style));
+        }
+        Assert.True(largestJitter > 18);
+
+        static Vector2 Rotate(Vector2 value, float angle) => new(value.X * MathF.Cos(angle) - value.Y * MathF.Sin(angle),
+            value.X * MathF.Sin(angle) + value.Y * MathF.Cos(angle));
+    }
+
+    [Fact]
+    public void Vertical_offsets_and_both_diagonal_families_remain_inside_their_body_ellipses_and_pivot_bands()
+    {
+        bool longPositive = false, longNegative = false, obliquePositive = false, obliqueNegative = false;
+        float minimumVerticalOffset = 1, maximumVerticalOffset = -1, minimumLongTilt = 90, maximumObliqueTilt = 0;
+        foreach (ulong seed in Enumerable.Range(0, 128).Select(i => (ulong)i))
+        foreach (var travel in new[] { Vector2.UnitX, Vector2.UnitY, -Vector2.UnitX, -Vector2.UnitY, new Vector2(1, 1) })
+        foreach (var style in new[] { TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal })
+        {
+            var state = TorsoBisectionPolicy.StateForDirection(1, seed, travel, 0.4f, style);
+            Assert.Equal(state, TorsoBisectionPolicy.StateForDirection(1, seed, travel, 0.4f, style));
+            Assert.True(state.IsValid);
+            Assert.True(state.FullBody);
+            var p = state.Plane;
+            float horizontalLength = MathF.Sqrt(p.X * p.X + p.Z * p.Z);
+            var horizontal = new Vector2(p.X, p.Z) / horizontalLength;
+            float radius = 1 / MathF.Sqrt(horizontal.X * horizontal.X / MathF.Pow(TorsoBisectionPolicy.FullBodyOffsetX, 2)
+                + horizontal.Y * horizontal.Y / MathF.Pow(TorsoBisectionPolicy.FullBodyOffsetZ, 2));
+            float intercept = -p.W / horizontalLength;
+            if (style == TorsoBisectionStyle.Vertical)
+            {
+                Assert.Equal(0, p.Y);
+                Assert.InRange(intercept, -radius - 0.00001f, radius + 0.00001f);
+                minimumVerticalOffset = MathF.Min(minimumVerticalOffset, intercept / radius);
+                maximumVerticalOffset = MathF.Max(maximumVerticalOffset, intercept / radius);
+                continue;
+            }
+            float slope = p.Y / horizontalLength, tilt = MathF.Atan(MathF.Abs(slope)) * 180 / MathF.PI;
+            bool oblique = tilt > TorsoBisectionPolicy.LongDiagonalMaximumTiltDegrees + 0.0001f;
+            float minimumPivot, maximumPivot, maximumOffset;
+            if (oblique)
+            {
+                Assert.InRange(tilt, TorsoBisectionPolicy.ObliqueDiagonalMinimumTiltDegrees - 0.0001f,
+                    TorsoBisectionPolicy.ObliqueDiagonalMaximumTiltDegrees + 0.0001f);
+                minimumPivot = TorsoBisectionPolicy.ObliqueDiagonalPivotMinimum;
+                maximumPivot = TorsoBisectionPolicy.ObliqueDiagonalPivotMaximum;
+                maximumOffset = radius * TorsoBisectionPolicy.ObliqueDiagonalOffsetScale;
+                obliquePositive |= slope > 0;
+                obliqueNegative |= slope < 0;
+                maximumObliqueTilt = MathF.Max(maximumObliqueTilt, tilt);
+            }
+            else
+            {
+                Assert.InRange(tilt, TorsoBisectionPolicy.LongDiagonalMinimumTiltDegrees - 0.0001f,
+                    TorsoBisectionPolicy.LongDiagonalMaximumTiltDegrees + 0.0001f);
+                minimumPivot = TorsoBisectionPolicy.LongDiagonalPivotMinimum;
+                maximumPivot = TorsoBisectionPolicy.LongDiagonalPivotMaximum;
+                maximumOffset = radius * TorsoBisectionPolicy.LongDiagonalOffsetScale;
+                longPositive |= slope > 0;
+                longNegative |= slope < 0;
+                minimumLongTilt = MathF.Min(minimumLongTilt, tilt);
+            }
+            // The plane must cross the permitted ellipse at some height inside its family's pivot band.
+            float low = MathF.Min(slope * minimumPivot, slope * maximumPivot) - maximumOffset;
+            float high = MathF.Max(slope * minimumPivot, slope * maximumPivot) + maximumOffset;
+            Assert.InRange(intercept, low - 0.00001f, high + 0.00001f);
+        }
+        Assert.True(longPositive && longNegative && obliquePositive && obliqueNegative);
+        Assert.True(minimumVerticalOffset < -0.9f && maximumVerticalOffset > 0.9f);
+        Assert.True(minimumLongTilt < 9 && maximumObliqueTilt > 33);
+    }
+
+    [Fact]
+    public void Opposing_oblique_blades_cut_across_the_torso_with_a_shared_height_and_opposite_slopes()
+    {
+        float minimumHeight = 100, maximumHeight = 0, minimumAngle = 90, maximumAngle = 0;
+        foreach (ulong seed in Enumerable.Range(0, 128).Select(i => (ulong)i))
+        foreach (var travel in new[] { Vector2.UnitX, Vector2.UnitY, new Vector2(-1, 1) })
+        {
+            var left = TorsoBisectionPolicy.StateForDirection(2, seed, travel, 0.4f, TorsoBisectionStyle.Oblique);
+            var right = TorsoBisectionPolicy.StateForDirection(3, seed, travel, 0.4f, TorsoBisectionStyle.Oblique);
+            Assert.True(left.IsValid && right.IsValid && left.FullBody && right.FullBody);
+            Assert.Equal(left, TorsoBisectionPolicy.StateForDirection(2, seed, travel, 0.4f, TorsoBisectionStyle.Oblique));
+            var a = left.Plane; var b = right.Plane;
+            Assert.True(a.Y > 0 && b.Y < 0);
+            Assert.Equal(a.X, b.X);
+            Assert.Equal(a.Z, b.Z);
+            Assert.Equal(a.Y, -b.Y);
+            float horizontalLength = MathF.Sqrt(a.X * a.X + a.Z * a.Z);
+            float angleAboveHorizontal = MathF.Atan(horizontalLength / a.Y) * 180 / MathF.PI;
+            Assert.InRange(angleAboveHorizontal, 30 - 0.0001f, 50 + 0.0001f);
+            // Opposing planes meet at the same torso height; their average offset stays near its centre.
+            float height = -(a.W - b.W) / (a.Y - b.Y), offset = -(a.W + b.W) / (2 * horizontalLength);
+            Assert.InRange(height, TorsoBisectionPolicy.ObliquePivotMinimum - 0.00001f, TorsoBisectionPolicy.ObliquePivotMaximum + 0.00001f);
+            float hx = a.X / horizontalLength, hz = a.Z / horizontalLength;
+            float radius = 1 / MathF.Sqrt(hx * hx / (TorsoBisectionPolicy.FullBodyOffsetX * TorsoBisectionPolicy.FullBodyOffsetX)
+                + hz * hz / (TorsoBisectionPolicy.FullBodyOffsetZ * TorsoBisectionPolicy.FullBodyOffsetZ));
+            Assert.InRange(MathF.Abs(offset), 0, radius * TorsoBisectionPolicy.ObliqueOffsetScale + 0.00001f);
+            minimumHeight = MathF.Min(minimumHeight, height); maximumHeight = MathF.Max(maximumHeight, height);
+            minimumAngle = MathF.Min(minimumAngle, angleAboveHorizontal); maximumAngle = MathF.Max(maximumAngle, angleAboveHorizontal);
+            foreach (int nativeAxis in new[] { 1, 7, 9 })
+                Assert.True(TorsoBisectionPolicy.StateForDirection(nativeAxis, seed, travel, 0.4f, TorsoBisectionStyle.Oblique).IsValid);
+        }
+        Assert.True(maximumHeight - minimumHeight > 1.1f);
+        Assert.True(minimumAngle < 31 && maximumAngle > 49);
+        Assert.False(TorsoBisectionPolicy.StateForDirection(4, style: TorsoBisectionStyle.Oblique).IsValid);
+        Assert.False(TorsoBisectionPolicy.StateForDirection(5, style: TorsoBisectionStyle.Oblique).IsValid);
     }
 
     [Fact]
     public void Each_opening_plane_survives_save_load_exactly_and_cannot_be_moved_by_a_later_hit()
     {
         foreach (ulong seed in new ulong[] { 0, 1, 3, 123456789 })
-        foreach (var style in new[] { TorsoBisectionStyle.Transverse, TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal })
+        foreach (var style in new[] { TorsoBisectionStyle.Transverse, TorsoBisectionStyle.Vertical, TorsoBisectionStyle.Diagonal, TorsoBisectionStyle.Oblique })
         {
             var victim = Victim(out int chest);
             var events = new List<MedicalEvent>();
@@ -238,7 +362,9 @@ public class TorsoBisectionTests
         Assert.NotNull(victim.TorsoBisection);
         ulong visual = TorsoBisectionPolicy.VisualSeedFor(world.Seed, defender, attacker, counter);
         Assert.Equal(TorsoBisectionPolicy.StateForDirection(hit.CutDirection, visual, hit.Direction, hit.VictimYaw), victim.TorsoBisection!.Value);
-        Assert.Equal(direction == 1, victim.TorsoBisection!.Value.FullBody);
+        if (direction == 1) Assert.True(victim.TorsoBisection!.Value.FullBody);
+        else if (victim.TorsoBisection!.Value.FullBody)
+            Assert.True(MathF.Abs(victim.TorsoBisection.Value.Plane.Y) >= MathF.Sin(TorsoBisectionPolicy.ObliqueMinimumTiltDegrees * MathF.PI / 180) - 0.00001f);
         Assert.Single(queue, e => e.Kind == CombatEventKind.Died && e.Victim == defender);
         Assert.Equal(chance, CombatRolls.Float(world.Seed, Rng.Key(defender), CombatRoll.BodyBisection, counter));
     }
@@ -352,7 +478,7 @@ public class TorsoBisectionTests
         Assert.True(cold.TorsoBisection!.Value.IsValid);
         var plane = cold.TorsoBisection;
         ulong visual = TorsoBisectionPolicy.VisualSeedFor(world.Seed, defender, attacker, 3);
-        Assert.Equal(TorsoBisectionPolicy.PlaneForDirection(hit.CutDirection, visual, hit.Direction, hit.VictimYaw), plane!.Value.Plane);
+        Assert.Equal(TorsoBisectionPolicy.StateForDirection(hit.CutDirection, visual, hit.Direction, hit.VictimYaw), plane!.Value);
         world.Commands.Enqueue(new DebugBisect(defender) { Tick = world.Tick, Attacker = attacker });
         world.RunTick();
         Assert.Single(queue, e => e.Kind == CombatEventKind.Hit);
@@ -367,15 +493,15 @@ public class TorsoBisectionTests
         var examples = new HashSet<Vector4>();
         foreach (ulong seed in new ulong[] { 0, 1, 3 })
         {
-            var first = DebugPlane(11, seed);
-            Assert.Equal(first, DebugPlane(31, seed));
+            var first = DebugPlane(11, seed, style: TorsoBisectionStyle.Transverse);
+            Assert.Equal(first, DebugPlane(31, seed, style: TorsoBisectionStyle.Transverse));
             examples.Add(first);
         }
         Assert.Equal(3, examples.Count);
         Assert.True(examples.Max(p => -p.W / p.Y) - examples.Min(p => -p.W / p.Y) > 1.4f);
-        Assert.NotEqual(DebugPlane(11, null), DebugPlane(31, null));
-        var left = DebugPlane(11, 1, 2);
-        var right = DebugPlane(11, 1, 3);
+        Assert.NotEqual(DebugPlane(11, null, style: TorsoBisectionStyle.Transverse), DebugPlane(31, null, style: TorsoBisectionStyle.Transverse));
+        var left = DebugPlane(11, 1, 2, TorsoBisectionStyle.Transverse);
+        var right = DebugPlane(11, 1, 3, TorsoBisectionStyle.Transverse);
         Assert.Equal(left.Y, right.Y);
         Assert.Equal(left.W, right.W);
         Assert.Equal(left.X, -right.X);
@@ -393,9 +519,25 @@ public class TorsoBisectionTests
     }
 
     [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(7)]
+    [InlineData(9)]
+    public void An_explicit_oblique_debug_cut_accepts_native_side_and_downward_axes(int direction)
+    {
+        var first = DebugPlane(11, 1, direction, TorsoBisectionStyle.Oblique);
+        Assert.Equal(first, DebugPlane(31, 1, direction, TorsoBisectionStyle.Oblique));
+        float horizontal = MathF.Sqrt(first.X * first.X + first.Z * first.Z);
+        Assert.InRange(MathF.Atan(horizontal / MathF.Abs(first.Y)) * 180 / MathF.PI, 30, 50);
+    }
+
+    [Theory]
     [InlineData(true, false, 2, TorsoBisectionStyle.Auto)]
     [InlineData(false, true, 2, TorsoBisectionStyle.Auto)]
     [InlineData(false, false, 1, TorsoBisectionStyle.Transverse)]
+    [InlineData(false, false, 4, TorsoBisectionStyle.Oblique)]
+    [InlineData(false, false, 5, TorsoBisectionStyle.Oblique)]
     public void The_debug_command_rejects_ineligible_targets_and_style_axis_mismatches_before_applying_damage(bool robot, bool animal, int direction, TorsoBisectionStyle style)
     {
         using var world = NewWorld(11, 1, out _);
@@ -437,6 +579,11 @@ public class TorsoBisectionTests
         ulong variation = visualSeed ?? TorsoBisectionPolicy.VisualSeedFor(worldSeed, defender, attacker, 0);
         Assert.Equal(TorsoBisectionPolicy.StateForDirection(hit.CutDirection, variation, hit.Direction, hit.VictimYaw, style), state);
         if (style is TorsoBisectionStyle.Vertical or TorsoBisectionStyle.Diagonal) Assert.True(state.FullBody && hit.CutDirection is 1 or 7);
+        if (style == TorsoBisectionStyle.Oblique)
+        {
+            Assert.True(state.FullBody);
+            Assert.Equal(direction, hit.CutDirection);
+        }
         return state.Plane;
     }
 

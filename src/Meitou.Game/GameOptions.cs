@@ -104,7 +104,7 @@ sealed class GameOptions
           --sandbox-character <name> the CHARACTER or ANIMAL_CHARACTER record the sandbox spawns (default: the first member of the default new-game start)
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), fight (the G key, with --sandbox 2), e.g. run,patrol (with --move-to or --screenshot)
           --sandbox-bisect          with --sandbox 2: force one lethal sideways chest cleave at tick 120 for visual inspection
-          --sandbox-bisect-style <kind> auto (default), transverse, vertical, or diagonal; long cuts include pelvis and legs
+          --sandbox-bisect-style <kind> auto (default), transverse, vertical, diagonal, or oblique; oblique crosses the trunk toward a shoulder
           --sandbox-bisect-variant <n> repeat a torso cut's angle and height from this visual seed
           --sandbox-severe-only     with --sandbox-dummy: hide generic wound marks and falling jaw to inspect permanent head state without a wound mask
           --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
@@ -219,7 +219,8 @@ sealed class GameOptions
                         "transverse" => Meitou.Simulation.Wounds.TorsoBisectionStyle.Transverse,
                         "vertical" => Meitou.Simulation.Wounds.TorsoBisectionStyle.Vertical,
                         "diagonal" => Meitou.Simulation.Wounds.TorsoBisectionStyle.Diagonal,
-                        _ => throw new ArgumentException("--sandbox-bisect-style must be auto, transverse, vertical, or diagonal"),
+                        "oblique" => Meitou.Simulation.Wounds.TorsoBisectionStyle.Oblique,
+                        _ => throw new ArgumentException("--sandbox-bisect-style must be auto, transverse, vertical, diagonal, or oblique"),
                     };
                     break;
                 case "--sandbox-bisect-variant": g.SandboxBisectVariant = ulong.Parse(Next(), NumberStyles.None, CultureInfo.InvariantCulture); break;

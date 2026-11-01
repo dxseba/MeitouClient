@@ -46,7 +46,7 @@ public class WeaponBloodEquipmentTests
     static CharacterSnapshot Snapshot(SimWorld world, CharacterId id) => Assert.Single(world.Snapshot.Characters, c => c.Id == id);
 
     [Fact]
-    public void Swapping_identical_blades_between_slots_moves_only_their_own_stain_and_keeps_old_snapshots_unchanged()
+    public void Swapping_identical_blades_between_slots_moves_only_their_own_stain_and_keeps_the_shown_snapshot_pair_unchanged()
     {
         var assembly = Assembly();
         var stained = Blade("back", Stain);
@@ -76,6 +76,9 @@ public class WeaponBloodEquipmentTests
         Assert.True(drawn.BackDrawn);
         Assert.Equal(Vector4.Zero, drawn.BackWeaponBlood);
         Assert.Equal(Stain, drawn.HipWeaponBlood);
+        Assert.Same(before, Assert.Single(world.PreviousSnapshot.Characters, c => c.Id == id));
+        Assert.Equal(Stain, before.BackWeaponBlood);
+        Assert.Equal(Vector4.Zero, before.HipWeaponBlood);
 
         owner.Fighter.SetArms(right: true, left: false);
         world.RunTick();
@@ -87,8 +90,6 @@ public class WeaponBloodEquipmentTests
         Assert.False(sheathed.WeaponDrawn);
         Assert.Equal(Stain, sheathed.HipWeaponBlood);
         Assert.Equal(Vector4.Zero, sheathed.BackWeaponBlood);
-        Assert.Equal(Stain, before.BackWeaponBlood);
-        Assert.Equal(Vector4.Zero, before.HipWeaponBlood);
         Assert.Equal(Vector4.Zero, clean.WeaponBlood);
     }
 

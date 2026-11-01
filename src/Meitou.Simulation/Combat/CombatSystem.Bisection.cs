@@ -39,6 +39,7 @@ public sealed partial class CombatSystem
             : -new Vector2(MathF.Sin(yaw), MathF.Cos(yaw));
         if (!float.IsFinite(travel.X) || !float.IsFinite(travel.Y) || travel.LengthSquared() < 1e-8f)
             travel = -new Vector2(MathF.Sin(yaw), MathF.Cos(yaw));
+        // Lengthwise previews need a downward blow; an oblique torso cut retains the requested side/down axis.
         int techniqueDirection = style is TorsoBisectionStyle.Vertical or TorsoBisectionStyle.Diagonal ? 1 : cutDirection;
         int direction = attackerSlot >= 0 ? HitOutcomes.Facing(techniqueDirection, HitOutcomes.Behind(table.Next[attackerSlot].Position, position, yaw)) : techniqueDirection;
         float cut = MathF.Max(200, medical.Parts[chest].MaxHp * 3);
