@@ -473,12 +473,16 @@ internal sealed class CharacterContent : IDisposable
             foreach (var part in mouth) foreach (var v in part.Vertices) (min, max) = (Vector3.Min(min, v.Position), Vector3.Max(max, v.Position));
             var head = headMax - headMin;
             float mouthScale = MathF.Min(head.X * 0.62f / (max.X - min.X), head.Y * 0.5f / (max.Y - min.Y));
-            var place = new Vector3(headMiddle.X, headMin.Y + head.Y * 0.32f, headMiddle.Z - head.Z * 0.02f);
+            var place = new Vector3(headMiddle.X, headMin.Y + head.Y * 0.32f, headMiddle.Z + head.Z * 0.05f);
+            // The lower arch of the gums left with the jaw: only the upper half stays.
+            float gumMiddle = mouth.Where(b => b.Bone == "Gingiva").SelectMany(b => b.Vertices).Select(v => v.Position.Y).DefaultIfEmpty(0).Average();
             foreach (var part in mouth)
             {
                 var colour = part.Bone.Contains("constrictor") ? new Vector4(0.26f, 0.05f, 0.05f, 0) : part.Bone == "Gingiva" ? new Vector4(0.55f, 0.2f, 0.2f, 0) : new Vector4(0.5f, 0.17f, 0.18f, 0);
-                foreach (var v in part.Vertices)
+                for (int t = 0; t < part.Vertices.Length; t++)
                 {
+                    var v = part.Vertices[t];
+                    if (part.Bone == "Gingiva" && part.Vertices[t - t % 3].Position.Y < gumMiddle) continue;
                     var p = (v.Position - (min + max) / 2) * mouthScale + place;
                     vertices.Add(new Vertex { Position = p, Normal = v.Normal, Uv = skin[0].Uv, Tangent = new Vector4(p, 5), Colour = colour, Bones = (uint)mouthBone, Weights = new Vector4(1, 0, 0, 0) });
                 }
