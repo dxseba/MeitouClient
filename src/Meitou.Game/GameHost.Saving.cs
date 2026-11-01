@@ -217,6 +217,12 @@ sealed partial class GameHost
         string[]? severeHeads2 = woundHandles is null ? null : [.. severeHeads.Write(
             id => woundHandles.TryGetValue(id, out var hand) ? (hand.C, hand.I) : null,
             keptHeadHandles.Contains, coldHeads)];
+        var coldTorsos = SaveCapture.LastColdHandles?
+            .Where(pair => pair.Key.TorsoBisection is not null)
+            .Select(pair => (Handle: (pair.Value.C, pair.Value.I), State: pair.Key.TorsoBisection!.Value)).ToArray();
+        string[]? torsoCuts2 = woundHandles is null ? null : [.. torsoCuts.Write(
+            id => woundHandles.TryGetValue(id, out var hand) ? (hand.C, hand.I) : null,
+            keptHeadHandles.Contains, coldTorsos)];
         saveWrite = Task.Run(() =>
         {
             try
@@ -225,6 +231,7 @@ sealed partial class GameHost
                 game.Write(folder);
                 if (wounds2 is { } lines) File.WriteAllLines(Path.Combine(folder, WoundFile), lines);
                 if (severeHeads2 is { } headLines) File.WriteAllLines(Path.Combine(folder, SevereHeadWounds.FileName), headLines);
+                if (torsoCuts2 is { } torsoLines) File.WriteAllLines(Path.Combine(folder, TorsoBisections.FileName), torsoLines);
                 Console.WriteLine($"save      {folder}: captured in {captureMs:0.0} ms{(ahead ? "" : " (the base made on the spot)")}, written in {written.ElapsedMilliseconds} ms");
                 if (!feedback) saveNotices.Enqueue(("Saved", false));
             }

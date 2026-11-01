@@ -57,6 +57,8 @@ public enum RngPurpose : uint
     Steal = 28,
     /// <summary>Severe head wound placement variation at its opening hit (display only).</summary>
     HeadWoundVisual = 29,
+    /// <summary>The fixed torso bisection plane chosen by its opening blow (display only).</summary>
+    TorsoBisectionVisual = 30,
 }
 
 /// <summary>

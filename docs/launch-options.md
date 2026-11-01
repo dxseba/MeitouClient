@@ -49,9 +49,11 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-power <n>` | number | off | The hero's melee damage, 100 being normal: 1000 hits ten times as hard. |
 | `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Fighters are male humans. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
 | `--sandbox-part <name>` | head, chest, stomach, left arm... | off | With `--sandbox-dummy`: test hits only on that body part. |
+| `--sandbox-bisect` | | off | With `--sandbox 2`: force one qualifying lethal sideways chest cut at tick 120; implies dummy/bare. `--scene bisect --scene-every 30 --scene-frames 8` captures the visible impact and both falling halves. Uses the production eligibility policy with a fixed successful roll. |
+| `--sandbox-bisect-variant <n>` | unsigned integer | from world/impact | With `--sandbox-bisect`: repeat one cut height and angle for visual comparison; seeds 0, 1 and 3 show distinct cuts. |
 | `--sandbox-behead` | | off | With `--sandbox-dummy`: the foe loses its head at tick 120. |
 | `--sandbox-head-wound <n>` | 0, 1, 2 | by character | With `--sandbox-dummy`: the head wound that the fourth heavy blow opens: jaw, scalp, broken skull. |
-| `--sandbox-cut-direction <n>` | 1, 2, 3 | cycling | With `--sandbox-dummy`: fix the blade direction to down, left, or right for reproducible head wound profiles. |
+| `--sandbox-cut-direction <n>` | 1, 2, 3 | cycling | With `--sandbox-dummy`: fix the blade direction to down, left, or right for reproducible head wound profiles. With `--sandbox-bisect`, use 2/3 for opposed diagonals; 1 is ineligible and causes no forced damage. |
 | `--sandbox-severe-only` | | off | With `--sandbox-dummy`: hide generic marks and falling jaw to verify permanent head rendering without a generic wound mask. |
 | `--sandbox-hit-mechanism <kind>` | slash, thrust, crush | slash | With `--sandbox-dummy`: compare cutting, puncture and blunt head wounds with corresponding synthetic damage channels. |
 | `--sandbox-hit-side <side>` | front, left, right, back | cycling | With `--sandbox-dummy`: fix the incoming side in the victim's local frame for reproducible head placement. |
@@ -72,7 +74,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--battle-map <map>` | plateau, mesa, fog, sandbox, or x,z | plateau | Where the battle is fought. `mesa` is the duel spot; `fog` a plateau in the Fog Islands; `sandbox` is the flat floor. |
 | `--battle-width <a>[,<b>]` | counts | rows as given | Fighters per row for each side (one value: both). |
 | `--battle-no-fear` | | off | Nobody in the battle runs away. |
-| `--scene <name>` | fight, turret, bed, acid, menu | none | With `--screenshot` (and `--load`): stage a scene and save frames. |
+| `--scene <name>` | fight, turret, bed, acid, menu, bisect | none | With `--screenshot`: stage a scene and save frames (`bisect` uses `--sandbox 2 --sandbox-bisect`; other scenes usually use `--load`). |
 | `--scene-frames <n>` | 1 to 200 | 8 | Frames saved. |
 | `--scene-every <n>` | 1 or more | 30 | Control ticks between saved frames. |
 | `--scene-npc <record>` | CHARACTER name or id | Bandit | Enemies spawned by the fight and turret scenes. |

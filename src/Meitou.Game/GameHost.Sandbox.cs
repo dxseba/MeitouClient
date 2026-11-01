@@ -216,6 +216,11 @@ sealed partial class GameHost
     void SandboxDummyHit()
     {
         var world = session.World;
+        if (g.SandboxBisect)
+        {
+            if (!sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBisect(sandboxFoe) { Tick = world.Tick, Attacker = sandboxHero, VisualSeed = g.SandboxBisectVariant, CutDirection = g.SandboxCutDirection ?? 2 });
+            return;
+        }
         if (g.SandboxBehead && !sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBehead(sandboxFoe) { Tick = world.Tick });
         if (g.SandboxSever && !sandboxFoe.IsNone && world.Tick is 34 or 60) world.Commands.Enqueue(new Meitou.Simulation.DebugHeal([sandboxFoe]) { Tick = world.Tick });   // back on its feet, the cut in view
         if (g.SandboxSever && !sandboxFoe.IsNone && world.Tick == 30) { world.Commands.Enqueue(new Meitou.Simulation.DebugSever(sandboxFoe, 0) { Tick = world.Tick }); world.Commands.Enqueue(new Meitou.Simulation.DebugSever(sandboxFoe, 1) { Tick = world.Tick }); }   // a stump to check

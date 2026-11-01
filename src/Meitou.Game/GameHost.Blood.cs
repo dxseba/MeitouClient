@@ -151,16 +151,19 @@ sealed partial class GameHost
             if (gone.Age > GutLifeSeconds) { gutFalls.Remove(who); gutsSpilled.Add(who); }   // spilled once: the wound stays and does not spill again
         foreach (var fall in gutFalls.Values)
         {
-            fall.Age += dt;
-            if (fall.Position.Y > fall.Floor + 0.35f)
-            {
-                // Slow at first, dragged out of the wound, then falling free.
-                fall.Velocity.Y -= (fall.Age < 0.8f ? 8 : 40) * dt;
-                fall.Position += fall.Velocity * dt;
-                fall.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitX, 3 * dt) * fall.Rotation);
-            }
+            StepGut(fall, dt);
             if (draw) gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.Bowel, 1, fall.Rotation, fall.Position));
         }
+    }
+
+    static void StepGut(GutFall fall, float dt)
+    {
+        fall.Age += dt;
+        if (fall.Position.Y <= fall.Floor + 0.35f) return;
+        fall.Velocity.Y -= (fall.Age < 0.8f ? 8 : 40) * dt;
+        fall.Position += fall.Velocity * dt;
+        fall.Position.Y = MathF.Max(fall.Position.Y, fall.Floor + 0.35f);
+        fall.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitX, 3 * dt) * fall.Rotation);
     }
 
     // A deep wound (dose 1.2) closes over about two hours of play at speed 1.
@@ -173,6 +176,7 @@ sealed partial class GameHost
     readonly SevereHeadWounds severeHeads = new();
     readonly HashSet<CharacterId> restoredJaws = [];
     string? woundsFrom;
+    World? woundsFor;
 
     void UpdateWounds(World world)
     {
@@ -181,20 +185,23 @@ sealed partial class GameHost
             var p = Meitou.Simulation.Wounds.WoundPolicy.Sample(x, y, new Meitou.Simulation.Wounds.WoundShape(w.Cosine, w.Sine, w.Aspect, w.Depth));
             return new Vector3(p.Core, p.Area, p.Ring);
         };
-        if (!ReferenceEquals(world.CombatEvents, woundQueue))
+        if (!ReferenceEquals(woundsFor, world) || !ReferenceEquals(world.CombatEvents, woundQueue))
         {
-            // Another world: its characters are not these. Wounds are not saved yet.
+            // Another world: runtime identities and transient effects belong to the previous one.
+            woundsFor = world;
             woundQueue.Clear();
             wounds.Clear();
             gutFalls.Clear();
             gutsSpilled.Clear();
             severeHeads.Clear();
             restoredJaws.Clear();
+            ClearTorsoCuts();
             // Only right after a load: a new game must not take the last save's wounds.
             string? loadedFrom = woundsFrom;
             woundsFrom = null;
             if (loadedFrom is { } folder)
             {
+                ReadTorsoCuts(folder);
                 if (File.Exists(Path.Combine(folder, WoundFile)))
                     wounds.Read(File.ReadLines(Path.Combine(folder, WoundFile)), SavedWoundCharacter);
                 if (File.Exists(Path.Combine(folder, SevereHeadWounds.FileName)))
@@ -210,9 +217,11 @@ sealed partial class GameHost
             world.CombatEvents = woundQueue;
         }
         RefreshSevereHeadStates(world);
+        RefreshTorsoCuts(world);
         if (world.Tick / WoundHealTicks != woundHealStep) { woundHealStep = world.Tick / WoundHealTicks; wounds.Heal(WoundHealDose); }
         while (woundQueue.TryDequeue(out var e))
         {
+            if (e.Kind == CombatEventKind.BodyBisected) BeginTorsoCut(e, world);
             // A hit throws real drops along the blow, out of the wound.
             if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && gpu?.Particles is { } drops)
             {
@@ -475,7 +484,7 @@ sealed partial class GameHost
         return [.. files.Cast<IReadOnlyList<string>>()];
     }
 
-    /// <summary>A DDS file's size in texels from its header (0 × 0 when unreadable).</summary>
+    /// <summary>A DDS file's size in texels from its header (0 Ã— 0 when unreadable).</summary>
     static (int Width, int Height) DdsSize(string path)
     {
         try

@@ -24,6 +24,7 @@ internal sealed class AssetPart
     public required bool Shared;
     public uint HeadReliefProfiles;
     public bool IsHeadRelief;
+    public bool IsTorsoCap;
     public int Bone = -1;
     public Matrix4x4 Offset = Matrix4x4.Identity;
     /// <summary>Index among the character's bone-attached parts (the matrices <see cref="CharacterRenderer"/> keeps per frame); -1 for shared parts.</summary>
@@ -145,6 +146,7 @@ internal sealed class CharacterAsset
     public required SkeletonRig Rig;
     public WoundPoint[]? WoundPoints;
     public Vertex[]? HeadSource;
+    public Vertex[]? BodySource;
     public BodyShapeData? Shape;
     /// <summary>The stat-driven body last applied to the shape and the body's normal maps (<see cref="CharacterRenderer"/>), null before the first.</summary>
     public BodyBuild? AppliedBuild;
@@ -202,6 +204,7 @@ internal sealed class CharacterContent : IDisposable
     const string AllocationName = "character meshes";
     readonly IGpuContext gpu;
     readonly CharacterHeadWoundPool headWoundPool;
+    readonly CharacterTorsoCutPool torsoCutPool;
     readonly AssetLocator assets;
     readonly GameDatabase db;
     readonly MaterialResolver resolver;
@@ -244,6 +247,7 @@ internal sealed class CharacterContent : IDisposable
     {
         this.gpu = gpu;
         headWoundPool = new CharacterHeadWoundPool(gpu);
+        torsoCutPool = new CharacterTorsoCutPool(gpu);
         this.assets = assets;
         this.db = db;
         modsDirectory = install.ModsDirectory;
@@ -275,6 +279,7 @@ internal sealed class CharacterContent : IDisposable
         prepared.Clear();
         MeshBytes = 0;
         headWoundPool.Dispose();
+        torsoCutPool.Dispose();
         Textures.Dispose();
         Morphs.Dispose();
         Materials.Dispose();
@@ -318,6 +323,7 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>The body meshes' vertices, thinned, by path: where a wound lands on the skin.</summary>
     static readonly System.Collections.Concurrent.ConcurrentDictionary<string, WoundPoint[]> WoundPoints = new();
     static readonly ConcurrentDictionary<string, Vertex[]> HeadSurfaces = new();
+    static readonly ConcurrentDictionary<string, Vertex[]> BodySurfaces = new();
 
     static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs, bool close, bool icon = false, string? partMap = null)
     {
@@ -330,6 +336,7 @@ internal sealed class CharacterContent : IDisposable
             if (limbs is not null || partMap is not null)
                 WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv, (int)(v.Bones & 255), v.Bones, v.Weights))];
             if (limbs is not null || partMap is not null) HeadSurfaces[path.ToLowerInvariant()] = HeadWoundSurface.Source(model);
+            if (limbs is not null || partMap is not null) BodySurfaces[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Indices.Select(i => p.Vertices[i]))];
             if (limbs is not null || partMap is not null) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
             // Not an icon's: its colour is the mesh's own vertex colour (CharacterShaders.VertexColoured), and icons take no skin.
             if (!icon) MarkCurvature(model);
@@ -442,7 +449,9 @@ internal sealed class CharacterContent : IDisposable
             if (!headSupported && batch.Bone is "Bip01 Head" or "Bip01 Jaw") continue;
             if ((rig.Handle(batch.Bone) ?? (batch.Bone == "Bip01 Jaw" ? rig.Handle("Bip01 Head") : null)) is not { } bone) continue;
             var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.36f, 0.075f, 0.07f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.55f, 0.12f, 0.12f, 1) };
-            foreach (var v in batch.Vertices)
+            // The face keeps skull/teeth and its dark inside; remove whole soft-tissue triangles to preserve later layer/bone boundaries.
+            IEnumerable<EcorcheVertex> sourceVertices = batch.Layer == 0 ? batch.Vertices : AnatomyTriangles.BelowHeight(batch.Vertices, (16.9f - hip.Y) / scale + 9.956298f);
+            foreach (var v in sourceVertices)
             {
                 var fitted = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
                 // The file's rib cage against this body: a narrower sternum, stouter ribs.
@@ -451,8 +460,6 @@ internal sealed class CharacterContent : IDisposable
                     if (MathF.Abs(fitted.X) < 0.75f) fitted = new Vector3(fitted.X * 0.68f, fitted.Y, fitted.Z - 0.1f);
                     else fitted += v.Normal * 0.05f;
                 }
-                // Soft tissue crumples in the thin space of a face: the head shows skull, teeth and its dark inside, as the GTA V fit's mouth work found.
-                if (batch.Layer != 0 && fitted.Y > 16.9f) continue;
                 if (batch.Layer == 0 && batch.Bone is "Bip01 Head" or "Bip01 Jaw") fitted = headMiddle + (fitted - skullMiddle) * skullScale;
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone));
@@ -535,6 +542,9 @@ internal sealed class CharacterContent : IDisposable
 
     public HeadWoundView HeadPlacement(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp) =>
         headWoundPool.Resolve(key, asset, placement, headState, stamp);
+
+    public IReadOnlyList<AssetPart> TorsoParts(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp) =>
+        torsoCutPool.Resolve(key, asset, parts, cut, groups, stamp);
 
     LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase)
     {
@@ -945,6 +955,7 @@ internal sealed class CharacterContent : IDisposable
             asset.Radius = body.Radius + new Vector2(body.Centre.X, body.Centre.Z).Length();
         }
         asset.HeadSource = HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant());
+        asset.BodySource = BodySurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant());
         var setup = Rigs.For(c);
         asset.Shape = setup?.Shape;
         asset.GroundOffset = setup?.GroundOffset ?? 0;

@@ -288,6 +288,9 @@ public sealed partial class MedicalState
     /// <summary>Kills the character because one of its death items was taken while it was down (docs/game/animals.md "Death items").</summary>
     public void Butcher(List<MedicalEvent>? events = null) => Die(DeathCause.Butchered, events);
 
+    /// <summary>A Meitou torso cleave destroys a vital part without applying a second damage packet; death is reported only once.</summary>
+    public void KillFromBisection(List<MedicalEvent>? events = null) => Die(DeathCause.VitalPart, events);
+
     void Die(DeathCause cause, List<MedicalEvent>? events)
     {
         if (Dead) return;

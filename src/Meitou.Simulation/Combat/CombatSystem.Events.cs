@@ -3,7 +3,7 @@ using Meitou.Simulation.Bodies;
 
 namespace Meitou.Simulation.Combat;
 
-public enum CombatEventKind { Hit, PartDown, PartSevered, KnockedOut, Died }
+public enum CombatEventKind { Hit, PartDown, PartSevered, KnockedOut, Died, BodyBisected }
 
 public enum CombatHitSource { Melee, Bolt, Execution }
 
@@ -24,7 +24,7 @@ public sealed partial class CombatSystem
     public static float TestPower { get; set; } = 1;
 
     /// <summary>Publishes a hit and its medical events. Serial, like the hits themselves.</summary>
-    internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false, CombatWoundMechanism mechanism = CombatWoundMechanism.Unspecified)
+    internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false, CombatWoundMechanism mechanism = CombatWoundMechanism.Unspecified, bool bodyBisected = false)
     {
         foreach (var ev in events)
             if (ev.Kind == MedicalEventKind.PartSevered && medical.Parts[ev.Part].Template.LimbSlot is >= 0 and <= 3 and var limb && cutDirection >= 0)
@@ -44,6 +44,7 @@ public sealed partial class CombatSystem
                 case MedicalEventKind.Died: Enqueue(CombatEventKind.Died, -1, default); break;
             }
         }
+        if (bodyBisected) Enqueue(CombatEventKind.BodyBisected, part, damage);
 
         void Enqueue(CombatEventKind kind, int eventPart, in HitDamage d) => queue.Enqueue(new CombatEvent(kind, world.Tick, source, attacker, id, eventPart,
             eventPart >= 0 ? medical.Parts[eventPart].Template.LimbSlot : -1, position, direction, d, yaw, cutDirection, lowStrike, mechanism));

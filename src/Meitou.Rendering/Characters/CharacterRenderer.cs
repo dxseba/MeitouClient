@@ -195,6 +195,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public bool HasWounds;
         public IReadOnlyList<AssetPart> DrawParts;
         public Matrix4x4 HeadFrame;
+        public Matrix4x4 TorsoFrame;
+        public CharacterTorsoCut? TorsoCut;
         public bool HeadReliefReady;
         public Vector4[]? WoundSpheres, WoundCuts;
         /// <summary>Posed this frame whatever the thinning (the player's, a ragdoll, a new asset or a first pose).</summary>
@@ -234,6 +236,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public WorldObjectRenderer.InteriorMemo Interior;
         /// <summary>Its bones were taken from another character (<see cref="Freeze"/>) and are never posed.</summary>
         public bool Frozen;
+        public CharacterTorsoCut? TorsoCut;
         /// <summary>The ragdoll bones it was last posed with: the same object again (a frozen ragdoll) needs no pose every frame.</summary>
         public BonePose? PosedRagdoll;
     }
@@ -245,7 +248,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     public bool HoldPose(long key, long from)
     {
         if (!states.TryGetValue(from, out var source) || source.Posed < 0 || source.Bones.Length == 0) return false;
-        states[key] = new CharState { Bones = [.. source.Bones], Previous = [.. source.Bones], Posed = updateStamp, Seen = updateStamp, Frozen = true };
+        states[key] = new CharState { Bones = [.. source.Bones], Previous = [.. source.Bones], Attach = [.. source.Attach], PreviousAttach = [.. source.Attach], Asset = source.Asset, World = source.World, InWorld = source.InWorld, Centre = source.Centre, Radius = source.Radius, Posed = updateStamp, Seen = updateStamp, Frozen = true };
         return true;
     }
 
@@ -257,8 +260,25 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     {
         if ((!states.TryGetValue(key, out var own) || !own.Frozen) && (!HoldPose(key, from) || !states.TryGetValue(key, out own))) return false;
         if (own.Bones.Length != asset.Rig.BoneCount) return false;
-        if (own.Attach.Length != asset.AttachCount) (own.Attach, own.PreviousAttach) = (new Matrix4x4[asset.AttachCount], new Matrix4x4[asset.AttachCount]);
+        if (own.Attach.Length != asset.AttachCount || !ReferenceEquals(own.Asset, asset))
+        {
+            own.Attach = new Matrix4x4[asset.AttachCount];
+            foreach (var part in asset.Parts)
+                if (part.AttachIndex >= 0) own.Attach[part.AttachIndex] = FrozenTag(asset.Rig, own.Bones, part.Bone, part.Offset);
+            foreach (var lamp in asset.Lamps) own.Attach[lamp.AttachIndex] = FrozenTag(asset.Rig, own.Bones, lamp.Bone, lamp.Offset);
+            own.PreviousAttach = [.. own.Attach];
+        }
         return true;
+    }
+
+    static Matrix4x4 FrozenTag(SkeletonRig rig, Matrix4x4[] skin, int bone, Matrix4x4 offset)
+    {
+        if ((uint)bone >= (uint)skin.Length) return offset;
+        var bind = Matrix4x4.CreateScale(rig.BindScale[bone]) * Matrix4x4.CreateFromQuaternion(Quaternion.Conjugate(rig.BindRotationInverse[bone])) * Matrix4x4.CreateTranslation(rig.BindPosition[bone]);
+        var derived = bind * skin[bone];
+        if (!Matrix4x4.Decompose(derived, out var scale, out var rotation, out var position)) return offset * derived;
+        offset.Translation *= scale.Y;
+        return offset * Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(position);
     }
 
     readonly Dictionary<long, CharState> states = [];
@@ -376,6 +396,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             {
                 int h = rig.Handle(bolt.Bone) ?? root;
                 if ((uint)h >= (uint)state.Bones.Length) continue;
+                if (l.TorsoCut is { } torso && TorsoCutSurface.Band(rig.BindPosition[h], woundMasks.GroupOfBone(rig, h), torso) < 0) continue;
                 // The bone's posed frame: its binding transform times its skin matrix (which is relative to the binding), placed in the world.
                 var bind = Matrix4x4.CreateScale(rig.BindScale[h]) * Matrix4x4.CreateFromQuaternion(Quaternion.Conjugate(rig.BindRotationInverse[h]))
                     * Matrix4x4.CreateTranslation(rig.BindPosition[h]);
@@ -411,7 +432,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             ref var l = ref live[i];
             if (l.PortraitOnly || l.Asset.IsIcon || l.Asset.Lamps.Count == 0) continue;
             foreach (var lamp in l.Asset.Lamps)
-                if (lamp.AttachIndex < l.State.Attach.Length)
+                if (lamp.AttachIndex < l.State.Attach.Length && (l.TorsoCut is not { } torso || TorsoCutSurface.Band(l.Asset.Rig.BindPosition[lamp.Bone], woundMasks.GroupOfBone(l.Asset.Rig, lamp.Bone), torso) >= 0))
                     into.Add(lamp.Light with { Position = (l.State.Attach[lamp.AttachIndex] * l.World).Translation });
         }
     }
@@ -493,11 +514,13 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             l.LostGroups = inst.LostGroups;
             l.LimbCuts = inst.LimbCuts;
             l.PartOnly = inst.PartOnly;
-            l.HasWounds = l.WoundMask != 0 || (l.LostGroups | l.LimbCuts | l.PartOnly) != 0;
+            l.TorsoCut = inst.TorsoCut is { } torso && TorsoCutSurface.TryNormalize(torso, out var normalizedTorso) ? normalizedTorso : null;
+            l.TorsoFrame = l.TorsoCut is { } torsoCut ? TorsoCutSurface.Packed(torsoCut) : default;
+            l.HasWounds = l.WoundMask != 0 || (l.LostGroups | l.LimbCuts | l.PartOnly) != 0 || l.TorsoCut is not null;
             var headView = l.HasWounds && inst.HeadWoundPlacement is { } placement
                 ? content.HeadPlacement(inst.Key, asset, placement, inst.LostGroups, updateStamp)
                 : CharacterHeadWoundPool.Fallback(asset, inst.LostGroups);
-            l.DrawParts = headView.Parts;
+            l.DrawParts = l.TorsoCut is { } capCut ? content.TorsoParts(inst.Key, asset, headView.Parts, capCut, woundMasks.BoneGroups(asset.Rig), updateStamp) : headView.Parts;
             l.HeadFrame = headView.Frame;
             l.HeadReliefReady = headView.ReliefReady;
             if (l.HasWounds) boneTotal += CharacterShaders.WoundHeaderBones;
@@ -510,6 +533,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (!states.TryGetValue(inst.Key, out var state)) states[inst.Key] = state = new CharState();
             state.Seen = updateStamp;
             l.State = state;
+            state.TorsoCut = l.TorsoCut;
             l.Interior = !far && InteriorObjects?.InteriorAt(centre, ref state.Interior) is not null;
             bool newAsset = !ReferenceEquals(state.Asset, asset);
             (state.Asset, state.WeaponDrawn, state.RangedDrawn, state.BackDrawn, state.InWorld, state.Centre, state.Radius) = (asset, inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, !far, centre, l.Radius);
@@ -608,8 +632,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     var groups = woundMasks.BoneGroups(rig);
                     groups.AsSpan().CopyTo(new Span<uint>(header + 16, 8));
                     *(Matrix4x4*)(header + 64) = l.HeadFrame;
-                    l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 128, WoundMasks.Spheres16));
-                    l.WoundCuts?.CopyTo(new Span<Vector4>(header + 64 * 18, WoundMasks.Spheres16));
+                    *(Matrix4x4*)(header + 128) = l.TorsoFrame;
+                    l.WoundSpheres?.CopyTo(new Span<Vector4>(header + 192, WoundMasks.Spheres16));
+                    l.WoundCuts?.CopyTo(new Span<Vector4>(header + 64 * 19, WoundMasks.Spheres16));
                 }
                 state.Attach.CopyTo(attachArray, l.AttachBase);
                 if (motion)

@@ -138,7 +138,7 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses)
+            AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses)
             {
                 Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
@@ -148,6 +148,9 @@ sealed partial class GameHost
         }
     }
 
+
+    /// <summary>A bisected owner's portrait uses its visible head on the upper half.</summary>
+    long PortraitKey(CharacterId id) => torsoCuts.Of(id) is null ? DrawKey(id) : DrawKey(id) ^ (1L << 52);
 
     /// <summary>A character's key in the draw list: stable while it exists, new for every world (the renderer keeps its poses by it).</summary>
     long DrawKey(CharacterId id) => (((long)id.Slot << 32 | (uint)id.Generation) + 1) | (long)worldEpoch << 56;
@@ -166,14 +169,14 @@ sealed partial class GameHost
         {
             var members = player.PortraitMembers();
             for (int i = 0; i < members.Count; i++)
-                characters.PortraitRequests.Add(new PortraitRequest(DrawKey(members[i].Id), i, members[i].PortraitSerial));
+                characters.PortraitRequests.Add(new PortraitRequest(PortraitKey(members[i].Id), i, members[i].PortraitSerial));
             foreach (var (id, cell) in player.CharacterTradePortraits())
-                characters.PortraitRequests.Add(new PortraitRequest(DrawKey(id), cell, player.PortraitSerial(id)));
+                characters.PortraitRequests.Add(new PortraitRequest(PortraitKey(id), cell, player.PortraitSerial(id)));
         }
         if (player.DialoguePortraitCharacters() is var (npc, talker))
         {
-            if (!npc.IsNone) characters.PortraitRequests.Add(new PortraitRequest(DrawKey(npc), PlayerInterface.DialogueNpcCell, player.PortraitSerial(npc)));
-            if (!talker.IsNone) characters.PortraitRequests.Add(new PortraitRequest(DrawKey(talker), PlayerInterface.DialoguePlayerCell, player.PortraitSerial(talker)));
+            if (!npc.IsNone) characters.PortraitRequests.Add(new PortraitRequest(PortraitKey(npc), PlayerInterface.DialogueNpcCell, player.PortraitSerial(npc)));
+            if (!talker.IsNone) characters.PortraitRequests.Add(new PortraitRequest(PortraitKey(talker), PlayerInterface.DialoguePlayerCell, player.PortraitSerial(talker)));
         }
     }
 
@@ -279,7 +282,7 @@ sealed partial class GameHost
             if (editing is null) CutHead(c, look);
             if (editing is null) CutLimbs(c);
             var glide = player.EditorBlend(c.Id);   // after the preview, which may just have swapped the look
-            list.Add(new CharacterInstance(DrawKey(c.Id), look, position, yaw, poses)
+            AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), look, position, yaw, poses)
             {
                 Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,

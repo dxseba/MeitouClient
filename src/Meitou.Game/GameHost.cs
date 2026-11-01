@@ -344,7 +344,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         gpu.HoverOutline ??= new HoverOutlineRenderer(context);
         gpu.NavmeshOverlay ??= new NavmeshOverlayRenderer(context);
         navOverlayRenderer = gpu.NavmeshOverlay;
-        player.MeshHit = (id, origin, direction) => gpu.Characters?.RayHit(DrawKey(id), origin, direction);
+        player.MeshHit = (id, origin, direction) => TorsoMeshHit(gpu.Characters, id, origin, direction);
         player.Floor = (() => viewedFloor, StepFloor);
         player.HiddenInWorld = hiddenIndoors.Contains;
         player.AboveViewedFloor = AboveViewedFloor;

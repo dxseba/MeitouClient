@@ -23,9 +23,10 @@ sealed class GameOptions
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
     public string? SandboxCharacter, SandboxPart, SandboxHitSide, SandboxHitMechanism;
     public bool SandboxBare;
-    public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead, SandboxSevereOnly;
+    public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead, SandboxSevereOnly, SandboxBisect;
     public float? SandboxYaw, SandboxPower;
     public int? SandboxHeadWound, SandboxCutDirection;
+    public ulong? SandboxBisectVariant;
     public float SandboxHitDamage = 30;
     public int? SandboxSeverLevel;
     public float SandboxZoom = 30;
@@ -72,7 +73,7 @@ sealed class GameOptions
     public bool NoPrecompile;
     /// <summary>The renderer for the whole frame: <c>vulkan</c> (the default) or <c>metal</c> (macOS: the scene, HUD and faithful panels, the port's current slice).</summary>
     public string Renderer = "vulkan";
-    /// <summary>With <c>--screenshot</c>: a staged scene to check behaviour offscreen (<c>--scene</c>: fight, turret, bed, acid, menu; GameHost.Scenes.cs).</summary>
+    /// <summary>With <c>--screenshot</c>: a staged scene to check behaviour offscreen (<c>--scene</c>: fight, turret, bed, acid, menu, bisect; GameHost.Scenes.cs).</summary>
     public string? Scene;
     /// <summary>The scene's frames and the control ticks between them (<c>--scene-frames</c>, <c>--scene-every</c>).</summary>
     public int SceneFrames = 8, SceneEvery = 30;
@@ -96,6 +97,8 @@ sealed class GameOptions
           --sandbox [n]              animation sandbox: no world, a flat 1000x1000 wireframe floor (lines every 10, bold every 100) with 1 character (n = 2: two facing each other 30 units apart; more: the rest idle in rings round them, up to 1000); Z/X/C walk/run/free, [ ] fixed speed, P patrol, G fight, Y follow; works with --screenshot --ticks
           --sandbox-character <name> the CHARACTER or ANIMAL_CHARACTER record the sandbox spawns (default: the first member of the default new-game start)
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), fight (the G key, with --sandbox 2), e.g. run,patrol (with --move-to or --screenshot)
+          --sandbox-bisect          with --sandbox 2: force one lethal sideways chest cleave at tick 120 for visual inspection
+          --sandbox-bisect-variant <n> repeat a torso cut's angle and height from this visual seed
           --sandbox-severe-only     with --sandbox-dummy: hide generic wound marks and falling jaw to inspect permanent head state without a wound mask
           --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
           --sandbox-cut-direction <n> with --sandbox-dummy: fixed blade axis 1 down, 2 left, 3 right
@@ -119,7 +122,7 @@ sealed class GameOptions
           --quit-after <s>           close after s seconds and print the frame rate (smoke test)
           --scene <name>             with --screenshot (and --load): stage a scene and save a frame every --scene-every ticks (default 30), --scene-frames of them (default 8):
                                      fight (enemies of --scene-npc spawned beside the leader and attacked), turret (the nearest town turret, enemies spawned in its range),
-                                     bed (the leader sleeps in the nearest bed), acid (acid rain forced on the characters), menu (the context menus of the nearest character,
+                                     bed (the leader sleeps in the nearest bed), acid (acid rain forced on the characters), bisect (with --sandbox 2 --sandbox-bisect: visible impact and falling halves), menu (the context menus of the nearest character,
                                      door, container and cage, one frame each); the log prints the leader's state each frame; --scene-town <name> moves the squad to that town first (turret)
           --no-precompile            compile methods on their first call only (by default a background thread compiles the game's methods ahead)
           --play-bench <dir>         with --load (or a new game): the game driven by a script (idle, camera orbit, zoom, pan, a long travel, time x2 and x5, talk, trade,
@@ -195,6 +198,8 @@ sealed class GameOptions
                     break;
                 case "--sandbox-severe-only": g.SandboxSevereOnly = true; break;
                 case "--sandbox-head-wound": g.SandboxHeadWound = int.Parse(Next()); break;
+                case "--sandbox-bisect-variant": g.SandboxBisectVariant = ulong.Parse(Next(), NumberStyles.None, CultureInfo.InvariantCulture); break;
+                case "--sandbox-bisect": g.SandboxBisect = g.SandboxDummy = g.SandboxBare = true; break;
                 case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever-level": g.SandboxSever = true; g.SandboxSeverLevel = int.Parse(Next()); break;
                 case "--sandbox-power": g.SandboxPower = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;

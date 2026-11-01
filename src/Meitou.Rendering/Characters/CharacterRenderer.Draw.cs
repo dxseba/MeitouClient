@@ -237,7 +237,7 @@ internal sealed unsafe partial class CharacterRenderer
             for (int p = 0; p < parts.Count; p++)
             {
                 var part = parts[p];
-                if (!part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn)) continue;
+                if (!part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) || !TorsoPartVisible(l, part) || part.IsTorsoCap && portraitLive >= 0) continue;
                 Matrix4x4 model = world;
                 if (!part.Shared) model = attach[l.AttachBase + part.AttachIndex] * world;
                 float modelScale = part.Shared ? worldScale : model.ScaleLength();
@@ -323,7 +323,7 @@ internal sealed unsafe partial class CharacterRenderer
         {
             var part = parts[p];
             ref var f = ref partFrames[l.PartBase + p];
-            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && (!part.Anatomy || (l.HasWounds && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) && (l.PartOnly == 0 || (part.IsBody && l.HasWounds)) && !(part.Bone >= 0 && l.LostGroups != 0 && (l.LostGroups >> woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) & 1) != 0 && woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) is 1 or 2);
+            f.Shows = part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) && TorsoPartVisible(l, part) && (!part.Anatomy || (l.HasWounds && l.Pixels > AnatomyPixels)) && !(l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) && (l.PartOnly == 0 || (part.IsBody && l.HasWounds)) && !(part.Bone >= 0 && l.LostGroups != 0 && (l.LostGroups >> woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) & 1) != 0 && woundMasks.GroupOfBone(l.Asset.Rig, part.Bone) is 1 or 2);
             if (!f.Shows) continue;
             f.Model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             f.Scale = part.Shared ? worldScale : f.Model.ScaleLength();
@@ -399,7 +399,7 @@ internal sealed unsafe partial class CharacterRenderer
                 ref readonly var f = ref partFrames[l.PartBase + p];
                 if (!f.Shows) continue;
                 var part = parts[p];
-                if (part.Anatomy && depth) continue;   // under the skin: no shadow of its own
+                if (part.Anatomy && !part.IsTorsoCap && depth) continue;   // only an exposed torso cap casts its own shadow
                 var mesh = part.Mesh;
                 bool twoSided = part.Material.DoubleSided;
                 bool headless = part.IsBody && l.Asset.Appearance is { Headless: true }, headOnly = part.IsBody && l.Asset.Appearance is { HeadOnly: true };
@@ -573,6 +573,12 @@ internal sealed unsafe partial class CharacterRenderer
 
     /// <summary>Height on screen under which a body's anatomy is not drawn: inside a cut it is lost at that size, and each costs 350k triangles.</summary>
     const float AnatomyPixels = 180;
+
+    bool TorsoPartVisible(in Live live, AssetPart part)
+    {
+        if (live.TorsoCut is not { } cut || part.Shared || part.Bone < 0 || part.Bone >= live.Asset.Rig.BindPosition.Length) return true;
+        return TorsoCutSurface.Band(live.Asset.Rig.BindPosition[part.Bone], woundMasks.GroupOfBone(live.Asset.Rig, part.Bone), cut) >= 0;
+    }
 
     /// <summary>The limb bits a chosen cut height takes over from the game's fixed hide.</summary>
     static int CutBits(uint cuts) { int bits = 0; for (int k = 0; k < 4; k++) if (((cuts >> (8 * k)) & 255) != 0) bits |= 1 << k; return bits; }

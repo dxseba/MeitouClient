@@ -15,7 +15,7 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>The scenes <see cref="StageScene"/> knows.</summary>
-    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu"];
+    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect"];
 
     /// <summary>The menu scene's targets, one frame each.</summary>
     static readonly string[] SceneMenus = ["character", "door", "container", "cage"];
@@ -39,6 +39,9 @@ sealed partial class GameHost
         var at = leader.Position;
         switch (scene)
         {
+            case "bisect":
+                if (!IsSandbox || !g.SandboxBisect) throw new ArgumentException("--scene bisect needs --sandbox 2 --sandbox-bisect");
+                return session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe)?.Position;
             case "fight":
             {
                 if (DebugRecord(g.SceneNpc, character: true) is not { } npc) { Console.WriteLine($"scene     no character record matches '{g.SceneNpc}'"); return null; }
@@ -121,6 +124,11 @@ sealed partial class GameHost
             session.Tick();
             session.AdvanceSimulation(session.Ticks.TickSeconds);
             UpdateNav(wait: true);
+            if (g.SandboxBisect)
+            {
+                UpdateWounds(session.World);
+                UpdateGuts(session.World, (float)session.Ticks.TickSeconds, draw: false);
+            }
         }
     }
 
@@ -157,6 +165,7 @@ sealed partial class GameHost
                 camera.Target = p;
             }
             ApplyCamera(session.Camera.Current);
+            if (scene == "bisect") SandboxFollowCamera();
             UpdateBuildings();
             gpu.Characters?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);

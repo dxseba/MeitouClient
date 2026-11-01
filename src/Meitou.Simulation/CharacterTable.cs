@@ -188,6 +188,8 @@ public sealed class CharacterCold
     public Saving.SavedCharacterLink? Save { get; set; }
     /// <summary>Severe visual head state retained with this cold object while a generated NPC is stored off screen; written to Meitou's sidecar only.</summary>
     public Wounds.SevereHeadWoundState? SevereHeadWound { get; set; }
+    /// <summary>Fixed visual torso separation retained through NPC storage and written only to Meitou's torso sidecar.</summary>
+    public Wounds.TorsoBisectionState? TorsoBisection { get; set; }
     /// <summary>The look was changed in the character editor (<see cref="Editing.EditCharacter"/>): a save writes its CHARACTER_APPEARANCE back.</summary>
     public bool LookEdited { get; set; }
     /// <summary>RACE <c>pathfind footprint radius</c> (0: not known, paths use the default human); what the navmesh keeps clear.</summary>

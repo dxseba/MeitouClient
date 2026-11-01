@@ -59,6 +59,34 @@ internal sealed partial class CharacterRenderer
         return Vector3.Transform(asset.Rig.BindPosition[h], s.Bones[h] * s.World);
     }
 
+    /// <summary>The fitted torso cut's outer-rim centre in its current posed world frame; null if neither the section nor spine is available.</summary>
+    public Vector3? TorsoCutPosition(long key, Vector4 plane)
+    {
+        if (!states.TryGetValue(key, out var state) || state.Asset is not { IsIcon: false, BodySource: { } source } asset || state.Posed < 0)
+            return BonePosition(key, "Bip01 Spine1");
+        var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
+        var cap = TorsoCutSurface.Build(source, woundMasks.BoneGroups(asset.Rig), new(plane, 1), morphs);
+        if (cap is null) return BonePosition(key, "Bip01 Spine1");
+        var centre = Vector3.Zero;
+        int count = 0;
+        foreach (var vertex in cap)
+        {
+            if (vertex.Uv.X > 0.5f) continue;
+            var posed = Vector3.Zero;
+            float sum = 0;
+            for (int k = 0; k < 4; k++)
+            {
+                uint bone = vertex.Bones >> (k * 8) & 255;
+                if (bone >= state.Bones.Length || vertex.Weights[k] <= 0) continue;
+                posed += Vector3.Transform(vertex.Position, state.Bones[bone]) * vertex.Weights[k];
+                sum += vertex.Weights[k];
+            }
+            centre += sum > 0 ? posed / sum : vertex.Position;
+            count++;
+        }
+        return count > 0 ? Vector3.Transform(centre / count, state.World) : BonePosition(key, "Bip01 Spine1");
+    }
+
     /// <summary>
     /// How the character <paramref name="key"/> was last drawn in the world: its placement, the look and where its <paramref name="bone"/> was; null when it was not drawn in the
     /// world in the last update. Render thread, between updates (a cut-off head starts from it, <see cref="CharacterInstance.FreezeFrom"/>).
@@ -81,12 +109,19 @@ internal sealed partial class CharacterRenderer
         {
             if (!part.ShowsWith(s.WeaponDrawn, s.RangedDrawn, back: s.BackDrawn) || part.PickBoxes.Length == 0) continue;
             if (!part.Shared && (part.AttachIndex < 0 || part.AttachIndex >= s.Attach.Length)) continue;
+            if (!part.Shared && s.TorsoCut is { } rigidCut && part.Bone >= 0 && TorsoCutSurface.Band(asset.Rig.BindPosition[part.Bone], woundMasks.GroupOfBone(asset.Rig, part.Bone), rigidCut) < 0) continue;
             var model = part.Shared ? s.World : s.Attach[part.AttachIndex] * s.World;
             foreach (var box in part.PickBoxes)
             {
                 var m = part.Shared && box.Bone >= 0 && box.Bone < s.Bones.Length ? s.Bones[box.Bone] * model : model;
                 if (!Matrix4x4.Invert(m, out var inverse)) continue;
-                if (Slab(Vector3.Transform(origin, inverse), Vector3.TransformNormal(direction, inverse), box.Min - new Vector3(PickPadding), box.Max + new Vector3(PickPadding)) is { } t && t < best)
+                var localOrigin = Vector3.Transform(origin, inverse);
+                var localDirection = Vector3.TransformNormal(direction, inverse);
+                var min = box.Min - new Vector3(PickPadding); var max = box.Max + new Vector3(PickPadding);
+                float? hit = part.Shared && s.TorsoCut is { } cut
+                    ? TorsoCutSurface.RayBox(localOrigin, localDirection, min, max, box.Bone >= 0 ? woundMasks.GroupOfBone(asset.Rig, box.Bone) : 0, cut)
+                    : Slab(localOrigin, localDirection, min, max);
+                if (hit is { } t && t < best)
                     best = t;
             }
         }

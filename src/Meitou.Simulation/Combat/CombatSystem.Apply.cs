@@ -98,8 +98,14 @@ public sealed partial class CombatSystem
         var ctx = MakeContext(world, d, dc);
         var events = hitEvents;   // Apply is serial, so one list serves every hit
         events.Clear();
+        bool aliveBeforeHit = !dc.Medical.Dead;
         var cover = new CoverRoll(world.Seed, Rng.Key(table.IdOf(d)), a, seq, blow);
         var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events);
+        var cutTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
+        ulong visualSeed = Wounds.TorsoBisectionPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), CombatRolls.BlowCounter(a, seq, blow, 0));
+        bool bisected = TryBisect(dc, part, damage, mechanism, aliveBeforeHit,
+            CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.BodyBisection, CombatRolls.BlowCounter(a, seq, blow, 0)), direction, events,
+            visualSeed, cutTravel, prev[d].Yaw);
         FloatHit(world, d, dc, ac.IsPlayer, part, damage, absorbed);
         A.Landed++;
         D.Taken++;
@@ -123,7 +129,7 @@ public sealed partial class CombatSystem
                     break;
             }
         }
-        PublishHit(world, CombatHitSource.Melee, table.IdOf(a), d, dc.Medical, part, damage, -toAttacker, events, direction, tech.LowStrike, mechanism);
+        PublishHit(world, CombatHitSource.Melee, table.IdOf(a), d, dc.Medical, part, damage, -toAttacker, events, direction, tech.LowStrike, mechanism, bisected);
         // A shackled defender is knocked out instead of staggered a quarter of the time (Character::_startStumble: MedicalSystem::knockout with factor 0.002, the floor of 3 s).
         if (!dc.Medical.Incapacitated && Meitou.Simulation.Locks.LockSystem.WornShackles(dc) is not null
             && CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.Shackled, CombatRolls.BlowCounter(a, seq, blow, 0)) < ShackledKnockout)
