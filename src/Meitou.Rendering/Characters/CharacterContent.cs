@@ -486,7 +486,7 @@ internal sealed class CharacterContent : IDisposable
                     // The throat stops at the palate's height, or it fills the lost jaw's place like a beard.
                     if (part.Bone.Contains("constrictor") && part.Vertices[t - t % 3].Position.Y < (min.Y + max.Y) / 2) continue;
                     var p = (v.Position - (min + max) / 2) * mouthScale + place;
-                    if (part.Bone == "Tongue") p = place + new Vector3(0, head.Y * 0.08f, -head.Z * 0.12f) + (p - place) * 0.7f;   // short and drawn back, its root in the throat
+                    if (part.Bone == "Tongue") p = place + new Vector3(0, -head.Y * 0.03f, head.Z * 0.02f) + (p - place) * 0.7f;   // short, hanging in the open behind the upper teeth
                     vertices.Add(new Vertex { Position = p, Normal = v.Normal, Uv = skin[0].Uv, Tangent = new Vector4(p, 5), Colour = colour, Bones = (uint)mouthBone, Weights = new Vector4(1, 0, 0, 0) });
                 }
             }

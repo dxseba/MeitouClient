@@ -131,9 +131,10 @@ static class CharacterShaders
         out float vClip;        // anatomy: above 0 outside every wound
         out float vBloodAmount; // the blood amount of the vertex's body part (the instance carries the parts': two 8-bit amounts in the w of each matrix row)
 
-        // The lower jaw: any real weight on its bone (lips and chin are shared with the head), or the face below the mouth's line.
+        // The lower jaw: any real weight on its bone (lips and chin are shared with the head), or the face below the mouth's line. The throat under the chin stays with the neck.
         bool JawVertex(mat4 header)
         {
+            if (aPosition.y < 16.8) return false;
             for (int k = 0; k < 4; k++)
             {
                 uint b = aBones[k];
@@ -558,6 +559,7 @@ static class CharacterShaders
             if (vJawCut > 0.0)
             {
                 float tornLip = vJawCut + 0.035 * sin(vBlood.x * 70.0) + 0.02 * sin(vBlood.y * 35.0);   // a soft edge: the face's long triangles draw any stronger tear as spikes
+                if (vSkinPos.y < 17.0) tornLip = (vSkinPos.y - 16.72) * 7.5 + 0.05 * sin(vBlood.y * 35.0);   // under the chin the triangles reach down the neck: the edge is a height there
                 if (tornLip > 0.6) discard;
                 float wet = smoothstep(0.15, 0.5, tornLip);
                 albedo = mix(albedo, m.colour1.rgb * 0.55, wet);
