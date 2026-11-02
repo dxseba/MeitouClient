@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Meitou.Data.Ogre;
+using Meitou.Data.Physics;
 using Meitou.Data.Textures;
 using Meitou.Rendering.Gpu;
 using Meitou.Rendering.Gpu.Shaders;
@@ -12,7 +13,7 @@ namespace Meitou.Rendering;
 /// it along its own z (a bolt in flight).
 /// </summary>
 public readonly record struct DebrisPiece(string Mesh, float Scale, Quaternion Rotation, Vector3 Position, float Stretch = 1,
-    LimbLook? Limb = null, bool Bloody = false, uint BloodColour = 0x800000);
+    LimbLook? Limb = null, bool Bloody = false, uint BloodColour = 0x800000, BowelPose? Bowel = null);
 
 /// <summary>
 /// How a severed limb is drawn (the original's <c>SeveredLimb</c> material, docs/game/blood-decals.md "On the body and on severed limbs"): the item's MATERIAL record's texture map and
@@ -28,7 +29,7 @@ public sealed record LimbLook(string Diffuse, string? Mask, Vector3 SkinTone, Ve
 /// fragment samplers are no longer a constraint. Drawn in the scene pass of the near slice before the characters (colour only, leaving the alpha to them); they
 /// cast no shadow. A mesh is loaded the first time its <see cref="Extent"/> is asked for.
 /// </summary>
-public sealed unsafe class DebrisRenderer : IDisposable
+public sealed unsafe partial class DebrisRenderer : IDisposable
 {
     const string Vertex = """
         #version 330 core
@@ -246,7 +247,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
     {
         public readonly DeviceBuffer Vertices = vertices, Indices = indices;
         public readonly (uint First, uint Count, int VertexOffset, DebrisTexture? Diffuse, float AlphaThreshold)[] Parts = parts;
-        public readonly Vector3 Extent = extent;
+        public Vector3 Extent = extent;
         /// <summary>A severed limb's: its skin-tone mask, the mesh's bounds middle in its own space (the vertices are moved by it).</summary>
         public DebrisTexture? Mask, Normal;
         public bool Limb;
@@ -360,12 +361,19 @@ public sealed unsafe class DebrisRenderer : IDisposable
         foreach (var piece in pieces)
         {
             // Only meshes loaded before (Extent): nothing is uploaded inside the pass.
-            if (!meshes.TryGetValue(Key(piece.Mesh, piece.Limb), out var mesh) || mesh is null) continue;
-            // A limb's piece is at its mesh's origin (its blood mapping reads the mesh's own x); the others are centred on their bounds.
-            var middle = mesh.Limb ? piece.Position + Vector3.Transform(mesh.Centre * piece.Scale, piece.Rotation) : piece.Position;
-            if (!FrustumTests.SphereVisible(frustum, middle, mesh.Extent.Length() * piece.Scale * MathF.Max(piece.Stretch, 1))) continue;
-            var m = Matrix4x4.CreateScale(piece.Scale, piece.Scale, piece.Scale * piece.Stretch) * Matrix4x4.CreateFromQuaternion(piece.Rotation) * Matrix4x4.CreateTranslation(piece.Position - eye);
-            for (int k = 0; k < 5; k++) bindings[k] = new GpuBufferBinding(mesh.Vertices.Handle, (ulong)(k switch { 0 => 0, 1 => 12, 2 => 20, 3 => 36, _ => 28 }));
+            Mesh? mesh;
+            if (piece.Bowel is { } bowel) mesh = BowelMesh(bowel);
+            else meshes.TryGetValue(Key(piece.Mesh, piece.Limb), out mesh);
+            if (mesh is null) continue;
+            // Tissue vertices already follow the physical nodes in a centre-relative frame.
+            var middle = piece.Bowel?.Centre ?? (mesh.Limb
+                ? piece.Position + Vector3.Transform(mesh.Centre * piece.Scale, piece.Rotation) : piece.Position);
+            float scale = piece.Bowel is null ? piece.Scale * MathF.Max(piece.Stretch, 1) : 1;
+            if (!FrustumTests.SphereVisible(frustum, middle, mesh.Extent.Length() * scale)) continue;
+            var m = piece.Bowel is not null ? Matrix4x4.CreateTranslation(middle - eye)
+                : Matrix4x4.CreateScale(piece.Scale, piece.Scale, piece.Scale * piece.Stretch)
+                    * Matrix4x4.CreateFromQuaternion(piece.Rotation) * Matrix4x4.CreateTranslation(piece.Position - eye);
+            for (int k = 0; k < 5; k++) bindings[k] = mesh.Vertices.Binding(gpu.Frame, (ulong)(k switch { 0 => 0, 1 => 12, 2 => 20, 3 => 36, _ => 28 }));
             cmd.BindVertexBuffers(0, bindings);
             cmd.BindIndexBuffer(new GpuBufferBinding(mesh.Indices.Handle, 0), IndexKind.U32);
             foreach (var part in mesh.Parts)
@@ -432,6 +440,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
         foreach (var v in loose) (min, max) = (Vector3.Min(min, v.Position), Vector3.Max(max, v.Position));
         var centre = (min + max) / 2;
         var vertices = loose.Select(v => new Vertex { Position = v.Position - centre, Normal = v.Normal, Uv = v.Uv, Colour = Vector4.One }).ToArray();
+        bowelSkinning = new BowelSkinning(vertices);
         var indices = Enumerable.Range(0, vertices.Length).Select(i => (uint)i).ToArray();
         var packed = GpuVertex.PackObject(vertices);
         var vb = DeviceBuffer.Create(gpu, (ulong)packed.Length, BufferUse.Vertex, "debris bowel");
@@ -502,6 +511,7 @@ public sealed unsafe class DebrisRenderer : IDisposable
 
     public void Dispose()
     {
+        DisposeBowels();
         foreach (var mesh in meshes.Values)
         {
             mesh?.Vertices.Dispose();

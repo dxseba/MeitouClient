@@ -23,6 +23,9 @@ public enum BodySide
 /// </summary>
 public sealed record BodyPartTemplate
 {
+    /// <summary>The canonical Stomach LOCATIONAL_DAMAGE record of the base data.</summary>
+    public const string StomachPartId = "100-gamedata.quack";
+
     public required string StringId { get; init; }
     public string Name { get; init; } = "";
     public BodyPartType Type { get; init; }

@@ -9,16 +9,16 @@ public sealed partial class CombatSystem
 {
     /// <summary>A deterministic debug command: ordinary delivered damage once, the shared bisection policy with roll zero, and normal hit/death publication.</summary>
     internal bool DebugBisect(World world, CharacterId victimId, CharacterId attackerId, ulong? visualSeed = null, int cutDirection = 2,
-        TorsoBisectionStyle style = TorsoBisectionStyle.Auto)
+        TorsoBisectionStyle style = TorsoBisectionStyle.Auto, string targetBodyPart = ArmourData.ChestPartId)
     {
         var table = world.Characters;
         if (!table.TryResolveNext(victimId, out int victimSlot)
             || table.Cold(victimSlot) is not { Medical: { Dead: false } medical, Race: { } race, Fighter: { } fighter, Stats: not null } victim
             || victim.TorsoBisection is not null) return false;
-        int chest = -1;
+        int struckPart = -1;
         for (int i = 0; i < medical.Parts.Count; i++)
-            if (medical.Parts[i].Template.StringId == ArmourData.ChestPartId) { chest = i; break; }
-        if (chest < 0) return false;
+            if (medical.Parts[i].Template.StringId == targetBodyPart) { struckPart = i; break; }
+        if (struckPart < 0) return false;
 
         bool LivingSource(int slot) => slot != victimSlot && (uint)slot < (uint)table.HighWater
             && table.Next[slot].Alive && table.Cold(slot)?.Medical is { Dead: false };
@@ -42,25 +42,25 @@ public sealed partial class CombatSystem
         // Lengthwise previews need a downward blow; an oblique torso cut retains the requested side/down axis.
         int techniqueDirection = style is TorsoBisectionStyle.Vertical or TorsoBisectionStyle.Diagonal ? 1 : cutDirection;
         int direction = attackerSlot >= 0 ? HitOutcomes.Facing(techniqueDirection, HitOutcomes.Behind(table.Next[attackerSlot].Position, position, yaw)) : techniqueDirection;
-        float cut = MathF.Max(200, medical.Parts[chest].MaxHp * 3);
-        var input = new TorsoBisectionInput(CombatHitSource.Melee, CombatWoundMechanism.Slash, medical.Parts[chest].Template,
-            direction, cut, medical.Parts[chest].MaxHp, Robot: race.IsRobot, Animal: fighter.IsAnimal) { Brutality = 100, Lethal = true };
+        float cut = MathF.Max(200, medical.Parts[struckPart].MaxHp * 3);
+        var input = new TorsoBisectionInput(CombatHitSource.Melee, CombatWoundMechanism.Slash, medical.Parts[struckPart].Template,
+            direction, cut, medical.Parts[struckPart].MaxHp, Robot: race.IsRobot, Animal: fighter.IsAnimal) { Brutality = 100, Lethal = true };
         if (!TorsoBisectionPolicy.SupportsStyle(direction, style) || !TorsoBisectionPolicy.ShouldBisect(input, 0)) return false;
         var events = new List<MedicalEvent>();
         var damage = new HitDamage(cut, 0, 0);
         var sourceFighter = attackerSlot >= 0 ? table.Cold(attackerSlot)?.Fighter : null;
         var strikingItem = sourceFighter is { IsAnimal: false, Unarmed: false } ? sourceFighter.Weapon?.SourceItem : null;
-        bool organicBeforeHit = !medical.Parts[chest].IsRobotic(race);
-        medical.ApplyHit(chest, damage, MakeContext(world, victimSlot, victim), events);
+        bool organicBeforeHit = !medical.Parts[struckPart].IsRobotic(race);
+        medical.ApplyHit(struckPart, damage, MakeContext(world, victimSlot, victim), events);
         DepositWeaponBlood(strikingItem, race, damage, true, organicBeforeHit, CombatWoundMechanism.Slash);
         var source = attackerSlot >= 0 ? table.IdOf(attackerSlot) : CharacterId.None;
         ulong variation = visualSeed ?? TorsoBisectionPolicy.VisualSeedFor(world.Seed, victimId, source, (ulong)world.Tick);
-        if (!TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, direction, events, variation, travel, yaw, style, brutality: 100)) return false;
+        if (!TryBisect(victim, struckPart, damage, CombatWoundMechanism.Slash, true, 0, direction, events, variation, travel, yaw, style, brutality: 100)) return false;
         Knockdown(world, victimSlot, victim, travel, cut);
         TaskStart.Stand(table, victimSlot);
         table.Next[victimSlot].Velocity = Vector3.Zero;
         PublishHit(world, CombatHitSource.Melee, source,
-            victimSlot, medical, chest, damage, travel, events, direction, mechanism: CombatWoundMechanism.Slash, bodyBisected: true, attackerBrutality: 100);
+            victimSlot, medical, struckPart, damage, travel, events, direction, mechanism: CombatWoundMechanism.Slash, bodyBisected: true, attackerBrutality: 100);
         return true;
     }
 
@@ -76,7 +76,7 @@ public sealed partial class CombatSystem
             struck.MaxHp, aliveBeforeHit, victim.TorsoBisection is not null, race.IsRobot, fighter.IsAnimal)
             { Brutality = brutality, Lethal = medical.Dead };
         if (!TorsoBisectionPolicy.ShouldBisect(input, roll)) return false;
-        var state = TorsoBisectionPolicy.StateForDirection(cutDirection, visualSeed, travel, victimYaw, style);
+        var state = TorsoBisectionPolicy.StateForHit(struck.Template, cutDirection, visualSeed, travel, victimYaw, style);
         if (!state.IsValid) return false;
         victim.TorsoBisection = state;
         medical.KillFromBisection(events);

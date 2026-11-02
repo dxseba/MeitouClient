@@ -44,7 +44,7 @@ sealed partial class PlayerInterface
 
         string chance = BrutalityPolicy.BisectionChance(level).ToString("P0", CultureInfo.InvariantCulture);
         string description = Loc.Tr("Experience in brutal melee combat teaches precise finishing cuts.") + "\n\n"
-            + Loc.Tr("Body cleaves require a lethal, powerful slash to the chest after armour. The weapon and attack direction must allow it.")
+            + Loc.Tr("Body cleaves require a lethal, powerful slash to the chest or stomach after armour. The weapon and attack direction must allow it.")
             + "\n\n" + Loc.Tr("Current cleave chance on eligible hits:") + " " + chance
             + "\n" + Loc.Tr("At level 100: 95%.");
         Text("stat-description-body", new(bar.X + 10 * scale, bar.Y + 28 * scale, bar.Width - 20 * scale,

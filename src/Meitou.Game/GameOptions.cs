@@ -82,7 +82,7 @@ sealed class GameOptions
     public bool NoPrecompile;
     /// <summary>The renderer for the whole frame: <c>vulkan</c> (the default) or <c>metal</c> (macOS: the scene, HUD and faithful panels, the port's current slice).</summary>
     public string Renderer = "vulkan";
-    /// <summary>With <c>--screenshot</c>: a staged scene to check behaviour offscreen (<c>--scene</c>: fight, turret, bed, acid, menu, bisect; GameHost.Scenes.cs).</summary>
+    /// <summary>With <c>--screenshot</c>: a staged scene to check behaviour offscreen (<c>--scene</c>: fight, turret, bed, acid, menu, bisect, guts; GameHost.Scenes.cs).</summary>
     public string? Scene;
     /// <summary>The scene's frames and the control ticks between them (<c>--scene-frames</c>, <c>--scene-every</c>).</summary>
     public int SceneFrames = 8, SceneEvery = 30;
@@ -110,7 +110,7 @@ sealed class GameOptions
           --sandbox-brutality <n>    hero Brutality level 0..100 (otherwise sandbox-stats, capped at 100)
           --sandbox-stats <n>        set native hero attributes and skills to n (including values above 100); Brutality caps at 100
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), fight (the G key, with --sandbox 2), e.g. run,patrol (with --move-to or --screenshot)
-          --sandbox-bisect          with --sandbox 2: force one lethal sideways chest cleave at tick 120 for visual inspection
+          --sandbox-bisect          with --sandbox 2: force one lethal torso cleave at tick 120 (chest; --sandbox-part stomach targets the abdomen)
           --sandbox-bisect-style <kind> auto (default), transverse, vertical, diagonal, or oblique; oblique crosses the trunk toward a shoulder
           --sandbox-bisect-variant <n> repeat a torso cut's angle and height from this visual seed
           --sandbox-severe-only     with --sandbox-dummy: hide generic wound marks and falling jaw to inspect permanent head state without a wound mask
@@ -138,7 +138,8 @@ sealed class GameOptions
           --quit-after <s>           close after s seconds and print the frame rate (smoke test)
           --scene <name>             with --screenshot (and --load): stage a scene and save a frame every --scene-every ticks (default 30), --scene-frames of them (default 8):
                                      fight (enemies of --scene-npc spawned beside the leader and attacked), turret (the nearest town turret, enemies spawned in its range),
-                                     bed (the leader sleeps in the nearest bed), acid (acid rain forced on the characters), bisect (with --sandbox 2 --sandbox-bisect: visible impact and falling halves), weapon-blood (ordinary sandbox combat, logs item blood), menu (the context menus of the nearest character,
+                                     bed (the leader sleeps in the nearest bed), acid (acid rain forced on the characters), bisect (with --sandbox 2 --sandbox-bisect: visible impact and falling halves),
+                                     guts (with --sandbox 2 --sandbox-bisect: physical bowel close-up), weapon-blood (ordinary sandbox combat, logs item blood), menu (the context menus of the nearest character,
                                      door, container and cage, one frame each), torso-carry (with --sandbox 3 --sandbox-bisect: independent pickups and put-downs), carry-reference (with --sandbox 2 --sandbox-bisect: intact lift then each half), downed-attack (with --sandbox 2: the real body-part attack menu against a living knocked-out enemy); the log prints the leader's state each frame; --scene-town <name> moves the squad to that town first (turret)
           --no-precompile            compile methods on their first call only (by default a background thread compiles the game's methods ahead)
           --play-bench <dir>         with --load (or a new game): the game driven by a script (idle, camera orbit, zoom, pan, a long travel, time x2 and x5, talk, trade,

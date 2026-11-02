@@ -15,7 +15,7 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>The scenes <see cref="StageScene"/> knows.</summary>
-    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "weapon-blood", "torso-carry", "carry-reference", "downed-attack", "head-cut"];
+    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "guts", "weapon-blood", "torso-carry", "carry-reference", "downed-attack", "head-cut"];
 
     /// <summary>The menu scene's targets, one frame each.</summary>
     static readonly string[] SceneMenus = ["character", "door", "container", "cage"];
@@ -45,6 +45,7 @@ sealed partial class GameHost
             case "downed-attack": return StageDownedAttack();
             case "torso-carry": return StageTorsoCarry();
             case "carry-reference": return StageCarryReference();
+            case "guts":
             case "bisect":
                 if (!IsSandbox || !g.SandboxBisect) throw new ArgumentException("--scene bisect needs --sandbox 2 --sandbox-bisect");
                 return session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe)?.Position;
@@ -178,7 +179,7 @@ sealed partial class GameHost
             }
             ApplyCamera(session.Camera.Current);
             if (scene is "torso-carry" or "carry-reference" && watch is { } torsoFocus) camera.Target = torsoFocus;
-            if (scene is "bisect" or "weapon-blood") SandboxFollowCamera();
+            if (scene is "bisect" or "guts" or "weapon-blood") SandboxFollowCamera();
             UpdateBuildings();
             gpu.Characters?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);
@@ -190,6 +191,13 @@ sealed partial class GameHost
                 DrawWorld(w, h);
                 ReportHeadCutScene(f);
             }
+            if (scene == "guts")
+            {
+                camera.Target = GutSceneFocus();
+                DrawWorld(w, h);
+                ReportGutScene(f);
+            }
+            if (scene == "bisect") ReportGutScene(f);
             if (scene is "torso-carry" or "carry-reference") ReportTorsoGripContact(f);
             if (overlay is not null)
             {

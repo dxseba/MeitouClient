@@ -7,7 +7,7 @@ namespace Meitou.Simulation.Wounds;
 
 public enum TorsoBisectionStyle { Auto = 0, Transverse = 1, Vertical = 2, Diagonal = 3, Oblique = 4 }
 
-/// <summary>The delivered chest hit and the victim's state before it landed.</summary>
+/// <summary>The delivered chest or stomach hit and the victim's state before it landed.</summary>
 public readonly record struct TorsoBisectionInput(CombatHitSource Source, CombatWoundMechanism Mechanism,
     BodyPartTemplate Part, int CutDirection, float Cut, float Maximum, bool AliveBeforeHit = true,
     bool AlreadyBisected = false, bool Robot = false, bool Animal = false)
@@ -16,12 +16,13 @@ public readonly record struct TorsoBisectionInput(CombatHitSource Source, Combat
     public bool Lethal { get; init; }
 }
 
-/// <summary>Meitou's skill-gated cleave of an already lethal chest hit; its roll reads no existing random stream.</summary>
+/// <summary>Meitou's skill-gated cleave of an already lethal torso hit; its roll reads no existing random stream.</summary>
 public static class TorsoBisectionPolicy
 {
     public const float MinimumCut = 70, MaximumHpFraction = 0.75f, BaseChance = 0.10f, MaximumChance = 0.95f;
     public const float MinimumHeight = 11.5f, MaximumHeight = 13.5f, MaximumTiltDegrees = 30, AzimuthVariationDegrees = 30;
     public const float MaximumSlopeX = 0.55f, MaximumSlopeZ = 0.24f;
+    public const float StomachMinimumHeight = MinimumHeight, StomachMaximumHeight = 12.25f;
     // Conservative junction bounds measured on installed human/Shek male/female and worker/soldier/prince meshes.
     public const float LegJunctionCeiling = 11.35f, ShoulderJunctionFloor = 14.10f;
     public const float JunctionHalfWidth = 3, JunctionHalfDepth = 1.51f;
@@ -38,7 +39,7 @@ public static class TorsoBisectionPolicy
         if (!input.AliveBeforeHit || !input.Lethal || input.AlreadyBisected || input.Robot || input.Animal
             || input.Source != CombatHitSource.Melee || input.Mechanism != CombatWoundMechanism.Slash
             || input.CutDirection is not (1 or 2 or 3 or 7 or 9)
-            || input.Part is not { Type: BodyPartType.Torso, StringId: ArmourData.ChestPartId }
+            || input.Part is not { Type: BodyPartType.Torso, StringId: ArmourData.ChestPartId or BodyPartTemplate.StomachPartId }
             || !float.IsFinite(input.Cut) || !float.IsFinite(input.Maximum) || input.Maximum <= 0) return 0;
         float threshold = MathF.Max(MinimumCut, MaximumHpFraction * input.Maximum);
         if (input.Cut < threshold) return 0;
@@ -64,7 +65,18 @@ public static class TorsoBisectionPolicy
 
     /// <summary>Eligible blows may cleave across the torso; other sideways cuts retain the transverse fit and downward cuts can continue lengthwise.</summary>
     public static TorsoBisectionState StateForDirection(int cutDirection, ulong visualSeed = 0, Vector2 travel = default,
-        float victimYaw = 0, TorsoBisectionStyle style = TorsoBisectionStyle.Auto)
+        float victimYaw = 0, TorsoBisectionStyle style = TorsoBisectionStyle.Auto) =>
+        StateForDirection(cutDirection, visualSeed, travel, victimYaw, style, stomach: false);
+
+    /// <summary>The struck canonical torso part selects the cut's height without changing its chance or visual hash.</summary>
+    public static TorsoBisectionState StateForHit(BodyPartTemplate part, int cutDirection, ulong visualSeed = 0,
+        Vector2 travel = default, float victimYaw = 0, TorsoBisectionStyle style = TorsoBisectionStyle.Auto) =>
+        part is { Type: BodyPartType.Torso, StringId: ArmourData.ChestPartId or BodyPartTemplate.StomachPartId }
+            ? StateForDirection(cutDirection, visualSeed, travel, victimYaw, style, part.StringId == BodyPartTemplate.StomachPartId)
+            : default;
+
+    static TorsoBisectionState StateForDirection(int cutDirection, ulong visualSeed, Vector2 travel,
+        float victimYaw, TorsoBisectionStyle style, bool stomach)
     {
         if (!SupportsStyle(cutDirection, style)) return default;
         ulong styleBits = Rng.Mix(visualSeed ^ 0x4C4F4E4743555453UL);
@@ -75,7 +87,7 @@ public static class TorsoBisectionPolicy
                 ? choice < 1f / 3 ? TorsoBisectionStyle.Vertical : choice < 2f / 3 ? TorsoBisectionStyle.Diagonal : TorsoBisectionStyle.Oblique
                 : choice < 1f / 3 ? TorsoBisectionStyle.Oblique : TorsoBisectionStyle.Transverse;
         }
-        if (style == TorsoBisectionStyle.Transverse) return new(PlaneForDirection(cutDirection, visualSeed, travel, victimYaw));
+        if (style == TorsoBisectionStyle.Transverse) return new(PlaneForDirection(cutDirection, visualSeed, travel, victimYaw, stomach));
 
         ulong offsetBits = Rng.Mix(styleBits), angleBits = Rng.Mix(offsetBits), pivotBits = Rng.Mix(angleBits), slopeBits = Rng.Mix(pivotBits);
         var local = new Vector2(0, -1);
@@ -101,6 +113,7 @@ public static class TorsoBisectionPolicy
             float maximumTilt = oblique ? ObliqueDiagonalMaximumTiltDegrees : LongDiagonalMaximumTiltDegrees;
             float minimumPivot = oblique ? ObliqueDiagonalPivotMinimum : LongDiagonalPivotMinimum;
             float maximumPivot = oblique ? ObliqueDiagonalPivotMaximum : LongDiagonalPivotMaximum;
+            if (stomach && oblique) (minimumPivot, maximumPivot) = (StomachMinimumHeight, StomachMaximumHeight);
             pivot = minimumPivot + (maximumPivot - minimumPivot) * Rng.Float(pivotBits);
             slope = MathF.Tan((minimumTilt + (maximumTilt - minimumTilt) * Rng.Float(slopeBits)) * MathF.PI / 180);
             if (Rng.Float(Rng.Mix(slopeBits)) < 0.5f) slope = -slope;
@@ -108,7 +121,9 @@ public static class TorsoBisectionPolicy
         }
         else if (style == TorsoBisectionStyle.Oblique)
         {
-            pivot = ObliquePivotMinimum + (ObliquePivotMaximum - ObliquePivotMinimum) * Rng.Float(pivotBits);
+            float minimumPivot = stomach ? StomachMinimumHeight : ObliquePivotMinimum;
+            float maximumPivot = stomach ? StomachMaximumHeight : ObliquePivotMaximum;
+            pivot = minimumPivot + (maximumPivot - minimumPivot) * Rng.Float(pivotBits);
             slope = MathF.Tan((ObliqueMinimumTiltDegrees + (ObliqueMaximumTiltDegrees - ObliqueMinimumTiltDegrees) * Rng.Float(slopeBits)) * MathF.PI / 180);
             bool negative = cutDirection == 3 || cutDirection != 2 && Rng.Float(Rng.Mix(slopeBits)) < 0.5f;
             if (negative) slope = -slope;
@@ -121,10 +136,14 @@ public static class TorsoBisectionPolicy
     }
 
     /// <summary>A varied original-bind-space plane, upper half positive. Height and slope stay clear of the fixed upper arms and lower legs.</summary>
-    public static Vector4 PlaneForDirection(int cutDirection, ulong visualSeed = 0, Vector2 travel = default, float victimYaw = 0)
+    public static Vector4 PlaneForDirection(int cutDirection, ulong visualSeed = 0, Vector2 travel = default, float victimYaw = 0) =>
+        PlaneForDirection(cutDirection, visualSeed, travel, victimYaw, stomach: false);
+
+    static Vector4 PlaneForDirection(int cutDirection, ulong visualSeed, Vector2 travel, float victimYaw, bool stomach)
     {
         ulong heightBits = Rng.Mix(visualSeed), tiltBits = Rng.Mix(heightBits), azimuthBits = Rng.Mix(tiltBits);
-        float height = MinimumHeight + (MaximumHeight - MinimumHeight) * Rng.Float(heightBits);
+        float maximumHeight = stomach ? StomachMaximumHeight : MaximumHeight;
+        float height = MinimumHeight + (maximumHeight - MinimumHeight) * Rng.Float(heightBits);
         var local = new Vector2(0, -1);
         float length = travel.LengthSquared();
         if (float.IsFinite(length) && length > 1e-8f && float.IsFinite(victimYaw))

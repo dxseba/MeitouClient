@@ -260,11 +260,12 @@ sealed partial class GameHost
         {
             Position = cutAt + along * 0.6f, Velocity = along * 2 + Vector3.UnitY,
             BloodColour = session.World.Characters.Cold(id.Slot)?.Race?.BloodColour ?? DefaultBloodColour,
-            Floor = session.World.Walkability.GroundHeight(cutAt.X, cutAt.Z, cutAt.Y)
-                + (gpu.Debris?.Extent(DebrisRenderer.Bowel)?.Y ?? 0.35f) - 0.35f,
+            Floor = session.World.Walkability.GroundHeight(cutAt.X, cutAt.Z, cutAt.Y),
         };
         // A still may advance the hit before any render. Match the loose bowel to the halves' event-time clock.
-        for (float remaining = MathF.Min(age, 4); remaining > 0; remaining -= 0.025f) StepGut(gut, MathF.Min(remaining, 0.025f));
-        gutFalls[id] = gut;
+        if (config.AdvancedRagdolls) gut.Age = MathF.Max(0, age);
+        else for (float remaining = MathF.Min(age, 4); remaining > 0; remaining -= 0.025f)
+            StepGut(gut, MathF.Min(remaining, 0.025f));
+        KeepGutFall(id, gut);
     }
 }

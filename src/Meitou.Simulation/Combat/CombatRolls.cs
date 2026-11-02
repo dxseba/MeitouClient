@@ -23,7 +23,7 @@ public enum CombatRoll : ulong
     Steering = 10,
     /// <summary>Whether an attack on a character getting up knocks it back down for 10 s (counter: the tick and the attacker).</summary>
     KnockDown = 11,
-    /// <summary>Whether a very strong sideways chest cut bisects the victim (counter: the incoming blow).</summary>
+    /// <summary>Whether a very strong chest or stomach cut bisects the victim (counter: the incoming blow).</summary>
     BodyBisection = 12,
 }
 

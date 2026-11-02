@@ -106,7 +106,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             }
             return o.Screenshot is not null ? Screenshot() : Interactive();
         }
-        finally { DisposeAudio(); DisposeTitleScene(); session?.Dispose(); nav?.Dispose(); ragdollGeometry?.Dispose(); ownedScene?.Dispose(); }
+        finally { DisposeGuts(); DisposeAudio(); DisposeTitleScene(); session?.Dispose(); nav?.Dispose(); ragdollGeometry?.Dispose(); ownedScene?.Dispose(); }
     }
 
     /// <summary>The start opens on the title (no start, save, sandbox or duel was asked for).</summary>

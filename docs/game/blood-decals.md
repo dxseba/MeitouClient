@@ -148,7 +148,7 @@ characters carry blood on their skin, not only on the ground.
   nearest named ancestor (as the hidden limbs are, `LimbHideOf`), numbered in the health parts' order (`BodyPartTemplate.MedicalOrder`, the order `bloodAmount` is indexed in). The
   race's `combat anatomy` order is a different one: numbering by it put the left arm's blood on the head (sandbox render).
 - Stump: a limb-replacement item without a material wears the body material at the full amount (`BloodFull`): a severed part is far below its health.
-- Advanced detached limbs use the natural body mesh with live physical bone positions and the race's body blood. A linked severed-limb item remains lootable at the physical piece; its old debris visual is suppressed. Heads follow an independent physical body. Jaw scraps and loose bowel retain their visual falls.
+- Advanced detached limbs use the natural body mesh with live physical bone positions and the race's body blood. A linked severed-limb item remains lootable at the physical piece; its old debris visual is suppressed. Heads follow an independent physical body. Jaw scraps retain their visual falls; spilled bowel uses the jointed tissue prop below.
 - Fallen limb fallback (advanced physics unavailable, or a saved loose item): `GameHost.SeveredLimbs` draws a race's `severed limbs` items with the debris renderer, falling and at rest, instead of as a world object: the MATERIAL record's
   texture map, the race's blood colour, blood with the cut end solid, and the Meitou skin's scattering (the same table and rule per race as the body; the curvature baked by
   `CharacterContent.MarkCurvature`), the cut character's skin tone through the colour map (`FallSource.SkinTone`, set in `PopulationSystem.DropSeveredLimb`, not saved: a limb read from a
@@ -159,6 +159,19 @@ characters carry blood on their skin, not only on the ground.
   sandbox is white without a material because the sandbox has no world-object layer, so the debris path (no material) drew it.
 
 The loose bowel is uploaded with packed `GpuVertex.ObjectSize` (44-byte) vertices, matching the debris pass; raw `Vertex` bytes use another stride and draw stretched triangles. Procedural character caps retain raw float attributes because their tangent holds bind-space coordinates and anatomy layer tags.
+
+With Advanced ragdolls enabled, each spilled bowel is a nine-body soft lattice with twelve
+BallSocket joints, using the existing Bepu gravity, damping, material and contact rules.
+A display-owned scene has separate terrain/building geometry caches; it never mutates the
+simulation's ragdoll scene. Nodes of one prop do not collide with each other, while separate
+props collide. It supports terrain and static buildings, not contact with character ragdolls.
+The original installed mesh blends its four nearest tissue nodes, with rest-local transforms
+and correct deformed normals; race blood colour is preserved. Uploads occur before rendering.
+Up to 32 props remain for 600 game seconds, the oldest removed when capacity is needed.
+All nodes must settle before freezing, with a 12-real-second upper limit. Restored spills
+start flat and at rest without replaying an impulse. Disabling Advanced ragdolls uses the
+previous simple fall. Pause stops physical stepping; changing worlds releases the scene.
+These props and their exact poses remain transient and are not saved.
 
 Gore palettes use that same RACE value for wound runs, cut rims, muscle, organs, mouth, brain,
 and loose wet scraps/bowel. Neutral bone and fat retain their palettes. Soft-tissue red chroma

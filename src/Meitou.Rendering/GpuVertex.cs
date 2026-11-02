@@ -62,13 +62,20 @@ public static class GpuVertex
     public static byte[] PackObject(ReadOnlySpan<Vertex> vertices)
     {
         var bytes = new byte[vertices.Length * ObjectSize];
-        var packed = MemoryMarshal.Cast<byte, ObjectVertex>(bytes.AsSpan());
+        PackObject(vertices, bytes);
+        return bytes;
+    }
+
+    /// <summary>Packs into reusable storage for deforming props, avoiding a large allocation every frame.</summary>
+    public static void PackObject(ReadOnlySpan<Vertex> vertices, Span<byte> bytes)
+    {
+        if (bytes.Length != checked(vertices.Length * ObjectSize)) throw new ArgumentException("One packed object record per vertex", nameof(bytes));
+        var packed = MemoryMarshal.Cast<byte, ObjectVertex>(bytes);
         for (int i = 0; i < vertices.Length; i++)
         {
             ref readonly var v = ref vertices[i];
             packed[i] = new ObjectVertex { Position = v.Position, Normal = new(new Vector4(v.Normal, 0)), Uv = v.Uv, Tangent = new(v.Tangent), Colour = new(v.Colour) };
         }
-        return bytes;
     }
 
     public static byte[] PackCharacter(ReadOnlySpan<Vertex> vertices)

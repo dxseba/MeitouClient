@@ -3,6 +3,7 @@ using System.Numerics;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Gameplay.Combat;
 using Meitou.Rendering;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -270,7 +271,14 @@ sealed partial class GameHost
                 };
                 world.Commands.Enqueue(new Meitou.Simulation.DebugSever(sandboxFoe, limb) { Tick = world.Tick });
             }
-            if (!sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBisect(sandboxFoe) { Tick = world.Tick, Attacker = sandboxHero, VisualSeed = g.SandboxBisectVariant, CutDirection = g.SandboxCutDirection ?? 2, Style = g.SandboxBisectStyle });
+            if (!sandboxFoe.IsNone && world.Tick == 120)
+                world.Commands.Enqueue(new Meitou.Simulation.DebugBisect(sandboxFoe)
+                {
+                    Tick = world.Tick, Attacker = sandboxHero, VisualSeed = g.SandboxBisectVariant,
+                    CutDirection = g.SandboxCutDirection ?? 2, Style = g.SandboxBisectStyle,
+                    TargetBodyPart = string.Equals(g.SandboxPart, "stomach", StringComparison.OrdinalIgnoreCase)
+                        ? BodyPartTemplate.StomachPartId : ArmourData.ChestPartId,
+                });
             return;
         }
         if (g.SandboxBehead && !sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBehead(sandboxFoe) { Tick = world.Tick });

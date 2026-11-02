@@ -66,7 +66,9 @@ sealed partial class GameHost
             AddBolts();   // the bolts are drawn whatever the Blood setting
             AddTracers(world);   // with their tracers
             UpdateFalls(world);   // and the severed limbs falling
-            UpdateGuts(world, 1f / 60);
+            double gutClock = session.ShownTick + session.SimulationAlpha;
+            UpdateGuts(world, (float)Math.Clamp((gutClock - debrisClock) * world.TickSeconds, 0, 0.5));
+            debrisClock = gutClock;
             return;
         }
         if (!ReferenceEquals(bloodFor, world)) BloodForNewWorld(null);
@@ -130,44 +132,6 @@ sealed partial class GameHost
 
     const float BloodRunSeconds = 5, GutLifeSeconds = 600, StumpBoneOut = 1.1f;
 
-    sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; public uint BloodColour = DefaultBloodColour; }
-    readonly Dictionary<CharacterId, GutFall> gutFalls = [];
-    readonly HashSet<CharacterId> gutsSpilled = [];
-
-    /// <summary>A deep belly wound spills the bowel as one loose body, as the GTA V FLESH port's guts prop: it falls from the wound and lies where it lands. Visual only.</summary>
-    void UpdateGuts(World world, float dt, bool draw = true)
-    {
-        if (gpu?.Debris is not { } debris) return;
-        debris.AnatomyFile ??= Meitou.Content.GameInstall.Locate() is { } install ? Path.Combine(install.ModsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy") : null;
-        if (debris.Extent(Meitou.Rendering.DebrisRenderer.Bowel) is null) return;
-        for (int slot = 0; slot < world.Characters.HighWater; slot++)
-        {
-            var hot = world.Characters.Previous[slot];
-            var id = world.Characters.IdOf(slot);
-            if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id) || world.Characters.Cold(slot)?.Race?.Name is not ("Greenlander" or "Scorchlander")) continue;
-            var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
-            gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y,
-                BloodColour = world.Characters.Cold(slot)?.Race?.BloodColour ?? DefaultBloodColour };
-        }
-        foreach (var (who, gone) in gutFalls.ToArray())
-            if (gone.Age > GutLifeSeconds) { gutFalls.Remove(who); gutsSpilled.Add(who); }   // spilled once: the wound stays and does not spill again
-        foreach (var fall in gutFalls.Values)
-        {
-            StepGut(fall, dt);
-            if (draw) gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.Bowel, 1, fall.Rotation, fall.Position, BloodColour: fall.BloodColour));
-        }
-    }
-
-    static void StepGut(GutFall fall, float dt)
-    {
-        fall.Age += dt;
-        if (fall.Position.Y <= fall.Floor + 0.35f) return;
-        fall.Velocity.Y -= (fall.Age < 0.8f ? 8 : 40) * dt;
-        fall.Position += fall.Velocity * dt;
-        fall.Position.Y = MathF.Max(fall.Position.Y, fall.Floor + 0.35f);
-        fall.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitX, 3 * dt) * fall.Rotation);
-    }
-
     // A deep wound (dose 1.2) closes over about two hours of play at speed 1.
     const int WoundHealTicks = 3000;
     const float WoundHealDose = 0.01f;
@@ -192,7 +156,7 @@ sealed partial class GameHost
             woundsFor = world;
             woundQueue.Clear();
             wounds.Clear();
-            gutFalls.Clear();
+            DisposeGuts();
             gutsSpilled.Clear();
             severeHeads.Clear();
             restoredJaws.Clear();

@@ -2,7 +2,7 @@ using Meitou.Simulation.Bodies;
 
 namespace Meitou.Simulation.Combat;
 
-/// <summary>Meitou's separate brutality progression: visual unlocks and the chance of a qualifying lethal chest cleave.</summary>
+/// <summary>Meitou's separate brutality progression: visual unlocks and the chance of a qualifying lethal torso cleave.</summary>
 public static class BrutalityPolicy
 {
     public const float SuperficialHeadLevel = 20, MajorHeadLevel = 40, BisectionLevel = 60;

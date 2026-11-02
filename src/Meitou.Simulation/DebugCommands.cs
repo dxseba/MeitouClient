@@ -3,6 +3,7 @@ using Meitou.Data;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Gameplay.Construction;
+using Meitou.Data.Gameplay.Combat;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Combat;
 using Meitou.Simulation.Wounds;
@@ -30,9 +31,11 @@ public sealed record DebugSever(CharacterId Character, int LimbSlot) : DebugComm
 /// <summary>Kills a character by cutting its head off.</summary>
 public sealed record DebugBehead(CharacterId Character) : DebugCommand;
 
-/// <summary>One deterministic, very strong chest cleave; an optional attacker supplies the real incoming direction.</summary>
+/// <summary>One deterministic, very strong torso cleave; an optional attacker supplies the real incoming direction.</summary>
 public sealed record DebugBisect(CharacterId Character) : DebugCommand
 {
+    /// <summary>The canonical chest or stomach hit; other parts are rejected before applying damage.</summary>
+    public string TargetBodyPart { get; init; } = ArmourData.ChestPartId;
     /// <summary>None selects a living selected character, then the nearest living character.</summary>
     public CharacterId Attacker { get; init; } = CharacterId.None;
     /// <summary>Explicit repeatable visual variation; null derives it from the world and this command's source, victim and tick.</summary>
@@ -165,7 +168,7 @@ static class DebugCheats
                 }
                 break;
             case DebugBisect bisect when world.SystemOf<CombatSystem>() is { } combat:
-                combat.DebugBisect(world, bisect.Character, bisect.Attacker, bisect.VisualSeed, bisect.CutDirection, bisect.Style);
+                combat.DebugBisect(world, bisect.Character, bisect.Attacker, bisect.VisualSeed, bisect.CutDirection, bisect.Style, bisect.TargetBodyPart);
                 break;
             case DebugHeadCut cutHead when world.SystemOf<CombatSystem>() is { } headCombat:
                 headCombat.DebugHeadCut(world, cutHead.Character, cutHead.Attacker, cutHead.Style, cutHead.CutDirection, cutHead.VisualSeed);
