@@ -54,14 +54,16 @@ sealed partial class GameHost
         bool fullScreen = config.FullScreen && !o.Windowed;
         bool savedVSync = vsync, savedFullScreen = fullScreen;
         if (fullScreen) BorderlessFullScreen.Toggle(window);
-        else if (!o.SizeGiven) window.WindowState = WindowState.Maximized;
+        else if (!o.SizeGiven && !o.HiddenWindow) window.WindowState = WindowState.Maximized;   // maximising would show a hidden window
         BeginLoadingScreen(display);   // its textures and fonts are made before the window shows
         // The Faithful start shows the original's splash, as the game does before its title, instead of the loading screen (unless the Interface setting turns it off).
         if (loading is { Faithful: true } && config.SplashScreens && OpensOnTitle(interactive: true)) loading.StartSplash();
         // The first loading frame is in the swapchain when the window shows, and on screen before the splash closes. Not on Wayland: a window gets its
         // shell role when it shows, and a buffer attached to the surface before that makes the compositor drop the client ("attached a buffer before
         // configure event"), so there the window shows first and takes the compositor's configure before anything is drawn.
-        if (window.Native?.Wayland is not null)
+        // --hidden-window: drawn and presented as usual, never shown (an unattended run).
+        if (o.HiddenWindow) LoadingFrame();
+        else if (window.Native?.Wayland is not null)
         {
             window.IsVisible = true;
             window.DoEvents();
@@ -383,6 +385,7 @@ sealed partial class GameHost
                 if (select && PanelLive() && !config.SandboxPanelCollapsed && sandboxPicker?.MouseDown(at) == true) return;
                 if (select && PanelLive() && SandboxToggleClick(at)) return;
                 if (select && profiler?.Click(at) == true) { profilerClick = true; return; }   // F12's legend opens and closes rows
+                if (select && CharacterBoxesClick(at)) { profilerClick = true; return; }   // F11's character boxes
                 // The cinema's editor: its clicks never select or move characters.
                 if (select && cinema.MouseDown(at)) return;
                 if (cinema.Contains(at)) return;
@@ -740,7 +743,13 @@ sealed partial class GameHost
                         overlay.Flush(size.X, size.Y);
                         panelsBottom = top + h - 8;
                     }
-                    if (statsVisible && stats.Count > 0) panelsBottom = overlay.Panel(size.X, size.Y, "Meitou   (F11 hides this)", stats, panelsBottom);
+                    characterBoxesToggle = null;
+                    if (statsVisible && stats.Count > 0)
+                    {
+                        TickCharacterBoxes(stats);
+                        panelsBottom = overlay.Panel(size.X, size.Y, "Meitou   (F11 hides this)", stats, panelsBottom, laidOut: statsLaidOut);
+                        characterBoxesToggle = FindCharacterBoxesToggle(overlay.CharWidth);
+                    }
                     if (debugMenuOpen) DrawDebugMenu(overlay, size.X, size.Y, panelsBottom);
                     profiler?.Draw(overlay, size.X, size.Y);
                     profiler?.DrawVram(overlay, size.X, size.Y);
@@ -750,6 +759,9 @@ sealed partial class GameHost
                 Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiSettings);
                 // Over everything: the letterbox and the cinema's editor (F6, also with F7); the game hides its status line.
                 if (overlay is not null && !covered) cinema.Draw(overlay, size.X, size.Y, shot || take || feedbackShot || (interfaceHidden && !cinema.EditorVisible), showStatus: false);
+                // F11's character boxes, on top of everything.
+                if (characterBoxes && statsVisible && ui && overlay is not null && !covered && !shot && !feedbackShot && gpu.Characters is { } boxed)
+                    DrawCharacterBoxes(overlay, boxed, camera, size.X, size.Y);
                 Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiCinema);
                 // The loading screen over the whole frame while a scene loads or the world warms up.
                 if (covered && loading is not null && loadingOverlay is not null)
@@ -807,7 +819,8 @@ sealed partial class GameHost
                 long objectTris = gpu.Objects?.Totals[0, 1] ?? 0;
                 int frames = Math.Max(statsFrames, 1);
                 WorldStats.Add(stats, display.Context, gpu, camera.Eye,
-                    new WorldStats.Triangles(terrainTris / frames, (objectTris - objectTris0) / (double)frames, gpu.Foliage?.ColourTrianglesPerFrame, characterTris / frames, grassBlades / frames));
+                    new WorldStats.Triangles(terrainTris / frames, (objectTris - objectTris0) / (double)frames, gpu.Foliage?.ColourTrianglesPerFrame, characterTris / frames, grassBlades / frames),
+                    characterBoxes: true);
                 gpu.Foliage?.ResetDrawTally();
                 objectTris0 = objectTris;
                 terrainTris = characterTris = grassBlades = 0;

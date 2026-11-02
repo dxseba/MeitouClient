@@ -94,7 +94,8 @@ sealed partial class GameHost
     void FillDrawList(CharacterDrawList list)
     {
         long f0 = Stopwatch.GetTimestamp();
-        try { FillDrawListCore(list); FillPortraits(); }
+        // The portraits first: their characters are posed however far (FillDrawListCore).
+        try { FillPortraits(); FillDrawListCore(list); }
         finally { fillTotal += Stopwatch.GetElapsedTime(f0).TotalMilliseconds; fillCalls++; }
     }
 
@@ -147,7 +148,7 @@ sealed partial class GameHost
             {
                 Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
-                HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Scale = c.Scale, Hidden = hiddenIndoors.Contains(c.Id), FullRateAnimation = c.IsPlayer, Rotation = rotation,
+                HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Scale = c.Scale, Hidden = hiddenIndoors.Contains(c.Id), FullRateAnimation = c.IsPlayer, Rotation = rotation, Build = c.Build, Blood = c.BloodAmounts,
                 Bones = Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),
             });
         }
@@ -213,6 +214,19 @@ sealed partial class GameHost
     }
 
     readonly HashSet<CharacterId> fullRate = [];
+    readonly HashSet<long> portraitKeys = [];
+    /// <summary>The snapshot the distant list was made from (<see cref="AddDistant"/>), its tick and the world.</summary>
+    (WorldSnapshot?, long, int) distantFor;
+
+    /// <summary>A character beyond reach into the distant list: its look (with its tool), its snapshot place, and what loading and the kept textures read.</summary>
+    void AddDistant(CharacterDrawList list, CharacterSnapshot c)
+    {
+        var look = HeldLook(c.Appearance!, c.HeldTool, out var heldPending);
+        CutHead(c, look);
+        bool hidden = hiddenIndoors.Contains(c.Id);
+        list.Distant.Add(new CharacterInstance(DrawKey(c.Id), look, c.Position, DrawnYaw(c), []) { Scale = c.Scale, Hidden = hidden, Build = c.Build });
+        if (heldPending is not null) list.Distant.Add(new CharacterInstance(DrawKey(c.Id) ^ (1L << 55), heldPending, c.Position, DrawnYaw(c), []) { Hidden = true });
+    }
     // By character slot, what the draw list hands the renderer, refilled every frame instead of made anew (the renderer reads them only in that frame's update):
     // the poses, the stuck bolts and the ragdoll between ticks.
     CharacterPose[]?[] posesBySlot = [];
@@ -235,10 +249,27 @@ sealed partial class GameHost
         // The character editor is a scene of its own (GameHost.Editor.cs): only the character being edited is posed and drawn.
         var editing = player.EditorFocus?.Character;
         player.FullRateCharacters(fullRate);
+        // Beyond the renderer's reach a character needs its look and place only (to load it), not its poses or ragdoll; those go in the distant list, made again only
+        // when the snapshot changes (CharacterDrawList.Distant). The editor's scene is listed whole every frame.
+        var reachOf = editing is null && !player.EditorOpen ? gpu.Characters : null;
+        var eye = camera.Eye;
+        portraitKeys.Clear();
+        if (reachOf is not null) foreach (var r in reachOf.PortraitRequests) portraitKeys.Add(r.Key);
+        var distantKey = (current, current.Tick, worldEpoch);
+        bool distant = reachOf is not null && distantKey != distantFor;
+        if (reachOf is null ? list.Distant.Count > 0 : distant) list.BeginDistant();
+        distantFor = reachOf is null ? default : distantKey;
         foreach (var c in current.Characters)
         {
             var inBar = editing is { } shown ? EditorBarPlace(c.Id, shown) : null;
             if (c.Appearance is null || editing is { } edited && c.Id != edited && inBar is null) continue;
+            // The snapshot's place: a tick's motion is well inside InReach's margin.
+            if (reachOf is not null && c.TorsoBisection is null && c.TorsoRagdoll is null && c.DetachedRagdolls.Count == 0
+                && !reachOf.InReach(c.Position, eye) && !portraitKeys.Contains(DrawKey(c.Id)) && c.Id != sandboxHero)
+            {
+                if (distant) AddDistant(list, c);
+                continue;
+            }
             var position = c.Position;
             float yaw = DrawnYaw(c);
             CharacterSnapshot? before = null;
@@ -258,7 +289,9 @@ sealed partial class GameHost
                 yaw = CarrierYaw(current, c, yaw, alpha);
                 (position, rotation) = MixCarry(before?.Carry, carry, alpha).World(position, yaw);
             }
-            var poses = Slot(ref posesBySlot, c.Id.Slot) is { } kept && kept.Length == c.Animations.Count ? kept : posesBySlot[c.Id.Slot] = new CharacterPose[c.Animations.Count];
+            // A character hidden indoors is not drawn (CharacterRenderer: as one out of reach) unless for its portrait: its poses are not read either.
+            bool posed = reachOf is null || !CharacterHidden(c.Id) || portraitKeys.Contains(DrawKey(c.Id));
+            var poses = !posed ? [] : Slot(ref posesBySlot, c.Id.Slot) is { } kept && kept.Length == c.Animations.Count ? kept : posesBySlot[c.Id.Slot] = new CharacterPose[c.Animations.Count];
             for (int i = 0; i < poses.Length; i++)
             {
                 var layer = c.Animations[i];
@@ -293,7 +326,7 @@ sealed partial class GameHost
                 Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
                 HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Bolts = BoltsOf(c), Scale = c.Scale, Hidden = inBar is null && hiddenIndoors.Contains(c.Id), FullRateAnimation = editing is not null || fullRate.Contains(c.Id) || c.Id == sandboxHero && sandboxPicker?.Current is not null,
-                Bones = Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),
+                Bones = !posed ? null : Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),
                 BlendFrom = glide?.From, Blend = glide?.Blend ?? 0, Build = c.Build, Rotation = rotation, Blood = c.BloodAmounts,
             });
             // The editor's next preview look, listed hidden so the renderer prepares it while the last one is still shown.
