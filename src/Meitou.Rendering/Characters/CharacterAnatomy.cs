@@ -8,7 +8,7 @@ namespace Meitou.Rendering.Characters;
 static class CharacterAnatomy
 {
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
-    const float SkullMargin = 0.5f, AnatomyGrid = 0.04f, AnatomyClearance = 0.2f;
+    const float SkullMargin = 0.12f, AnatomyGrid = 0.04f, AnatomyClearance = 0.2f;
     /// <summary>What a stump shows, as Gore Lab's SeverBoneExposure: the limb's bone a little past the skin's cut (LimbHide heights), muscle up to it.</summary>
     static bool StaysOnStump(Meitou.Data.Characters.EcorcheBatch batch, Vector3 p, bool female)
     {
@@ -84,7 +84,9 @@ static class CharacterAnatomy
                     var p = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
                     (skullMin, skullMax) = (Vector3.Min(skullMin, p), Vector3.Max(skullMax, p));
                 }
-        var skullScale = headSupported ? Vector3.Max(headMax - headMin - new Vector3(SkullMargin * 2), new Vector3(0.05f)) / Vector3.Max(skullMax - skullMin, new Vector3(0.01f)) : Vector3.One;
+        var skullMargin = Vector3.Min(new Vector3(SkullMargin), (headMax - headMin) * 0.06f);
+        var skullScale = headSupported ? Vector3.Max(headMax - headMin - skullMargin * 2, new Vector3(0.05f))
+            / Vector3.Max(skullMax - skullMin, new Vector3(0.01f)) : Vector3.One;
         var (skullMiddle, headMiddle) = ((skullMin + skullMax) / 2, (headMin + headMax) / 2);
         foreach (var batch in batches)
         {
@@ -106,12 +108,17 @@ static class CharacterAnatomy
                     if (MathF.Abs(fitted.X) < 0.75f) fitted = new Vector3(fitted.X * 0.68f, fitted.Y, fitted.Z - 0.1f);
                     else fitted += v.Normal * 0.05f;
                 }
-                if (batch.Layer == 0 && batch.Bone is "Bip01 Head" or "Bip01 Jaw") fitted = headMiddle + (fitted - skullMiddle) * skullScale;
+                var normal = v.Normal;
+                if (batch.Layer == 0 && batch.Bone is "Bip01 Head" or "Bip01 Jaw")
+                {
+                    fitted = headMiddle + (fitted - skullMiddle) * skullScale;
+                    normal = Vector3.Normalize(normal / skullScale);
+                }
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone), bone);
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if ((batch.Layer != 0 || WoundMasks.BodyGroup(batch.Bone) != 0) && height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);   // bone keeps its true shape: the depth push hides what stands proud
-                vertices.Add(AnatomyTriangles.FollowBone(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? GorePalette.Recolour(OrganColour((int)MathF.Floor(v.Uv.X / 10)), bloodColour) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) } }, bone));
+                vertices.Add(AnatomyTriangles.FollowBone(new Vertex { Position = fitted, Normal = normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? GorePalette.Recolour(OrganColour((int)MathF.Floor(v.Uv.X / 10)), bloodColour) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) } }, bone));
             }
         }
         // The body's back wall (Gore Lab's cavity lining): what a line of sight through the torso ends on. Layer 7, the torso's group.
@@ -181,7 +188,7 @@ static class CharacterAnatomy
                 foreach (var v in part.Vertices)
                 {
                     var p = (v.Position - (min + max) / 2) * fit + place;
-                    vertices.Add(new Vertex { Position = p, Normal = v.Normal, Uv = skin[0].Uv, Tangent = new Vector4(p, 6), Colour = GorePalette.Recolour(new Vector4(0.6f, 0.4f, 0.4f, 0), bloodColour), Bones = (uint)brainBone, Weights = new Vector4(1, 0, 0, 0) });
+                    vertices.Add(new Vertex { Position = p, Normal = Vector3.Normalize(v.Normal / fit), Uv = skin[0].Uv, Tangent = new Vector4(p, 6), Colour = GorePalette.Recolour(new Vector4(0.6f, 0.4f, 0.4f, 0), bloodColour), Bones = (uint)brainBone, Weights = new Vector4(1, 0, 0, 0) });
                 }
         }
         // Clustered on a fine grid: seen only through cuts, the file's detail is lost, and triangles that collapse go.

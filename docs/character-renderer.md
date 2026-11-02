@@ -163,6 +163,8 @@ Shared hair uses instance bit 5 to read the head header without skin deformation
 **Design choice**: `CharacterTorsoCut.HeadOnly` scopes a saved normalized head-box plane to actual Head/Jaw skin, hair and internal anatomy.
 `HeadCutSurface` derives the box from negative-V head skin with at least half Head/Jaw influence, excluding articulated horn bounds and torso spikes.
 The plane is resolved once into bind space; the head's own triangle subset supplies its closed wound rim/backing, never a whole-body section.
+The skull retains a per-axis skin inset of `min(0.12, head size * 0.06)`; skull and brain normals follow their nonuniform fit.
+Fitted layer-6 brain triangles also supply their own cut section for head and full-body cuts. Concave contours produce a recessed cortex/white-matter surface (layer 32, UV band 4), not a skull-wide fill; it retains head-bone weights and the race palette within the existing cap buffer limit. The exposed brain shell uses its fitted depth in colour, shadow and motion; ordinary wound anatomy retains its protective depth offset. Missing local `Brain.anatomy` omits both shell and section.
 Face morphs enter head intersections once. Existing wound groups and the 35-matrix palette header stay unchanged; two unused torso-frame words carry head membership.
 Colour, depth and motion use the same clip. An attached negative half follows its body's clipped Head/Jaw actors; detached positive/negative pieces have distinct keys.
 Physics clips only head actors, retaining original internal joints with anchors moved inside their kept half. A missing physical rig uses the existing analytic drop.

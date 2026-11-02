@@ -9,15 +9,13 @@ sealed partial class GameHost
     {
         var character = session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe);
         if (character is null) return camera.Target;
-        var points = new List<Vector3>();
         var renderer = gpu.Characters;
-        if (character.HeadCut is null or { Mode: Meitou.Simulation.Wounds.HeadCutMode.AttachedSplit }
-            && renderer?.BonePosition(DrawKey(character.Id), "Bip01 Head") is { } attached) points.Add(attached);
         foreach (var part in character.DetachedRagdolls)
-            if (part.Part == -1 && renderer?.BonePosition(DetachedDrawKey(DrawKey(character.Id), -1, part.FragmentId), "Bip01 Head") is { } point)
-                points.Add(point);
-        return points.Count > 0 ? points.Aggregate(Vector3.Zero, (sum, point) => sum + point) / points.Count
-            : DrawnPosition(character) + new Vector3(0, 17, 0);
+            if (part.Part == -1
+                && renderer?.BonePosition(DetachedDrawKey(DrawKey(character.Id), -1, part.FragmentId), "Bip01 Head") is { } point)
+                return point;
+        return renderer?.BonePosition(DrawKey(character.Id), "Bip01 Head")
+            ?? DrawnPosition(character) + new Vector3(0, 17, 0);
     }
 
     void ReportHeadCutScene(int frame)

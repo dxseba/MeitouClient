@@ -318,9 +318,11 @@ static class CharacterShaders
                 vBloodAmount = float((uint(pair + 0.5) >> (8u * (k & 1u))) & 255u) / 255.0;
             }
             gl_Position = view.viewProjection * p;
-            if (anatomy && aTangent.w < 7.5)
+            bool slicedBrain = anatomy && aTangent.w > 5.5 && aTangent.w < 6.5 && (vHeadRelief & 1u) != 0u;
+            if (anatomy && aTangent.w < 7.5 && !slicedBrain)
             {
-                // Fitted wound rims sit on the skin; only the internal anatomy receives this depth push.
+                // A sliced brain uses its fitted depth; an artificial push can bury it behind the cut's backing.
+                // Fitted wound rims sit on the skin; only the remaining internal anatomy receives this depth push.
                 // Anatomy loses every depth test to the skin in front of it, however it pokes through: only a hole shows it.
                 vec4 back = view.viewProjection * vec4(p.xyz + normalize(p.xyz) * 1.0, 1.0);
                 gl_Position.z = back.z / back.w * gl_Position.w;

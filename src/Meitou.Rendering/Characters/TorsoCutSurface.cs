@@ -126,7 +126,7 @@ static partial class TorsoCutSurface
 
     /// <summary>Intersects torso triangles, or every closed body contour in full-body mode, preserving weights and one interpolated body morph.</summary>
     public static Vertex[]? Build(Vertex[] source, uint[] groups, in CharacterTorsoCut cut, Vector4[]? morphs = null, int[]? components = null,
-        uint bloodColour = GorePalette.DefaultBlood)
+        uint bloodColour = GorePalette.DefaultBlood, bool brainSection = false)
     {
         if (!TryNormalize(cut, out var normalized)) return null;
         var n = new Vector3(normalized.Plane.X, normalized.Plane.Y, normalized.Plane.Z);
@@ -343,6 +343,7 @@ static partial class TorsoCutSurface
         }
         if (rims.Count == 0) return null;
         rims = rims.OrderByDescending(r => r.Area).Take(normalized.FullBody ? 128 : 1).ToList();
+        if (brainSection) return BuildBrainSection(rims, normalized, n, u, v, bloodColour);
         int total = rims.Sum(r => r.Points.Count), budget = normalized.FullBody ? 2048 : 512;
         var outward = n * -normalized.KeepSide;
         var result = new List<Vertex>();

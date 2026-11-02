@@ -153,6 +153,7 @@ internal sealed class CharacterAsset
     public WoundPoint[]? WoundPoints;
     public Vertex[]? HeadSource;
     public Vertex[]? BodySource;
+    public Vertex[]? BrainSource;
     public BodyShapeData? Shape;
     /// <summary>The stat-driven body last applied to the shape and the body's normal maps (<see cref="CharacterRenderer"/>), null before the first.</summary>
     public BodyBuild? AppliedBuild;
@@ -225,7 +226,8 @@ internal sealed class CharacterContent : IDisposable
 
     /// <param name="FirstMaterialName">The first submesh's material (script) name, which is all the material resolver takes of a submesh; null: no submesh.</param>
     sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null,
-        float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null, uint HeadReliefProfiles = 0);
+        float[]? FileDistances = null, int FileFirst = 0, float FileRadius = 0, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null,
+        uint HeadReliefProfiles = 0, Vertex[]? BrainSource = null);
 
     readonly string modsDirectory;
 
@@ -387,7 +389,10 @@ internal sealed class CharacterContent : IDisposable
         if (meshes.TryGetValue(key, out var cached)) return cached;
         var made = CharacterAnatomy.Build(rig, skin, HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [], female, morphs,
             headless, headOnly, Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy"), bloodColour);
-        return meshes[key] = made is null ? null : UploadAnatomy(made);
+        return meshes[key] = made is null ? null : UploadAnatomy(made) with
+        {
+            BrainSource = made.Where(v => v.Tangent.W == 6).ToArray(),
+        };
     }
     public HeadWoundView HeadPlacement(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp) =>
         headWoundPool.Resolve(key, asset, placement, headState, stamp);
@@ -877,12 +882,15 @@ internal sealed class CharacterContent : IDisposable
         uint bloodColour = unchecked((uint)c.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
         if (!asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin
             && AnatomyMesh(rig, bodyPath, skin, c.Female, body.Morphs, c.Headless, c.HeadOnly, bloodColour) is { } anatomy)
+        {
+            asset.BrainSource = anatomy.BrainSource;
             asset.Parts.Add(new AssetPart
             {
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,
                 Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true,
                     Description = "anatomy", BloodColour = bloodColour },
             });
+        }
 
         // Face relief is small and per morph; keep the much larger internal anatomy shared between faces.
         if (!c.Headless && !asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase, bloodColour) is { } relief)

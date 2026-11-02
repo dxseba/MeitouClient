@@ -48,6 +48,7 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
             var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
             uint bloodColour = unchecked((uint)asset.Appearance.Race.GetInt("blood colour", 0x800000));
             var vertices = TorsoCutSurface.Build(source, groups, cut, morphs, components, bloodColour);
+            vertices = WithBrainSection(vertices, asset, groups, cut, components, bloodColour);
             slot.Ready = vertices is { Length: > 0 and <= VertexCapacity };
             if (slot.Ready)
             {
@@ -69,6 +70,15 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
             slot.View = [.. parts, slot.Cap!];
         }
         return slot.View!;
+    }
+
+    static Vertex[]? WithBrainSection(Vertex[]? flesh, CharacterAsset asset, uint[] groups, in CharacterTorsoCut cut,
+        int[]? components, uint bloodColour)
+    {
+        if (!cut.FullBody && !cut.HeadOnly || asset.BrainSource is not { Length: > 0 } brain) return flesh;
+        var section = TorsoCutSurface.Build(brain, groups, cut, components: components, bloodColour: bloodColour, brainSection: true);
+        if (section is not { Length: > 0 } || (flesh?.Length ?? 0) + section.Length > VertexCapacity) return flesh;
+        return [.. flesh ?? [], .. section];
     }
 
     AssetPart Allocate()
