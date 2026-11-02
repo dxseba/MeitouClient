@@ -95,7 +95,8 @@ static class Program
             db = Meitou.Data.GameDatabase.Load(Meitou.Data.LoadOrder.FromInstall(install));
             (world.NoTextures, world.NoObjects, world.NoFoliage, world.NoWater, world.NoFogFeatures, world.WaterReflection, world.DistantZones) = (true, true, true, true, true, 0, 0);
             world.Post.Ssao = false;   // SSAO bands a perfectly flat floor; the Tab panel can turn it back on
-            world.NoParticles = true;   // no weather or map effects to show (the effect library and every map placer would be read)
+            world.NoParticles = true;   // Skip weather/map placers; the host can load just the combat effects.
+            game.FlatCombatParticles = !args.Contains("--no-particles");
             world.Clouds ??= 0;   // no cloud layer: the volume march and the cloud shadows skip at density 0
             world.Weather ??= "Default";   // clear; the scheduler would roll the weather of the world region under the floor
             world.Distance ??= game.Battle is null ? 70 : 150;

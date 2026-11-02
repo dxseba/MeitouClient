@@ -32,7 +32,7 @@ public class StomachBisectionTests
         TorsoBisectionInput[] excluded =
         [
             Eligible with { Lethal = false }, Eligible with { AliveBeforeHit = false }, Eligible with { AlreadyBisected = true },
-            Eligible with { Robot = true }, Eligible with { Animal = true }, Eligible with { Brutality = 59.99f },
+            Eligible with { Animal = true }, Eligible with { Brutality = 59.99f },
             Eligible with { Source = CombatHitSource.Bolt }, Eligible with { Mechanism = CombatWoundMechanism.Thrust },
             Eligible with { Mechanism = CombatWoundMechanism.Crush }, Eligible with { CutDirection = 5 },
             Eligible with { Part = Stomach }, Eligible with { Part = CanonicalStomach with { Type = BodyPartType.Arm } },

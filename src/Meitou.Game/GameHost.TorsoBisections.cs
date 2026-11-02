@@ -255,7 +255,8 @@ sealed partial class GameHost
 
     void SpillTorsoGuts(CharacterId id, Vector3 cutAt, Vector3 along, float age)
     {
-        if (gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) return;
+        if (session.World.Characters.Cold(id.Slot)?.Race?.IsRobot == true
+            || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) return;
         var gut = new GutFall
         {
             Position = cutAt + along * 0.6f, Velocity = along * 2 + Vector3.UnitY,

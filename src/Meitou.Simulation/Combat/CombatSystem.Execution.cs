@@ -33,11 +33,11 @@ public sealed partial class CombatSystem
         float brutality = ac.Brutality.Level;
         var travel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
         ulong headSeed = Wounds.HeadCutPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), (ulong)(uint)blow);
-        var headCut = !race.IsRobot && dc.Fighter is not { IsAnimal: true }
+        var headCut = dc.Fighter is not { IsAnimal: true }
             ? Wounds.HeadCutPolicy.Candidate(brutality, mechanism, -1, packet.Cut, headSeed, travel, prev[d].Yaw) : null;
         var ctx = MakeContext(world, d, dc) with
         {
-            AllowDecapitation = !race.IsRobot && dc.Fighter is not { IsAnimal: true } && BrutalityPolicy.CanDecapitate(brutality, mechanism)
+            AllowDecapitation = dc.Fighter is not { IsAnimal: true } && BrutalityPolicy.CanDecapitate(brutality, mechanism)
                 && headCut is not { Mode: Wounds.HeadCutMode.AttachedSplit },
             HeadCutCandidate = headCut,
         };

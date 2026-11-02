@@ -52,7 +52,8 @@ static class HeadCutSurface
             groups[bone / 8] |= (uint)(inHead ? bone == jaw ? 6 : 7 : 0) << (bone % 8 * 4);
         }
 
-        var raw = asset.HeadSource ?? [];
+        bool mechanical = asset.Appearance.Race.GetBool("is robot");
+        var raw = mechanical ? asset.BodySource ?? asset.HeadSource ?? [] : asset.HeadSource ?? [];
         var skin = new List<Vertex>();
         bool HeadVertex(Vertex vertex)
         {
@@ -68,7 +69,15 @@ static class HeadCutSurface
             if (HeadVertex(raw[i]) || HeadVertex(raw[i + 1]) || HeadVertex(raw[i + 2]))
                 skin.AddRange([raw[i], raw[i + 1], raw[i + 2]]);
 
-        if (!HeadWoundSurface.TryAnatomyBounds(raw, head, jaw, asset.Morph?.Poses, out var min, out var max))
+        bool supported = HeadWoundSurface.TryAnatomyBounds(raw, head, jaw, asset.Morph?.Poses, out var min, out var max);
+        if (mechanical && skin.Count > 0)
+        {
+            var points = skin.Where(HeadVertex).Select(vertex => vertex.Position).ToArray();
+            min = points.Aggregate(new Vector3(float.MaxValue), Vector3.Min);
+            max = points.Aggregate(new Vector3(float.MinValue), Vector3.Max);
+            supported = max.X > min.X && max.Y > min.Y && max.Z > min.Z;
+        }
+        if (!supported)
         {
             var centre = head >= 0 ? rig.BindPosition[head] : new Vector3(0, asset.Height * 0.9f, 0);
             min = centre - new Vector3(1, 1.5f, 1);

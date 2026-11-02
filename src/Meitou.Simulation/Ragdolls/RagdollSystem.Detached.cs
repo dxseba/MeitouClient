@@ -83,14 +83,15 @@ public sealed partial class RagdollSystem
     void PrepareDetached(World world, CharacterId id, CharacterCold cold, ref CharacterHot hot,
         (Vector3 Velocity, Vector3 Push) start, bool advanced)
     {
-        if (!advanced || cold.Fighter is { IsAnimal: true } || cold.Race is not { IsRobot: false } race
+        if (!advanced || cold.Fighter is { IsAnimal: true } || cold.Race is null
             || cold.Medical is not { } medical || cold.Appearance is not { } look) return;
         int missing = medical.Decapitated ? 1 : 0, robotic = 0;
         foreach (var part in medical.PartSpan)
         {
             if (part.Template.LimbSlot is not (>= 0 and <= 3 and var limb)) continue;
             if (part.Limb == LimbState.Stump) missing |= 1 << (limb + 1);
-            if (part.IsRobotic(race)) robotic |= 1 << (limb + 1);
+            // A robot's original limbs can be severed; only fitted replacements suppress an original-part spawn.
+            if (part.Limb == LimbState.Replaced) robotic |= 1 << (limb + 1);
         }
         bool firstSeen = detachedSeen.Add(id);
         bool torso = cold.TorsoBisection is not null;
@@ -135,7 +136,8 @@ public sealed partial class RagdollSystem
         bool restoredHead = firstSeen && cold.Save is not null;
         var ownerPosition = hot.Position;
         var headPlane = Vector4.Zero;
-        bool slicedHead = headCut is { } headState && SkinSurfaceFor(look)?.HeadPlane(setup.Rig, headState.Plane, out headPlane) == true;
+        bool slicedHead = headCut is { } headState
+            && SkinSurfaceFor(look)?.HeadPlane(setup.Rig, headState.Plane, out headPlane, look.Race.GetBool("is robot")) == true;
         if (slicedHead && headCut is { } state)
         {
             var split = RagdollSeverance.SplitHead(source, headPlane, state.Mode);

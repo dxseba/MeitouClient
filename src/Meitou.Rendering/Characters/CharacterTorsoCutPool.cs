@@ -23,6 +23,9 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
     readonly Dictionary<long, Slot> byKey = [];
     readonly PartMaterial material = new() { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "torso cut flesh" };
 
+    readonly PartMaterial mechanicalMaterial = new() { Shading = CharacterShaders.ShadeItem, VertexColoured = true,
+        DoubleSided = true, Mechanical = true, Description = "robot cut metal" };
+
     public IReadOnlyList<AssetPart> Resolve(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp, int[]? components = null)
     {
         var source = cut.HeadOnly ? HeadCutSurface.Skin(asset) : asset.BodySource;
@@ -47,12 +50,14 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
             slot.Components = components;
             var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
             uint bloodColour = unchecked((uint)asset.Appearance.Race.GetInt("blood colour", 0x800000));
-            var vertices = TorsoCutSurface.Build(source, groups, cut, morphs, components, bloodColour);
+            bool mechanical = asset.Appearance.Race.GetBool("is robot");
+            var vertices = TorsoCutSurface.Build(source, groups, cut, morphs, components, bloodColour, mechanical: mechanical);
             vertices = WithBrainSection(vertices, asset, groups, cut, components, bloodColour);
             slot.Ready = vertices is { Length: > 0 and <= VertexCapacity };
             if (slot.Ready)
             {
                 slot.Cap ??= Allocate();
+                slot.Cap.Material = mechanical ? mechanicalMaterial : material;
                 using var uploads = gpu.Uploads.Begin();
                 uploads.Write(slot.Cap.Mesh.Parts[0].Vertices, 0, MemoryMarshal.AsBytes(vertices!.AsSpan()));
                 slot.Cap.Mesh.Parts[0].Count[0] = vertices!.Length;

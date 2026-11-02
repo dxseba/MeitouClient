@@ -110,11 +110,11 @@ public sealed partial class CombatSystem
             usefulBeforeHit[i] = MathF.Max(0, dc.Medical.Parts[i].Flesh + dc.Medical.Parts[i].MaxHp - dc.Medical.Parts[i].Stun);
         var headTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
         ulong headSeed = Wounds.HeadCutPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), CombatRolls.BlowCounter(a, seq, blow, 0));
-        var headCut = !dc.Race.IsRobot && !target.IsAnimal
+        var headCut = !target.IsAnimal
             ? Wounds.HeadCutPolicy.Candidate(brutality, mechanism, direction, packet.Cut, headSeed, headTravel, prev[d].Yaw) : null;
         var ctx = MakeContext(world, d, dc) with
         {
-            AllowDecapitation = !dc.Race.IsRobot && !target.IsAnimal && BrutalityPolicy.CanDecapitate(brutality, mechanism)
+            AllowDecapitation = !target.IsAnimal && BrutalityPolicy.CanDecapitate(brutality, mechanism)
                 && headCut is not { Mode: Wounds.HeadCutMode.AttachedSplit },
             HeadCutCandidate = headCut,
         };

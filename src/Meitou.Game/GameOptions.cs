@@ -24,6 +24,8 @@ sealed class GameOptions
     public bool NoPopulation, NewGame, ListStarts, DataCheck;
     /// <summary>The animation sandbox (<c>--sandbox [n]</c>): 0 off, else the number of characters (1 or 2) on a flat wireframe floor.</summary>
     public int Sandbox;
+    /// <summary>Flat scenes skip map/weather placers; combat particles still draw unless --no-particles was explicit.</summary>
+    public bool FlatCombatParticles = true;
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
     public string? SandboxCharacter, SandboxPart, SandboxHitSide, SandboxHitMechanism;
     public bool SandboxBare;

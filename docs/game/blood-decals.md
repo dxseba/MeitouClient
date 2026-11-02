@@ -180,6 +180,20 @@ identity. Shared anatomy/relief mesh keys include the blood palette; individual 
 their owner appearance. Shader fluid is stored separately from clothing dyes in the spare
 material hair-colour W (exact RGB24 integer; GPU layout unchanged).
 
+## Robot cut effects (Meitou)
+
+Humanoid robot cuts expose mechanical internals; organic anatomy, loose bowel and hit-born
+bone/flesh scraps and arterial neck sprays are omitted. Terrain marks keep the RACE fluid colour.
+One landed melee or execution Slash with positive finite delivered Cut emits `kenshi_sparks`
+at the struck head, chest, stomach or limb bone (a part-height fallback before it is drawn).
+Legacy unspecified slash events remain compatible; bolts, Thrust, Crush and secondary
+sever/death/bisection notifications emit none. Effects use display particles and change no
+damage, skill XP or simulation rolls. Restoring saved cuts does not replay impact sparks.
+Flat sandbox/battle scenes load combat effects without weather/map placers; an explicit
+`--no-particles` still disables them.
+Luckyren robot bursts retain the race's severed-limb meshes and fluid decals, omitting organic
+meat, nest bones and landing blood sprites.
+
 ## Blood on surfaces (Meitou)
 
 The `bloodsurfaces` switch (Meitou, default; Faithful: terrain only, as the game): the same marks also land on walls, buildings, rocks and other static objects. **Observed** (Hub battle, sandbox screenshots), not a game behaviour.

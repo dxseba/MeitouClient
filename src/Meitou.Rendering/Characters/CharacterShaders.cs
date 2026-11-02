@@ -199,6 +199,7 @@ static class CharacterShaders
             float turn = atan(aNormal.x, aNormal.z) / 3.14159265359 * 0.5;
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
             bool wounded = (aInstanceData.z & 0x80000000u) != 0u, anatomy = (aInstanceData.z & 0x40000000u) != 0u;
+            bool mechanicalInterior = anatomy && aTangent.w > 33.5 && aTangent.w < 34.5;
             vHeadHair = aInstanceData.z & {{HairWoundFlag}}u;
             bool headHeader = wounded || vHeadHair != 0u;
             vAnatomy = anatomy ? 1u : 0u;
@@ -263,7 +264,18 @@ static class CharacterShaders
                     if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.1) * 0.75 - distance(aPosition, c.xyz));
                 }
             }
-            if (anatomy && aTangent.w > 31.5 && aTangent.w < 32.5) vAnatomy = 5u;   // exposed torso flesh ring
+            if (mechanicalInterior)
+            {
+                vAnatomy = 6u;
+                vClip = 1000.0;
+                for (uint i = 0u; i < 64u; i++)
+                {
+                    vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
+                    if (c.w > 0.0 && abs(floor(c.w / 10.0) - floor(aColour.a + 0.5)) < 0.5)
+                        vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
+                }
+            }
+            else if (anatomy && aTangent.w > 31.5 && aTangent.w < 32.5) vAnatomy = 5u;   // exposed torso flesh ring
             else if (anatomy && aTangent.w > 7.5) vAnatomy = uint((aTangent.w - 8.0) * 0.5) == vHeadProfile && (mod(aTangent.w - 8.0, 2.0) < 0.5 ? vHeadOpen == 1u : vHeadOpen >= 2u) ? 4u : 3u;   // fitted scalp/bone relief, only its own wound variant
             else if (anatomy && aTangent.w > 5.5 && aTangent.w < 6.5) vAnatomy = vHeadOpen >= 2u || (vHeadRelief & 1u) != 0u ? 2u : 3u;   // brain exposed by a skull wound or full-body slice
             else if (anatomy && aTangent.w > 4.5 && aTangent.w < 5.5)
@@ -292,7 +304,7 @@ static class CharacterShaders
             // bit 18 + p it carries (the vertex's limb bits 0-3, part bits from 4: CharacterContent.MarkBody); the fragments discard where it is above 0.
             uint marks = uint(aColour.y + 0.5);
             vHidden = ((marks & (aInstanceData.z >> 12) & 15u) | ((marks >> 4) & (aInstanceData.z >> 18) & 1023u) | ((marks >> 14) & (aInstanceData.z >> 28) & 1u)) != 0u ? 1.0 : 0.0;
-            if ((aInstanceData.z & 0x8000000Cu) != 0u && !anatomy)
+            if ((aInstanceData.z & 0x8000000Cu) != 0u && (!anatomy || mechanicalInterior))
             {
                 // A limb cut at its own height: everything of that limb below it goes.
                 mat4 cutHeader = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
@@ -305,6 +317,7 @@ static class CharacterShaders
                 {
                     uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;
                     if (height != 0u) vCutBand = aPosition.y - float(height) * 0.1;
+                    else if (mechanicalInterior && (floatBitsToUint(cutHeader[0][1]) >> cutGroup & 1u) != 0u) vHidden = 1.0;
                 }
             }
             if ((aInstanceData.z & {{HeadOnly}}u) != 0u) vHidden = (marks & {{CharacterContent.HeadBit}}u) == 0u ? 1.0 : 0.0;   // a cut-off head: its vertices only
@@ -464,6 +477,15 @@ static class CharacterShaders
             bend = (across * dFdx(rise) + down * dFdy(rise)) / max(abs(dot(dx, across)), 1e-5) * 0.09;
             vec3 cut = field.rgb;
             if (field.a > (vUv.y < 0.0 ? 0.85 : 0.5) && (vUv.y >= 0.0 || field.r > 0.5)) discard;   // the face opens only at a deep cut's heart: eyes and teeth sit behind it   // only the deepest cuts open onto the anatomy
+            if ((m.flags & {{Mechanical}}u) != 0u)
+            {
+                float score = 0.5 + 0.5 * sin(vSkinPos.y * 79.0 + vSkinPos.x * 31.0);
+                vec3 edge = mix(vec3(0.19, 0.21, 0.22), vec3(0.43, 0.45, 0.42), score);
+                albedo = mix(albedo, edge, cut.b);
+                albedo = mix(albedo, raceBlood(m) * 0.35 + vec3(0.012), smoothstep(0.2, 0.7, cut.g));
+                gloss = mix(gloss, 0.65, cut.g);
+                return;
+            }
             // A painted cut, rim to core: bruise, thin fat, wet meat with fine grain, dark bottom.
             // Wet runs from the cuts, thick and glossy where they pool down the middle.
             float run = smoothstep(0.1, 0.55, tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g);
@@ -699,14 +721,19 @@ static class CharacterShaders
                 float edge = vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0);
                 if (edge < 0.0) discard;
                 float band = 1.0 - smoothstep(0.1, 0.32, edge);
-                albedo = mix(albedo, !gl_FrontFacing && edge < 0.2 ? vec3(0.7, 0.64, 0.5) : raceBlood(m) * 0.55, band);
+                vec3 rim = flag(f, {{Mechanical}}u) ? vec3(0.27, 0.29, 0.28)
+                    : !gl_FrontFacing && edge < 0.2 ? vec3(0.7, 0.64, 0.5) : raceBlood(m) * 0.55;
+                albedo = mix(albedo, rim, band);
                 gloss = mix(gloss, 0.7, band);
             }
-            bool torsoExposed = (vAnatomy == 1u || ((vHeadRelief & 1u) != 0u && vAnatomy == 2u)) && vClipLayer < 7.5 && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
+            bool mechanicalExposed = vAnatomy == 6u && (((vHeadRelief & 1u) != 0u && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth)
+                || (vCutBand >= 0.0 && vCutBand < 0.75));
+            bool torsoExposed = mechanicalExposed || ((vAnatomy == 1u || ((vHeadRelief & 1u) != 0u && vAnatomy == 2u))
+                && vClipLayer < 7.5 && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth);
             if (vTorsoBand < 999.0 && vAnatomy == 0u && ((vHeadRelief & 1u) == 0u || vHeadHair == 0u))
             {
                 float wet = 1.0 - smoothstep(0.02, 0.20, vTorsoBand);
-                albedo = mix(albedo, goreColour(vec3(0.27, 0.015, 0.02), m), wet);
+                albedo = mix(albedo, flag(f, {{Mechanical}}u) ? vec3(0.22, 0.24, 0.23) : goreColour(vec3(0.27, 0.015, 0.02), m), wet);
                 gloss = mix(gloss, 0.75, wet);
             }
             if (vPlated > 0.0 && vClip > -0.5)
@@ -736,12 +763,23 @@ static class CharacterShaders
                 if (vClipLayer > 3.5 && vClipLayer < 4.5) { albedo = vColour.rgb * (0.9 + 0.1 * sin(vBlood.y * 30.0)); gloss = 0.75; }
                 if (vAnatomy == 2u) albedo *= 0.6;   // a stump's cut flesh, wet and dark
                 gloss = vAnatomy == 4u ? (vColour.r > 0.5 ? 0.25 : 0.65) : 0.5;
+                if (flag(f, {{Mechanical}}u))
+                {
+                    metal = vAnatomy == 6u && vColour.g > vColour.r * 1.4 ? 0.08 : 0.65;
+                    gloss = 0.55;
+                }
             }
             else if (m.shading == 1u && !gl_FrontFacing && (vWounds != 0u || vTorsoBand < 999.0) && ((vHeadRelief & 1u) == 0u || vHeadHair == 0u) && dot(vNormal, view.eye - vWorld) < 0.0)   // truly the inside: a flipped outer triangle still has its normal towards the eye
             {
                 // The body's inside, drawn only through a hole: the cavity behind the anatomy. An unwounded body keeps its plain colour: a reduced level's flipped triangles must not vanish.
                 // Wet cavity wall, not a black void.
-                if ((vHeadRelief & 1u) != 0u)
+                if (flag(f, {{Mechanical}}u))
+                {
+                    albedo = vec3(0.055, 0.070, 0.075) + raceBlood(m) * 0.15;
+                    metal = 0.7;
+                    gloss = 0.55;
+                }
+                else if ((vHeadRelief & 1u) != 0u)
                 {
                     float mottled = fullBodyFleshNoise(vSkinPos * 4.1);
                     float fibre = smoothstep(0.53, 0.74, fullBodyFleshNoise(vSkinPos * vec3(38.0, 2.1, 31.0) + mottled * 0.7));
@@ -852,6 +890,9 @@ static class CharacterShaders
         flat in uint vHeadProfile;
         in vec3 vSkinPos;
         in float vTorsoBand;
+        in float vClip;
+        in float vCutBand;
+        in vec4 vBlood;
         void main()
         {
             if (vHidden > 0.0 || (vClipLayer > 7.5 && vAnatomy == 3u) || (vHeadHair != 0u && vHeadOpen != 0u && headSwordHair(vSkinPos, vHeadProfile, vHeadFrame) < 1.15)) discard;
@@ -862,6 +903,10 @@ static class CharacterShaders
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
+            bool mechanicalExposed = fullBodyExposed || (vCutBand >= 0.0 && vCutBand < 0.75);
+            if (vAnatomy == 6u && !mechanicalExposed && vClip > 0.0) discard;
+            if ((f & 8388608u) != 0u && vCutBand < 1000.0
+                && vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0) < 0.0) discard;
             bool cut = false;
             if (m.shading == 2u && (f & 1u) != 0u)
                 cut = dot(tex(m.tex[0], vUv), m.alphaChannel) < m.alphaThreshold;
@@ -894,6 +939,9 @@ static class CharacterShaders
         flat in uint vHeadProfile;
         in vec3 vSkinPos;
         in float vTorsoBand;
+        in float vClip;
+        in float vCutBand;
+        in vec4 vBlood;
         layout(location = 0) out vec4 fragColour;
         float viewZ(float d) { float zd = 2.0 * d - 1.0; return view.nearPlanes.x * view.nearPlanes.y / (view.nearPlanes.y - zd * (view.nearPlanes.y - view.nearPlanes.x)); }
         void main()
@@ -906,6 +954,10 @@ static class CharacterShaders
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
+            bool mechanicalExposed = fullBodyExposed || (vCutBand >= 0.0 && vCutBand < 0.75);
+            if (vAnatomy == 6u && !mechanicalExposed && vClip > 0.0) discard;
+            if ((f & 8388608u) != 0u && vCutBand < 1000.0
+                && vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0) < 0.0) discard;
             if (m.shading == 2u && (f & 1u) != 0u) { if (dot(tex(m.tex[0], vUv), m.alphaChannel) < m.alphaThreshold) discard; }
             else if (m.shading == 0u && (f & 512u) != 0u) { if (tex(m.tex[1], vUv).a < 0.6) discard; }
             float stored = texelFetch(textures2D[nonuniformEXT(pc.depthIndex)], ivec2(gl_FragCoord.xy), 0).r;

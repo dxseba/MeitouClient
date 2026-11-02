@@ -37,6 +37,12 @@ sealed partial class GameHost
     void SetUpBlood(IGpuContext context)
     {
         gpu.Debris ??= new DebrisRenderer(context, gpu.Objects?.Resolver, assets.Find) { SharedTextures = () => gpu.Characters?.Textures };   // made now: its shaders compile here, not at the first burst
+        if (IsFlat && g.FlatCombatParticles)
+        {
+            var particles = WorldFrame.EnsureParticles(gpu, context, assets);
+            particles.World.GroundHeight = gpu.Terrain.HeightAt;
+            particles.World.FreezeGroundHeight = () => gpu.Terrain.Snapshot().HeightAt;
+        }
         gpu.Particles?.PrepareBursts(BurstSplash, BurstSpray, SparksSystem);
         if (gpu.Decals is not null || AudioSystem.Setting(install, "Blood", 1) == 0) return;
         var files = BloodTextureFiles(assets.Configured);
@@ -156,6 +162,7 @@ sealed partial class GameHost
             woundsFor = world;
             woundQueue.Clear();
             wounds.Clear();
+            robotSparkBursts = 0;
             DisposeGuts();
             gutsSpilled.Clear();
             severeHeads.Clear();
@@ -187,10 +194,12 @@ sealed partial class GameHost
         while (woundQueue.TryDequeue(out var e))
         {
             if (e.Kind == CombatEventKind.BodyBisected) BeginTorsoCut(e, world);
-            uint bloodColour = world.Characters.IsAlive(e.Victim)
-                ? world.Characters.Cold(e.Victim.Slot)?.Race?.BloodColour ?? DefaultBloodColour : DefaultBloodColour;
+            var victimData = world.Characters.IsAlive(e.Victim) ? world.Characters.Cold(e.Victim.Slot) : null;
+            bool robot = victimData?.Race?.IsRobot == true;
+            EmitRobotCutSparks(e, victimData);
+            uint bloodColour = victimData?.Race?.BloodColour ?? DefaultBloodColour;
             // A hit throws real drops along the blow, out of the wound.
-            if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && gpu?.Particles is { } drops)
+            if (!robot && !o.NoParticles && e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && gpu?.Particles is { } drops)
             {
                 float force = MathF.Min((e.Damage.Cut + e.Damage.Pierce) / 20, 1);
                 var along = e.Direction.LengthSquared() > 1e-6f ? Vector2.Normalize(e.Direction) : Vector2.UnitX;
@@ -202,7 +211,7 @@ sealed partial class GameHost
                 }
             }
             // A heavy blow knocks a splinter of bone and a scrap of flesh out of the wound.
-            if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && gpu?.Debris is { } shards)
+            if (!robot && e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && e.Damage.Cut + e.Damage.Pierce >= 15 && gpu?.Debris is { } shards)
                 foreach (bool flesh in new[] { false, true })
                 {
                     string mesh = flesh ? MeatMesh : BoneMeshes[bloodRandom.Next(BoneMeshes.Length)];
@@ -217,13 +226,13 @@ sealed partial class GameHost
                         Rotation = Quaternion.Identity, Spin = new Vector3(5, 3, 7),
                     });
                 }
-            if (e.Part < 0 || !world.Characters.IsAlive(e.Victim) || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count || cold.Race is { IsRobot: true }) continue;   // robots have no flesh
+            if (e.Part < 0 || !world.Characters.IsAlive(e.Victim) || world.Characters.Cold(e.Victim.Slot) is not { Medical: { } medical } cold || e.Part >= medical.Parts.Count) continue;
             var part = medical.Parts[e.Part];
             // Visual severity uses the delivered channel, while the pre-armour mechanism distinguishes clubs from blades.
             var mechanism = HeadMechanism(e);
             float headForce = mechanism == CombatWoundMechanism.Crush ? e.Damage.Cut + e.Damage.Blunt + e.Damage.Pierce : e.Damage.Cut + e.Damage.Pierce;
             // Skill and delivered force gate authored head forms; ordinary wound stamps remain independent.
-            if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && headForce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
+            if (!robot && e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && headForce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
                 UpdateSevereHead(world, e, cold, mechanism, headForce);
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
         }

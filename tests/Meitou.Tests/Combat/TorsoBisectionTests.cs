@@ -44,7 +44,7 @@ public class TorsoBisectionTests
     }
 
     [Fact]
-    public void The_mechanism_supported_cleave_axis_chest_and_living_organic_target_are_all_required()
+    public void The_mechanism_supported_cleave_axis_chest_and_living_humanoid_target_are_all_required()
     {
         TorsoBisectionInput[] excluded =
         [
@@ -55,7 +55,7 @@ public class TorsoBisectionTests
             Eligible with { Part = Stomach }, Eligible with { Part = Head },
             Eligible with { Part = CanonicalChest with { Type = BodyPartType.Arm } },
             Eligible with { AliveBeforeHit = false }, Eligible with { AlreadyBisected = true },
-            Eligible with { Robot = true }, Eligible with { Animal = true },
+            Eligible with { Animal = true },
             Eligible with { Lethal = false }, Eligible with { Brutality = 59.99f },
         ];
         foreach (var input in excluded) Assert.False(TorsoBisectionPolicy.ShouldBisect(input, 0));
@@ -530,7 +530,6 @@ public class TorsoBisectionTests
     }
 
     [Theory]
-    [InlineData(true, false, 2, TorsoBisectionStyle.Auto)]
     [InlineData(false, true, 2, TorsoBisectionStyle.Auto)]
     [InlineData(false, false, 1, TorsoBisectionStyle.Transverse)]
     [InlineData(false, false, 4, TorsoBisectionStyle.Oblique)]

@@ -12,7 +12,7 @@ public sealed partial class CombatSystem
     {
         var table = world.Characters;
         if (!table.TryResolveNext(victimId, out int slot)
-            || table.Cold(slot) is not { Medical: { Dead: false } medical, Race: { IsRobot: false }, Fighter: { IsAnimal: false }, Stats: not null } victim
+            || table.Cold(slot) is not { Medical: { Dead: false } medical, Race: not null, Fighter: { IsAnimal: false }, Stats: not null } victim
             || victim.HeadCut is not null) return false;
         int head = -1;
         for (int i = 0; i < medical.Parts.Count; i++)

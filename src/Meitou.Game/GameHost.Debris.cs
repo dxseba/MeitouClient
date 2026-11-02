@@ -73,6 +73,7 @@ sealed partial class GameHost
     void Burst(in BloodMark m, World world)
     {
         bool bleeds = m.Amount > 0;
+        bool robot = m.Race is { } race && scene.Database?.Find(race)?.GetBool("is robot") == true;
         var blow = m.Direction.LengthSquared() > 1e-6f ? Vector2.Normalize(m.Direction) : Vector2.Zero;
         if (decalStore is { } store && bleeds && m.Position.Y <= gpu.Terrain.HeightAt(m.Position.X, m.Position.Z) + BloodAboveGround)
         {
@@ -87,7 +88,7 @@ sealed partial class GameHost
         }
         var centre = m.Position + new Vector3(0, BurstHeight, 0);
         characterSounds?.Burst(centre);
-        if (bleeds && gpu.Particles is { } particles)
+        if (bleeds && !robot && !o.NoParticles && gpu.Particles is { } particles)
         {
             var recolour = BloodRecolour(m.Colour);
             particles.Burst(BurstSplash, centre, Quaternion.Identity, 0.3f, MistSize, MistLife, recolour);
@@ -104,13 +105,13 @@ sealed partial class GameHost
         float floor = m.Position.Y > terrain + BloodAboveGround ? m.Position.Y : float.NaN;
         var limbs = LimbMeshes(m.Race);
         var meshes = new List<string>(limbs);
-        int meat = bleeds ? MeatPerBurst : 0;
+        int meat = bleeds && !robot ? MeatPerBurst : 0;
         for (int i = 0; i < meat; i++) meshes.Add(MeatMesh);
-        for (int i = 0; i < BonesPerBurst; i++) meshes.Add(BoneMeshes[bloodRandom.Next(BoneMeshes.Length)]);
+        for (int i = 0; i < (robot ? 0 : BonesPerBurst); i++) meshes.Add(BoneMeshes[bloodRandom.Next(BoneMeshes.Length)]);
         for (int i = 0; i < meshes.Count; i++)
         {
             string mesh = meshes[i];
-            bool limb = i < limbs.Length, flesh = i < limbs.Length + meat;
+            bool limb = i < limbs.Length, flesh = !robot && i < limbs.Length + meat;
             if (debris.Extent(mesh, flesh ? null : BoneMeshes[0]) is not { } size) continue;
             // The nest bones are a beast's (up to 3.5 m long): all shrunk alike by BoneScale (±15%), so a vertebra stays smaller than a thigh bone.
             // The meat is a 39 cm slab: torn smaller.
@@ -121,7 +122,7 @@ sealed partial class GameHost
             var spinAxis = Vector3.Normalize(new Vector3(bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f) + new Vector3(1e-3f));
             pieces.Add(new Piece
             {
-                Mesh = mesh, Scale = scale, Extent = extent, Floor = floor, Born = world.Tick, Colour = bleeds ? 0xFF000000 | Abgr(m.Colour) : 0, Recolour = BloodRecolour(m.Colour), Flesh = flesh, BloodColour = m.Colour,
+                Mesh = mesh, Scale = scale, Extent = extent, Floor = floor, Born = world.Tick, Colour = bleeds && !robot ? 0xFF000000 | Abgr(m.Colour) : 0, Recolour = BloodRecolour(m.Colour), Flesh = flesh, BloodColour = m.Colour,
                 Position = centre,
                 Velocity = new Vector3(d.X * speed, 30 + bloodRandom.NextSingle() * 50, d.Y * speed),
                 Rotation = Quaternion.Normalize(new Quaternion(bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f)),
@@ -373,7 +374,7 @@ sealed partial class GameHost
         if (!p.Landed && p.Flesh)
         {
             characterSounds?.Splat(p.Position);
-            if (p.Colour != 0) gpu.Particles?.Burst(BurstSplash, p.Position, Quaternion.Identity, 0.15f, 1.3f, 1.5f, p.Recolour);
+            if (p.Colour != 0 && !o.NoParticles) gpu.Particles?.Burst(BurstSplash, p.Position, Quaternion.Identity, 0.15f, 1.3f, 1.5f, p.Recolour);
         }
         p.Landed = true;
         var flat = new Vector2(p.Velocity.X, p.Velocity.Z);

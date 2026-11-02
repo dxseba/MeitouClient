@@ -518,7 +518,7 @@ internal sealed unsafe partial class CharacterRenderer
     /// <summary>One placed part's instance, added to the chunk of every view in <paramref name="seen"/> at the level that view chooses.</summary>
     void GatherPart(in Live l, AssetPart part, in PartFrame f, int c, uint seen, GatherView[] views, int viewCount, bool depth, bool motion, float bias)
     {
-        if (part.Anatomy && !part.IsTorsoCap && depth) return;   // only an exposed torso cap casts its own shadow
+        if (part.Anatomy && !part.IsTorsoCap && !part.Material.Mechanical && depth) return;   // only an exposed torso cap casts its own shadow
         var instance = new CharInstance
         {
             Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model,

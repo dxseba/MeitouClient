@@ -400,6 +400,18 @@ internal sealed class CharacterContent : IDisposable
     public IReadOnlyList<AssetPart> TorsoParts(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp, int[]? components = null) =>
         torsoCutPool.Resolve(key, asset, parts, cut, groups, stamp, components);
 
+    LoadedMesh? MechanicalAnatomyMesh(SkeletonRig rig, string bodyPath, CharacterAppearance appearance)
+    {
+        var mode = appearance.HeadOnly ? "head" : appearance.Headless ? "body" : "whole";
+        var key = ("mechanical@" + bodyPath.ToLowerInvariant() + "@" + mode, rig.BoneCount, false,
+            (string?)rig.Skeleton.GetHashCode().ToString());
+        if (meshes.TryGetValue(key, out var cached)) return cached;
+        var source = BodySurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [];
+        var head = HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [];
+        var made = CharacterMechanicalAnatomy.Build(rig, source, head, appearance.Headless, appearance.HeadOnly);
+        return meshes[key] = made is null ? null : UploadAnatomy(made);
+    }
+
     LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase, uint bloodColour)
     {
         var pathKey = "head-relief@" + bodyPath.ToLowerInvariant() + "@" + morphBase + "@" + bloodColour;
@@ -892,6 +904,15 @@ internal sealed class CharacterContent : IDisposable
             });
         }
 
+        if (!asset.Animal && c.Race.GetBool("is robot") && MechanicalAnatomyMesh(rig, bodyPath, c) is { } mechanical)
+            asset.Parts.Add(new AssetPart
+            {
+                Label = "mechanical anatomy", Mesh = mechanical.Gpu, Shared = true, Anatomy = true,
+                BoundsCentre = mechanical.Centre, BoundsRadius = mechanical.Radius,
+                Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true,
+                    DoubleSided = true, Mechanical = true, Description = "mechanical anatomy", BloodColour = bloodColour },
+            });
+
         // Face relief is small and per morph; keep the much larger internal anatomy shared between faces.
         if (!c.Headless && !asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase, bloodColour) is { } relief)
         {
@@ -996,7 +1017,8 @@ internal sealed class CharacterContent : IDisposable
         var m = new PartMaterial
         {
             BloodColour = unchecked((uint)c.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF,
-            DoubleSided = true, Shading = CharacterShaders.ShadeBody, Description = $"RACE '{c.Race.Name}' body",
+            DoubleSided = true, Shading = CharacterShaders.ShadeBody, Mechanical = c.Race.GetBool("is robot"),
+            Description = $"RACE '{c.Race.Name}' body",
             SkinTone = c.SkinToneParameter, HairColour = c.HairColour,
             HairAlpha = Channel(c.Hair?.GetInt("head alpha channel" + f, 1) ?? 1), HairMult = Channel(c.Hair?.GetInt("head channel" + f) ?? 0),
             BeardAlpha = Channel(c.Beard?.GetInt("head alpha channel" + f, 1) ?? 1),

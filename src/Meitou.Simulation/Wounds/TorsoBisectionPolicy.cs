@@ -36,7 +36,7 @@ public static class TorsoBisectionPolicy
 
     public static float Chance(in TorsoBisectionInput input)
     {
-        if (!input.AliveBeforeHit || !input.Lethal || input.AlreadyBisected || input.Robot || input.Animal
+        if (!input.AliveBeforeHit || !input.Lethal || input.AlreadyBisected || input.Animal
             || input.Source != CombatHitSource.Melee || input.Mechanism != CombatWoundMechanism.Slash
             || input.CutDirection is not (1 or 2 or 3 or 7 or 9)
             || input.Part is not { Type: BodyPartType.Torso, StringId: ArmourData.ChestPartId or BodyPartTemplate.StomachPartId }

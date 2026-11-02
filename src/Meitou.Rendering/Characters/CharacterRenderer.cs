@@ -1165,7 +1165,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         if (m.VertexColoured) flags |= CharacterShaders.VertexColoured;
         if (m.Bloody && has[CharacterShaders.SlotBlood]) flags |= CharacterShaders.Bloody | (m.BloodFull ? CharacterShaders.BloodFull : 0);
         if (m.WeaponBloodAxis.W > 0 && has[CharacterShaders.SlotBlood]) flags |= CharacterShaders.WeaponBloodMaterial;
-        if (m.Wound) flags |= CharacterShaders.Wound | (m.Mechanical ? CharacterShaders.Mechanical : 0);
+        if (m.Wound) flags |= CharacterShaders.Wound;
+        if (m.Mechanical) flags |= CharacterShaders.Mechanical;
         // Textures assigned but not resident yet: a hair's diffuse (its cut-out), a clipped item's normal map, the head's maps.
         if (m.Shading == CharacterShaders.ShadeHair && m.Tex[CharacterShaders.SlotDiffuse] is not null && !has[CharacterShaders.SlotDiffuse]
             || m.ClipOnNormalAlpha && m.Tex[CharacterShaders.SlotNormal] is not null && !has[CharacterShaders.SlotNormal])

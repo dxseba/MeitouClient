@@ -126,7 +126,7 @@ static partial class TorsoCutSurface
 
     /// <summary>Intersects torso triangles, or every closed body contour in full-body mode, preserving weights and one interpolated body morph.</summary>
     public static Vertex[]? Build(Vertex[] source, uint[] groups, in CharacterTorsoCut cut, Vector4[]? morphs = null, int[]? components = null,
-        uint bloodColour = GorePalette.DefaultBlood, bool brainSection = false)
+        uint bloodColour = GorePalette.DefaultBlood, bool brainSection = false, bool mechanical = false)
     {
         if (!TryNormalize(cut, out var normalized)) return null;
         var n = new Vector3(normalized.Plane.X, normalized.Plane.Y, normalized.Plane.Z);
@@ -374,7 +374,9 @@ static partial class TorsoCutSurface
             p += n * (depth * normalized.KeepSide);
             float grain = 0.90f + 0.10f * MathF.Sin(point.Position.X * 31 + point.Position.Z * 23);
             var colour = (band == 1 ? new Vector4(0.43f, 0.17f, 0.10f, 0) : new Vector4(0.29f, 0.018f, 0.025f, 0)) * grain;
-            colour = GorePalette.Recolour(colour, bloodColour);
+            colour = mechanical
+                ? (band == 1 ? new Vector4(0.37f, 0.40f, 0.39f, 0) : new Vector4(0.10f, 0.12f, 0.13f, 0)) * grain
+                : GorePalette.Recolour(colour, bloodColour);
             return new() { Position = p, Normal = outward, Uv = new(band, contour), Tangent = new(p, Layer), Colour = colour, Bones = point.Bones, Weights = point.Weights };
         }
         void Triangle(Vertex a, Vertex b, Vertex c)
@@ -399,7 +401,8 @@ static partial class TorsoCutSurface
             var outline = rim.Select(p => p.Position + p.Morph).ToArray();
             AppendSectionBacking(floor, triangles, outline, normalized, sectionSkin, 32768 - result.Count - 15 * budget, Triangle);
             // Reserve the remaining contours' flesh first, so a bone detail can never overflow the shared cap buffer.
-            AppendLimbBoneSection(floor, triangles, outline, groups, normalized, u, v, 32768 - result.Count - 15 * budget, Triangle, bloodColour);
+            if (!mechanical) AppendLimbBoneSection(floor, triangles, outline, groups, normalized, u, v,
+                32768 - result.Count - 15 * budget, Triangle, bloodColour);
         }
         }
         if (normalized.FullBody) FitSectionBacking(result, normalized, sectionSkin);

@@ -198,6 +198,7 @@ sealed partial class GameHost
                 ReportGutScene(f);
             }
             if (scene == "bisect") ReportGutScene(f);
+            if (scene is "bisect" or "head-cut") ReportRobotScene(f);
             if (scene is "torso-carry" or "carry-reference") ReportTorsoGripContact(f);
             if (overlay is not null)
             {
