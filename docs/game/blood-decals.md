@@ -210,6 +210,11 @@ Severe robot destruction (torso bisection, head cut or limb severing) also throw
 fragments through the existing 400-piece debris pool: installed Iron Plates, Motor and Hinge
 meshes, shrunk and given deterministic visual-only velocities/spins. A bounded 64-marker history
 coalesces hit/sever notifications; pause, gravity, bounce and settling use the normal debris path.
+Flat arenas create a material resolver from their database when no object renderer exists, before
+loading the first debris mesh; they share the normal character texture cache. **Verified**
+(installed ITEM/MATERIAL records and atlas files): Iron Plates, Motor and Hinge reference
+`Item_Atlas_ottos` (`5263-lanterns_otto.mod`), with `props_atlas_regular_diffuse.dds` and
+`props_atlas_regular_normal.dds`; the embedded `StaticObject` name alone does not identify this atlas.
 World changes clear the cached choices/history. Explicit `--no-particles` omits the extra burst; a Luckyren death with configured mechanical drops suppresses duplicate scrap.
 
 Flat sandbox/battle scenes load combat effects without weather/map placers; an explicit
