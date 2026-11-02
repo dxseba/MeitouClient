@@ -38,13 +38,13 @@ public sealed partial class FirstAidSystem
     internal void BeginSweep(World world)
     {
         var table = world.Characters;
-        var next = table.Next;
         if (sweepNeeds.Length < table.HighWater * 2) sweepNeeds = new float[table.HighWater * 2];
+        var next = table.Next;
         sweepNeedy.Clear();
         for (int s = 0; s < table.HighWater; s++)
         {
             float organic = 0, robot = 0;
-            if (next[s].Alive && table.Cold(s) is { } c) (organic, robot) = (AidNeed(c, false), AidNeed(c, true));
+            if (next[s].Alive && table.Cold(s) is { } c) (organic, robot) = AidNeeds(c);
             (sweepNeeds[s * 2], sweepNeeds[s * 2 + 1]) = (organic, robot);
             if (organic > 0 || robot > 0) sweepNeedy.Add(s);
         }
@@ -141,6 +141,11 @@ public sealed partial class FirstAidSystem
         && (medic.SquadId >= 0 && (slave.SlaveMaster == medic.SquadId || slave.SquadId == medic.SquadId) || slave.SlaveMaster < 0 && slave.SlaveOwner == medic.Faction);
 
     /// <summary>The patient's need score for a kit type (<see cref="MedicalState.FirstAidNeed"/>); 0 for a body without a medical state.</summary>
+    (float Organic, float Robot) AidNeeds(CharacterCold c) =>
+        c.Medical is { } med && c.Race is { } race
+            ? med.FirstAidNeeds(race, MathF.Max(MedicalState.BloodCapacity(race, c.Stats?.Strength ?? 50, med.HasStatsObject, med.ScaleK, med.ScaleZ), 1), Constants.ExtraBloodLossFromBodyparts)
+            : (0, 0);
+
     float AidNeed(CharacterCold c, bool robotKit) =>
         c.Medical is { } med && c.Race is { } race
             ? med.FirstAidNeed(race, robotKit, MathF.Max(MedicalState.BloodCapacity(race, c.Stats?.Strength ?? 50, med.HasStatsObject, med.ScaleK, med.ScaleZ), 1), Constants.ExtraBloodLossFromBodyparts)

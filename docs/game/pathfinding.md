@@ -397,9 +397,9 @@ Swamp House `48-Newwworld-INGAME`'s stair foot met the ground at Y124 vs 127 and
 agents had no way up; with the seam, ground (-47000,125,48100) reaches the room (-47229,178,47969) (the dome `805-rebirth-INGAME`,
 `6-` and `4-` were already reachable). Its deck (Y~178) was never pruned: the red there in `--png` is roofs, beams under the deck and interior fragments.
 An edge pair also joins when the stretch of it within the climb is at least `SeamClimbCells` (2 cells) long, the other end being higher (a corner takes
-its highest neighbouring cell's height; engine choice; Storm House `27.22:1821-`, above). Contour simplification also leaves near-miss T seams (one edge against two whose middle vertex is off its line). Open edges of one tile left
+its highest neighbouring cell's height; engine choice; Storm House `27.22:1821-`, above). Such a pair also needs the two polygons' own surfaces (the height samples of each one's region nearest the edge's cells) within the climb along `SeamClimbCells` of it, since the corner within it can be the artifact (engine choice). **Observed** (zone 28.60, `--path`, Ancient Lab with TwoStorey): its upper floor (553) and its spiral stair share a 40-unit edge along the stairwell with the stair 8..17 below, joined because the stair's corner took the floor's height; paths dropped off the floor's edge (552→537). Now (-16649,131186) → (-16740,131120) `--from-y 553 --to-y 492` goes round to the stair's top (437 for 371). Storm House `27.22:1821-` and `--compare-interiors` 27.22, 28.60, 28.43, 21.42, 18.39 are unchanged; `--compare` over 10 zones changes one kept polygon (47.16). The original's cached interior has a floor face and a stair face 1 apart in X/Z and 18 in height there; whether it joins them: **Unknown**. Contour simplification also leaves near-miss T seams (one edge against two whose middle vertex is off its line). Open edges of one tile left
 unjoined are linked (`Links`, not `Neighbours`) when they run opposite, share one end in X/Z (so floors either side of a thin wall stay apart),
-lie within 1.5 of each other's line at both ends of the overlap, and are within climb + 0.5 there; A* portals for such links take the overlap
+lie within 1.5 of each other's line at both ends of the overlap, and are within climb + 0.5 there, by the edges' own heights or else by both polygons' surfaces (own-region samples, interpolated) at every cell along the overlap: Recast simplifies contours in X/Z only, so a long edge from flat ground up a stair runs straight in height and misses the stair beside it by a step (engine choice). **Observed** (zone 14.23, Longhouse `14.23:78-`, west door stair): the stair's lower polygon (an 88-unit edge along z -37652, 1506 to 1536) against the upper stair's edge from (-82306,1515) was 12 off by the edge, 4 at most by the surfaces; unjoined, radius-4 walkers could not reach the door (the town's residents searched 300-600 ms for its cabinet again and again), now (-82140,-37692) → (-82157,-37664) goes round to it (818). Near-miss joins in 14.23, 27.22, 21.42, 20.32, 42.22, 18.39 grew 10-20 % (28.60 none); hub path pins unchanged. A* portals for such links take the overlap
 with the door joins' 6 gap when no facing edge is within 0.2. **Observed** (zone 18.39, `meitou-tools navmesh`): the Swamp Village stair foot's edge
 (-62220,108,34088 → -62208,105,34086) against two edges meeting at (-62216,106,34086) joins both; the path (-62218,34080) → (-62216,34148)
 `--to-y 140` climbs through that vertex (length 83) instead of detouring to the tile line x−62208 (97). **Observed** (after the terrain diagonal change, the same path from z 34080 exactly on a polygon edge): 153, the funnel from a start on its first portal's line swung out to that portal's end; `NavQuery.Pull` drops a first portal the start lies on, 82.
@@ -448,6 +448,7 @@ edge beside the spot, more than `StandRise` off a character within `StandRise` o
 of it (engine choice; **Observed**, zone 33.28, scratch probe: by the foot of a walkable top at ~560 west of Black Desert City, ground 537, polygons
 at ~550, walkers at 7245, -13968 stopped and dropped their order); with no layer in range, a
 polygon within `EdgeTolerance` counts. A character already off every layer near its height still steps down.
+A path walker whose step finds no layer in reach of its height, more than 4 off its path's height there (the leg to its next point), looks for one at the path's height (engine choice, `MovementSystem.CorridorHeight`; **Observed** before the seam check below, Ancient Lab `28.60:2-`: walkers stood at the edge of its stairwell both ways).
 A path point takes the height of the corridor polygon under it; of stacked ones the corridor crosses, the one nearest the point's own height (`NavQuery.OnSurface`;
 **Observed** with `meitou-tools navmesh --town Squin --path`: a route into a Bughouse and up onto its roof beds ended on the floor below, y 372 for 482).
 **Long routes** (engine choice): goals in unloaded zones use `CoarseRoute` (192-unit terrain grid, slope and
@@ -679,6 +680,22 @@ above the mesh, over the finished picture and fainter where the scene hides it. 
 yellow. Original: polygons magenta, ends orange, edges joined to the next tile violet. Rebuilt on a worker when the world or view changes.
 **Observed** (Hub, zone 20.32): the original's polygons are large and simplified, building footprints are holes (interiors separate), and rock and cliff
 cuts follow the blocky 36-unit terrain grid (generator inputs, terrain). The original has no such view (`rebuild_navmesh` Ctrl+Shift+F11 only rebuilds).
+
+### Search cost
+
+Engine facts (our A*, not the original's Havok query). Each expanded polygon relaxes its neighbours; a relaxation places the crossing on the shared edge
+that makes the detour to the goal shortest (`BestCrossing`, a golden-section search: 12 steps, 14 detours, the interval narrowed to 0.3 %). The game's
+exit log prints the searches, the polygons each expanded on average and how many ran to `NavQuery.MaxIterations`. **Observed** (save with five
+player characters apart, ~1,400 characters loaded, 75 s of flights between them): ~12,000 searches of ~11,000 polygons each, under 1 % at the limit;
+the search was 77 % of the simulation's busy CPU. The golden section (was 14 ternary steps, 28 detours) answered 14 % more searches in the same
+time and moved pinned path points by about a unit.
+
+Unreachable goals were most of the rest. **Observed** (same run): a town's residents in zone 14.23 kept asking for goals in a building they cannot
+enter (radius 4 found no way in, radius 0 did: an unjoined seam on its door stair, "Inner seams"), 300-600 ms each: the exact search, up to four
+off-mesh start retries, then the nearest-point search, each exploring all the ground they reach. Engine choices since: a goal found unreachable
+is remembered (goal polygon, radius, door rule; same navmesh; `NavmeshWalkability.UnreachableSeconds`), and a walker that reaches its
+remembered nearest point gets the provisional route at once; retries skip start polygons a failed search reached (same region, same
+failure). GoTo answers went from ~95 to ~17 ms on average, polygons per search ~11,000 to ~5,800.
 
 ## Gate codes
 

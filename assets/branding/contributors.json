@@ -1,7 +1,7 @@
 {
   "doublevoid": {
-    "commits": 18,
-    "areas": "Navmesh"
+    "commits": 44,
+    "areas": "Navmesh, Navmesh tool, Interior joins, Ragdoll collision, Tests, Docs"
   },
   "asc3ns10n": {
     "commits": 17,
@@ -20,8 +20,8 @@
     "areas": "Audio, Saves"
   },
   "gosuboy": {
-    "commits": 2,
-    "areas": "Metal, Material lookup"
+    "commits": 6,
+    "areas": "Seats, Metal, Materials"
   },
   "crockmr": {
     "commits": 2,
@@ -32,7 +32,11 @@
     "areas": "Projectile tracers"
   },
   "lucasskrewer": {
+    "commits": 3,
+    "areas": "Animal hunger"
+  },
+  "dxseba": {
     "commits": 1,
-    "areas": ""
+    "areas": "Character meshes"
   }
 }

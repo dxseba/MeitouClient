@@ -127,7 +127,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             return (Grid: grid, Parts: BootSimulation(grid, interactive));
         });
         gpu = WorldFrame.CreateGpu(context, install, scene, assets, o, interactive, LoadingStep, AwaitLoading);
-        if (!o.NoParticles) titleParticleFactory = () => ParticleRenderer.Create(context, install, gpu.Particles?.Library);
+        if (!o.NoParticles) titleParticleFactory = () => ParticleRenderer.Create(context, assets, gpu.Particles?.Library);
         if (gpu.Post is { } vendorPost) vendorPost.UpscalerFactory = Meitou.Rendering.Upscalers.VendorUpscalers.Factory(display.Context, streamline, ngx);
         (camera, render) = WorldFrame.Setup(scene, o);
         render.Grid = IsFlat;
@@ -143,6 +143,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 Sunrise = (float)clock.Sunrise, Sunset = (float)clock.Sunset,
             },
             systems: systems, walkability: walkability);
+        session.World.BenchFacingFix = config.FixBenchFacing;
         BootPlayer(display, interactive);
     }
 
@@ -364,6 +365,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             () => Meitou.Data.Save.SaveCatalog.Scan(Meitou.Simulation.Saving.QuickSave.DefaultRoot, install.SaveDirectory,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "kenshi", "save")),
             assets.Find("credits.txt") is { } creditsFile ? File.ReadAllText(creditsFile) : "");
+        player.DataProblems = (scene.Database?.Issues.Count ?? 0) + (scene.Objects?.Levels.Problems().Count ?? 0);
         if (OpensOnTitle(interactive)) player.ShowTitle();
         if (nav is not null && (start is not null || !interactive))
         {
@@ -550,6 +552,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 weatherHour: (float)session.Clock.HourOfDay);
         }
         finally { session.EndTickAhead(); }
+        if (tickAhead) NoteAheadTick();
     }
 
     /// <summary>This frame's world draw overlaps the next world tick (set by the interactive loop; never in stills, the duel, recorded flights or the play benchmark).</summary>

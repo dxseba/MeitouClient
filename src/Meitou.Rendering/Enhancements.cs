@@ -154,13 +154,13 @@ public static class Enhancements
             "the game's ground is its height map's mesh; Meitou tessellates the ground near the eye and raises it by the same relief (needs tessellation shaders; visual only: characters walk on the undisplaced ground)"),
         new("weld", "Mesh welding", "per-face tangents", "welded, averaged tangents",
             () => MeshWeld.Enabled, v => MeshWeld.Enabled = v,
-            "the game's meshes store each corner once per triangle, with that triangle's own tangent, so normal-mapped surfaces show faint facets at the triangle edges; Meitou welds the corners that differ only in their tangent and averages it, which smooths the bump lighting (characters most) and keeps about 60% fewer vertices in video memory; applies to meshes as they load (docs/render-objects.md)"),
+            "stores the game's 3D models more compactly, so they take about half the video memory and look practically the same; in detail, the game's meshes store most corners once for every triangle that uses them, each copy with its own triangle's tangent; Meitou merges the copies that differ only in that tangent into one vertex with their averaged tangent, so meshes keep about 60% fewer vertices (object meshes at The Hub take 50 MB of video memory instead of 98) and the bump lighting barely changes (tangents move 4° on average); applies to meshes loaded after the change (docs/render-objects.md)"),
         new("tracers", "Bolt tracers", "none", "streaks",
             tracers ?? (() => false), setTracers ?? (_ => { }),
             "the game draws a bolt in flight as its mesh alone, stretched a little with its speed, which is hard to follow at a distance; Meitou draws a faint streak behind it that grows out of the crossbow and shrinks into where the bolt stops; drawn with the particles, so none with --no-particles (docs/game/combat.md \"Bolt visuals\")"),
-        new("fog", "Fog", "hard-edged", "soft",
+        new("fog", "Fog", "hard-edged, flat", "soft, lit",
             () => post.MeitouFog, v => post.MeitouFog = v,
-            "the game's dust and smoke sprites cut straight into the ground and walls they cross (all but its mist and steam, which fade; Faithful draws those hard-edged too); Meitou fades each sprite out over the last stretch before a surface (a quarter of its size, 0.2 to 30 m), so dust clouds meet the ground softly (docs/render-post.md \"Fog\")"),
+            "the game's dust and smoke sprites cut straight into the ground and walls they cross (all but its mist and steam, which fade; Faithful draws those hard-edged too); Meitou fades each sprite out over the last stretch before a surface (a quarter of its size, 0.2 to 30 m), so dust clouds meet the ground softly; the game's sprites are also flat and not fogged (one brightness in sun and shade, near and far, seen through fog banks), Meitou darkens dust and smoke where the sun is shadowed, brightens them towards the sun and puts the haze and the fog volumes in front of them over them; and it fades each effect out before the distance it stops being simulated at, where its whole cloud popped in and out (docs/render-post.md \"Fog\")"),
     ];
 
     /// <summary><c>--meitou</c> / <c>--faithful &lt;all|id,id...&gt;</c>: turns those switches to Meitou or to Faithful.</summary>

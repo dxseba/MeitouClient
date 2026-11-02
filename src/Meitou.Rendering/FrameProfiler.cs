@@ -82,7 +82,7 @@ public sealed class FrameProfiler : IDisposable
     // --log-spikes (SpikeLog): per slot the frame number, its notes and its render-thread stages, kept until the GPU times arrive.
     readonly long[] slotFrame = new long[Slots];
     readonly string?[] slotNotes = new string?[Slots], slotCpu = new string?[Slots];
-    readonly double[] slotCpuTotal = new double[Slots];
+    readonly double[] slotCpuTotal = new double[Slots], slotCpuMedian = new double[Slots];
     readonly (QuerySlot Begin, QuerySlot PreEnd)[] slotStamps = new (QuerySlot, QuerySlot)[Slots];
     readonly (QuerySlot Begin, QuerySlot End)[] slotWhole = new (QuerySlot, QuerySlot)[Slots];   // each profiled frame's own first and last stamps (its GPU total)
     long frameCounter;
@@ -220,7 +220,8 @@ public sealed class FrameProfiler : IDisposable
             slotFrame[slot] = ++frameCounter;
             slotStamps[slot] = native.LastFrameStamps;
             slotCpuTotal[slot] = sum;
-            slotCpu[slot] = StageList(StageClock.Ms, 0.5);
+            slotCpuMedian[slot] = CpuMedian();
+            slotCpu[slot] = StageList(StageClock.Ms, 0.5) + PartList("ui", StageClock.UiPartNames, StageClock.UiPartMs) + PartList("upd-chars", StageClock.PartNames, StageClock.PartMs);
             long uploaded = native.Frame.Stats.UploadBytes;
             slotNotes[slot] = (uploaded > 0 ? $"uploads total {uploaded / 1048576.0:0.00} MB; " : "") + SpikeLog.TakeFrame();
         }
@@ -286,8 +287,10 @@ public sealed class FrameProfiler : IDisposable
         var slices = owners.Take(8).Select(o => (o.Name, o.DeviceLocal)).ToList();
         ulong ours = (ulong)owners.Sum(o => (double)o.DeviceLocal), shown = (ulong)slices.Sum(s => (double)s.DeviceLocal);
         if (ours > shown) slices.Add(("other of ours", ours - shown));
-        ulong blocks = alloc.TotalAllocatedBytes, used = alloc.TotalUsedBytes;
-        if (blocks > used) slices.Add(("free in our blocks", blocks - used));
+        // Device-local blocks only: the host-visible ones (staging, constants) are system memory, not in the driver's VRAM figure.
+        var (empty, spare, scattered, _) = alloc.Slack();
+        ulong free = empty + spare + scattered, blocks = ours + free;
+        if (free > 0) slices.Add(("free in our blocks", free));
         if (vram.Used > blocks) slices.Add(("driver and others", vram.Used - blocks));
         return slices;
     }
@@ -309,8 +312,9 @@ public sealed class FrameProfiler : IDisposable
         var heaps = native.Device.Heaps();
         for (int i = 0; i < heaps.Count; i++)
             w.WriteLine($"  heap {i}: {heaps[i].Size / 1048576.0:0} MB, ours {heaps[i].Usage / 1048576.0:0.0} MB of budget {heaps[i].Budget / 1048576.0:0.0} MB ({heaps[i].Flags})");
-        w.WriteLine($"ours: {blocks / 1048576.0:0.0} MB in {alloc.BlockCount} blocks, {alloc.TotalUsedBytes / 1048576.0:0.0} MB used by {alloc.AllocationCount} allocations; "
-            + $"driver and others {(used > blocks ? used - blocks : 0) / 1048576.0:0.0} MB");
+        ulong local = (ulong)alloc.Breakdown().Sum(o => (double)o.DeviceLocal) + empty + spare + scattered;
+        w.WriteLine($"ours: {blocks / 1048576.0:0.0} MB in {alloc.BlockCount} blocks ({local / 1048576.0:0.0} MB device-local), {alloc.TotalUsedBytes / 1048576.0:0.0} MB used by {alloc.AllocationCount} allocations; "
+            + $"driver and others {(used > local ? used - local : 0) / 1048576.0:0.0} MB");
         w.WriteLine($"room in device-local blocks: empty {empty / 1048576.0:0.0} MB, spare {spare / 1048576.0:0.0} MB, scattered {scattered / 1048576.0:0.0} MB in {partBlocks} blocks");
         w.WriteLine();
         w.WriteLine("owners (MB, device-local MB, count):");
@@ -450,12 +454,23 @@ public sealed class FrameProfiler : IDisposable
             medianScratch.Sort();
             double median = have >= 30 ? medianScratch[have / 2] : 0;
             double pre = native.Frame.Timestamps.TryRead(slotStamps[s].Begin, out ulong pb) && native.Frame.Timestamps.TryRead(slotStamps[s].PreEnd, out ulong pe) && pe >= pb ? (pe - pb) / 1e6 : -1;
-            SpikeLog.Report(slotFrame[s], total, median, (pre >= 0 ? $"pre-frame {pre:0.0}, " : "") + StageList(gpuFrame, 0.3) + (total - sum >= 0.3 ? $", other {total - sum:0.0}" : ""), slotCpu[s] ?? "", notes, slotCpuTotal[s]);
+            SpikeLog.Report(slotFrame[s], total, median, (pre >= 0 ? $"pre-frame {pre:0.0}, " : "") + StageList(gpuFrame, 0.3) + (total - sum >= 0.3 ? $", other {total - sum:0.0}" : ""), slotCpu[s] ?? "", notes, slotCpuTotal[s], slotCpuMedian[s]);
             slotNotes[s] = null;
         }
         gpuHead = (gpuHead + 1) % History;
         gpuCount = Math.Min(gpuCount + 1, History);
         pending[s] = false;
+    }
+
+    /// <summary>The render thread's median frame total over the history (0 before 30 frames), the frame just kept included.</summary>
+    double CpuMedian()
+    {
+        int have = Math.Min(cpuCount + 1, History);
+        if (have < 30) return 0;
+        medianScratch.Clear();
+        for (int i = 0; i < have; i++) medianScratch.Add(cpu[Total][i]);
+        medianScratch.Sort();
+        return medianScratch[have / 2];
     }
 
     readonly List<float>[] runGpu = Enumerable.Range(0, Series).Select(_ => new List<float>()).ToArray();
@@ -477,6 +492,14 @@ public sealed class FrameProfiler : IDisposable
             double mean = keep.Length == 0 ? 0 : keep.Average(i => v[i]);
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"gpu-run     {Label(s),-12} {mean,6:0.00} {sorted[sorted.Length / 2],6:0.00} {sorted[(int)(sorted.Length * 0.95)],6:0.00} {sorted[^1],7:0.00}"));
         }
+    }
+
+    // A stage's parts of 1 ms or more, for the spike log: "; ui: hud 25.0, composite 3.1".
+    static string PartList(string stage, string[] names, double[] ms)
+    {
+        var parts = new List<string>();
+        for (int k = 0; k < names.Length; k++) if (ms[k] >= 1) parts.Add(string.Create(CultureInfo.InvariantCulture, $"{names[k]} {ms[k]:0.0}"));
+        return parts.Count == 0 ? "" : $"; {stage}: {string.Join(", ", parts)}";
     }
 
     static string StageList(double[] ms, double least)

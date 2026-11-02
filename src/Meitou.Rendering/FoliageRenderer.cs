@@ -255,7 +255,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     Vector3? lastEye;
     double lastEyeTime;
     Vector2 velocity;
-    readonly List<(ZoneCoordinate Zone, Tier Tier, float Urgency)> wanted = [];
+    readonly List<(ZoneCoordinate Zone, Tier Tier, float Urgency, bool ForKept)> wanted = [];
     readonly List<ZoneState> dropping = [];
     readonly HashSet<ZoneCoordinate> candidates = [];
     public List<string> Messages { get; } = [];
@@ -266,11 +266,13 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     /// <summary>
     /// <see cref="Pending"/> as a loading screen waits for it: the grass only within the range the default grass distance gives (<see cref="DefaultGrassRange"/>). A longer
     /// setting's farther pages (four times the grass at twice the distance, a minute and more of generation) grow in, nearest first, once the screen lifts.
+    /// Of the impostor atlases only the uploads of those read from the cache are waited for (<see cref="ImpostorUploadsAwaited"/>): the meshes draw until each
+    /// atlas is ready, and after a mod list change hundreds are baked, 20 s and more.
     /// </summary>
-    public int LoadingPending => Pending - grassWaiting - zones.Values.Sum(z => z.GrassRunning) + grassNear;
+    public int LoadingPending => Pending - grassWaiting - zones.Values.Sum(z => z.GrassRunning) + grassNear - ImpostorPending + ImpostorUploadsAwaited;
 
     /// <summary>What <see cref="Pending"/> is made of, for the loading log.</summary>
-    public string PendingDetail => $"layouts {runningWhole + runningFar + zonesWaiting}, grass {grassWaiting + zones.Values.Sum(z => z.GrassRunning)}, meshes {decoding.Count} decoding {uploads.Count} upload steps, lods {lodRunning + lodWaiting}, textures {textures.AwaitedCount} loading {textures.UnresidentUsedCount} deferred, impostors {ImpostorPending}";
+    public string PendingDetail => $"layouts {runningWhole + runningFar + zonesWaiting}, grass {grassWaiting + zones.Values.Sum(z => z.GrassRunning)} ({grassNear} near), meshes {decoding.Count} decoding {uploads.Count} upload steps, lods {lodRunning + lodWaiting}, textures {textures.AwaitedCount} loading {textures.UnresidentUsedCount} deferred, impostors {ImpostorPending} ({ImpostorUploadsAwaited} cache uploads)";
 
     /// <summary>GPU memory held by foliage meshes, textures and grass pages.</summary>
     public long ResidentBytes => residentMeshBytes + textures.ResidentBytes + GrassBytes() + impostorBytes;
@@ -394,11 +396,12 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
 
     sealed class GrassPage
     {
-        public Task<(float[][] Blades, int[][] Prefixes)>? Job;
+        public Task<(float[][] Blades, int[] Floats, int[][] Prefixes)>? Job;
         public GrassBuffer[]? Buffers;
         public bool Dropped;
-        /// <summary>The generated blades while the arena or the slot table had no room (<see cref="FoliageGrassGpu.Misses"/>): placed again by <see cref="UpdateGrass"/>.</summary>
+        /// <summary>The generated blades while the arena or the slot table had no room (<see cref="FoliageGrassGpu.Misses"/>): placed again by <see cref="UpdateGrass"/>. Rented (<see cref="FoliageGrassField.RentBladesWithPrefixes"/>), the first <see cref="PendingFloats"/> of each in use; the page's last upload step returns them.</summary>
         public float[][]? PendingBlades;
+        public int[]? PendingFloats;
         public int[][]? PendingPrefixes;
     }
 
@@ -431,6 +434,44 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     /// </summary>
     public Vector3? Ahead { get; set; }
 
+    /// <summary>
+    /// Points kept loaded besides the eye's (the player's characters, "Keep textures at characters", docs/render-objects.md "Kept points"): zones within
+    /// the near reach of one are laid out and kept, after the eye's, and their meshes and textures stay loaded, and grass pages are made there (<see cref="UpdateGrass"/>).
+    /// </summary>
+    public IReadOnlyList<Vector3> Kept { get; set; } = [];
+
+    /// <summary>The camera's distance to its target: a kept point's texture needs count from at least this far (the view a jump there would have).</summary>
+    public float KeptViewDistance { get; set; }
+
+    /// <summary>Places kept loaded (<see cref="WorldTextureCache.Areas"/>): the foliage textures' mark scales with it, and the grass store
+    /// (<see cref="GrassStoreScale"/>) within its caps.</summary>
+    public int Areas { get => areas; set { areas = Math.Max(value, 1); textures.Areas = areas; } }
+    int areas = 1;
+
+    float NearKeptZone(ZoneCoordinate zone)
+    {
+        float d = float.PositiveInfinity;
+        var kept = Kept;
+        for (int i = 0; i < kept.Count; i++) d = MathF.Min(d, ZoneDistance(zone, kept[i]));
+        return d;
+    }
+
+    /// <summary>
+    /// The ground's height under the eye (the host sets it each frame before <see cref="Update(Vector3)"/>; unknown: none). Which zones and grass pages are laid
+    /// out and kept counts the eye's height above the game's highest camera (<see cref="Load"/>), so a free camera high above the land loads only what
+    /// can be seen from there; drawing still measures across the ground.
+    /// </summary>
+    public float GroundUnderEye { get; set; } = float.NegativeInfinity;
+
+    /// <summary>
+    /// A ground distance from the eye as the loading measures it: with the eye's height above <see cref="GroundUnderEye"/> beyond the game's camera heights
+    /// (<see cref="Meitou.Data.World.KenshiCamera.MaxHeightAbovePivot"/>) added as a third side, so those heights load as before.
+    /// </summary>
+    float Load(float groundDistance, Vector3 eye)
+    {
+        return EyeLift.Apply(groundDistance, EyeLift.Of(eye, GroundUnderEye));
+    }
+
     void Update(Vector3 eye, bool settling)
     {
         updates++;
@@ -454,7 +495,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         }
         dropping.Clear();
         foreach (var state in zones.Values)
-            if (state.Job is null && ZoneDistance(state.Zone, eye) > farReach + WorldLayout.ZoneSize && !(Ahead is { } kept && ZoneDistance(state.Zone, kept) <= nearReach + WorldLayout.ZoneSize))
+            if (state.Job is null && Load(ZoneDistance(state.Zone, eye), eye) > farReach + WorldLayout.ZoneSize && !(Ahead is { } arrivalAt && ZoneDistance(state.Zone, arrivalAt) <= nearReach + WorldLayout.ZoneSize)
+                && !(!settling && Kept.Count > 0 && NearKeptZone(state.Zone) <= nearReach + WorldLayout.ZoneSize))
                 dropping.Add(state);
         foreach (var state in dropping) Drop(state);
 
@@ -493,29 +535,45 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
                 for (int dx = -around; dx <= around; dx++)
                     candidates.Add(new ZoneCoordinate(landing.X + dx, landing.Y + dz));
         }
+        var keptPoints = settling ? [] : Kept;
+        foreach (var point in keptPoints)
+        {
+            var home = WorldLayout.ZoneOf(point.X, point.Z);
+            int around = (int)Math.Ceiling(arrivalReach / WorldLayout.ZoneSize) + 1;
+            for (int dz = -around; dz <= around; dz++)
+                for (int dx = -around; dx <= around; dx++)
+                    candidates.Add(new ZoneCoordinate(home.X + dx, home.Y + dz));
+        }
+        bool meitou = MeitouRange;
+        Tier TierAt(float soon) => soon <= wholeReach + PrefetchMargin ? Tier.Whole : meitou && soon <= nearReach + PrefetchMargin ? Tier.Meshes : Tier.Far;
         foreach (var z in candidates)
         {
             if (!z.IsInsideGrid) continue;
-            float d = ZoneDistance(z, eye), dp = ZoneDistance(z, predicted), da = arrival is { } a ? ZoneDistance(z, a) : float.PositiveInfinity;
+            float d = Load(ZoneDistance(z, eye), eye), dp = Load(ZoneDistance(z, predicted), eye), da = arrival is { } a ? ZoneDistance(z, a) : float.PositiveInfinity;
             bool landing = da <= arrivalReach;
             float soon = Math.Min(Math.Min(d, dp), da);
-            if (d > farReach && !landing) continue;   // the prediction orders and adds whole layouts, it never adds zones
-            bool meitou = MeitouRange;
-            var need = soon <= wholeReach + PrefetchMargin ? Tier.Whole : meitou && soon <= nearReach + PrefetchMargin ? Tier.Meshes : Tier.Far;
+            float dk = keptPoints.Count > 0 ? NearKeptZone(z) : float.PositiveInfinity;
+            bool atKept = dk <= arrivalReach;
+            if (d > farReach && !landing && !atKept) continue;   // the prediction orders and adds whole layouts, it never adds zones
+            var need = TierAt(Math.Min(soon, dk));
+            // Wanted more for a kept point than for the eye or the arrival: ranked after all of theirs.
+            bool forKept = atKept && (d > farReach && !landing || TierAt(soon) != need);
             zones.TryGetValue(z, out var state);
             if (state is not null && Satisfies(state, need, meitou)) continue;   // has what it needs
-            if (d <= wholeReach) NearestIncompleteZone = Math.Min(NearestIncompleteZone, d);
-            if (state is not { Ready: true }) NearestUnlaidZone = Math.Min(NearestUnlaidZone, d);
+            if (d <= wholeReach && !forKept) NearestIncompleteZone = Math.Min(NearestIncompleteZone, d);
+            if (state is not { Ready: true } && !forKept) NearestUnlaidZone = Math.Min(NearestUnlaidZone, d);
             if (state?.Job is not null) continue;   // on its way
             // Whole layouts first (what is missing there is in view near the eye), then the large-only ones, then the far ones, each nearest
             // first (from the eye or where it will be, whichever is nearer).
             // During a flight the arrival's zones go first, then the flight path's (the eye's), each in the same order.
             float tierBase = need == Tier.Whole ? 0 : need == Tier.Meshes ? nearReach : farReach;
-            wanted.Add((z, need, arrival is null ? tierBase + soon : landing ? tierBase + da : 2 * farReach + tierBase + Math.Min(d, dp)));
+            wanted.Add((z, need, forKept ? (arrival is null ? 2 : 4) * farReach + tierBase + dk
+                : arrival is null ? tierBase + soon : landing ? tierBase + da : 2 * farReach + tierBase + Math.Min(d, dp), forKept));
         }
         wanted.Sort((a, b) => a.Urgency.CompareTo(b.Urgency));
-        int started = 0;
-        foreach (var (zone, tier, _) in wanted)
+        int started = 0, keptWaiting = 0;
+        foreach (var w in wanted) if (w.ForKept) keptWaiting++;
+        foreach (var (zone, tier, _, forKept) in wanted)
         {
             if (guard is { Streaming: false }) break;   // memory pressure: no new layout is started
             bool whole = tier != Tier.Far;   // a Meshes layout is a whole one whose far-away groups are left out (Accept)
@@ -528,6 +586,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             if (whole) runningWhole++; else runningFar++;
             state.JobTier = tier;
             started++;
+            if (forKept) keptWaiting--;
             bool farOnly = !whole;
             Func<GroupedFoliageZone> job = () =>
             {
@@ -546,10 +605,11 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             // Whole layouts go ahead of the grass pages and texture decodes queued meanwhile (a dozen grass pages could hold every worker).
             state.Job = whole ? BackgroundWork.RunUrgent(job) : BackgroundWork.Run(job);
         }
-        zonesWaiting = wanted.Count - started;   // needed but not started yet (the workers are busy)
+        // Needed but not started yet (the workers are busy); a kept point's zones not counted, so a far squad member does not hold up the loading screen.
+        zonesWaiting = wanted.Count - started - keptWaiting;
         NearestMissingMesh = float.PositiveInfinity;
 
-        UpdateGrass(eye);
+        UpdateGrass(eye, keptPoints);
         PumpMeshes();
         PumpLods();
         Prune();
@@ -781,10 +841,16 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     const int MaxGrassJobs = 12;
     static readonly int CoveredGrassJobs = Math.Max(MaxGrassJobs, 4 * BackgroundWork.Threads);
     readonly List<(float Distance, ZoneState State, int Key)> grassWanted = [];
+    /// <summary>An eye page waited for room in the grass store last frame (<see cref="UpdateGrass"/>): kept pages are not queued meanwhile.</summary>
+    bool grassEyeWaited;
     readonly (float Distance, ZoneState State, int Key)[] grassPicks = new (float, ZoneState, int)[CoveredGrassJobs];
     int zonesWaiting, grassWaiting, grassNear;
 
-    void UpdateGrass(Vector3 eye)
+    /// <summary>
+    /// Makes and frees grass pages round the eye and the kept points (<see cref="Kept"/>). A kept point's pages rank after every page the eye wants, and
+    /// they give way to the eye's: while an eye page waits for room in the full store, the kept page farthest from its point is freed (one a frame).
+    /// </summary>
+    void UpdateGrass(Vector3 eye, IReadOnlyList<Vector3> kept)
     {
         GrowGrassStore();
         grassWanted.Clear();
@@ -793,29 +859,42 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         NearestMissingGrass = float.PositiveInfinity;
         int inFlight = 0;
         foreach (var state in zones.Values) inFlight += state.GrassRunning;
+        // The kept page to free for a waiting eye page (farthest from its point) and whether an eye page waits.
+        bool eyeWaiting = false;
+        GrassPage? victim = null;
+        ZoneState? victimState = null;
+        int victimKey = 0;
+        float victimDistance = float.NegativeInfinity;
         foreach (var state in zones.Values)
         {
             if (!state.Ready || state.Ground is null || state.Patches.Count == 0) continue;
             float range = state.Patches.Max(GrassRange), near = range * Math.Min(1, DefaultGrassRange / GrassRangeSetting);
-            if (state.Pages.Count == 0 && ZoneDistance(state.Zone, eye) > range + PageSize) continue;
+            float keptZone = float.PositiveInfinity;
+            foreach (var k in kept) keptZone = MathF.Min(keptZone, ZoneDistance(state.Zone, k));
+            if (state.Pages.Count == 0 && Load(ZoneDistance(state.Zone, eye), eye) > range + PageSize && keptZone > range + PageSize) continue;
             for (int pz = 0; pz < PagesPerZone; pz++)
                 for (int px = 0; px < PagesPerZone; px++)
                 {
                     int key = pz * PagesPerZone + px;
                     float x0 = state.X0 + px * PageSize, z0 = state.Z0 + pz * PageSize;
-                    float d = BoxDistance(x0, z0, PageSize, eye);
+                    float d = Load(BoxDistance(x0, z0, PageSize, eye), eye), dk = float.PositiveInfinity;
+                    if (keptZone <= range + PageSize * 2) foreach (var k in kept) dk = MathF.Min(dk, BoxDistance(x0, z0, PageSize, k));
+                    bool eyeWants = d < range + PageSize * 0.5f;
                     state.Pages.TryGetValue(key, out var page);
                     if (page?.Buffers is null && d < range * 0.8f) NearestMissingGrass = Math.Min(NearestMissingGrass, d);   // not sinking yet: would be seen
                     if (page is null)
                     {
-                        if (d < range + PageSize * 0.5f)
+                        if (eyeWants)
                         {
                             grassWanted.Add((d, state, key));
                             if (d < near) grassNear++;
                         }
+                        else if (dk < range + PageSize * 0.5f) grassWanted.Add((2 * range + PageSize + dk, state, key));   // after all of the eye's
                         continue;
                     }
-                    if (page.Job is null && d > range + PageSize * 2)
+                    if (eyeWants && page.PendingBlades is not null) eyeWaiting = true;
+                    if (!eyeWants && page.Buffers is not null && page.Job is null && dk > victimDistance && dk <= range + PageSize * 2) (victim, victimState, victimKey, victimDistance) = (page, state, key, dk);
+                    if (page.Job is null && MathF.Min(d, dk) > range + PageSize * 2)
                     {
                         FreePage(page);
                         state.Pages.Remove(key);
@@ -827,10 +906,19 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
                         inFlight--;   // its slot is free for this frame's picks
                         page.Job = null;
                         var result = job.Result;
-                        TryQueuePage(state, key, page, result.Blades, result.Prefixes);
+                        // While an eye page waits for room, a kept page's blades wait too: the room a freed kept page leaves goes to the eye's.
+                        if (!eyeWants && grassEyeWaited) (page.PendingBlades, page.PendingFloats, page.PendingPrefixes) = (result.Blades, result.Floats, result.Prefixes);
+                        else TryQueuePage(state, key, page, result.Blades, result.Floats, result.Prefixes);
                     }
-                    else if (page.PendingBlades is not null) TryQueuePage(state, key, page, page.PendingBlades, page.PendingPrefixes!);   // no room last time
+                    else if (page.PendingBlades is not null && (eyeWants || !grassEyeWaited)) TryQueuePage(state, key, page, page.PendingBlades, page.PendingFloats!, page.PendingPrefixes!);   // no room last time
                 }
+        }
+        grassEyeWaited = eyeWaiting;
+        if (eyeWaiting && grassFull && victim is not null)
+        {
+            FreePage(victim);
+            victimState!.Pages.Remove(victimKey);
+            grassFull = false;   // the waiting page tries the room next frame
         }
         // Missing pages nearest first, a bounded number at a time. Pages hold the blades of the highest density setting,
         // so changing the setting never regenerates them (Draw shows a prefix). Only the nearest free jobs' worth is picked: sorting every
@@ -857,10 +945,11 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             page.Job = BackgroundWork.Run(() =>
             {
                 var blades = new float[patches.Count][];
+                var floats = new int[patches.Count];
                 var prefixes = new int[patches.Count][];
                 for (int i = 0; i < blades.Length; i++)
-                    blades[i] = FoliageGrassField.BladesWithPrefixes(patches[i], ground, x0, z0, PageSize, out prefixes[i], MaxGrassDensity);
-                return (blades, prefixes);
+                    blades[i] = FoliageGrassField.RentBladesWithPrefixes(patches[i], ground, x0, z0, PageSize, out prefixes[i], out floats[i], MaxGrassDensity);
+                return (blades, floats, prefixes);
             });
         }
     }
@@ -1144,7 +1233,9 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         foreach (var state in zones.Values)
         {
             if (!state.Ready) continue;
-            float zoneDistance = ZoneDistance(state.Zone, eye);
+            // In range of the eye or of a kept point; a kept point's texture needs count from at least the camera's distance (KeptViewDistance).
+            float eyeZone = ZoneDistance(state.Zone, eye), keptZone = Kept.Count > 0 ? NearKeptZone(state.Zone) : float.PositiveInfinity;
+            float zoneDistance = MathF.Min(eyeZone, keptZone);
             foreach (var g in state.Groups)
             {
                 if (zoneDistance > RangeOf(g).Range + WorldLayout.ZoneSize * 0.5f) continue;
@@ -1152,7 +1243,13 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
                 a.LastUsed = now;
                 if (!a.Resident) Reload(a);   // in range but unloaded (or never loaded after an unload): decode it again, wherever the camera looks
                 if (!a.HasBounds) continue;
-                float near = g.BoundsReady ? BoxDistance(g.BoundMin, g.BoundMax, eye) : zoneDistance, scale = Math.Max(g.MaxScale, 1e-6f);
+                float near = g.BoundsReady ? BoxDistance(g.BoundMin, g.BoundMax, eye) : eyeZone, scale = Math.Max(g.MaxScale, 1e-6f);
+                if (float.IsFinite(keptZone))
+                {
+                    float kept = keptZone;
+                    if (g.BoundsReady) { kept = float.PositiveInfinity; foreach (var k in Kept) kept = MathF.Min(kept, BoxDistance(g.BoundMin, g.BoundMax, k)); }
+                    near = MathF.Min(near, MathF.Max(kept, KeptViewDistance));
+                }
                 Offer(a.MainMaterial, near / (a.MainTexel * scale));
                 Offer(a.LeavesMaterial, near / (a.LeavesTexel * scale));
                 foreach (var m in (ReadOnlySpan<FoliageMaterial?>)[a.MainMaterial, a.LeavesMaterial])
@@ -2423,9 +2520,13 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         grassDraws.Clear();
         grassOrder.Clear();
         foreach (var st in zones.Values)
+        {
+            if (st.Pages.Count == 0 || st.Patches.Count == 0) continue;
+            float reach = st.Patches.Max(GrassRange);   // pages kept round a far character (Kept) are not sorted and tested each frame
             foreach (var (k, pg) in st.Pages)
-                if (pg.Buffers is not null)
-                    grassOrder.Add((BoxDistance(st.X0 + k % PagesPerZone * PageSize, st.Z0 + k / PagesPerZone * PageSize, PageSize, eye), st, k, pg));
+                if (pg.Buffers is not null && BoxDistance(st.X0 + k % PagesPerZone * PageSize, st.Z0 + k / PagesPerZone * PageSize, PageSize, eye) is var d && d < reach)
+                    grassOrder.Add((d, st, k, pg));
+        }
         grassOrder.Sort((a, b) => a.Distance.CompareTo(b.Distance));
         foreach (var (d, state, key, page) in grassOrder)
         {

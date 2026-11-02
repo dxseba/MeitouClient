@@ -187,11 +187,21 @@ public sealed unsafe class WorldTextureCache : IDisposable
     /// the fixed mark was on the 11.4 GB card it was tuned on), and three quarters of it under the guard's pressure.</summary>
     public double HighWaterShare { get; set; } = TextureQuality.MemoryBudgetMb(0) / 11453.0;
     /// <summary>The mark in effect (MB).</summary>
-    public double MarkMb => EffectiveMark(HighWaterMb, HighWaterShare, Guard);
+    public double MarkMb => EffectiveMark(HighWaterMb, HighWaterShare, Guard, Areas);
 
-    internal static double EffectiveMark(double highWaterMb, double share, VramGuard? guard)
+    /// <summary>Places kept loaded ("Keep textures at characters": the eye's and each merged kept point's, docs/render-objects.md "Kept points"): the mark is
+    /// this many times larger, its share of the memory budget at most <see cref="MaxAreaShare"/> (never below the unscaled share).</summary>
+    public int Areas { get; set; } = 1;
+    /// <summary>The largest share of the driver's memory budget a mark scaled by <c>Areas</c> may take.</summary>
+    internal const double MaxAreaShare = 0.5;
+
+    internal static double EffectiveMark(double highWaterMb, double share, VramGuard? guard, int areas = 1, double maxShare = MaxAreaShare)
     {
-        if (guard is not { BudgetBytes: > 0 } g || double.IsInfinity(highWaterMb) || highWaterMb >= double.MaxValue) return highWaterMb;
+        if (double.IsInfinity(highWaterMb) || highWaterMb >= double.MaxValue) return highWaterMb;
+        areas = Math.Max(areas, 1);
+        highWaterMb *= areas;
+        share = Math.Max(share, Math.Min(share * areas, maxShare));
+        if (guard is not { BudgetBytes: > 0 } g) return highWaterMb;
         return Math.Min(highWaterMb, g.BudgetBytes / 1048576.0 * share) * (g.Pressure ? 0.75 : 1);
     }
     /// <summary>The memory-pressure guard (<see cref="VramGuard"/>): while it is under pressure no texture is refined and a texture something draws
@@ -228,6 +238,19 @@ public sealed unsafe class WorldTextureCache : IDisposable
     public string Describe() => $"{ResidentCount} textures {ResidentBytes / 1048576.0:0} MB ({Unloads} unloaded, {Reloads} reloaded so far{(Shares > 0 ? $", {Shares} taken from another cache" : "")}" +
         (Mips.Enabled ? $"; mip streaming: {Math.Max(UnstreamedBytes - ResidentBytes, 0) / 1048576.0:0} MB less than every mip, {Refined} refined, {Coarsened} coarsened)" : ")");
 
+    /// <summary>Vanilla references to files the game never shipped (docs/formats/dds.md "Dead references"): not warned about.</summary>
+    static readonly HashSet<string> DeadVanillaTextures = new(StringComparer.OrdinalIgnoreCase)
+        { "Geobased_Rockloop_DIF_HI.dds", "Geobased_Rockloop_NML_HI.dds", "Rockloop09_DIF_HI.dds", "Rockloop09_NML_HI.dds" };
+    /// <summary>Missing names already warned about by any cache (each cache resolves the same foliage names): one warning per name per run.</summary>
+    static readonly HashSet<string> WarnedMissing = new(StringComparer.OrdinalIgnoreCase);
+
+    static bool ShouldWarnMissing(string name)
+    {
+        string file = System.IO.Path.GetFileName(name.Replace('\\', '/'));
+        if (DeadVanillaTextures.Contains(file)) return false;
+        lock (WarnedMissing) return WarnedMissing.Add(file);
+    }
+
     /// <param name="deferred">The texture is not loaded now: it stays <see cref="WorldTexture.Residency.Unloaded"/> until something reads its
     /// <see cref="WorldTexture.Key"/> (the foliage makes its meshes' textures this way and reads the keys only of groups within their range).</param>
     public WorldTexture? Get(string? name, bool border, bool deferred = false)
@@ -251,7 +274,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
         if (t.Path is null)
         {
             t.State = WorldTexture.Residency.Missing;
-            Messages.Add($"texture not found: {name}");
+            if (ShouldWarnMissing(name)) Messages.Add($"texture not found: {name}");
             return t;
         }
         if (deferred || !MayStart(t, out bool lean)) { t.State = WorldTexture.Residency.Unloaded; return t; }   // loaded when its key is read (and the guard lets it)

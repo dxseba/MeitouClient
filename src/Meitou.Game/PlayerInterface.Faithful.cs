@@ -230,7 +230,7 @@ sealed partial class PlayerInterface
     };
     void AddFaithfulContent(string id, List<UiControl> controls)
     {
-        if (id == "title" && UiMode == UiMode.Meitou) { MeitouTitleMenu(controls); return; }
+        if (id == "title") { if (UiMode == UiMode.Meitou) MeitouTitleMenu(controls); AddDataProblems(controls); return; }
         if (id == "stats") { AddStatsContent(controls); return; }
         if (id == "new-game") { AddStartLines(controls); AddAdvancedContent(controls); return; }
         if (id == "message") { StyleMessageBox(controls); return; }
@@ -323,6 +323,7 @@ sealed partial class PlayerInterface
             if (job.Type == Meitou.Data.Gameplay.Ai.TaskType._SLAVE_OBEDIENCE && obedienceJob < 0) obedienceJob = i;
             string text = Loc.Tr(Meitou.Simulation.Production.PermaJobs.Text(job.Type) ?? job.Type.ToString());
             if (job.Site is { } id && session.CurrentSnapshot.Buildings.FirstOrDefault(s => s.Id == id) is { } site) text += ": " + SiteName(site);
+            else if (job.Site is { } dummyId && session.CurrentSnapshot.Dummies.FirstOrDefault(d => d.Id == dummyId) is { } dummy) text += ": " + (buildHost?.ItemName(dummy.Record) ?? dummy.Record);
             jobs.Add(new("job:" + i.ToString(CultureInfo.InvariantCulture), text));
         }
         b.Lists["JobsPanel"] = jobs;

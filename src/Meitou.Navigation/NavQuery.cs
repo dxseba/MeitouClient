@@ -31,6 +31,11 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
     public const float OpenDoorCost = 50;
     /// <summary>The original's iteration limit.</summary>
     public const int MaxIterations = 100000;
+
+    static long searches, expanded, exhausted;
+
+    /// <summary>Corridor searches so far, the polygons they expanded and how many ran to <see cref="MaxIterations"/> (all threads; the exit log prints them).</summary>
+    public static (long Searches, long Expanded, long Exhausted) Stats => (Interlocked.Read(ref searches), Interlocked.Read(ref expanded), Interlocked.Read(ref exhausted));
     /// <summary>
     /// How far (units) from the start / the goal a polygon may be and still count. Engine choice: the original looks for the start face within 500 Havok units
     /// (5000 Kenshi units) and the goal face within about 30 (Observed, docs/game/pathfinding.md, "Path queries").
@@ -61,6 +66,8 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
     {
         public readonly Dictionary<long, Node> Nodes = [];
         public readonly PriorityQueue<Node, float> Open = new();
+        /// <summary>Whether the last search explored all it could reach without finding its goal (not cut short by <see cref="MaxIterations"/>).</summary>
+        public bool Exhaustive;
         readonly List<Node> made = [];
         int used;
 
@@ -93,10 +100,20 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
     public PathResult FindPath(Vector3 from, Vector3 to, NavAgent agent, Func<NavRef, bool>? skipStart, out NavRef start)
     {
         if (!World.TryFindPolygon(from, StartSnap, out start, out var startPoint, skipStart)) { start = new NavRef(-1, -1); return PathResult.NotFound; }
+        if (searchScratch is { } last) last.Exhaustive = false;
         if (!World.TryFindPolygon(to, GoalSnap, out var goal, out var goalPoint)) return PathResult.NotFound;
         var corridor = FindCorridor(start, startPoint, goal, goalPoint, agent);
         if (corridor is null) return PathResult.NotFound;
         return new PathResult(Pull(corridor, agent));
+    }
+
+    /// <summary>When the last search on this thread failed after reaching all it could, adds the polygons it reached to <paramref name="into"/>
+    /// (<see cref="NavRef.Key"/>): a search from any of them fails too.</summary>
+    public static void AddReachedByFailed(HashSet<long> into)
+    {
+        if (searchScratch is { Exhaustive: true } s)
+            foreach (var (key, node) in s.Nodes)
+                if (node.Closed) into.Add(key);
     }
 
     /// <summary>
@@ -164,6 +181,10 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
                 open.Enqueue(first, first.F);
             }
         }
+        Interlocked.Increment(ref searches);
+        Interlocked.Add(ref expanded, iterations);
+        if (iterations > MaxIterations) Interlocked.Increment(ref exhausted);
+        scratch.Exhaustive = last is null && iterations <= MaxIterations;
         if (last is null && partial && nearest != first)
         {
             last = nearest;
@@ -210,11 +231,26 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
     /// <summary>The point of the portal that makes the way from <paramref name="prev"/> through it to the goal shortest (the portal's ends clamp it), so the search sees near-straight legs even through thin polygons.</summary>
     static Vector3 BestCrossing(Vector3 prev, Vector3 left, Vector3 right, Vector3 goal)
     {
+        // Golden-section search (the detour is convex along the portal): each step keeps one of its two probes, so 12 steps cost 14 detours and narrow the
+        // interval to 0.3 % as the 14 ternary steps (28 detours) before did; the A* spends most of its time here (docs/game/pathfinding.md "Search cost").
+        const float InvPhi = 0.618034f;
         float lo = 0, hi = 1;
-        for (int i = 0; i < 14; i++)
+        float a = hi - InvPhi * (hi - lo), b = lo + InvPhi * (hi - lo);
+        float fa = Detour(prev, Vector3.Lerp(left, right, a), goal), fb = Detour(prev, Vector3.Lerp(left, right, b), goal);
+        for (int i = 0; i < 12; i++)
         {
-            float a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3;
-            if (Detour(prev, Vector3.Lerp(left, right, a), goal) < Detour(prev, Vector3.Lerp(left, right, b), goal)) hi = b; else lo = a;
+            if (fa < fb)
+            {
+                (hi, b, fb) = (b, a, fa);
+                a = hi - InvPhi * (hi - lo);
+                fa = Detour(prev, Vector3.Lerp(left, right, a), goal);
+            }
+            else
+            {
+                (lo, a, fa) = (a, b, fb);
+                b = lo + InvPhi * (hi - lo);
+                fb = Detour(prev, Vector3.Lerp(left, right, b), goal);
+            }
         }
         return Vector3.Lerp(left, right, (lo + hi) / 2);
     }

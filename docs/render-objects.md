@@ -51,6 +51,7 @@ The object, foliage and character texture caches share images (`TextureShare`, p
 level is taken by another instead of loaded when it drops no more top levels than that cache's mip streaming would, and two loads of the same file
 and levels that land together keep one. An image goes with its last user; each cache still counts its bytes. **Observed** (VRAM dump, 2026-11-01):
 about 150 MB of the same files were resident twice before this.
+Debris (severed limbs, bolts) takes its textures from the character cache rather than loading its own copies (~30 MB of skins were held twice, VRAM dump 2026-11-01).
 
 The sharing caches also have one high-water mark together (`TextureShare.ResidentBytes` against `MarkMb`, 2 GB at full quality), not one each.
 Above it, textures unused for 8 s are unloaded, least recently used first, until the total is under three quarters of the mark. Below it,
@@ -70,8 +71,21 @@ Advanced "Keep textures at characters" (Meitou, default on, `UserConfig.KeepText
 the drawn position of every squad bar member each frame; its sub-option "Keep textures at all squads" (default off, shown only while the
 main one is on, `KeepTexturesAtAllSquads`) takes every player squad's members instead. `ObjectStreamer.Near` / zone layout count the nearest of eye, `Ahead` and `Kept`,
 so object meshes and texture mips stay loaded round each character (a resolving instance's first texture need is measured the same way, else
-its textures load coarse for the far eye and wait for refines); terrain biome textures gather cells round each (ranked after the
-eye's). `Kept` ranks after the eye in the load order. Foliage and grass pages follow only the eye and `Ahead`. Costs video memory
+its textures load coarse for the far eye and wait for refines). Detail (texture mips, mesh levels) counts a kept point from at least the camera's
+distance to its target (`KeptViewDistance`), the view a jump there would have; residency counts from the point itself. **Observed** (VRAM dump
+2026-11-01, squad member at a town gate): 189 MB of object textures at need 0; whether from the kept point or the bounding sphere is
+**Unknown** (that dump did not list the points; the dump's header now does). Terrain biome pairs gather cells round each (ranked after the
+eye's); a pair within its near range of a point, measured from the point, takes a full-size near slot while the eye's leave one free.
+Foliage zones within the near reach of a point are laid out and kept, ranked after the eye's, and their meshes and textures stay resident
+(texture needs from at least `KeptViewDistance`); their waiting layouts do not hold up the loading screen. `Kept` ranks after the eye in the load order. The colour, overlay and fine height windows keep
+standby copies round far points ([render-terrain.md](render-terrain.md#geometry-and-material) "Standby windows"). Grass pages are made round the points too,
+after the eye's, sharing the one store: while an eye page waits for room, the kept page farthest from its point is freed (one a frame). The ground
+relief needs nothing more (its heights come with the biome pairs' far tier). Built characters within `KeptReach` of a point but beyond the
+eye's reach offer their textures from the point (at least `KeptViewDistance`) each budget pass; before, nothing read them and the 20 s idle
+limit unloaded them whatever the mark. **Areas** (`WorldFrame` `Areas`): 1 + the merged points, held at its highest for 30 s. The shared texture
+mark and the mesh mark are that many times larger, their shares of the memory budget at most 0.5 and 0.2 (`MaxAreaShare`; together under the budget), so the
+character `NeedScale` blur also starts later; the grass store, standby counts and terrain near slots scale too (render-foliage.md, render-terrain.md).
+Costs video memory
 (the VRAM guard still applies). `WorldFrame` merges the points first (`ObjectStreamer.MergeKept`): one within 500 units of the eye or of an
 earlier point is dropped, so a squad standing together is one point. Every distance test walks the kept points, and `ObjectStreamer.Scan`
 tests each unresolved instance every frame. Out-of-range instances (stand-ins and unknown part distances included) are therefore parked per

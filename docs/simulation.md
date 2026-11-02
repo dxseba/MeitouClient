@@ -9,33 +9,43 @@ below do not claim original-game parity. Retain Verified/Observed/Unknown scopes
 Control: 30 Hz real time, input/UI/camera continue while paused. The interface's own commands (selection, order toggles, run speed, job lists,
 crafting/research queues, squads, inventory, shops, building settings, the Stop order and every order, [order queue](#order-queue)) apply between ticks while paused
 (`World.ApplyPausedInterfaceCommands`); orders only set tasks, nobody moves or fights until the next tick. Simulation: 1/30 s game time;
-accumulate `realDt*speed`, speeds 0/1/2/5. Budget `6*speed` ticks per frame; excess is dropped and
+accumulate `realDt*speed`, speeds 0/1/2/5. Budget `2*speed` ticks per frame; excess is dropped and
 `AchievedSpeed` reports slowdown. Engine choice: the original instead caps the real frame time at 0.05 s before the speed
-multiplier (slows below 20 fps; [game loop](game/game-loop.md#frame-clocks)); Meitou slows only below 5 fps. Control ticks precede simulation ticks; a speed change applies
+multiplier (slows below 20 fps; [game loop](game/game-loop.md#frame-clocks)); Meitou slows below 15 fps (a budget of 6 let a heavy world snowball: **Observed**, a save with 5 characters apart and 1374 characters loaded, ticks of 15-40 ms, frames running 6 of them, 200-470 ms). Control ticks precede simulation ticks; a speed change applies
 to the entire frame. `WorldSession` rejects unequal world/clock tick lengths, owns snapshots,
 clocks, input and camera, and disposes systems/services. Of a frame's ticks only the last two publish
 a snapshot (`RunTick(publish)`), the pair the host interpolates between. Advanced → Pause after loading (`PauseOnLoad`, a plain on/off switch outside the Faithful / Meitou sides, default off as
 the game runs a loaded save at once, [game loop](game/game-loop.md)) pauses the speed after a menu load or import; `--load` runs.
 
+### Speed steps
+
+**Engine choice.** `World.SpeedSteps` is 1 at 1x and headless, 2 at 2x, 5 at 5x (from `World.PhysicsSpeed`, set by the host before each tick). The staggered looks
+take their period through `World.Every`, so each character looks as often per real second at every speed: Aggro's scan, the AI's think and package cadence,
+TownDuty, Captive, Kidnap, Crime, FirstAid's auto look and the carry system's rescue, arm and scavenge. A period that also times something (Aggro's sightings,
+the AI's away time) uses the stretched one. The body tick (`BodySystem.Act`) steps a character on its slot's turn with the ticks since its last step, unless
+it is a player character, in combat, incapacitated or bleeding (those step every tick). At 5x reactions come later in game time, as in the original, whose
+one update a frame covers frame time x speed ([game loop](game/game-loop.md#frame-clocks)). 1x and the goldens are unchanged.
+
 ### Snapshots
 
-`World.Publish` reuses its `CharacterSnapshot` objects (**engine choice**): one per slot in each of three sets, filled in place (every property, every
-publish) into the set neither `Snapshot` nor `PreviousSnapshot` uses, so the shown pair stays untouched while a tick runs ahead and fills the third. A
+`World.Publish` reuses its `CharacterSnapshot` objects (**engine choice**): one per slot in each of four sets, filled in place (every property, every
+publish) into a set none of `Snapshot`, `PreviousSnapshot` and the one before them uses, so the shown pair stays untouched while ticks run ahead and publish twice. A
 paused publish and loading keep `PreviousSnapshot`'s set out of the ring with it. Contract: a published snapshot's characters stay as they are until
 two more snapshots are published; hold them across frames, not across ticks (the host's per-id index and the HUD's selection are rebuilt when the
 snapshot object changes). `WorldSnapshot` itself is new on each publish.
 
 ### Tick ahead
 
-The game can run the next tick on its own thread (`WorldSession.BeginTickAhead`, thread `Meitou.Tick`) during the world draw (`WorldFrame.Draw`, after
-`DrawWorld`'s host prefix), and joins it right after (`EndTickAhead`), so the frame costs about the slower of the two instead of their sum. The tick is
-ahead of the clock: it counts as the next one owed (`AdvanceSimulation` takes it, then runs the rest), and the game clock moves when it falls due.
-Until then `CurrentSnapshot`/`PreviousSnapshot` hold the pair from before it, so the picture is where it was; `ShownTick` is the world tick on
+The game can run the next ticks on their own thread (`WorldSession.BeginTickAhead`, thread `Meitou.Tick`) during the world draw (`WorldFrame.Draw`, after
+`DrawWorld`'s host prefix), and joins them right after (`EndTickAhead`), so the frame costs about the slower of the two instead of their sum. A batch runs as many ticks as a frame has owed
+lately (smoothed, rounded down after adding 0.1; at least 1, at most the frame budget), so at 2x and 5x a frame's ticks overlap the draw instead of adding to it; only its
+last two publish. The ticks are ahead of the clock: they count as the next ones owed (`AdvanceSimulation` takes them, then runs the rest), and the game
+clock moves as each falls due. No new batch starts until the last is due; until then `CurrentSnapshot`/`PreviousSnapshot` hold the pair from before them, so the picture is where it was; `ShownTick` is the world tick on
 screen. Between `BeginTickAhead` and `EndTickAhead` nothing may touch the `World`: the renderer's host callbacks (`Source`, `PoseClock`) read only
 the session's snapshots, and the world reads the renderer only through the weather source (a reference and a float per region). Consequences
-(**engine choice**): a command lands one tick later (33 ms at 1x); blood marks and sounds come out with the tick, up to a tick before it shows; a
-pause with a tick ahead takes it at once (the picture jumps a tick, then the paused interface's republished snapshots show); a save takes it first
-(`SettleAhead`); `ReplaceWorld` drops it. Display → World tick alongside drawing (`TickAhead`): Faithful never (the world, then the draw); Meitou, the default, once
+(**engine choice**): a command lands a batch later (one tick, 33 ms, at 1x; about a frame's ticks at 5x); blood marks and sounds come out with the tick, up to a batch before it
+shows; a pause with ticks ahead takes them at once (the picture jumps, then the paused interface's republished snapshots show); a save takes them first
+(`SettleAhead`); `ReplaceWorld` drops them. Display → World tick alongside drawing (`TickAhead`): Faithful never (the world, then the draw); Meitou, the default, once
 a tick takes 4 ms (`WorldSession.TickMs`, smoothed over about ten ticks) until it is under 2 ms (a tick ahead is slower, sharing the cores); Always
 every frame. Off whatever the setting in stills, the duel, recorded flights and the play benchmark (their ticks stay in step with the frame).
 F12's `tick ahead` row is its wall time; `outside ticks` leaves it out.
@@ -55,6 +65,11 @@ rendering is camera-relative.
 Tick order: Inputs → Schedule → Think → Move → Act → ordered Apply → SlowWorld → Publish.
 Inputs/Schedule/Apply/SlowWorld are serial; each implemented parallel phase has a system barrier. Publish makes the character snapshots on the
 workers in 256-slot chunks (each reads only the tick's state), listed in slot order.
+Engine choice, to keep the publish small with ~1,400 characters: the context menu's figures (kidnap and stealth KO chances, shackles) and the AI goal text
+go only to the selected, inspected and pointed character (`PlayerState.Pointed`, set by the host as the mouse moves) and the player's (goal text);
+`CanStealthKo` tells the quick order and highlight for everyone. A body's part figures (aggregates, worst part, blood shown) are kept until a part's
+`HealthPart.Version` moves. The research view refreshes at once when the finished, queued or paid lists or the bench level change, else at most once a
+second (progress, bench stock, the focus zone). Cages and shown doors are new lists only when one changed.
 A system's `BeforeAct` runs right before its own `Act`, with a barrier between. Combat's body step runs there: the medical tick (`TickMedical`), the arms, getting up,
 and the fight's end on going down. Every fighter's body step therefore finishes before any fighter decides. Otherwise a decision that reads its target's knock-out
 or fight would depend on which partition ran first. A decision reads another fighter's fight as that fighter's body step left it, because a decision's own fight end
@@ -275,6 +290,13 @@ First aid reads patients in its own Act barrier and applies treatment during ser
 Body handles medical ticks before combat (`TickMedical=false`); carry sees knockouts before
 combat and drops carried targets before attacking. Combat swaps before animation/retaliation;
 crime sees deeds and final positions/carry links. Game combat uses `SelfApproach=false`.
+
+### Spread sweeps
+
+Engine choice: a periodic per-character pass looks at each character on its slot's turn (slot mod the period), as the original runs its AI
+updates 8 characters a frame in turn ([game loop](game/game-loop.md#the-character-update-budget)), instead of all on one tick: Aggro, Crime,
+FirstAid, NPC looting, Captive (`SweepEveryTicks` 30; new jobs at most `MaxNewJobs` over the period, at least one a tick), Town duty and
+Kidnap (`LookEveryTicks` 15). **Observed** (`--log-spikes`, ~1,400 characters loaded): the captive sweep on one tick was 8-11 ms once a second.
 
 ## Population
 
@@ -526,7 +548,9 @@ Cache key: the zone's building hash, the build settings and a content hash (the 
 height, blend, biome and overlay maps by size and write time, the DotRecast version). The cache holds the zone's own pruning; the kept set of every loaded
 zone is resolved again whenever one is published or unloaded (the border rule toward unloaded sides, the neighbours' kept edges, `KeepAt` points;
 [zone borders](game/pathfinding.md#own-builder)). Unloading a zone skips its queued build;
-a running one is still cached but not published, and its task is cancelled.
+a running one is still cached but not published, and its task is cancelled. A zone's tiles build in parallel on every core but one under a
+loading screen and on a quarter of the cores in play (`NavMeshService.Covered`): **Observed** (allocation trace, coming down into unbuilt zones) the tile
+builds allocated ~13 GB in 5 s and, on every core, starved every simulation system and the render thread into 100-180 ms frames.
 
 ## Animation
 
@@ -732,6 +756,9 @@ main grid, weight and burden only, grid size from its `inventory w` / `inventory
 
 `Ragdolls/RagdollSystem` (game behaviour: [ragdolls](game/ragdolls.md)) runs serially after animation
 when the host passes `CharacterRigs` (the game does; tests and goldens do not). Engine choices:
+- **Files**: a race's ragdoll `.phs` is read once per path (one a race and sex) and shared by every look; read per look, each character streamed in
+  read it in the tick that first asked (`AnimationSystem` asks `HasRagdoll` of every character), most of the long ticks' file time (**Observed**, CPU trace
+  of the play benchmark's flights, ~1,400 characters: 141 ticks over 25 ms before, 99 after).
 - **Physics**: BepuPhysics2, one scene stepped on the calling thread (deterministic, 2 solver
   iterations, 4 substeps per tick, fallback batch threshold 1024: Bepu 2.4.0's fallback batch throws
   when its last contact on a dynamic body is removed with one on a kinematic body, which big battles hit at the default 64). Bodies and joints come from the race's ragdoll `.phs`
@@ -1384,6 +1411,12 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   owner: the base game's ore is picked up by hand), or a storage within `HaulRange` takes it as for any machine. Engine choices: the rock is picked by its mesh's triangles where the instance places them (the original picks its building's collision); its radius, the longest half-extent of the mesh's bounds box scaled by the instance and at least `NodeRadius` 25, sizes its resource richness (the original takes the mesh's bounds the same way); without the mesh file a rock is picked as a sphere of 25 round its origin; the pointer over a rock is `mine` (with characters selected, after sites and doors, as the click order is); level-placed `is foliage`
   buildings (not drawn, not in `FoliageResourceNodes`) cannot be mined. NPC town mines are not run (the original's make output while NPCs
   operate them).
+- **Town training dummies** (`ProductionSystem.TownDummy`, fixtures `FixtureKind.Training`, UI `PlayerInterface.Dummies.cs`). A town building's BF_TRAINING
+  furniture (its interior layout's, or the building itself) is a fixture `<building>@dummy<n>` (n in layout order) of the building's owner; like a rock it is no
+  registry site, so it is neither drawn, saved nor built: the production system makes a complete site of it once its town has registered, and its machine is kept in
+  memory, not saved. A right click with characters selected is an `OperateOrder` (Training, 97), with Shift the Training job, whoever owns the dummy
+  ([UseableStuff verbs](game/ui-input.md#context-menu-verbs)); a saved order or job keeps the id. Picked as a bed is (its collision, else its middle within
+  30 px); pointer `use`. Not handled: an NPC idling at a dummy (town goals, `HomeSpotKind.Training`) does not count as its operator, so a player character can share it.
 - **Items.** `PutInMachine` and `TakeFromMachine` move items between a character within 40 of the building's footprint and the machine:
   inputs, output, or storage cells.
 - **Research** (`Construction/ResearchState`). A queue paid at queue time from the benches' storage; a paid id is never
@@ -1531,6 +1564,8 @@ per stock container, each container's window showing only its own (`Shop.ForBuil
 trader has its home's containers filled instead (`FillHome`). Only members that trade (`DialogueSystem.Trades`, [who trades](game/economy.md#who-trades)) publish `IsTrader`, the
 Trade verb and pointer. Shop state is hashed; the open trade is not, except its buyback receipts (below). A shop is saved on its platoon (`Saving/ShopSave`: stock, fill count,
 `inventory refresh time`, [economy](game/economy.md#building-shops-observed-decompile)) and kept by a saved platoon that leaves the world; a save without it gets a fresh fill.
+Customer: the original buys into the character window the stock is dropped on (`FUN_140712490`, **Observed**). Meitou keeps one customer; when it is no longer selected, the
+trade passes to a selected player character in reach of the trader (`FollowSelection`; out of reach the customer stays), and the inventory window shows the customer while trading.
 Transfers and money changes must succeed together. Stealing from containers: [crimes](#crimes-and-bounties). Smuggling: the refusal and event 8 (`TradeSystem.Smuggling`) and the held item's prompt ([economy](game/economy.md#fencing-stealing-and-smuggling)); not built: a smuggler's own answer (read by no caller seen).
 
 Bags (engine choice; how the original trades bags and their contents is **Unknown**): a bag trades whole, the same instance with its contents grid, and only empty ("That bag

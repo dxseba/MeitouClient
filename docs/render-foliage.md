@@ -9,6 +9,8 @@ Atlas format, transitions and residency: [impostors.md](impostors.md). GPU API: 
 overlay and random state. Fine/coarse tiers and velocity lookahead prepare zones before entry;
 layouts, GPU resources and visibility are separate lifetimes. Keep ready data until replacements
 publish. Instances draw in every intersecting depth slice, not only the near slice.
+Which zones are laid out and kept, and which grass pages made and kept, adds the eye's height above the ground beyond the game's highest camera
+to the ground distance (`FoliageRenderer.Load`, [engine](engine.md#eye-height)). Drawing still measures across the ground.
 
 `FoliageRenderer`/`FoliageShaders`: race-independent world instances, material modes, alpha test,
 lighting/wind and shadows. Faithful uses layer ranges and full-detail rules. Meitou `range`
@@ -25,13 +27,17 @@ recording; workers record immutable draw jobs, never upload/allocate or mutate r
 
 ## Grass
 
-Worker-built 576-unit pages (8x8 per zone) use placement density and terrain rules from research.
+Worker-built 576-unit pages (8x8 per zone) use placement density and terrain rules from research. A page's blades are generated into pooled arrays
+(`FoliageGrassField.RentBladesWithPrefixes`) that go back once its last upload step has run: fresh arrays per page were ~4 GB in 50 s of flight
+(**Observed**, allocation trace).
 Near pages draw blades; ranges and paging determine coverage. The blades live in one store (`FoliageGrassGpu`), 160 MB and 32768 slots at
-the default grass distance (x 8 the layer ranges), times the distance ratio squared rounded up, at most 8 and an eighth of the memory budget (x 2: 640 MB); raising the setting
+the default grass distance (x 8 the layer ranges), times the distance ratio squared and the kept places (`Areas`, render-objects.md "Kept points") rounded up, at most 8 and an eighth of the memory budget (x 2: 640 MB); raising the setting
 past it builds a larger store and makes every page again (`GrowGrassStore`; not when `VramGuard` refuses it), lowering it keeps the store until restart. A page that finds the
 store full keeps its blades and waits; while full, one waiting page a frame is tried. **Observed** (save siwa-test4, x 2 in the 160 MB
 store): retrying every waiting page each frame cost 15.8 ms of the render thread (trace: `BufferArena.Allocate` and the release of the
-partial allocation), and the pages past the store were never drawn. Sway is held for deterministic
+partial allocation), and the pages past the store were never drawn. Pages round kept points ([render-objects.md](render-objects.md#kept-points))
+rank after the eye's; while an eye page waits for room the kept pages queue nothing and the one farthest from its point is freed each frame
+(frees land after the frames in flight, so a few more may go than needed). The draw skips pages beyond their zone's longest grass range before sorting. Sway is held for deterministic
 screenshots unless deliberately stepped. `grass-velocity` supplies sway motion only where screen
 motion warrants it; camera reprojection handles the rest. Incorrect previous phase/camera/depth
 causes temporal ghosting. Keep blade motion consistent between colour/depth/velocity views.

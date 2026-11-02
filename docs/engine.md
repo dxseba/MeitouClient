@@ -10,7 +10,7 @@ GPU and simulation ownership stay separate. [Simulation contracts](simulation.md
 
 WorldSession owns world, clocks, input/bindings, camera and last two snapshots. Control30Hz real
 (default config tickRate), max10 ticks/frame; simulation1/30 game second, speed0/1/2/5 and
-6*speed budget. Control precedes simulation; interpolation uses each clock's alpha, shortest
+2*speed budget. Control precedes simulation; interpolation uses each clock's alpha, shortest
 angle rotation and cuts on mode changes. The authoritative time/order/determinism details are
 in simulation. Host copies camera state into WorldCamera and snapshots into CharacterDrawList. The next world tick runs on its own
 thread during the world draw ([simulation](simulation.md#tick-ahead)).
@@ -162,6 +162,18 @@ are restored when leaving the title.
 Title character preparation starts ahead of ordinary streaming during boot; the complete scene uses the readiness contract above.
 `--title-preview --screenshot <path>` captures it for visual QA (`--settings-showcase` the settings menu's Graphics page in its states); `--ticks` advances the fight. Save arrival still uses the
 loader's leader-focused camera contract; saved camera pose restoration remains unimplemented.
+
+### Eye height
+
+Engine choice (`EyeLift`): loading adds the eye's height above the ground beyond the game's highest camera (1840, `KenshiCamera.MaxHeightAbovePivot`)
+to a distance across the ground, so the game's camera heights load as before and a free camera high above the land loads only what it can see. It
+measures the terrain's biome textures and which load at full size (`TerrainTextures.UpdateBiomes`), the object zones laid out, kept and unparked
+(`ObjectStreamer.NearZone`), foliage zones and grass pages ([render-foliage](render-foliage.md)). Characters: only those within drawing reach of the eye
+(6000, 3000 while lifted, `CharacterRenderer.LiftedReach`) or 3000 of a kept point or a flight's arrival are built (meshes, textures); all were before,
+the draw list holding every loaded character. **Observed** (play benchmark flights, ~1,400 characters): character textures 576 MB to 122 MB. Drawing
+and the kept points and arrivals still measure as before.
+A free camera over 3000 above the ground under it (`KenshiCamera.FlightHeight`, the focus gate in [camera](formats/camera.md)) has the weather's fog and
+camera particle effects off, the fog thinning over the 500 below it (`SkyRenderer.WeatherFogScale`): they surround a ground-level eye and would fill a flight's whole view.
 
 ## Rendering and upscaling
 

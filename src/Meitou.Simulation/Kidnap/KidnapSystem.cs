@@ -11,7 +11,7 @@ namespace Meitou.Simulation.Kidnap;
 /// <summary>Settings of the <see cref="KidnapSystem"/>; engine choices unless a doc label says otherwise.</summary>
 public sealed record KidnapSettings
 {
-    /// <summary>The look for victims and cages runs every this many ticks.</summary>
+    /// <summary>Each kidnapper looks for victims and cages once in this many ticks, on its slot's turn.</summary>
     public int LookEveryTicks { get; init; } = 15;
     /// <summary>A kidnapper looks for a victim within its sight (the rescue finder's range; the sensed list's size is <b>Unknown</b>).</summary>
     public float Sight { get; init; } = AggroSystem.OutdoorSight;
@@ -144,10 +144,12 @@ public sealed class KidnapSystem(PopulationData data, PopulationSystem populatio
             if (Step(world, abductions[k])) k++;
             else abductions.RemoveAt(k);
         }
-        if (world.Tick % Math.Max(1, Settings.LookEveryTicks) == 0) Look(world);
+        // Each kidnapper looks once in LookEveryTicks, on its slot's turn (slot mod the period): the looks spread over the ticks (docs/simulation.md "Spread sweeps").
+        int every = world.Every(Settings.LookEveryTicks);
+        Look(world, every, (int)(world.Tick % every));
     }
 
-    void Look(World world)
+    void Look(World world, int every, int phase)
     {
         var table = world.Characters;
         victims.Clear();
@@ -169,7 +171,7 @@ public sealed class KidnapSystem(PopulationData data, PopulationSystem populatio
             duty.Fill(-1);
             foreach (var member in squad.Members)
             {
-                if (!table.TryResolveNext(member, out int slot) || !FreeKidnapper(world, slot)) continue;
+                if (!table.TryResolveNext(member, out int slot) || slot % every != phase || !FreeKidnapper(world, slot)) continue;
                 var cold = table.Cold(slot)!;
                 int role = (int)Ai.AiSystem.RoleOf(squad, member, cold);
                 if (duty[role] < 0) duty[role] = population.KidnapDuty(world, squad, (AiRole)role) ? 1 : 0;
@@ -257,7 +259,7 @@ public sealed class KidnapSystem(PopulationData data, PopulationSystem populatio
                 // Every look the best free cage of its faction in range. A marching carrier looks only within a town of its faction (any on the way: the original's cage finder weighs
                 // the home x100 but does not require it) and drops the captive when its home town (any, without a HomeSite) has no free cage; any other carrier waits a while for one
                 // (engine choices; the original's give-up rule is Unknown).
-                if ((world.Tick + g) % Math.Max(1, Settings.LookEveryTicks) != 0) return true;
+                if ((world.Tick + g) % world.Every(Settings.LookEveryTicks) != 0) return true;
                 int town = TownOf(world, gn.Position, gc.Faction);
                 if (a.Marching && town < 0) return true;
                 if (CageFor(world, gn.Position, gc, a) is { } found) return ToCage(world, a, g, found);

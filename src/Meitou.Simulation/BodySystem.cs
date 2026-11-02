@@ -162,7 +162,14 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                 n.Velocity = Vector3.Zero;
             }
             if (medical.Dead) continue;
-            if (cold.Animal is { } animal) Age(cold, animal, stats, medical, world.TickSeconds);
+            // At 2x and 5x (World.SpeedSteps) a character no fight, injury or player touches steps on its slot's turn with the time since its last step: the rates come
+            // out the same and the body costs per real second what it does at 1x. The rest step every tick, so knock-outs, deaths and the HUD keep their timing.
+            int steps = world.SpeedSteps;
+            if (steps > 1 && !cold.IsPlayer && !cold.InCombat && !medical.Incapacitated && !(medical.Bleeding > 0) && i % steps != world.Tick % steps
+                && cold.BodyStepTick >= 0 && world.Tick - cold.BodyStepTick < steps) continue;
+            float dt = cold.BodyStepTick < 0 ? world.TickSeconds : Math.Clamp(world.Tick - cold.BodyStepTick, 1, steps) * world.TickSeconds;
+            cold.BodyStepTick = world.Tick;
+            if (cold.Animal is { } animal) Age(cold, animal, stats, medical, dt);
             // The light level the stat multiplier's light term reads (the original's Character +0xd8, kept by the senses).
             medical.Light = world.Sight.Light(i);
             // The load: the inventory weight, plus carry person weight while carrying someone, against the strength the injuries leave (character-stats.md "Encumbrance and carrying").
@@ -193,12 +200,12 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             if (world.BloodMarks is { } marks && medical.Bleeding > 0 && cold.WaterState == 0) BloodTrail(world, marks, i, cold, medical.Bleeding, race, in n);
             events ??= [];
             events.Clear();
-            medical.Tick(world.TickSeconds, ctx, events);
+            medical.Tick(dt, ctx, events);
             n.MaxSpeed = Speed.Run(race, stats, medical, encumbrance, statsFactor: cold.Fighter?.AthleticsFactor ?? 1);
             cold.SwimSpeed = Speed.Swim(race, stats, medical, encumbrance);
             // Movement XP only for the player's faction and not while fight steering or swinging (FUN_140660dc0, Verified; Meitou: not on the Attack task).
             if ((cold.IsPlayer || world.Player.Faction >= 0 && cold.Faction == world.Player.Faction) && n.Task != (byte)CharacterTask.Attack)
-                TrainOnTheMove(stats, race, medical, in n, cold.WaterState == 3, carrying, encumbrance, world.TickSeconds);
+                TrainOnTheMove(stats, race, medical, in n, cold.WaterState == 3, carrying, encumbrance, dt);
             // The stealth XP the listeners' hearing checks gave since the last tick (FUN_1408c7330, summed by AggroSystem.Apply; docs/game/character-stats.md "Stealth (heard check)").
             if (cold.HearingXp != 0)
             {
@@ -212,7 +219,7 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             {
                 cold.StealthFactor = 1;   // the sneak XP step resets the hearing checks' exposure factor (FUN_1408c65a0)
                 var exposure = PaidExposureOf(world, cold);
-                if (exposure != StealthExposure.Unobserved || SomeoneAbout(world, i)) xp.Sneaking(stats, race, exposure, world.TickSeconds);
+                if (exposure != StealthExposure.Unobserved || SomeoneAbout(world, i)) xp.Sneaking(stats, race, exposure, dt);
             }
             if (cold.IsPlayer || table.IdOf(i) == world.Player.Inspected) cold.Extended = ExtendedOf(cold, stats, race, medical, n.MaxSpeed, encumbrance, ctx.Resting, carrying, ctx.UseHungerRate);
             n.Health = Math.Clamp(medical.Blood / MathF.Max(MedicalState.BloodCapacity(race, stats.Strength), 1) * 100, 0, 100);
@@ -385,14 +392,14 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
 
     /// <summary>
     /// The hunger level a character is kept at for free (character slot <c>0x348</c>, <c>FUN_1405c9ca0</c>, <b>Verified</b> decompile; docs/game/character-stats.md "Free food"):
-    /// an animal 3; a slave 1; held in a cage or restraint, none when the player's faction holds it, else 2 (1.15 for an escaped slave); the player's faction none (-10); anyone else
+    /// a slave 1; held in a cage or restraint, none when the player's faction holds it, else 2 (1.15 for an escaped slave); the player's faction none (-10); anyone else
     /// its squad's level, 3, or 1 + 1.2 x a random number once per squad for a SQUAD_TEMPLATE with <c>malnourished</c> (the platoon constructor <c>FUN_1407ee2d0</c>). Without a
-    /// database (tests) only animals, slaves and prisoners are fed.
+    /// database (tests) only slaves and prisoners are fed. The original's first case, an animal 3, applies only with the gameplay option <c>animalsEat</c> off; it is on in every
+    /// game (default 1, no UI binding, never saved), so animals take the cases above like anyone else: the player's animals get hungry.
     /// </summary>
     internal float HungerFloor(World world, CharacterCold cold, MedicalState medical)
     {
         const float None = MedicalContext.NoHungerFloor;
-        if (!medical.HasStatsObject) return MedicalState.MaxHunger;
         if (cold.SlaveState == 1) return 1;
         if (cold.IsImprisoned)
         {

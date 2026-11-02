@@ -83,7 +83,7 @@ OS file-cache state is separate. GPU setup, biome texture uploads, river-map gen
 streamer settling remain costs with warm caches. Separate start-up from steady-state frames.
 The game's `--quit-after` log reports exposed-menu FPS, longest frame and stalls over 100ms separately from covered loading work.
 With `--log-spikes`, the game's exit also prints the profiler's per-stage GPU run summary once the last frame's timestamps
-arrive. In an interactive game run, `--windowed --size WxH` holds that window size; without `--size` it starts maximized.
+arrive. A spike frame whose simulation took over 20 ms also notes each system and part of it from 2 ms (`sim <name>`). A tick run ahead over 20 ms is noted in the frame whose draw waited for it (`sim ahead tick`, `sim ahead <system>`); that wait is the `ui` part `world end`. Its render-thread list ends with the parts of `ui` (everything from the world's last stage to the submission: world end, markers, steer, hud, debug, settings, cinema, loading, pointer, composite) and of `upd-chars` from 1 ms. The exit summary also lists the run's collections and its most allocated types (the runtime's allocation samples, `BenchGcListener`). In an interactive game run, `--windowed --size WxH` holds that window size; without `--size` it starts maximized.
 
 The game/viewer disable tiered compilation and tiered PGO. Experiments can use
 `DOTNET_TieredCompilation` / `DOTNET_TieredPGO`; record these settings. ReadyToRun and tiering
@@ -104,7 +104,7 @@ numbers from untraced runs.
 `MeitouClient --load <save> --play-bench <dir>` plays a scripted session in the real game (frame limit and VSync off) and quits
 (`GameHost.PlayBench.cs`). Segments: settle, idle, orbit, zoom to the farthest, pan, a 30 s travel at 3000 units/s, return, time x2
 and x5, talk, trade, container, doors, pick-up, paths (a squad or each member sent 20-200 m in a random direction every 0.5 s), walk,
-fight (six spawned enemies, `--scene-npc`), loot, the panels opened cold then warm (with limbs and build), a grazing horizon view, the overview.
+fight (six spawned enemies, `--scene-npc`), loot, the panels opened cold then warm (with limbs and build), a grazing horizon view, the overview, flights (each player character in turn, twice, 6 s each, as a double click on its portrait: a character flight when they are on).
 Each interaction targets the nearest candidate within 150 m and retries every 3 s; a modal message box is closed and logged.
 `MEITOU_BENCH_ONLY=settle,zoom` keeps only the named segments (the run is deterministic from the save, so a hitch comes back at its tick).
 
@@ -137,8 +137,9 @@ post 0.9, objects 0.7, particles 0.5, shadows 0.45); render thread ~3 ms; world 
 | a follower walked towards the world origin after spawning and asked for a path there | a spawned character's goal was (0, 0) until its first think set one; a follower waiting it out steered at it | `CharacterTable.Spawn` starts the goal at the character's own spot |
 | 20-80 ms on first use (AI, dialogue, screens) | JIT: each method compiled on its first call (no tiering) | `JitWarmup`: the Meitou assemblies compiled ahead on three background threads, simulation then rendering first (~38000 methods, about 3 s; `--no-precompile`): the game thread's JIT 4.5 -> 2.3 s, none left in play |
 
-Largest remaining allocation (shares of the ~160 MB/s before the fixes): the UI rebuilds its controls and their property dictionaries every frame (`MyGuiPresentation.Arrange`, ~6%),
-snapshot records per character (~2%), particle affector delegates (~1%).
+Largest remaining allocation (shares of the ~160 MB/s before the fixes): the screens rebuild their controls and property dictionaries every frame (`MyGuiPresentation.Arrange`, ~6% with the HUD's),
+snapshot records per character (~2%), particle affector delegates (~1%). The HUD's arrangement is reused while its bindings are equal (`UiBindings.ContentEquals`; remade on 15% of frames at 180 fps, on the ticks that move the life bars), and the painter keeps each caption's lines and widths (`UiPainter.LayOutText`).
+**Observed** (2026-11-02, quicksave at 1920x1080, HUD only, paired runs): the HUD's render-thread cost 0.83 -> 0.69 ms a frame (layout 0.15 -> 0.05, paint 0.47 -> 0.43); what remains is binding and arranging the rest (~0.2 ms) and emitting the quads and glyphs (~0.4 ms).
 Simulation side (**Observed**, headless probe of a ~1600-character town save, 2026-11-01): ~0.21 MB a tick (1.72 MB before): `World.Publish` reuses its character snapshots and layer lists (docs/simulation.md "Snapshots"), and `BodySystem.HungerFloor` and `AnimationSystem.PainHold` no longer allocate per character. Collections per 1800 ticks (a minute at 1x): ~41 before the snapshot reuse, 5-6 after.
 Pipelines are made on first use (`PipelineLibrary.Prepare` has no caller): the loading warm-up's frames make what they draw. Still made in play: the blood
 decals', a portrait's, the hover outline's and the build menu's icon pipelines (one each per session). Every frame's count is in `frames.csv` (`late_pipelines`).

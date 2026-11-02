@@ -52,6 +52,12 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
     public const float TileSize = 32;
     /// <summary>Freezing (docs/game/ragdolls.md "Sleep and limits"): not before this age, then when this share of the bodies is still; at the latest after <see cref="FreezeLatest"/>.</summary>
     public const float FreezeEarliest = 2, FreezeShare = 0.6f, FreezeLatest = 7;
+    /// <summary>
+    /// Meitou (<b>engine choice</b>): a collapsed limb of a character still up dangles only within this of the camera (<see cref="World.ViewPosition"/>; about where the human body's first
+    /// reduced mesh level starts), and one already dangling until 10 % farther; beyond, the limb follows the animation and the physics need not step for it. The original dangles them at
+    /// any distance (docs/game/ragdolls.md "Sleep and limits").
+    /// </summary>
+    public const float LimbReach = 300;
     /// <summary>A body is still under these squared speeds (the game's PhysX sleep velocities: linear² 2.25, angular² 1.96).</summary>
     const float StillLinear = 2.25f, StillAngular = 1.96f;
     /// <summary>How far under the terrain a body's centre must get, in world units, to count as through it (engine choice; a resting limb's centre is at least its radius, 0.4 and up, above it).</summary>
@@ -66,6 +72,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
     readonly Dictionary<CharacterId, Ragdoll> ragdolls = [];
     readonly List<CharacterId> order = [];
     readonly ConcurrentDictionary<CharacterAppearance, Lazy<(PhysicsFile File, string Path)?>> files = new(ReferenceEqualityComparer.Instance);
+    readonly ConcurrentDictionary<string, Lazy<PhysicsFile?>> physicsFiles = new();
     readonly ConcurrentDictionary<(string Path, SkeletonRig Rig, int Scale), Lazy<RagdollDefinition?>> definitions = new();
     readonly Dictionary<RagdollDefinition, (TypedIndex Shape, BodyInertia Inertia)[]> shapes = new(ReferenceEqualityComparer.Instance);
     IAnimationSource? animations;
@@ -84,7 +91,15 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
     /// <summary>Ragdolls in play (frozen ones included) and how many are moving.</summary>
     public int Count => ragdolls.Count + torsoRagdolls.Count * 2 + DetachedCount;
     public int Moving { get; private set; }
+    /// <summary>The moving ones by kind: carried, whole-body (falling or settling) and limbs only (a collapsed arm or leg of a character still up).</summary>
+    public int MovingCarried { get; private set; }
+    public int MovingWhole { get; private set; }
+    public int MovingLimbs { get; private set; }
     public int Tiles => physics.TileCount;
+    // Real seconds of physics owed since the last step (SlowWorld); not saved or hashed.
+    float physicsDue;
+    /// <summary>Bodies the physics steps (its awake set, ground tiles included).</summary>
+    public int AwakeBodies => physics.Simulation.Bodies.ActiveSet.Count;
 
     sealed class Ragdoll
     {
@@ -133,15 +148,19 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
 
     public BonePose? Publish(CharacterId id) => torsoRagdolls.TryGetValue(id, out var cut) ? cut.Published?.Negative : ragdolls.TryGetValue(id, out var r) ? r.Published : null;
 
-    // A static factory given the rigs: nothing allocated on a hit.
-    (PhysicsFile File, string Path)? FileOf(CharacterAppearance look) => files.GetOrAdd(look, static (a, rigs) => new(() =>
+    // A static factory given the system: nothing allocated on a hit. The file itself is read once per path (one a race and sex), not once per look: every
+    // character has a look of its own, and reading it again for each one put a file read in the tick of every character streamed in (docs/simulation.md "Ragdolls").
+    (PhysicsFile File, string Path)? FileOf(CharacterAppearance look) => files.GetOrAdd(look, static (a, self) => new(() =>
     {
         // RACE male ragdoll / female ragdoll (the female file only for a female look; docs/game/ragdolls.md "RagdollPart and requests").
         var name = a.Race.GetPath(a.Female ? "female ragdoll" : "male ragdoll") is { Length: > 0 } f ? f : a.Race.GetPath("male ragdoll");
-        if (string.IsNullOrEmpty(name) || rigs.Find(name) is not { } path) return null;
-        try { return (PhysicsFile.ReadFile(path), path); }
-        catch (Exception e) when (e is FormatException or IOException) { return null; }
-    }), rigs).Value;
+        if (string.IsNullOrEmpty(name) || self.rigs.Find(name) is not { } path) return null;
+        return self.physicsFiles.GetOrAdd(path, static p => new(() =>
+        {
+            try { return PhysicsFile.ReadFile(p); }
+            catch (Exception e) when (e is FormatException or IOException) { return null; }
+        })).Value is { } file ? (file, path) : null;
+    }), this).Value;
 
     RagdollDefinition? DefinitionOf(CharacterAppearance look, SkeletonRig rig, float scale)
     {
@@ -229,6 +248,11 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             }
             // The look's ragdoll file asked only of a character that wants one (two cache lookups per standing character every tick were most of this loop in a big battle).
             var wanted = cold.Appearance is null ? RagdollPart.None : Wanted(cold);
+            if (wanted != RagdollPart.None && (wanted & ~RagdollPart.Limbs) == 0 && world.ViewPosition is { } eye)
+            {
+                float reach = r is { Mask: not RagdollPart.None } ? LimbReach * 1.1f : LimbReach;
+                if (Vector3.DistanceSquared(next[i].Position, eye) > reach * reach) wanted = RagdollPart.None;
+            }
             if (wanted != RagdollPart.None && !HasRagdoll(cold)) wanted = RagdollPart.None;
             // A ragdoll a save holds (Saving.RagdollSave): taken the first time the character is seen, used when it starts as a whole body.
             SavedRagdoll? restore = null;
@@ -278,17 +302,37 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
         CoverDetached(env, tick);
         world.Profile.Part("rag setup");   // F12: the masks, the builds, the pins and the ground tiles
         // 2. The step.
-        Moving = 0;
-        foreach (var id in order) if (ragdolls[id] is { Frozen: false, Mask: not RagdollPart.None }) Moving++;
-        Moving += MovingTorsoRagdolls + MovingDetached;
+        (Moving, MovingCarried, MovingWhole, MovingLimbs) = (0, 0, 0, 0);
+        foreach (var id in order)
+            if (ragdolls[id] is { Frozen: false, Mask: not RagdollPart.None and var mask })
+            {
+                Moving++;
+                if ((mask & RagdollPart.CarryMode) != 0) MovingCarried++;
+                else if ((mask & RagdollPart.Whole) != 0) MovingWhole++;
+                else MovingLimbs++;
+            }
+        int torsoMoving = MovingTorsoRagdolls, torsoCarried = 0, detachedMoving = MovingDetached;
+        foreach (var id in torsoOrder)
+        {
+            var halves = torsoRagdolls[id];
+            if (!halves.Positive.Frozen && halves.PositiveCarried) torsoCarried++;
+            if (!halves.Negative.Frozen && halves.NegativeCarried) torsoCarried++;
+        }
+        Moving += torsoMoving + detachedMoving;
+        MovingCarried += torsoCarried;
+        MovingWhole += torsoMoving - torsoCarried + detachedMoving;
         // The physics on the world's thread count (its own workers: the world's pool is idle in this serial phase).
         if (Moving > 0 && threads is null && world.Settings.Threads > 1) threads = new BepuUtilities.ThreadDispatcher(world.Settings.Threads);
-        if (Moving > 0)
+        // Meitou: the real time steps up until it makes a step of 1x (every tick at 1x, every 5th at 5x), so the physics costs per real second what it does at 1x whatever the speed;
+        // a step costs about the same however short (Observed: 0.5 ms a tick for a few ragdolls at 1x and at 5x).
+        physicsDue = Moving > 0 ? physicsDue + stepDt : 0;
+        if (Moving > 0 && physicsDue >= RagdollPhysics.StepOf(dt, 1) - 1e-5f)
         {
-            foreach (var id in order) if (ragdolls[id] is { Frozen: false, Mask: not RagdollPart.None } floating) Buoy(world, floating, stepDt);
-            BuoyTorsoRagdolls(world, stepDt);
-            BuoyDetached(world, stepDt);
-            physics.Step(stepDt, threads);
+            foreach (var id in order) if (ragdolls[id] is { Frozen: false, Mask: not RagdollPart.None } floating) Buoy(world, floating, physicsDue);
+            BuoyTorsoRagdolls(world, physicsDue);
+            BuoyDetached(world, physicsDue);
+            physics.Step(physicsDue, threads);
+            physicsDue = 0;
         }
         world.Profile.Part("rag step");
 

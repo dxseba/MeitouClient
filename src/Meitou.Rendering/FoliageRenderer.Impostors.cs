@@ -102,6 +102,8 @@ public sealed partial class FoliageRenderer
         public long FinerSince;
         /// <summary>Scans in a row the plan left this atlas out.</summary>
         public int DropScans;
+        /// <summary>The atlas was baked here, not read from the cache (a loading screen does not wait for its upload: <see cref="ImpostorUploadsAwaited"/>).</summary>
+        public bool Baked;
         /// <summary>A refine in flight: the cache read, the atlas, the new textures and the albedo skip they are made with.</summary>
         public Task<ImpostorAtlas?>? RefineLoad;
         public ImpostorAtlas? RefineAtlas;
@@ -172,6 +174,19 @@ public sealed partial class FoliageRenderer
 
     /// <summary>Atlases loading, waiting to bake, baking or uploading (part of <see cref="Pending"/>).</summary>
     int ImpostorPending => impostorWork.Count + impostorBakes.Count + (impostorBake is null ? 0 : 1);
+    /// <summary>
+    /// The atlases a loading screen waits for: those read from the cache and uploading. Not the reads still queued (behind a long setting's far grass jobs
+    /// on the workers they can wait half a minute) nor the bakes and their uploads: the meshes draw until each atlas is ready.
+    /// </summary>
+    int ImpostorUploadsAwaited
+    {
+        get
+        {
+            int n = 0;
+            foreach (var a in impostorWork) if (a.Impostor is { Stage: ImpostorStage.Uploading, Baked: false }) n++;
+            return n;
+        }
+    }
 
     string ImpostorDescription => $"{ImpostorAssets().Count(a => a.Impostor?.Stage == ImpostorStage.Ready)} impostor atlases {impostorBytes / 1048576.0:0} MB of {ImpostorLimitMb:0} MB " +
         $"({impostorsLoaded} from the cache, {impostorsBaked} baked, {impostorUnloads} unloaded, {impostorRefined} refined, {impostorCoarsened} coarsened, {impostorDropped} dropped by the plan, {impostorRefused} refused; " +
@@ -523,7 +538,8 @@ public sealed partial class FoliageRenderer
             float bestKey = float.PositiveInfinity;
             for (int i = 0; i < impostorRefineQueue.Count; i++)
             {
-                if (impostorRefineQueue[i].Impostor is not { Stage: ImpostorStage.Ready, Next: null, RefineLoad: null } s || s.WantSkip == s.Skip || now < s.RefineRetryAt || (s.WantSkip < s.Skip && guard is { Pressure: true }))
+                // Not one already refining (its atlas loaded, its textures being made): a second refine would list it twice and free the atlas the first still uses.
+                if (impostorRefineQueue[i].Impostor is not { Stage: ImpostorStage.Ready, Next: null, RefineLoad: null, RefineAtlas: null, Making: null } s || s.WantSkip == s.Skip || now < s.RefineRetryAt || (s.WantSkip < s.Skip && guard is { Pressure: true }))
                 {
                     impostorRefineQueue.RemoveAt(i--);
                     continue;
@@ -570,7 +586,7 @@ public sealed partial class FoliageRenderer
                 s.RefineLoad = null;
                 if (s.RefineAtlas is null) { s.RefineRetryAt = Environment.TickCount64 + 8000; impostorRefining.RemoveAt(i--); continue; }
             }
-            var atlas = s.RefineAtlas!;
+            if (s.RefineAtlas is not { } atlas) { impostorRefining.RemoveAt(i--); continue; }   // abandoned or finished under another entry
             if (s.Next is null)
             {
                 if (s.Making is null)
@@ -690,6 +706,12 @@ public sealed partial class FoliageRenderer
             }
             PlanImpostors(now);
             ApplyImpostorPlan(now);
+            // A jump (a save loaded from the menu's scene, a teleport): the atlases the old place wanted go now, not after the idle time,
+            // so they do not hold the new place's to the limit meanwhile.
+            if (impostorScanEye is { } last && Vector3.Distance(last, eye) > ImpostorJumpDistance)
+                foreach (var a in ImpostorAssets())
+                    if (a.Impostor is { Stage: ImpostorStage.Ready } s && s.LastUsed != now) UnloadImpostor(a);
+            impostorScanEye = eye;
         }
         if (now - lastImpostorScan < 2000 || settling)
             foreach (var a in ImpostorAssets())
@@ -786,6 +808,9 @@ public sealed partial class FoliageRenderer
     const float ImpostorReferenceHeight = 1080;
     /// <summary>Impostor atlases unused this long are unloaded (shorter than the meshes' <see cref="IdleSeconds"/>: an atlas is 9 to 36 MB).</summary>
     const double ImpostorIdleSeconds = 20;
+    /// <summary>The eye moved at least this far between two scans: a jump, after which only what the plan admitted stays resident.</summary>
+    const float ImpostorJumpDistance = 10000;
+    Vector3? impostorScanEye;
 
     /// <summary>The top levels an atlas never needs at a transition distance (<see cref="SkipFor"/> with the atlas's own radius).</summary>
     internal static int LevelsToSkip(ImpostorAtlas atlas, float maxScale, float transition) => SkipFor(atlas.FramePixels, atlas.Levels, atlas.Radius * maxScale, transition);
@@ -890,6 +915,7 @@ public sealed partial class FoliageRenderer
             });
             st.Atlas = atlas;
             st.Stage = ImpostorStage.Uploading;
+            st.Baked = true;
             impostorWork.Add(a);
         }
         else

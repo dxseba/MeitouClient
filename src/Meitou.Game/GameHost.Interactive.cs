@@ -96,6 +96,8 @@ sealed partial class GameHost
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
         // The debug overlays (docs/engine.md): F10 the debug menu (GameHost.DebugMenu.cs), F11 the frame statistics, F12 the profiler chart.
         var profiler = overlay is null ? null : new FrameProfiler(display.Context, () => display.Context.GpuFrameMs);
+        // --log-spikes: the run's allocations by type (the runtime's samples, one per ~100 KB), printed with the summary.
+        using var spikeGc = SpikeLog.Enabled ? new BenchGcListener() : null;
         // The Faithful / Meitou switches; Shift+F1 turns Meitou off and back on (plain F2..F4 and F8 are the game's speed and screenshot keys), the Tab panel sets them one by one.
         var switches = WorldFrame.LiveSwitches(o, () => gpu, () => camera, () => render);
         var meitou = new MeitouToggle(switches);
@@ -127,6 +129,7 @@ sealed partial class GameHost
                 LateDefencesChanged = on => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.LateDefences = on; },
                 GunnerFacingChanged = on => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.GunnerFacesBarrel = on; },
                 PunchReachChanged = on => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.PunchReachFix = on; },
+                BenchFacingChanged = on => session.World.BenchFacingFix = on,
                 DoorsCloseChanged = on => { foreach (var locks in session.World.Systems.OfType<Meitou.Simulation.Locks.LockSystem>()) locks.DoorsCloseBehind = on; },
                 AudioChanged = AudioSettingsChanged,
                 GameplayChanged = ApplyGameplay,
@@ -212,7 +215,7 @@ sealed partial class GameHost
 
         var silkInput = Silk.NET.Input.InputWindowExtensions.CreateInput(window);
         // The faithful windows' edit boxes copy and paste through the first keyboard's system clipboard.
-        player.ClipboardRead = () => silkInput.Keyboards.Count > 0 ? silkInput.Keyboards[0].ClipboardText : null;
+        player.ClipboardRead = () => silkInput.Keyboards.Count > 0 ? ClipboardText.Read(silkInput.Keyboards[0]) : null;
         player.ClipboardWrite = text => { if (silkInput.Keyboards.Count > 0) silkInput.Keyboards[0].ClipboardText = text; };
         Vector2? lastMouse = null;
         // Rotating pins the pointer. Windows and macOS put it back after every move (HoldPointer); Linux locks it (GLFW's disabled cursor),
@@ -309,7 +312,7 @@ sealed partial class GameHost
                     keyboard.ClipboardText = code;
                     Console.WriteLine($"camera    copied {code} ({WorldCameraCode.Describe(camera)})");
                 }
-                else if (WorldCameraCode.Decode(keyboard.ClipboardText) is { } pose)
+                else if (WorldCameraCode.Decode(ClipboardText.Read(keyboard)) is { } pose)
                 {
                     // The code's orbit (target, yaw, pitch, distance) as the free camera's eye and look direction.
                     Vector3 back = new(MathF.Cos(pose.Pitch) * MathF.Sin(pose.Yaw), MathF.Sin(pose.Pitch), MathF.Cos(pose.Pitch) * MathF.Cos(pose.Yaw));
@@ -551,7 +554,7 @@ sealed partial class GameHost
             // Edge scrolling (the game's default): the pointer at the edge of the window pans the camera, unless something else has the pointer.
             session.Camera.Settings.EdgeScroll = config.EdgeScroll != false;
             session.Camera.Strategy.EdgePointer = Covered || TitleVisible || panel?.Visible == true || interfaceHidden || cinemaHolds || cinema.EditorVisible ? null : WindowPointer.InWindow(window);
-            session.World.Profile.Enabled = profiler is { Showing: not FrameProfiler.Mode.Off } || g.PlayBench is not null;
+            session.World.Profile.Enabled = profiler is { Showing: not FrameProfiler.Mode.Off } || g.PlayBench is not null || SpikeLog.Enabled;
             if (!Covered) session.Advance(frameDt);   // loading and arrival preserve the loaded world's exact time
             DuelHoldClock();
             double advanceMs = Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
@@ -670,6 +673,7 @@ sealed partial class GameHost
                 if (gpu.Characters is { } coveredCharacters) coveredCharacters.Covered = streamsCovered;
                 if (gpu.Foliage is { } coveredFoliage) coveredFoliage.Covered = streamsCovered;
                 if (gpu.Objects is { } coveredObjects) coveredObjects.Covered = streamsCovered;
+                if (nav is not null) nav.Covered = covered;
                 // The loading screen follows the interface's mode as it is now (the settings can switch it at any time); only the Faithful mode counts loads.
                 bool faithfulUi = player.UiMode == Meitou.Data.Ui.UiMode.Faithful;
                 loadBar.Update(faithfulUi ? PendingLoads() : 0);
@@ -684,6 +688,7 @@ sealed partial class GameHost
                     DrawWorld(size.X, size.Y);
                     tickAhead = false;
                 }
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiWorldEnd);
                 // The sky arrival's fade to and from black, over the world and under everything else.
                 if (skyArrival is { Fade: > 0 } fading && overlay is not null)
                 {
@@ -703,13 +708,16 @@ sealed partial class GameHost
                 player.UiVisible = ui && !g.NoPopulation;
                 screenshotRequested = false;
                 if (ui && overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiMarkers);
                 if (!g.NoPopulation && !covered && panel?.Visible != true) player.Steer();
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiSteer);
                 if (ui && overlay is not null && !g.NoPopulation)
                 {
                     player.Draw(overlay, size.X, size.Y);
                 }
                 if (ui && overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
                 if (ui && overlay is not null && IsBattle) DrawBattleCounter(overlay, size.X, size.Y);
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiHud);
                 // The debug overlays are left out of saved pictures: the statistics at the top left, the key list below them, the profiler.
                 if (ui && overlay is not null && !shot && !feedbackShot)
                 {
@@ -737,9 +745,12 @@ sealed partial class GameHost
                     profiler?.Draw(overlay, size.X, size.Y);
                     profiler?.DrawVram(overlay, size.X, size.Y);
                 }
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiDebug);
                 if (ui && !feedbackShot) panel?.Draw(size.X, size.Y);
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiSettings);
                 // Over everything: the letterbox and the cinema's editor (F6, also with F7); the game hides its status line.
                 if (overlay is not null && !covered) cinema.Draw(overlay, size.X, size.Y, shot || take || feedbackShot || (interfaceHidden && !cinema.EditorVisible), showStatus: false);
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiCinema);
                 // The loading screen over the whole frame while a scene loads or the world warms up.
                 if (covered && loading is not null && loadingOverlay is not null)
                 {
@@ -748,6 +759,8 @@ sealed partial class GameHost
                     else if (loading.Exiting || skyArrival is { AtStars: true, Arriving: false } && sceneLoad?.Clock.Elapsed.TotalSeconds >= 2)
                         loading.Draw(size.X, size.Y, background: false);
                 }
+                else loading?.ReleaseWhenGone();
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiLoading);
                 // The mouse pointer over everything, as the original's Pointer layer; never in saved pictures. What the right button would do picks it,
                 // the arrow over the settings panel, the cinema's editor and the loading screen. The free camera hides it (the original's `invisible`);
                 // Hardware mouse shows Windows' cursor instead.
@@ -760,8 +773,10 @@ sealed partial class GameHost
                 }
                 // World and interface into the top-down picture the window shows (and a screenshot reads). With frame generation on this frame the window shows the
                 // world alone (the backbuffer, flipped by the present) and the layer lays the interface over every frame, generated ones too.
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiPointer);
                 bool generating = frameGen is not null && frameGen.Finish(uiTarget);
                 var finalPicture = generating ? null : uiLayer.Composite(backbuffer);
+                Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiComposite);
                 display.Present(finalPicture);
                 profiler?.EndFrame();
                 BenchLap(7);
@@ -820,6 +835,9 @@ sealed partial class GameHost
         // otherwise dispose the profiler before the frame ring has delivered them.
         profiler?.Flush();
         if (SpikeLog.Enabled) SpikeLog.PrintSummary();
+        if (spikeGc is not null) PrintAllocations(spikeGc);
+        if (Meitou.Navigation.NavQuery.Stats is { Searches: > 0 } paths)
+            Console.WriteLine($"paths     {paths.Searches} searches, {paths.Expanded / paths.Searches} polygons each on average, {paths.Exhausted} ran to the limit of {Meitou.Navigation.NavQuery.MaxIterations}");
         profiler?.Dispose();
         player.DisposeUi();
         EndLoadingScreen();
@@ -936,6 +954,17 @@ sealed partial class GameHost
         while (clock.Elapsed.TotalSeconds < end) Thread.SpinWait(64);
     }
 
+    /// <summary>--log-spikes, at exit: the most allocated types over the run and the collections by generation, their pauses summed.</summary>
+    static void PrintAllocations(BenchGcListener gc)
+    {
+        var (allocated, collections) = gc.Take();
+        long total = allocated.Values.Sum();
+        Console.WriteLine($"spikes    allocated {total / 1048576.0:0} MB over the run (sampled); collections {string.Join(", ", collections.GroupBy(c => c.Generation).OrderBy(g => g.Key)
+            .Select(g => $"gen{g.Key} x{g.Count()} {g.Sum(c => c.PauseMs):0} ms"))}; the most allocated types (MB):");
+        foreach (var (type, bytes) in allocated.OrderByDescending(p => p.Value).Take(30))
+            Console.WriteLine($"spikes      {type,-90} {bytes / 1048576.0,9:0}");
+    }
+
     /// <summary>Ctrl+Shift+F12: what is in video memory now, to vram-&lt;time&gt;.txt beside log.txt (<see cref="FrameProfiler.DumpVram"/>).</summary>
     void DumpVram(FrameProfiler? profiler)
     {
@@ -944,6 +973,7 @@ sealed partial class GameHost
         void Caches(TextWriter w)
         {
             if (gpu.Guard is { } guard) { w.WriteLine(guard.Status); w.WriteLine(); }
+            gpu.Objects?.WriteViewReport(w);
             gpu.Objects?.Textures.WriteReport(w);
             gpu.Foliage?.Textures.WriteReport(w);
             gpu.Characters?.Textures.WriteReport(w);
@@ -956,6 +986,8 @@ sealed partial class GameHost
     World? simNamesFor;
     string[] simNames = [];
     double[] simMs = [];
+    /// <summary>--log-spikes notes the simulation's systems of a frame whose ticks took longer than this.</summary>
+    const double SpikeSimMs = 20;
 
     /// <summary>Hands the frame's <paramref name="advanceMs"/> to the profiler with the world's tick profile split into phases and systems, and clears the profile.</summary>
     void SimProfile(FrameProfiler profiler, double advanceMs)
@@ -981,7 +1013,74 @@ sealed partial class GameHost
         simMs[^1] = ahead;
         int paths = world.Systems.OfType<MovementSystem>().FirstOrDefault()?.Paths.Pending ?? 0;
         profiler.Outside(advanceMs, profile.Ticks, simNames, simMs, phases + 1, systems, paths);
+        // --log-spikes: a slow frame's simulation by system and part (the phases only add up what these hold).
+        if (SpikeLog.Enabled && advanceMs > SpikeSimMs)
+            for (int k = phases + 1; k < simMs.Length; k++)
+                if (simMs[k] >= 2) SpikeLog.Note($"sim {simNames[k]}", ms: simMs[k]);
+        if (SpikeLog.Enabled) SimWindow(profile, advanceMs, ahead, phases + 1, parts);
         profile.Clear();
+    }
+
+    // --log-spikes: the simulation's steady cost, summed over a window of real time (the spike notes only see frames over SpikeSimMs).
+    const double SimWindowSeconds = 5;
+    readonly Dictionary<string, double> simWindowMs = [];
+    double simWindowStart = -1, simWindowMain, simWindowAhead;
+    long simWindowTicks;
+    int simWindowFrames;
+    // The ragdolls sampled once a frame: in play, moving, the physics' awake bodies, frames with any moving.
+    long simWindowRagdolls, simWindowMoving, simWindowAwake, simWindowCarried, simWindowWhole, simWindowLimbs;
+    int simWindowStepping;
+
+    /// <summary>
+    /// --log-spikes: every <see cref="SimWindowSeconds"/> one line of the speed, ticks a second, the sim's ms a frame, then ms a tick by phase, by system, by system in the slow
+    /// world phase and by part, biggest first. Keys carry their list's prefix: '#' phase, '~' slow world, '.' part.
+    /// </summary>
+    void SimWindow(TickProfile profile, double advanceMs, double ahead, int firstSystem, int firstPart)
+    {
+        double now = realTime.Elapsed.TotalSeconds;
+        if (simWindowStart < 0) simWindowStart = now;
+        (simWindowTicks, simWindowMain, simWindowAhead, simWindowFrames) = (simWindowTicks + profile.Ticks, simWindowMain + advanceMs, simWindowAhead + ahead, simWindowFrames + 1);
+        void Add(string key, double ms) => simWindowMs[key] = simWindowMs.GetValueOrDefault(key) + ms;
+        for (int p = 0; p < firstSystem - 1; p++) Add("#" + simNames[p], simMs[p]);
+        for (int k = firstSystem; k < simMs.Length - 1; k++) Add((k >= firstPart ? "." : "") + simNames[k], simMs[k]);
+        for (int k = 0; k < profile.SystemMs.Length && firstSystem + k < firstPart; k++) Add("~" + simNames[firstSystem + k], profile.Ms(TickProfile.SlowWorld, k));
+        if (session.World.Systems.OfType<Meitou.Simulation.Ragdolls.RagdollSystem>().FirstOrDefault() is { } rag)
+        {
+            (simWindowRagdolls, simWindowMoving, simWindowAwake, simWindowStepping) = (simWindowRagdolls + rag.Count, simWindowMoving + rag.Moving, simWindowAwake + rag.AwakeBodies, simWindowStepping + (rag.Moving > 0 ? 1 : 0));
+            (simWindowCarried, simWindowWhole, simWindowLimbs) = (simWindowCarried + rag.MovingCarried, simWindowWhole + rag.MovingWhole, simWindowLimbs + rag.MovingLimbs);
+        }
+        double seconds = now - simWindowStart;
+        if (seconds < SimWindowSeconds) return;
+        if (simWindowTicks > 0)
+        {
+            var inv = CultureInfo.InvariantCulture;
+            string Top(char kind, int count) => string.Join(", ", simWindowMs.Where(p => (p.Key[0] is '#' or '~' or '.' ? p.Key[0] : ' ') == kind && p.Value / simWindowTicks >= 0.01)
+                .OrderByDescending(p => p.Value).Take(count).Select(p => string.Create(inv, $"{p.Key.TrimStart('#', '~', '.')} {p.Value / simWindowTicks:0.00}")));
+            double tickMs = simWindowMs.Where(p => p.Key[0] == '#').Sum(p => p.Value) / simWindowTicks;
+            Console.WriteLine(string.Create(inv, $"simprof   {session.Simulation.Speed:0}x {simWindowFrames / seconds:0} fps, {simWindowTicks / seconds:0} ticks/s, {session.World.Snapshot.Characters.Count} characters; ") +
+                string.Create(inv, $"ms a frame: in frame {simWindowMain / simWindowFrames:0.00}, ahead {simWindowAhead / simWindowFrames:0.00}; ms a tick {tickMs:0.00}: ") +
+                $"phases: {Top('#', 10)}; systems: {Top(' ', 12)}; slow world: {Top('~', 12)}; parts: {Top('.', 12)}; " +
+                string.Create(inv, $"ragdolls {(double)simWindowRagdolls / simWindowFrames:0.0}, moving {(double)simWindowMoving / simWindowFrames:0.0} (carried {(double)simWindowCarried / simWindowFrames:0.0}, whole {(double)simWindowWhole / simWindowFrames:0.0}, limbs {(double)simWindowLimbs / simWindowFrames:0.0}), awake bodies {(double)simWindowAwake / simWindowFrames:0}, stepping {100.0 * simWindowStepping / simWindowFrames:0}% of frames"));
+        }
+        simWindowMs.Clear();
+        (simWindowStart, simWindowTicks, simWindowMain, simWindowAhead, simWindowFrames) = (now, 0, 0, 0, 0);
+        (simWindowRagdolls, simWindowMoving, simWindowAwake, simWindowStepping, simWindowCarried, simWindowWhole, simWindowLimbs) = (0, 0, 0, 0, 0, 0, 0);
+    }
+
+    /// <summary>
+    /// --log-spikes: a tick run ahead over <see cref="SpikeSimMs"/>, by system and part, in the frame whose draw waited for it (its profile holds that tick
+    /// alone then: <see cref="SimProfile"/> cleared it before the draw).
+    /// </summary>
+    void NoteAheadTick()
+    {
+        if (!SpikeLog.Enabled || session.AheadMs <= SpikeSimMs) return;
+        var world = session.World;
+        var profile = world.Profile;
+        SpikeLog.Note("sim ahead tick", ms: session.AheadMs);
+        for (int k = 0; k < profile.SystemMs.Length && k < world.Systems.Count; k++)
+            if (profile.SystemMs[k] >= 2) SpikeLog.Note($"sim ahead {world.Systems[k].GetType().Name}", ms: profile.SystemMs[k]);
+        foreach (var (name, ms) in profile.Parts)
+            if (ms >= 2) SpikeLog.Note($"sim ahead {name}", ms: ms);
     }
 
     /// <summary>Between ticks: the world's messages for the player go to the HUD and the log, the fights hostility started to the log.</summary>

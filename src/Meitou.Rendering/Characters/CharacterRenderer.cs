@@ -49,6 +49,61 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
 
     /// <summary>Characters farther than this from the eye are neither posed nor drawn.</summary>
     public float DrawDistance { get; set; } = 6000;
+    /// <summary>While the eye is above the game's camera heights (<see cref="EyeLift"/>): characters farther than this are neither built, posed nor drawn
+    /// (engine choice: a few pixels tall there).</summary>
+    public float LiftedReach { get; set; } = 3000;
+    /// <summary>The ground's height under the eye (set each frame; unknown: none), for <see cref="LiftedReach"/>.</summary>
+    public float GroundUnderEye { get; set; } = float.NegativeInfinity;
+    /// <summary>A character flight's arrival eye and the player's kept points: characters within <see cref="KeptReach"/> of them are built ahead (their
+    /// meshes and textures), the eye's own being only those it can draw.</summary>
+    public Vector3? Ahead { get; set; }
+    public IReadOnlyList<Vector3> Kept { get; set; } = [];
+    public float KeptReach { get; set; } = 3000;
+    /// <summary>The camera's distance to its target: a kept character's texture needs count from at least this far (the view a jump there would have).</summary>
+    public float KeptViewDistance { get; set; }
+    /// <summary>Places kept loaded (<see cref="WorldTextureCache.Areas"/>): the character textures' mark (and so <see cref="CharacterTextureBudget"/>) scales with it.</summary>
+    public int Areas { set => content.Textures.Areas = value; }
+    /// <summary>Built characters out of the eye's reach but within <see cref="KeptReach"/> of a kept point, with that distance: their textures are offered
+    /// (and so marked used) as if seen from there, or the cache's idle limit unloaded them before a jump there.</summary>
+    readonly List<(CharacterAsset Asset, float Distance)> keptLooks = [];
+    float NearKept(Vector3 p)
+    {
+        float d = float.PositiveInfinity;
+        var kept = Kept;
+        for (int k = 0; k < kept.Count; k++) d = MathF.Min(d, Vector2.Distance(new Vector2(kept[k].X, kept[k].Z), new Vector2(p.X, p.Z)));
+        return d;
+    }
+    /// <summary>Added to the reach for building, so a character is ready a little before it is drawn.</summary>
+    const float BuildMargin = 300;
+
+    /// <summary>Whether <paramref name="c"/>'s look is built: within <paramref name="reach"/> (and the margin) of the eye, or within <see cref="KeptReach"/> of
+    /// the arrival or a kept point. Every loaded character is in the draw list; built all, they loaded the textures of the whole loaded world.</summary>
+    bool WantsAsset(in CharacterInstance c, Vector3 eye, float reach)
+    {
+        if (WantsAssetAt(c.Position, eye, reach)) return true;
+        if (c.Bones is not { AbsolutePositions: true } bones) return false;
+        // A half can be carried close to the eye while its logical owner's origin stays far away.
+        // Before the asset is built its shaped ground offset is unknown; BuildMargin covers that small vertical difference.
+        var world = UnbuiltWorld(c);
+        for (int h = 0; h < Math.Min(bones.Set.Length, bones.Position.Length); h++)
+            if (bones.Set[h] && WantsAssetAt(Vector3.Transform(bones.Position[h], world), eye, reach)) return true;
+        return false;
+    }
+
+    static Matrix4x4 UnbuiltWorld(in CharacterInstance c) => c.World ?? Matrix4x4.CreateScale(c.Scale > 0 ? c.Scale : 1)
+        * Matrix4x4.CreateFromQuaternion(c.Rotation ?? Quaternion.CreateFromAxisAngle(Vector3.UnitY, c.Yaw))
+        * Matrix4x4.CreateTranslation(c.Position);
+
+    bool WantsAssetAt(Vector3 point, Vector3 eye, float reach)
+    {
+        if (!float.IsFinite(point.LengthSquared())) return false;
+        if (Vector3.Distance(eye, point) <= reach + BuildMargin) return true;
+        var at = new Vector2(point.X, point.Z);
+        if (Ahead is { } a && Vector2.Distance(new Vector2(a.X, a.Z), at) <= KeptReach) return true;
+        var kept = Kept;
+        for (int k = 0; k < kept.Count; k++) if (Vector2.Distance(new Vector2(kept[k].X, kept[k].Z), at) <= KeptReach) return true;
+        return false;
+    }
     /// <summary>A presentation fill light (linear colour, 0 in play): added ambient, three times as strong at the silhouette, so a backlit figure reads.</summary>
     public Vector3 Fill { get; set; }
     /// <summary>Assets built per <see cref="Update"/> (0: all of them, for stills), and no new one once <see cref="BuildBudgetMs"/> went on them.</summary>
@@ -165,8 +220,23 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     public float LoadingReach { get; set; } = 3000;
 
     /// <summary>Whether <paramref name="c"/> waits for the loading screen to lift (<see cref="LoadingFocus"/>).</summary>
-    bool Deferred(in CharacterInstance c) =>
-        LoadingFocus is { } f && Vector2.DistanceSquared(new Vector2(c.Position.X, c.Position.Z), f) > LoadingReach * LoadingReach;
+    bool Deferred(in CharacterInstance c)
+    {
+        if (LoadingFocus is not { } focus) return false;
+        float reachSquared = LoadingReach * LoadingReach;
+        if (Vector2.DistanceSquared(new Vector2(c.Position.X, c.Position.Z), focus) <= reachSquared) return false;
+        if (c.Bones is { AbsolutePositions: true } bones)
+        {
+            var world = UnbuiltWorld(c);
+            for (int h = 0; h < Math.Min(bones.Set.Length, bones.Position.Length); h++)
+            {
+                if (!bones.Set[h]) continue;
+                var point = Vector3.Transform(bones.Position[h], world);
+                if (Vector2.DistanceSquared(new Vector2(point.X, point.Z), focus) <= reachSquared) return false;
+            }
+        }
+        return true;
+    }
     /// <summary>The appearance was uploaded or failed with a diagnostic; either completes its loading request.</summary>
     public bool IsPrepared(CharacterAppearance appearance) => assets.ContainsKey(appearance);
     /// <summary>Start preparing a scene's essential characters ahead of the world streaming queue (render thread).</summary>
@@ -481,13 +551,16 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         liveCount = layerCount = attachCount = 0;
         int built = 0, boneTotal = 0, partTotal = 0;
         double buildMs = 0;
+        float reach = EyeLift.Of(eye, GroundUnderEye) > 0 ? Math.Min(DrawDistance, LiftedReach) : DrawDistance;
         var items = Draws.Items;
+        keptLooks.Clear();
         for (int i = 0; i < items.Count; i++)
         {
             var inst = items[i];
             if (!assets.TryGetValue(inst.Appearance, out var asset))
             {
                 if (Deferred(inst)) continue;
+                if (!portraitKeys.Contains(inst.Key) && !WantsAsset(inst, eye, reach)) continue;
                 // Interactive: the files are read and the meshes prepared on a worker first (CharacterContent.Fetched), then a few a frame are uploaded.
                 if (LoadBudget > 0 && (!content.Fetched(inst.Appearance) || !Covered && built >= LoadBudget || buildMs >= (Covered ? CoveredBudgetMs : BuildBudgetMs))) continue;
                 long buildStart = Stopwatch.GetTimestamp();
@@ -517,6 +590,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 {
                     if (!detachedBones.Set[h]) continue;
                     var point = Vector3.Transform(detachedBones.Position[h], world);
+                    if (!float.IsFinite(point.LengthSquared())) continue;
                     minimum = Vector3.Min(minimum, point);
                     maximum = Vector3.Max(maximum, point);
                     any = true;
@@ -527,8 +601,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     radius += Vector3.Distance(minimum, maximum) * 0.5f;
                 }
             }
-            bool far = inst.Hidden || Vector3.Distance(eye, centre) - radius > DrawDistance;
-            if (far && !portraitKeys.Contains(inst.Key)) continue;
+            bool far = inst.Hidden || Vector3.Distance(eye, centre) - radius > reach;
+            if (far && !portraitKeys.Contains(inst.Key))
+            {
+                if (!inst.Hidden && Kept.Count > 0 && NearKept(centre) is var dk && dk <= KeptReach) keptLooks.Add((asset, dk));
+                continue;
+            }
             if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
             ref var l = ref live[liveCount++];
             l.Asset = asset;
@@ -709,6 +787,14 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 foreach (var t in part.Material.Tex)
                     if (t is not null) { t.OfferNow(need); _ = t.Key; }
             }
+        if (budget.Due)
+            foreach (var (asset, distance) in keptLooks)
+                foreach (var part in asset.Parts)
+                {
+                    float need = Math.Max(Math.Max(distance, KeptViewDistance) - asset.Radius * 0.5f, 0.5f) / part.UvScale * budget.NeedScale;
+                    foreach (var t in part.Material.Tex)
+                        if (t is not null) { t.OfferNow(need); _ = t.Key; }
+                }
         budget.Update(content.Textures);
         // A record is written again only when something it reads changed (materialEpoch, or the material's own fields), and uploaded into the material table
         // (CharacterMaterialTable) only when it came out different or the material has no slot.

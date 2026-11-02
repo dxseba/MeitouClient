@@ -157,6 +157,8 @@ public sealed partial class World : IDisposable
     public IReadOnlyList<int>? FactionFormations { get; set; }
     /// <summary>The squad templates whose <c>force speed</c> is 0, 1 or 2 (<see cref="Squad.ForceSpeed"/>), by record id; set by the population. Derived from the data: not saved or hashed.</summary>
     public IReadOnlyDictionary<string, byte>? ForcedSpeeds { get; set; }
+    /// <summary>A bench with its table behind is sat facing away from the table (Fixes settings, Meitou); off, towards the world origin, as the game does (docs/game/ai-tasks.md "Town goals").</summary>
+    public bool BenchFacingFix { get; set; } = true;
     /// <summary>The player: faction, money, selection.</summary>
     public PlayerState Player { get; } = new();
     /// <summary>Doors, lockable containers, cages and beds of the registered towns, with their occupants (docs/simulation.md "Cages, beds and locks").</summary>
@@ -216,6 +218,18 @@ public sealed partial class World : IDisposable
     /// not hashed, not saved.
     /// </summary>
     public float PhysicsSpeed { get; set; } = 1;
+    /// <summary>
+    /// Meitou (<b>engine choice</b>, docs/simulation.md "Speed steps"): how many ticks make one tick of real time at the host's speed: 1 at 1x (and headless), 2 at 2x, 5 at 5x.
+    /// The periodic looks (<see cref="Every"/>) and the body step stretch by it, so they cost per real second what they do at 1x.
+    /// </summary>
+    public int SpeedSteps => PhysicsSpeed >= 1.5f ? (int)MathF.Round(PhysicsSpeed) : 1;
+    /// <summary>A look's period of <paramref name="ticks"/> stretched by <see cref="SpeedSteps"/> (at least 1).</summary>
+    public int Every(int ticks) => Math.Max(1, ticks) * SpeedSteps;
+    /// <summary>
+    /// Where the player's camera is (null without one: headless runs, tests). For looks only: the ragdoll system dangles a collapsed limb near it (<see cref="Ragdolls.RagdollSystem.LimbReach"/>).
+    /// An input like <see cref="GameHours"/>: not hashed, not saved.
+    /// </summary>
+    public System.Numerics.Vector3? ViewPosition { get; set; }
     /// <summary>The integer hour of day, 0 to 23 (the game's sky controller hour that the AI compares windows with).</summary>
     public int Hour => Math.Clamp((int)(((GameHours % 24) + 24) % 24), 0, 23);
     public float TickSeconds => Settings.TickSeconds;
@@ -326,20 +340,30 @@ public sealed partial class World : IDisposable
         {
             systems[k].SlowWorld(this);
             prof?.Lap(TickProfile.SlowWorld, k);
-            if (k == decideAfter) Decisions.Run(this, paused: false);
+            if (k == decideAfter) RunDecisions(prof);
         }
-        if (decideAfter < 0) Decisions.Run(this, paused: false);
+        if (decideAfter < 0) RunDecisions(prof);
         TaskStart.CheckStarts(this);
+        prof?.Part("task starts");
 
         // 8. Publish.
         Squads.Refresh(table);
         Player.Prune(table);
         table.Phase = TablePhase.Outside;
         table.EndTick();
+        prof?.Part("end tick");   // F12: the squads, the prune and the table's end, apart from the snapshot
         Tick++;
         GameHours += TickSeconds / SecondsPerGameHour;
-        if (publish && Settings.PublishSnapshots) Publish();
+        if (publish && Settings.PublishSnapshots) Publish(prof);
         prof?.Lap(TickProfile.Publish);
+    }
+
+    // The decisions pass: its own part of the slow world phase, not the next system's.
+    void RunDecisions(TickProfile? prof)
+    {
+        Decisions.Run(this, paused: false);
+        prof?.Part("decisions");
+        prof?.Lap(TickProfile.SlowWorld);
     }
 
     /// <summary>The ticks' time per phase and system (off unless the host turns it on; F12's sim rows).</summary>

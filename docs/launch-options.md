@@ -16,6 +16,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 |---|---|---|---|
 | `--new-game [start]` | start name | Wanderer | New game: squad at its town, camera on it. |
 | `--list-starts` | | | Print the available starts and exit. |
+| `--data-check` | | | Print every game data and level file problem of the load order (missing mod, changed record type...) and exit: 0 none, 1 some. |
 | `--load <folder>` | save folder | none | Start in a save, Meitou's or the original game's. With `--screenshot` too. |
 | `--seed <n>` | integer | 0 | World seed. A new game from the menu keeps it once given. |
 | `--no-population` | | off | No residents or movement. |
@@ -147,7 +148,7 @@ Authority: `src/Meitou.Rendering/WorldFrame.cs` (`Parse`, `Usage`), `src/Meitou.
 | `--screenshot <out.png>` | file | none | Render offscreen to a PNG and exit. |
 | `--size <W>x<H>` | pixels | 1280x960 (1280x720 for bench and A/B runs) | Render size. |
 | `--no-vsync` | | vsync on (viewer) | Start with vsync off. The game takes it as its own option. |
-| `--log-spikes` | | off | Log frames whose GPU time is over 1.5 times the median. |
+| `--log-spikes` | | off | Log frames whose GPU time, or render-thread time (over 20 ms), is over 1.5 times its median; every 5 s a `simprof` line: speed, ticks/s, sim ms a frame (in frame, ahead) and ms a tick by system and part. |
 | `--sway-step <s>` | seconds | | Grass sway advanced per frame (motion check, with screenshot or bench). |
 | `--orbit-step <deg>` | degrees | | With `--screenshot`: the camera orbits this much per frame (upscaler motion vectors). |
 | `--wireframe` | | off | Wireframe view. |

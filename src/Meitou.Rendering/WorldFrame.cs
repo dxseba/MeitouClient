@@ -256,7 +256,7 @@ sealed class WorldOptions
           --faithful <all|ao,dither,haze,aa,shadows,range,impostors,reach,water,particles,lod,gi,tonemap,shafts,heathaze,night,planetshine,stars,nightgrade,clouds,cloudshadows,cloudfog,interiorgi,charlod,skin,interiorlamps,icons,blood,bloodsurfaces,parallax,displace,weld,tracers,fog>   the game's look instead of Meitou's enhancements (default: all Meitou; --meitou <...> turns them back on; these ids also name the --ab switches)
           --show-keys              start with the key list overlay open (toggle with F10)
           --play-shots             start flying the saved camera keys (the F2 timeline) on a loop
-          --log-spikes             print a line for every frame whose GPU time is over 1.5 x the median: stage times (GPU, render thread) and what it uploaded or rebuilt
+          --log-spikes             print a line for every frame whose GPU time, or render-thread time over 20 ms, is over 1.5 x its median: stage times (GPU, render thread) and what it uploaded or rebuilt
           --fly-to <x>,<z>         with --screenshot: fly there first (streaming test, reports frame times), then take the picture
           --fly-benchmark <frames> offscreen, no window: fly the camera round a circle at 60 frames per second of wall time, print frame-time
                                    percentiles, the worst frames with their stage times and resident memory   --fly-radius <u> (12000)   --fly-speed <u per frame> (150)
@@ -529,6 +529,8 @@ static class WorldFrame
 {
     /// <summary>Heightmap step of the whole-world height grid behind the loaded region (2049² samples, 144 units apart).</summary>
     public const int CoarseStep = 8;
+    /// <summary>How long <see cref="GpuState.Areas"/> holds its highest count before it may fall.</summary>
+    public const int AreasHoldMs = 30000;
 
     /// <summary>The weather scheduler's random seed (the default of <c>meitou-tools weather</c>, so the two agree).</summary>
     const int WeatherSeed = 1;
@@ -545,6 +547,7 @@ static class WorldFrame
         {
             db = preloaded ?? GameDatabase.Load(LoadOrder.FromInstall(install));
             Console.WriteLine($"game data {db.Records.Count} records ({watch.ElapsedMilliseconds} ms)");
+            LogIssues("game data", db.Issues);
         }
 
         double x = 0, z = 0;
@@ -601,8 +604,20 @@ static class WorldFrame
     /// A flat world for the game's animation sandbox: the whole terrain at one height (a 256² window of heights round the origin and a flat whole-world grid),
     /// no heightmap file, no objects. The caller turns textures, objects, foliage and water off in <paramref name="o"/>.
     /// </summary>
+    /// <summary>A load's data problems (a missing mod, a record defined twice or with another type, a level file left out...) to the log: a count by kind, then the first few.</summary>
+    internal static void LogIssues(string what, List<GameDataIssue> issues)
+    {
+        if (issues.Count == 0) return;
+        Console.WriteLine($"{what} {issues.Count} problems: {string.Join(", ", issues.GroupBy(i => i.Kind).Select(g => $"{g.Key} {g.Count()}"))}");
+        const int shown = 20;
+        foreach (var issue in issues.Take(shown))
+            Console.WriteLine($"  {issue.Kind}: {issue}");
+        if (issues.Count > shown) Console.WriteLine($"  ... and {issues.Count - shown} more");
+    }
+
     public static WorldScene LoadFlat(WorldOptions o, GameDatabase db, ushort raw = 3344)
     {
+        LogIssues("game data", db.Issues);
         const int cells = 256;   // 4608 units: one zone
         var (c0, r0) = ((int)Math.Round(WorldLayout.ToSample(0, 0).Column) - cells / 2, (int)Math.Round(WorldLayout.ToSample(0, 0).Row) - cells / 2);
         var flat = new ushort[(cells + 1) * (cells + 1)];
@@ -709,6 +724,10 @@ static class WorldFrame
         public Vector3? Ahead;
         /// <summary>Points whose surroundings stay loaded besides the camera's (the player's characters, "Keep textures at characters"): object meshes and textures, terrain biome textures.</summary>
         public IReadOnlyList<Vector3> Kept = [];
+        /// <summary>Places kept loaded: the eye's and each merged kept point's, held at its highest for <see cref="AreasHoldMs"/> (the merge flickers near
+        /// its distance, and the grass store and terrain arrays reallocate when it grows). The texture, mesh and grass budgets scale with it.</summary>
+        public int Areas = 1;
+        public long AreasAt;
         /// <summary>Keeps the video memory under the budget by clamping the ranges and pausing the streaming (null with <c>MEITOU_VRAM_GUARD=0</c>).</summary>
         public VramGuard? Guard;
         /// <summary>The scene's native host (wave 4), made at the first frame.</summary>
@@ -775,7 +794,8 @@ static class WorldFrame
     static void UpdateParticles(Gpu gpu, WorldCamera camera)
     {
         if (gpu.Weather is not { } weather || gpu.MakeParticles is null) return;
-        var input = weather.EffectInput();
+        // In flight (KenshiCamera.FlightHeight, the platoons' gate) the weather's effects stop, as its fog does (SkyRenderer.WeatherFogScale).
+        var input = gpu.Sky.WeatherFogScale == 0 ? Meitou.Data.Particles.WeatherEffectInput.None : weather.EffectInput();
         if (input.Effects.Count == 0 && gpu.Particles is null) return;
         var particles = gpu.Particles ??= gpu.MakeParticles();
         // The effects are placed in the camera's weather region: the area follows the cell the camera is in.
@@ -792,10 +812,10 @@ static class WorldFrame
     }
 
     /// <summary>The particle renderer (reads the scripts and materials, makes the pass's program) if there is none yet; for whoever feeds it a weather's effect list.</summary>
-    public static ParticleRenderer EnsureParticles(Gpu gpu, IGpuContext context, GameInstall install)
+    public static ParticleRenderer EnsureParticles(Gpu gpu, IGpuContext context, AssetLocator assets)
     {
         if (gpu.Particles is { } existing) return existing;
-        return gpu.Particles = ParticleRenderer.Create(context, install);
+        return gpu.Particles = ParticleRenderer.Create(context, assets);
     }
 
     /// <summary>The renderer for <paramref name="scene"/>. <paramref name="step"/> is called before each of its steps (terrain, biomes, sky, water, objects, foliage, shadows) with the step's name: the game draws a loading frame there.</summary>
@@ -878,7 +898,7 @@ static class WorldFrame
         if (particlesEnabled && !o.NoParticles && scene.Database is { } effectsDb)
         {
             var particleWatch = Stopwatch.StartNew();
-            var particles = EnsureParticles(gpu, context, install);
+            var particles = EnsureParticles(gpu, context, assets);
             particles.PrewarmSeconds = o.ParticlePrewarm;
             gpu.ParticleDensity = o.ParticleDensity;
             particles.World.GroundHeight = terrain.HeightAt;   // main thread only: the height grid swaps as the terrain streams
@@ -1041,6 +1061,7 @@ static class WorldFrame
         ShadowFilterSlider = "Shadow filter 0-2 (Meitou; 0 low-end)",
         HazeStrengthSlider = "Haze strength (1 = game)",
         PlanetshineStrengthSlider = "Planetshine strength (x physical)",
+        CloudHeightSlider = "Cloud height (Meitou)",
         AmbientStrengthSlider = "Ambient light strength (1 = game)",
         NightAmbientStrengthSlider = "Night ambient light strength (1 = 1.2x game)",
         ToneMapSlider = "Tone map (0 = game)",
@@ -1213,6 +1234,8 @@ static class WorldFrame
         sliders.Add(new Slider(HazeStrengthSlider, 0, 3, () => g.Sky.HazeStrength, v => g.Sky.HazeStrength = v, "0.00", Faithful: 1, Meitou: Enhancements.MeitouHazeStrength));
         // Ours (docs/formats/sky.md "Planetshine"): the planet's light at night, a multiple of the physical value.
         sliders.Add(new Slider(PlanetshineStrengthSlider, 0, 200, () => g.Sky.PlanetshineStrength, v => g.Sky.PlanetshineStrength = MathF.Round(v), "0"));
+        sliders.Add(new Slider(CloudHeightSlider, VolumetricClouds.MinBottom, VolumetricClouds.MaxBottom, () => g.Sky.CloudHeight,
+            v => g.Sky.CloudHeight = MathF.Round(v / 100) * 100, "0", Logarithmic: true));
         // Ours: the sky's ambient light (shade, nights, interiors), a multiple of the game's.
         sliders.Add(new Slider(AmbientStrengthSlider, 0, 3, () => g.Sky.AmbientStrength, v => g.Sky.AmbientStrength = MathF.Round(v * 20) / 20, "0.00"));
         // Ours: a further multiple by night (the exposure sits at its night floor there, so it is not adapted away).
@@ -1379,9 +1402,22 @@ static class WorldFrame
         var eye = camera.Eye;
         gpu.Guard?.Tick();
         var kept = ObjectStreamer.MergeKept(gpu.Kept, eye);
-        if (gpu.Streamer is { } aheadTerrain) (aheadTerrain.Ahead, aheadTerrain.Kept) = (gpu.Ahead, kept);
-        if (gpu.Objects is { } aheadObjects) (aheadObjects.Ahead, aheadObjects.Kept) = (gpu.Ahead, kept);
-        if (gpu.Foliage is { } aheadFoliage) aheadFoliage.Ahead = gpu.Ahead;
+        long areasNow = Environment.TickCount64;
+        if (1 + kept.Count >= gpu.Areas || areasNow - gpu.AreasAt > AreasHoldMs) (gpu.Areas, gpu.AreasAt) = (1 + kept.Count, areasNow);
+        if (gpu.Objects is { } areaObjects) areaObjects.Areas = gpu.Areas;
+        if (gpu.Foliage is { } areaFoliage) areaFoliage.Areas = gpu.Areas;
+        if (gpu.Characters is { } areaCharacters) areaCharacters.Areas = gpu.Areas;
+        if (gpu.Streamer is { } areaTerrain) areaTerrain.Areas = gpu.Areas;
+        if (gpu.Streamer is { } aheadTerrain) (aheadTerrain.Ahead, aheadTerrain.Kept, aheadTerrain.Guard) = (gpu.Ahead, kept, gpu.Guard);
+        if (gpu.Objects is { } aheadObjects) (aheadObjects.Ahead, aheadObjects.Kept, aheadObjects.KeptViewDistance) = (gpu.Ahead, kept, camera.Distance);
+        if (gpu.Foliage is { } aheadFoliage) (aheadFoliage.Ahead, aheadFoliage.Kept, aheadFoliage.KeptViewDistance) = (gpu.Ahead, kept, camera.Distance);
+        if (gpu.Characters is { } aheadCharacters) (aheadCharacters.Ahead, aheadCharacters.Kept, aheadCharacters.KeptViewDistance) = (gpu.Ahead, kept, camera.Distance);
+        // The loading counts the eye's height over the ground beyond the game's cameras (EyeLift): terrain textures, object zones, foliage, characters. In flight the weather fog is off.
+        float groundUnderEye = gpu.Terrain.HeightAt(eye.X, eye.Z);
+        if (gpu.Streamer is { } liftedTerrain) liftedTerrain.GroundUnderEye = groundUnderEye;
+        if (gpu.Objects is { } liftedObjects) liftedObjects.GroundUnderEye = groundUnderEye;
+        if (gpu.Characters is { } liftedCharacters) liftedCharacters.GroundUnderEye = groundUnderEye;
+        gpu.Sky.SetFlightHeight(eye.Y - groundUnderEye);
         gpu.Streamer?.Update(eye);
         StageClock.Lap(0);
         if (gpu.Objects is { } lodObjects) lodObjects.LodPixelsPerRadian = render.TerrainPixelScale;   // the generated object levels are placed by the pixel size too
@@ -1391,6 +1427,7 @@ static class WorldFrame
         gpu.Objects?.Update(eye);
         StageClock.Lap(1);
         if (gpu.Foliage is { } lodFoliage) lodFoliage.LodPixelsPerRadian = render.TerrainPixelScale;   // the generated mesh levels measure their deviation in rendered pixels
+        if (gpu.Foliage is { } liftedFoliage) liftedFoliage.GroundUnderEye = groundUnderEye;
         gpu.Foliage?.Update(eye);
         StageClock.Lap(2);
         gpu.Characters?.Update(eye);
@@ -1417,14 +1454,18 @@ static class WorldFrame
         // haze takes longer to close in the higher the eye.
         var sun = scene.Clock.SunDirection(hour);
         // The weather at the camera (before the sky's tables are prepared: the colour multiplier feeds them). A held frame (a screenshot) has dt 0, the first frame snaps.
+        long skyStep = Stopwatch.GetTimestamp();
         bool held = post.InstantAdaptation;
         if (gpu.Weather is { } weather)
         {
             float scheduleHour = weatherHour ?? hour;
             weather.Update(eye, scheduleHour, scene.Clock.SunDirection(scheduleHour).Y, held);
+            SkyStep("weather update", ref skyStep);
             weather.Apply(gpu.Sky);
+            SkyStep("weather apply", ref skyStep);
         }
         gpu.Surfaces?.Apply(gpu.WeatherState);
+        SkyStep("surfaces", ref skyStep);
         // The night sky's clocks: the starfield shifts with the game hours since the load, the planets turn with the day and hour.
         gpu.Sky.StarHours = gpu.GameHours ?? gpu.HeatHazeHours;
         gpu.Sky.Day = gpu.Weather?.Day ?? 0;
@@ -1433,6 +1474,7 @@ static class WorldFrame
         gpu.Sky.StarSeconds = (float)(gpu.HeatHazeHours / HeatHaze.HoursPerSecond % 3600);   // the twinkle's clock: still for a picture
         gpu.Sky.Eye = new Vector3((float)eye.X, (float)eye.Y, (float)eye.Z);
         var (colours, light) = gpu.Sky.Prepare(sun, eye.Y, fogDistance + 3 * Math.Max(eye.Y, 0));
+        SkyStep("sky tables", ref skyStep);
         // The game's exposure (0.55 over the mean luminance, clamped to its band) goes with the game's sky and light.
         post.AutoExposure = (gpu.Sky.MinLuminance, gpu.Sky.MaxLuminance);
         post.WaterHeight = render.Water && gpu.Water is not null ? WorldWater.Height : null;
@@ -1440,6 +1482,7 @@ static class WorldFrame
         // The Meitou water's waves on the game clock (the heat haze's, held still for a still picture), led by the wind at the camera.
         gpu.Water?.Animate(gpu.GameHours ?? gpu.HeatHazeHours,gpu.WeatherState.WindDirection, gpu.WeatherState.WindSpeed);
         gpu.Water?.Track(eye, gpu.Terrain.Snapshot());
+        SkyStep("water", ref skyStep);
         // The clouds drift on the frame clock (game-speed seconds, 0 while paused), held still for a still picture.
         if (gpu.Weather is { } drift) gpu.Sky.StepClouds(drift.Times.Game); else gpu.Sky.StepClouds(held);
         gpu.Sky.PrepareCloudShadows();
@@ -1507,6 +1550,7 @@ static class WorldFrame
         StageClock.Lap(14);
         // The blood on the ground near the eye (docs/game/blood-decals.md), before any terrain draw reads it.
         if (gpu.Decals is { } decals && gpu.DecalStore is { } decalStore) decals.Record(decalStore, eye);
+        gpu.Terrain.RecordMaterialCache(eye);
         gpu.Terrain.Decals = gpu.DecalStore is null ? null : gpu.Decals;
         StageClock.Lap(StageClock.Blood, "blood decals");
         // Water reflection: the mirrored scene into its own framebuffer (restores the bound one), before the main pass.
@@ -1716,6 +1760,8 @@ static class WorldFrame
         // Then the particles, blended over it and tested against the near slice's depth (they are not fogged; docs/formats/fogfeatures.md).
         if (gpu.Particles is { } particleDraw && particleNear > 0)
         {
+            particleDraw.RangeFade = particleDraw.Lit = post.Options.MeitouFog;
+            particleDraw.SunShade = ShaftDarkening(post.Options, light, sun.Y) * ShaftCloudFade(Overcast(gpu));
             particleDraw.Prepare(particleViewProjection, particleNearProjection, particleNear, view, eye, sun, post.ParticlePixelsPerUnit(camera.Projection(aspect, 1, 10).M22), (float)post.RenderWidth * post.RenderHeight, post.Options.ParticleDivisor,
                 lowViewProjection: post.ParticlesAfterUpscale ? particleLowProjection : null, lowCloseViewProjection: post.ParticlesAfterUpscale ? particleLowNearProjection : null);
             if (particleDraw.FullCount > 0)
@@ -1734,6 +1780,13 @@ static class WorldFrame
                     host.Open(13, post.ParticleTargets(divisor));
                     particleDraw.Record(divisor, post.SoftParticleDepth(divisor));
                     host.Close();
+                    // Again against each block's farthest depth, where the chain keeps both (the depth-aware upsample takes each pixel's own surface from either).
+                    if (post.ParticleTargetsFar(divisor) is { } farTargets)
+                    {
+                        host.Open(13, farTargets);
+                        particleDraw.Record(divisor, post.SoftParticleDepthFar(divisor));
+                        host.Close();
+                    }
                     post.MarkParticleDraws();
                     post.CompositeParticlesLow(divisor);
                 }
@@ -1750,6 +1803,7 @@ static class WorldFrame
             var (markerNear, markerFar) = slices[^1];
             marker.Record(picture, width, height, post.SceneDepth, post.RenderWidth, post.RenderHeight, view * camera.Projection(aspect, markerNear, markerFar), eye, sun);
         }
+        else gpu.Markers?.Idle();
         // The navmesh debug view over the finished picture (Meitou only).
         if (gpu.NavmeshOverlay is { Visible: true } navOverlay && post.Target is { } navPicture)
         {
@@ -1775,6 +1829,15 @@ static class WorldFrame
             giDebug.Run(gpu.GiDebug, traced, post.SceneDepth, giTarget, post.RenderWidth, post.RenderHeight, inverse, eye, light);
         }
         StageClock.Lap(10);
+    }
+
+    /// <summary>--log-spikes: a step of the sky-prepare stage over 5 ms is noted (<c>slow sky &lt;step&gt;</c>), the time since <paramref name="since"/>, which moves on.</summary>
+    static void SkyStep(string step, ref long since)
+    {
+        long now = Stopwatch.GetTimestamp();
+        double ms = (now - since) * 1000.0 / Stopwatch.Frequency;
+        since = now;
+        if (ms > 5) SpikeLog.Note($"slow sky {step}", ms: ms);
     }
 
     /// <summary>The air layer's density by the time of day (docs/render-shafts.md "Air layer"): <c>ShaftAirDawn</c> at sunrise and at sunset, easing (smoothstep) to

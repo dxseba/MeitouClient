@@ -306,9 +306,9 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     sealed class ParticleDepthPass : FullscreenProgram
     {
         public readonly SamplerSlot Depth;
-        public readonly UniformHandle FullSize, Div;
+        public readonly UniformHandle FullSize, Div, Layer, Planes;
         public ParticleDepthPass(GpuContext gpu) : base(gpu, PostProcessShaders.ParticleDepth, "post particle depth") =>
-            (Depth, FullSize, Div) = (P.Sampler("uDepth"), P.Uniform("uFullSize"), P.Uniform("uDiv"));
+            (Depth, FullSize, Div, Layer, Planes) = (P.Sampler("uDepth"), P.Uniform("uFullSize"), P.Uniform("uDiv"), P.Uniform("uLayer"), P.Uniform("uPlanes"));
     }
 
     /// <summary>The scene's depth copied to a colour target for the soft fade (<see cref="PostProcessShaders.ParticleSoftDepth"/>).</summary>
@@ -321,11 +321,12 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// <summary>The low-resolution particles over the scene (<see cref="PostProcessShaders.ParticleComposite"/>).</summary>
     sealed class ParticleCompositePass : FullscreenProgram
     {
-        public readonly SamplerSlot Accum, LowDepth, Depth;
+        public readonly SamplerSlot Accum, LowDepth, AccumFar, LowDepthFar, Depth;
         public readonly UniformHandle LowSize, NearPlanes, Div, ClipDepthZeroToOne, Scale, Footprint;
         public ParticleCompositePass(GpuContext gpu) : base(gpu, PostProcessShaders.ParticleComposite, "post particle composite")
         {
             (Accum, LowDepth, Depth) = (P.Sampler("uAccum"), P.Sampler("uLowDepth"), P.Sampler("uDepth"));
+            (AccumFar, LowDepthFar) = (P.Sampler("uAccumFar"), P.Sampler("uLowDepthFar"));
             (LowSize, NearPlanes, Div) = (P.Uniform("uLowSize"), P.Uniform("uNearPlanes"), P.Uniform("uDiv"));
             (ClipDepthZeroToOne, Scale, Footprint) = (P.Uniform("uClipDepthZeroToOne"), P.Uniform("uScale"), P.Uniform("uFootprint"));
         }
@@ -334,11 +335,12 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// <summary>The low-resolution particles' coverage for the upscalers' reactive mask (<see cref="PostProcessShaders.ParticleCoverage"/>).</summary>
     sealed class ParticleCoveragePass : FullscreenProgram
     {
-        public readonly SamplerSlot Accum, LowDepth, Depth;
+        public readonly SamplerSlot Accum, LowDepth, AccumFar, LowDepthFar, Depth;
         public readonly UniformHandle LowSize, NearPlanes, Div, FullSize, ClipDepthZeroToOne, Limit;
         public ParticleCoveragePass(GpuContext gpu) : base(gpu, PostProcessShaders.ParticleCoverage, "post particle coverage")
         {
             (Accum, LowDepth, Depth) = (P.Sampler("uAccum"), P.Sampler("uLowDepth"), P.Sampler("uDepth"));
+            (AccumFar, LowDepthFar) = (P.Sampler("uAccumFar"), P.Sampler("uLowDepthFar"));
             (LowSize, NearPlanes, Div, FullSize, Limit) = (P.Uniform("uLowSize"), P.Uniform("uNearPlanes"), P.Uniform("uDiv"), P.Uniform("uFullSize"), P.Uniform("uLimit"));
             ClipDepthZeroToOne = P.Uniform("uClipDepthZeroToOne");
         }
@@ -480,15 +482,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
                 upscaleDepth = Make(batch, w, h, InternalFormat.R32f, TextureMinFilter.Nearest, "post upscale depth");
                 // R32F, not R8: Streamline cannot size an R8_UNORM resource and drops it (DLSS's hint), FSR takes either.
                 reactive = Make(batch, w, h, InternalFormat.R32f, TextureMinFilter.Nearest, "post reactive");
-                historyA = Make(batch, displayW, displayH, InternalFormat.Rgba16f, TextureMinFilter.Linear, "post taa history");
+                // The output; the TAA's second history is made when it first runs (a vendor upscaler keeps its own history: one image does).
                 historyB = Make(batch, displayW, displayH, InternalFormat.Rgba16f, TextureMinFilter.Linear, "post taa history");
             }
-            // FXAA and the heat haze read the composite's LDR picture, as the game's run on its A8R8G8B8 buffers after the HDR composite
-            // (all always made, SMAA's too, so switching either at run time needs no new targets).
-            ldr = Make(batch, displayW, displayH, InternalFormat.Rgba8, TextureMinFilter.Linear, "post ldr");
-            ldrFxaa = Make(batch, displayW, displayH, InternalFormat.Rgba8, TextureMinFilter.Linear, "post ldr fxaa");
-            smaaEdges = Make(batch, displayW, displayH, InternalFormat.Rgba8, TextureMinFilter.Nearest, "post smaa edges");
-            smaaWeights = Make(batch, displayW, displayH, InternalFormat.Rgba8, TextureMinFilter.Nearest, "post smaa weights");
+            // The LDR, FXAA and SMAA targets are made when a frame first needs them (MakeLdrTargets).
             int hw = Math.Max((w + 1) / 2, 1), hh = Math.Max((h + 1) / 2, 1);
             aoA = Make(batch, hw, hh, InternalFormat.RG16f, TextureMinFilter.Linear, "post ssao");
             aoB = Make(batch, hw, hh, InternalFormat.RG16f, TextureMinFilter.Linear, "post ssao");
@@ -822,9 +819,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         var bloom = RunBloom(postColour);
 
         // Composite: to the target, or to the LDR picture FXAA (or SMAA) and / or the heat haze then read (the game's order: FXAA, HeatHaze).
+        MakeLdrTargets(o.Smaa && !Temporal, o.Fxaa && !Temporal, HeatHazeWanted);
         bool smaa = o.Smaa && !Temporal && smaaWeights is not null;
         bool fxaa = o.Fxaa && !smaa && !Temporal && ldr is not null;
-        bool haze = HeatHazeRuns;
+        bool haze = HeatHazeRuns && (!(fxaa || smaa) || ldrFxaa is not null);
         var c = compositePass;
         Bind(c.P, c.Scene, postColour);
         Bind(c.P, c.Ao, aoB);
@@ -884,6 +882,29 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             stamps = null;
         }
         (previousRotation, previousEye, previousFov, previousAspect, previousValid) = (viewRotation, eyeNow, fovNow, aspectNow, Temporal);
+    }
+
+    /// <summary>
+    /// FXAA, SMAA and the heat haze read the composite's LDR picture, as the game's run on its A8R8G8B8 buffers after the HDR composite. Each display-size
+    /// target is made the first frame that needs it (a temporal upscaler bypasses FXAA and SMAA, so it never has theirs), and kept until the next resize.
+    /// Out of video memory, the passes that lack theirs are skipped.
+    /// </summary>
+    void MakeLdrTargets(bool smaa, bool fxaa, bool haze)
+    {
+        bool wantLdr = smaa || fxaa || haze, wantSecond = haze && (smaa || fxaa);
+        if (displayWidth <= 0 || (!wantLdr || ldr is not null) && (!wantSecond || ldrFxaa is not null) && (!smaa || smaaWeights is not null)) return;
+        try
+        {
+            using var batch = Gpu.Uploads.Begin();
+            if (wantLdr) ldr ??= Make(batch, displayWidth, displayHeight, InternalFormat.Rgba8, TextureMinFilter.Linear, "post ldr");
+            if (wantSecond) ldrFxaa ??= Make(batch, displayWidth, displayHeight, InternalFormat.Rgba8, TextureMinFilter.Linear, "post ldr fxaa");
+            if (smaa && smaaWeights is null)
+            {
+                smaaEdges ??= Make(batch, displayWidth, displayHeight, InternalFormat.Rgba8, TextureMinFilter.Nearest, "post smaa edges");
+                smaaWeights = Make(batch, displayWidth, displayHeight, InternalFormat.Rgba8, TextureMinFilter.Nearest, "post smaa weights");
+            }
+        }
+        catch (Gpu.Core.VulkanException e) when (e.Result is Vk.Result.ErrorOutOfDeviceMemory or Vk.Result.ErrorOutOfHostMemory) { }
     }
 
     /// <summary>SMAA on the composite's LDR picture (docs/render-post.md "SMAA"): edges, blending weights, then the blend into the heat haze's input or the target.</summary>
@@ -1071,13 +1092,14 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     sealed class LowTarget(int divisor)
     {
         public readonly int Divisor = divisor;
-        public Target2D? Accum, Depth;
-        /// <summary>The depth the draws are tested against, as a colour (R32F): what the Meitou fog's soft fade reads.</summary>
-        public Target2D? Soft;
+        /// <summary>The draw tested against each block's nearest depth (<see cref="Depth"/>), and the one tested against its farthest (<see cref="DepthFar"/>).</summary>
+        public Target2D? Accum, Depth, AccumFar, DepthFar;
+        /// <summary>The depths the draws are tested against, as a colour (R32F): what the Meitou fog's soft fade reads.</summary>
+        public Target2D? Soft, SoftFar;
         public bool Drawn;
         /// <summary>Drawn this frame but blended after the upscaler (<see cref="ParticlesAfterUpscale"/>), not yet.</summary>
         public bool Late;
-        public PassTargets Targets = null!;
+        public PassTargets Targets = null!, TargetsFar = null!;
     }
 
     readonly LowTarget[] lowTargets = [new(2), new(4)];
@@ -1092,11 +1114,13 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
 
     /// <summary>What the low-resolution particles of one size are drawn into (valid after <see cref="BeginParticlesLow"/>): the accumulation target, cleared, and its depth.</summary>
     public PassTargets ParticleTargets(int divisor) => LowFor(divisor).Targets;
+    /// <summary>The second draw of the same particles: tested against each block's farthest depth (<see cref="PostProcessShaders.ParticleUpsample"/>).</summary>
+    public PassTargets? ParticleTargetsFar(int divisor) => LowFor(divisor).TargetsFar;
 
     /// <summary>
     /// Prepares one low-resolution particle pass (docs/render-post.md "Colour, night and particles"): the target pair at 1/<paramref name="divisor"/>
-    /// of the render size (made or remade when the size changed), the scene's depth reduced to it (nearest and farthest of each block in a checkerboard, as the
-    /// depth of a depth-only rendering).
+    /// of the render size (made or remade when the size changed), the scene's depth reduced to it twice (the nearest and the farthest of each block, each as the
+    /// depth of a depth-only rendering, for the two draws).
     /// Call after <see cref="RunFogVolumes"/> and before opening the host on <see cref="ParticleTargets"/>.
     /// </summary>
     public void BeginParticlesLow(int divisor)
@@ -1106,25 +1130,33 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         int lw = Math.Max((width + div - 1) / div, 1), lh = Math.Max((height + div - 1) / div, 1);
         if (low.Accum is null || low.Accum.Width != lw || low.Accum.Height != lh)
         {
-            low.Accum?.Texture.Dispose();
-            low.Depth?.Texture.Dispose();
-            low.Soft?.Texture.Dispose();
+            foreach (var t in (ReadOnlySpan<Target2D?>)[low.Accum, low.Depth, low.Soft, low.AccumFar, low.DepthFar, low.SoftFar]) t?.Texture.Dispose();
             using var batch = Gpu.Uploads.Begin();
             low.Accum = Make(batch, lw, lh, InternalFormat.Rgba16f, TextureMinFilter.Linear, $"post particle accumulation 1/{div}");
             low.Depth = Make(batch, lw, lh, InternalFormat.DepthComponent24, TextureMinFilter.Nearest, $"post particle depth 1/{div}");
             low.Soft = Make(batch, lw, lh, InternalFormat.R32f, TextureMinFilter.Nearest, $"post particle soft depth 1/{div}");
+            low.AccumFar = Make(batch, lw, lh, InternalFormat.Rgba16f, TextureMinFilter.Linear, $"post particle accumulation far 1/{div}");
+            low.DepthFar = Make(batch, lw, lh, InternalFormat.DepthComponent24, TextureMinFilter.Nearest, $"post particle depth far 1/{div}");
+            low.SoftFar = Make(batch, lw, lh, InternalFormat.R32f, TextureMinFilter.Nearest, $"post particle soft depth far 1/{div}");
         }
         CloseSegment();
         var d = particleDepthPass;
         Bind(d.P, d.Depth, sceneDepth);
         d.P.Set(d.FullSize, (float)width, (float)height);
         d.P.Set(d.Div, (float)div);
-        DrawPass(d.P, low.Soft!.Attachment with { Load = LoadOp.DontCare }, low.Soft.Format, low.Depth!.Attachment with { Load = LoadOp.Clear, DepthClear = 1f },
-            low.Depth.Format, lw, lh, lw, lh, PassState with { DepthTest = true, DepthWrite = true, Compare = DepthFunction.Always });
-        CloseSegment();
+        d.P.Set(d.Planes, nearPlanes.X, nearPlanes.Y, Gpu.ClipDepthZeroToOne ? 1 : 0);
+        foreach (var (layer, soft, depth) in (ReadOnlySpan<(int, Target2D, Target2D)>)[(1, low.Soft!, low.Depth!), (2, low.SoftFar!, low.DepthFar!)])
+        {
+            d.P.Set(d.Layer, layer);
+            DrawPass(d.P, soft.Attachment with { Load = LoadOp.DontCare }, soft.Format, depth.Attachment with { Load = LoadOp.Clear, DepthClear = 1f },
+                depth.Format, lw, lh, lw, lh, PassState with { DepthTest = true, DepthWrite = true, Compare = DepthFunction.Always });
+            CloseSegment();
+        }
         Stamp("particle depth");
-        var targets = PassTargets.Of(low.Accum.Texture, low.Depth.Texture);
+        var targets = PassTargets.Of(low.Accum!.Texture, low.Depth!.Texture);
         low.Targets = targets with { Colour = targets.Colour with { Load = LoadOp.Clear, Clear = default } };
+        var far = PassTargets.Of(low.AccumFar!.Texture, low.DepthFar!.Texture);
+        low.TargetsFar = far with { Colour = far.Colour with { Load = LoadOp.Clear, Clear = default } };
     }
 
     Target2D? softDepth;
@@ -1158,6 +1190,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         return t is null ? null : new ParticleRenderer.SoftDepth(Sampled(t), nearPlanes.X, nearPlanes.Y, Gpu.ClipDepthZeroToOne);
     }
 
+    /// <summary>The far draw's depth for its soft fade (<see cref="ParticleTargetsFar"/>), or null (Faithful).</summary>
+    public ParticleRenderer.SoftDepth? SoftParticleDepthFar(int divisor) =>
+        Options.MeitouFog && divisor > 1 && LowFor(divisor).SoftFar is { } t ? new ParticleRenderer.SoftDepth(Sampled(t), nearPlanes.X, nearPlanes.Y, Gpu.ClipDepthZeroToOne) : null;
+
     /// <summary>
     /// Whether the low-resolution particles are blended over the vendor upscaler's output instead of the scene it upscales (docs/render-post.md "Colour,
     /// night and particles"): DLSS took drifting see-through dust as standing still (its default preset ignores the reactive mask) and trailed it in rows
@@ -1187,6 +1223,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         var c = particleCompositePass;
         Bind(c.P, c.Accum, low.Accum);
         Bind(c.P, c.LowDepth, low.Depth);
+        Bind(c.P, c.AccumFar, low.AccumFar);
+        Bind(c.P, c.LowDepthFar, low.DepthFar);
         Bind(c.P, c.Depth, sceneDepth);
         c.P.Set(c.LowSize, (float)low.Accum!.Width, (float)low.Accum.Height);
         c.P.Set(c.NearPlanes, nearPlanes.X, nearPlanes.Y);
@@ -1246,7 +1284,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             Gpu.EndNative(cmd);
         }
         if (CloudMotion is { } clouds && !reset) RunCloudMotion(clouds);
-        (historyA, historyB) = (historyB, historyA);
+        if (historyA is not null) (historyA, historyB) = (historyB, historyA);
         var output = historyB!;
         bool done = false;
         sharpenAfter = true;
@@ -1290,6 +1328,13 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             CompositeLateParticles(sceneColour!, width, height);
             // The particles' coverage into the motion target's alpha (the TAA's reactive channel; the water's analytic value is there already).
             if (Particles is { HasCoverage: true }) RunCoverage(motion!, ColorMask.A, clear: false);
+            if (historyA is null)
+            {
+                // The TAA's first frame on these targets: the history it reads (nothing in it yet, so it starts over).
+                using (var batch = Gpu.Uploads.Begin())
+                    historyA = Make(batch, displayWidth, displayHeight, InternalFormat.Rgba16f, TextureMinFilter.Linear, "post taa history");
+                reset = true;
+            }
             var t = taaPass;
             Bind(t.P, t.Colour, sceneColour);
             Bind(t.P, t.Motion, motion);
@@ -1302,8 +1347,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             Draw(t.P, output);
             ActiveUpscaler = width == displayWidth && height == displayHeight ? "taa" : $"taa {width}x{height}";
         }
-        // The vendor upscaler's output (not a history Meitou keeps): the low-resolution particles over it.
-        CompositeLateParticles(output, displayWidth, displayHeight);
+        // The vendor upscaler's output (not a history Meitou keeps): the low-resolution particles over it, through their own temporal filter.
+        CompositeLateParticlesFiltered(output, displayWidth, displayHeight, reset);
         historyValid = true;
         // Frame generation takes the depth and the motion this frame made, whatever upscaled (TAA, FSR); the vendor segment is closed above or no segment is open.
         if (FrameGen is { Wanted: true } frameGen && upscaleDepth is not null && motion is not null)
@@ -1381,6 +1426,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             var c = particleCoveragePass;
             Bind(c.P, c.Accum, low.Accum);
             Bind(c.P, c.LowDepth, low.Depth);
+            Bind(c.P, c.AccumFar, low.AccumFar);
+            Bind(c.P, c.LowDepthFar, low.DepthFar);
             Bind(c.P, c.Depth, sceneDepth);
             c.P.Set(c.LowSize, (float)low.Accum!.Width, (float)low.Accum.Height);
             c.P.Set(c.NearPlanes, nearPlanes.X, nearPlanes.Y);
@@ -1475,7 +1522,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// <summary>Whether the heat-haze textures were found (else the pass never runs).</summary>
     public bool HasHeatHaze => flowTexture is not null && perturbationTexture is not null;
     /// <summary>Whether this frame ends with the heat haze: it is on, has its textures and an amount.</summary>
-    public bool HeatHazeRuns => Options.HeatHaze && HasHeatHaze && HeatHazeAmount * Options.HeatHazeScale > 0 && ldr is not null;
+    public bool HeatHazeRuns => HeatHazeWanted && ldr is not null;
+    bool HeatHazeWanted => Options.HeatHaze && HasHeatHaze && HeatHazeAmount * Options.HeatHazeScale > 0;
 
     /// <summary>
     /// Loads the heat haze's two textures from the install (<c>materials/FlowHAZE.dds</c> and <c>Perturber.dds</c>, BC1 2048² with
@@ -1616,6 +1664,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         DisposeShadingRate();
         DisposeShafts();
         DisposeSceneLayers();
+        DisposeLateParticles();
         DisposeMerged();
         DisposeBloom();
         Hiz?.Dispose();

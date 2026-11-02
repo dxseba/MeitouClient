@@ -521,13 +521,13 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
     {
         // Each NPC looks every AutoEveryTicks ticks, a slot's turn falling on its own tick (slot mod the period), so the looks spread over the ticks instead of all landing on one
         // (the original runs its AI updates 8 characters a frame in turn, FUN_140786e30).
-        int every = Settings.AutoEveryTicks;
-        if (every <= 0) return;
+        if (Settings.AutoEveryTicks <= 0) return;
+        int every = world.Every(Settings.AutoEveryTicks);
         var table = world.Characters;
         var next = table.Next;
         int phase = (int)(world.Tick % every);
-        var taken = Treated(table);
-        BeginSweep(world);
+        // The treated list and the sweep are made on the turn's first idle NPC (a turn with none, most of them in a quiet world, makes neither).
+        List<(int Medic, int Patient)>? taken = null;
         try
         {
             for (int i = phase; i < table.HighWater; i += every)
@@ -537,7 +537,9 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
                 if (cold.IsPlayer || !Settings.AutoNpcs) continue;   // a player's medic jobs are the decision step's (MedicJobs)
                 // Idle: no task, following, wandering or an implicit job.
                 bool idle = next[i].Task is (byte)CharacterTask.Idle or (byte)CharacterTask.Wander or (byte)CharacterTask.Follow || Production.PermaJobs.ListJob(cold, (CharacterTask)next[i].Task) is { Implicit: true };
-                if (idle) HealSomeone(world, i, taken, robotics: false, TaskSource.Npc);
+                if (!idle) continue;
+                if (taken is null) { taken = Treated(table); BeginSweep(world); }
+                HealSomeone(world, i, taken, robotics: false, TaskSource.Npc);
             }
         }
         finally { EndSweep(); }

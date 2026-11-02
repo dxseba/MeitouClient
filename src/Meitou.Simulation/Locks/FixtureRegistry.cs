@@ -53,14 +53,44 @@ public sealed partial class FixtureRegistry
 
     List<Fixture>? cageList;
 
-    /// <summary>Every cage, for the host's picking; rebuilt (serial phases) when a building registers or goes, or a cage's lock or occupant changes (<see cref="Touch"/>).</summary>
-    public IReadOnlyList<CageSpot> CageSpots(CharacterTable table) =>
-        [.. (cageList ??= [.. all.Where(f => f.Kind == FixtureKind.Cage)]).Select(f => new CageSpot(f.Id, f.RecordId, f.Position, f.Owner, f.Lock is { EffectivelyLocked: true }, IsFree(table, f) ? CharacterId.None : f.Occupant, f.Lock?.Level ?? 0, f.Yaw, f.OccupantSelection))];
+    /// <summary>Every cage, for the host's picking; the list is rebuilt (serial phases) when a building registers or goes, the spots only when a cage's lock, occupant or owner changed.</summary>
+    public IReadOnlyList<CageSpot> CageSpots(CharacterTable table)
+    {
+        cageList ??= [.. all.Where(f => f.Kind == FixtureKind.Cage)];
+        ulong key = 0x43616765 ^ (ulong)cageList.Count;
+        for (int i = 0; i < cageList.Count; i++)
+        {
+            var f = cageList[i];
+            var held = IsFree(table, f) ? CharacterId.None : f.Occupant;
+            key = Rng.Mix(key ^ (ulong)i) ^ (uint)held.Slot ^ ((ulong)(uint)held.Generation << 32) ^ ((ulong)(uint)(f.Lock?.Level ?? 0) << 16) ^ ((ulong)(uint)f.Owner << 40)
+                ^ (f.Lock is { EffectivelyLocked: true } ? 1UL << 62 : 0) ^ (f.OccupantSelection ? 1UL << 63 : 0);
+        }
+        if (publishedCages is not null && key == publishedCagesKey) return publishedCages;
+        publishedCagesKey = key;
+        return publishedCages = [.. cageList.Select(f => new CageSpot(f.Id, f.RecordId, f.Position, f.Owner, f.Lock is { EffectivelyLocked: true }, IsFree(table, f) ? CharacterId.None : f.Occupant, f.Lock?.Level ?? 0, f.Yaw, f.OccupantSelection))];
+    }
+
+    IReadOnlyList<CageSpot>? publishedCages;
+    ulong publishedCagesKey;
 
     IReadOnlyList<BedSpot>? bedSpots;
 
     /// <summary>Every bed, for the host's picking; rebuilt (serial phases) only when a building registers or goes.</summary>
     public IReadOnlyList<BedSpot> BedSpots => bedSpots ??= [.. all.Where(f => f.Kind == FixtureKind.Bed).Select(f => new BedSpot(f.Id, f.RecordId, f.Position, f.Owner, f.Yaw))];
+
+    IReadOnlyList<TrainingSpot>? dummySpots;
+
+    /// <summary>Every town training dummy, for the host's picking; rebuilt (serial phases) only when a building registers or goes.</summary>
+    public IReadOnlyList<TrainingSpot> TrainingSpots => dummySpots ??= [.. all.Where(f => f.Kind == FixtureKind.Training).Select(f => new TrainingSpot(f.Id, f.RecordId, f.Position, f.Owner, f.Yaw))];
+
+    /// <summary>The fixture id of a town building's <paramref name="index"/>th training dummy (its furniture in layout order): <c>&lt;building&gt;@dummy&lt;index&gt;</c>.</summary>
+    public static string DummyId(string building, int index) => string.Create(CultureInfo.InvariantCulture, $"{building}{DummyMark}{index}");
+
+    /// <summary>Whether an id names a town training dummy (<see cref="DummyId"/>), registered or not yet.</summary>
+    public static bool IsDummy(string id) => id.LastIndexOf(DummyMark, StringComparison.Ordinal) is var at and > 0 && at + DummyMark.Length < id.Length
+        && id.AsSpan(at + DummyMark.Length).IndexOfAnyExceptInRange('0', '9') < 0;
+
+    const string DummyMark = "@dummy";
 
     IReadOnlyList<DoorPick>? doorPicks;
 
@@ -137,6 +167,7 @@ public sealed partial class FixtureRegistry
         foreach (var f in b.Fixtures)
             if (db.Find(f.RecordId) is { } item && (Lockable(db, item) ?? (f.StorageWidth > 0 && f.StorageHeight > 0 ? FixtureKind.Container : null)) is { } kind)
                 list.Add(Make(world, db, kind, f.Id, b.Key, item, site, owner, faction, f.Position, f.Yaw, f.StorageWidth, f.StorageHeight));
+        RegisterSeats(b, owner);
         int bed = 0;
         foreach (var spot in b.Spots)
         {
@@ -149,13 +180,23 @@ public sealed partial class FixtureRegistry
             });
             bed++;
         }
-        if (list.Count == 0 && !properties.ContainsKey(b.Key)) return;
+        int dummy = 0;
+        foreach (var piece in b.Furniture)
+        {
+            if (piece.Kind != HomeSpotKind.Training || piece.Record is not { } dummyRecord) continue;
+            list.Add(new Fixture
+            {
+                Id = DummyId(b.Key, dummy++), Building = b.Key, Kind = FixtureKind.Training, Site = site, Owner = owner,
+                Position = piece.Position, Yaw = piece.Yaw, RecordId = dummyRecord, HostRecordId = b.BuildingId,
+            });
+        }
+        if (list.Count == 0 && !properties.ContainsKey(b.Key) && !seatSpots.Values.Any(s => s.Building == b.Key)) return;
         byBuilding[b.Key] = list;
         buildings.Add(b.Key);
         foreach (var f in list) { all.Add(f); byId[f.Id] = f; }
         containerSpots = null;
         doorPicks = null; doorsByBuilding = null;
-        bedSpots = null; cageList = null;
+        bedSpots = null; cageList = null; doorList = null; publishedCages = null; dummySpots = null;
         usableData ??= data;
         levelPublic[b.Key] = Saved?.GetValueOrDefault(b.Key) is { } savedState ? savedState.Bools.GetValueOrDefault("is public day", true) : b.LevelState?.GetBool("is public day", true) ?? true;
         if (Saved?.GetValueOrDefault(b.Key) is { } nestedState ? nestedState.Bools.GetValueOrDefault("is inside building") : b.LevelState?.GetBool("is inside building") ?? false) nested.Add(b.Key);
@@ -220,7 +261,7 @@ public sealed partial class FixtureRegistry
         foreach (var f in list) { all.Add(f); byId[f.Id] = f; }
         containerSpots = null;
         doorPicks = null; doorsByBuilding = null;
-        bedSpots = null; cageList = null;
+        bedSpots = null; cageList = null; doorList = null; publishedCages = null; dummySpots = null;
         if (Saved?.GetValueOrDefault(Meitou.Data.World.BuildingKey.Of(site.Zone, site.Id)) is { } state) Restore(StateKeys.Of(state), site.Id, list, level: false);
         SyncDoors(site.Id);
         if (bed is not null) Bind(world);
@@ -274,10 +315,11 @@ public sealed partial class FixtureRegistry
     {
         if (!byBuilding.Remove(buildingInstance, out var list)) return;
         buildings.Remove(buildingInstance);
+        RemoveSeats(buildingInstance);
         foreach (var f in list) { all.Remove(f); byId.Remove(f.Id); }
         containerSpots = null;
         doorPicks = null; doorsByBuilding = null;
-        bedSpots = null; cageList = null;
+        bedSpots = null; cageList = null; doorList = null; publishedCages = null; dummySpots = null;
         initialApplied.Remove(buildingInstance);
         doors?.SetDoorsBlocked(buildingInstance, false);
     }
@@ -1011,21 +1053,23 @@ public sealed partial class FixtureRegistry
 
     IReadOnlyDictionary<(string Building, int Door), DoorView> publishedDoors = new Dictionary<(string Building, int Door), DoorView>();
     ulong publishedDoorsKey;
+    List<Fixture>? doorList;
 
     /// <summary>The doors of the player's buildings and every other door that is not plainly closed and unlocked (open, moving, locked, set to lock or broken), for the snapshot; a new dictionary only when one of them changed.</summary>
     internal IReadOnlyDictionary<(string Building, int Door), DoorView> PublishedDoors()
     {
-        ulong key = 0x446F6F72;
-        for (int i = 0; i < all.Count; i++)
+        doorList ??= [.. all.Where(f => f.Kind == FixtureKind.Door)];
+        ulong key = 0x446F6F72 ^ (ulong)doorList.Count;
+        for (int i = 0; i < doorList.Count; i++)
         {
-            var f = all[i];
+            var f = doorList[i];
             if (f.Kind != FixtureKind.Door || !Shown(f)) continue;
             key = Rng.Mix(key ^ (ulong)i) ^ BitConverter.SingleToUInt32Bits(f.OpenAmount) ^ ((ulong)f.Motion << 32) ^ (f.Lock is { EffectivelyLocked: true } ? 1UL << 40 : 0) ^ (f.WantsLock ? 1UL << 41 : 0) ^ (f.DoorBroken ? 1UL << 42 : 0);
         }
         if (key == publishedDoorsKey) return publishedDoors;
         var doorViews = new Dictionary<(string Building, int Door), DoorView>();
-        foreach (var f in all)
-            if (f.Kind == FixtureKind.Door && Shown(f))
+        foreach (var f in doorList)
+            if (Shown(f))
                 doorViews[(f.Building, f.DoorIndex)] = new DoorView(f.OpenAmount, f.Motion, f.Lock is { EffectivelyLocked: true }, f.WantsLock, f.DoorBroken, DoorSpotOf(f)?.Centre ?? f.Position, f.RecordId, f.Lock?.Level ?? 0);
         publishedDoorsKey = key;
         return publishedDoors = doorViews;
