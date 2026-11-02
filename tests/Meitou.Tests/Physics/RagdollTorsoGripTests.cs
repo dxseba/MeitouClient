@@ -19,7 +19,7 @@ public class RagdollTorsoGripTests
     [InlineData(0, -1)] [InlineData(0, 1)]
     [InlineData(1, -1)] [InlineData(1, 1)]
     [InlineData(2, -1)] [InlineData(2, 1)]
-    public void A_retained_half_reuses_the_original_whole_body_contact_while_its_carrier_moves_and_turns(int style, int side)
+    public void A_retained_half_keeps_its_central_contact_on_the_upper_arm_while_its_carrier_moves_and_turns(int style, int side)
     {
         var plane = style switch { 0 => new Vector4(0, 1, 0, -10), 1 => new(1, 0, 0, 0.25f), _ => new(0.6f, 0.7f, 0.2f, -7.7f) };
         plane /= new Vector3(plane.X, plane.Y, plane.Z).Length();
@@ -56,7 +56,7 @@ public class RagdollTorsoGripTests
                     Vector3.Transform(scratch.DerivedPosition[body.Bone],placement),Quaternion.Normalize(rotation*scratch.DerivedRotation[body.Bone])))).ToArray();
             }
             finally { scene.Setup.Rig.Return(scratch); }
-            palm = ReferenceContact(scene, side, carrier);
+            palm = UpperArmContact(scene, side, carrier);
             var held = State(side);
             var distances = own.Bodies.Select((body, i) => Distance(body, held.Pose[i].Inverse().Apply(palm))).ToArray();
             var connected = new HashSet<int> { own.Root };
@@ -193,39 +193,38 @@ public class RagdollTorsoGripTests
             [0,0],0,definition,[Matrix4x4.Identity,Matrix4x4.Identity],new(0,15,1)));
         Assert.InRange(grip.Posed([Matrix4x4.Identity,Matrix4x4.Identity]).Y,17.8999f,17.9001f);
     }
-    internal static Vector3 ReferenceContact(Scene scene, int side, CharacterId carrier)
+    internal static Vector3 UpperArmContact(Scene scene, int side, CharacterId carrier)
     {
         var scratch = scene.Setup.Rig.Rent();
         try
         {
             scratch.PoseDerived(scene.Setup.Shape, []);
-            // Physics reads simulation coordinates. DrawnPosition can lower a healthy snapshot to the synthetic water surface.
+            // The meshless fixture uses the explicit upper-arm thickness fallback in actual simulation coordinates.
             ref readonly var holder = ref scene.World.Characters.Previous[carrier.Slot];
-            var palm = Vector3.Transform(CarryPose.PalmPoint(scratch.DerivedPosition[3], forearm: scratch.DerivedPosition[2]),
+            return Vector3.Transform(CarryPose.BicepsSupport(scratch.DerivedPosition[1], scratch.DerivedPosition[2]),
                 CharacterRigs.Placement(scene.Setup, holder.Position, holder.Yaw, 1));
-            var attach = (side > 0 ? scene.Snapshot.TorsoPositiveCarry : scene.Snapshot.Carry) ?? CarryPose.Fallback;
-            // This minimal scene has no CarrySystem.KeepLinks: an ordinary negative owner keeps its own hot node.
-            ref readonly var owner = ref scene.World.Characters.Previous[scene.Id.Slot];
-            var held = side > 0 ? attach.World(holder.Position, holder.Yaw) : attach.World(owner.Position, owner.Yaw);
-            var placement = CharacterRigs.Placement(scene.Setup, held.Position, held.Rotation, 1);
-            var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
-            var source = scene.SourceDefinition.Bodies[scene.SourceDefinition.Root];
-            var root = source.BoneInBody.Inverse().Then(new RigidTransform(Vector3.Transform(scratch.DerivedPosition[source.Bone], placement),
-                Quaternion.Normalize(turn * scratch.DerivedRotation[source.Bone])));
-            // The fixture's ordinary contact is on its sole axial box, rather than on the carrier's biceps.
-            return root.Apply(Vector3.Clamp(root.Inverse().Apply(palm), -source.Size * .5f, source.Size * .5f));
         }
         finally { scene.Setup.Rig.Return(scratch); }
     }
 
-    internal static void AssertReferenceContact(Scene scene, int side, CharacterId carrier)
+    internal static void AssertUpperArmContact(Scene scene, int side, CharacterId carrier)
     {
         var cut = scene.Cold.TorsoBisection!.Value;
         var definition = Assert.IsType<RagdollDefinition>(RagdollCut.Build(scene.SourceDefinition, cut.Plane, side, cut.FullBody));
         var saved = Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(scene.Physics.SaveState(scene.Id)).Torso);
         var held = side > 0 ? saved.Positive : saved.Negative;
-        var contact = ReferenceContact(scene, side, carrier);
-        Assert.InRange(Distance(definition.Bodies[definition.Root], held.Pose[definition.Root].Inverse().Apply(contact)), 0, .001f);
+        var contact = UpperArmContact(scene, side, carrier);
+        var connected=new HashSet<int>{definition.Root};
+        bool changed;
+        do
+        {
+            changed=false;
+            foreach(var joint in definition.Joints)
+                if(connected.Contains(joint.A)!=connected.Contains(joint.B))changed|=connected.Add(joint.A)|connected.Add(joint.B);
+        }while(changed);
+        float gap=connected.Where(b=>definition.Bodies[b].Name is not("Bip01 Head" or "Bip01 L Forearm" or "Bip01 R Forearm"))
+            .Min(b=>Distance(definition.Bodies[b],held.Pose[b].Inverse().Apply(contact)));
+        Assert.InRange(gap, 0, .001f);
     }
     [Fact]
     public void Middle_contact_uses_the_full_3D_extent_instead_of_grabbing_a_horizontal_endpoint()
@@ -305,9 +304,39 @@ public class RagdollTorsoGripTests
         var transferred=State();
         Assert.True(transferred.Pose[forearm].Position.X>280);
         Assert.InRange(Vector3.Distance(transferred.Pose[forearm].Position,transferred.Pose[cutDefinition.Root].Position),0,15);
-        AssertReferenceContact(scene,1,replacement);
+        AssertUpperArmContact(scene,1,replacement);
 
         SavedRagdoll State()=>Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(scene.Physics.SaveState(scene.Id)).Torso).Positive;
+    }
+
+    [Fact]
+    public void Half_centre_uses_actual_surface_area_rather_than_bounds_or_vertex_count()
+    {
+        using var scene = new Scene();
+        var surface = RagdollSkinSurface.Read(Mesh([new(0,-1,-1),new(0,1,-1),new(0,0,2),new(10,-2,-2),new(10,2,-2),new(10,0,4)],[0,0,0,0,0,0]));
+        var skin = Enumerable.Repeat(Matrix4x4.Identity,4).ToArray();
+        var grip = Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance!,scene.Setup.Rig,default,1,true,
+            [0,0,0,0],0,scene.SourceDefinition,skin,Vector3.Zero,query:new(Uncut:true,AreaCentre:true)));
+        Assert.InRange(Vector3.Distance(grip.Posed(skin),new(10,0,0)),0,.0001f);
+        var transform=Matrix4x4.CreateRotationY(.8f)*Matrix4x4.CreateRotationZ(.4f)*Matrix4x4.CreateTranslation(13,8,-2);
+        skin=Enumerable.Repeat(transform,4).ToArray();
+        var turned=Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance!,scene.Setup.Rig,default,1,true,
+            [0,0,0,0],0,scene.SourceDefinition,skin,Vector3.Transform(Vector3.Zero,transform),query:new(Uncut:true,AreaCentre:true)));
+        Assert.InRange(Vector3.Distance(turned.Posed(skin),Vector3.Transform(new(10,0,0),transform)),0,.0001f);
+    }
+
+    [Fact]
+    public void Upper_arm_support_is_real_upper_facing_skin_at_the_middle_cross_section()
+    {
+        using var scene = new Scene();
+        var surface=RagdollSkinSurface.Read(Mesh([new(4,6,-1),new(4,10,-1),new(4,10,1),new(4,6,-1),new(4,10,1),new(4,6,1),
+            new(4.4f,7,-1),new(4.4f,9,-1),new(4.4f,8,1)],[1,1,1,1,1,1,0,0,0]));
+        var skin=Enumerable.Repeat(Matrix4x4.Identity,4).ToArray();
+        var grip=Assert.IsType<RagdollSkinSurface.Grip>(surface.FindUpperArmSupport(scene.Cold.Appearance!,scene.Setup.Rig,scene.SourceDefinition,
+            skin,new(3,9.5f,0),new(3,6.5f,0)));
+        var point=grip.Posed(skin);
+        Assert.InRange(Vector3.Distance(point,new(4,8,0)),0,.0001f);
+        Assert.InRange((9.5f-point.Y)/3,.4f,.6f);
     }
 
     static OgreMesh Mesh(Vector3[] positions,int[] bones)

@@ -14,11 +14,13 @@ public sealed partial class RagdollSystem
         if (negativeHolderChanged)
         {
             fragments.NegativeGrip = null;
+            fragments.NegativeSupport = null;
             fragments.NegativeGripHolder = cold.CarriedBy;
         }
         bool negativeCarried = !cold.CarriedBy.IsNone;
-        UpdateTorsoPieceCarry(fragments.Negative, cold, negativeCarried, Placement(fragments.Negative, cold, hot),
-            ref fragments.NegativeCarried, ref fragments.NegativeCarriedBodies, fragments, -1, PalmOf(world.Characters, cold.CarriedBy), newHolder: negativeHolderChanged);
+        var publicationFrame = Placement(fragments.Negative, cold, hot);
+        UpdateTorsoPieceCarry(fragments.Negative, cold, negativeCarried, publicationFrame, publicationFrame,
+            ref fragments.NegativeCarried, ref fragments.NegativeCarriedBodies, fragments, -1, UpperArmOf(world.Characters, cold.CarriedBy, ref fragments.NegativeSupport), newHolder: negativeHolderChanged);
 
         var table = world.Characters;
         bool positiveCarried = table.TryResolveNext(cold.TorsoPositiveCarriedBy, out int holder);
@@ -27,6 +29,7 @@ public sealed partial class RagdollSystem
         if (positiveHolderChanged)
         {
             fragments.PositiveGrip = null;
+            fragments.PositiveSupport = null;
             fragments.PositiveGripHolder = positiveGripHolder;
         }
         var placement = Matrix4x4.Identity;
@@ -37,8 +40,8 @@ public sealed partial class RagdollSystem
             placement = CharacterRigs.Placement(fragments.Positive.Setup, at, rotation, fragments.Positive.Scale);
             cold.TorsoPositiveYaw = carrier.Yaw;
         }
-        UpdateTorsoPieceCarry(fragments.Positive, cold, positiveCarried, placement,
-            ref fragments.PositiveCarried, ref fragments.PositiveCarriedBodies, fragments, 1, PalmOf(table, cold.TorsoPositiveCarriedBy),
+        UpdateTorsoPieceCarry(fragments.Positive, cold, positiveCarried, placement, publicationFrame,
+            ref fragments.PositiveCarried, ref fragments.PositiveCarriedBodies, fragments, 1, UpperArmOf(table, cold.TorsoPositiveCarriedBy, ref fragments.PositiveSupport),
             release: cold.TorsoPositiveReleaseAt is not null, forceCarriedPose: true, newHolder: positiveHolderChanged);
         if (!positiveCarried && cold.TorsoPositiveReleaseAt is { } released)
         {
@@ -57,7 +60,7 @@ public sealed partial class RagdollSystem
         cold.TorsoPositiveReleaseAt = null;
     }
 
-    void UpdateTorsoPieceCarry(Ragdoll piece, CharacterCold cold, bool carried, Matrix4x4 placement,
+    void UpdateTorsoPieceCarry(Ragdoll piece, CharacterCold cold, bool carried, Matrix4x4 placement, Matrix4x4 publicationFrame,
         ref bool wasCarried, ref bool[]? carriedBodies, TorsoFragments fragments, int side, Vector3? palm, bool release = false, bool forceCarriedPose = false, bool newHolder = false)
     {
         if (!carried && !wasCarried && !release) return;
@@ -68,7 +71,7 @@ public sealed partial class RagdollSystem
         if (carried)
         {
             RefreshCarriedOffsets(fragments, piece, side, placement, layers, target, carriedBodies);
-            if (palm is { } hand) AlignTorsoGrip(fragments, piece, cold, side, target, carriedBodies, hand, placement, layers, entering);
+            if (palm is { } hand) AlignTorsoGrip(fragments, piece, cold, side, target, carriedBodies, hand, publicationFrame, layers, entering);
         }
         if (carried != wasCarried || release || entering)
         {

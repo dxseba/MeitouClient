@@ -13,7 +13,17 @@ internal sealed partial class RagdollSkinSurface
     }
 
     internal sealed record GripQuery(bool NearestToPoint = false, bool AxialOnly = false, bool Uncut = false,
-        Grip? Retained = null, bool[]? PinnedBones = null);
+        Grip? Retained = null, bool[]? PinnedBones = null, bool AreaCentre = false, Vector3? SegmentStart = null, Vector3? SegmentEnd = null);
+
+    internal Grip? FindUpperArmSupport(CharacterAppearance look, SkeletonRig rig, RagdollDefinition definition,
+        Matrix4x4[] skin, Vector3 shoulder, Vector3 elbow)
+    {
+        if (rig.Handle("Bip01 L UpperArm") is not int upperArm) return null;
+        var selected = Enumerable.Range(0, rig.BoneCount).Select(h => h == upperArm).ToArray();
+        return FindGrip(look, rig, default, 1, true, new int[rig.BoneCount], 0, definition, skin,
+            Carrying.CarryPose.UpperArmProbe(shoulder, elbow), query: new(NearestToPoint: true, Uncut: true,
+                PinnedBones: selected, SegmentStart: shoulder, SegmentEnd: elbow));
+    }
 
     internal Grip? FindGrip(CharacterAppearance look, SkeletonRig rig, Vector4 plane, int side, bool fullBody, int[] components, int root,
         RagdollDefinition definition, Matrix4x4[] skin, Vector3 palm, float[]? limbCuts = null, Matrix4x4? boundsFrame = null, GripQuery? query = null)
@@ -32,6 +42,8 @@ internal sealed partial class RagdollSkinSurface
         float nearest = float.MaxValue;
         var surfaces = new List<(Point[] Points, Vector3[] Posed, Vector3[] Polygon, float[] Shares)>();
         var minimum = new Vector3(float.MaxValue); var maximum = new Vector3(float.MinValue);
+        var weightedCentre = Vector3.Zero;
+        double totalArea = 0;
         foreach (var triangle in triangles)
         {
             Point[] original = [triangle.A, triangle.B, triangle.C];
@@ -81,6 +93,15 @@ internal sealed partial class RagdollSkinSurface
             var shaped = original.Select(p => p with { Position = p.Position + deltas.GetValueOrDefault((p.Target, p.Vertex)) }).ToArray();
             var posed = shaped.Select(p => Skin(p, skin)).ToArray();
             Vector3 At(Vector3 bary) => posed[0] * bary.X + posed[1] * bary.Y + posed[2] * bary.Z;
+            if (query is { SegmentStart: { } segmentStart, SegmentEnd: { } segmentEnd })
+            {
+                var axis = segmentEnd - segmentStart;
+                float squared = axis.LengthSquared();
+                if (squared < 1e-10f) continue;
+                Clip(bary => Vector3.Dot(At(bary) - segmentStart, axis) / squared - .4f);
+                Clip(bary => .6f - Vector3.Dot(At(bary) - segmentStart, axis) / squared);
+                if (polygon.Count < 3) continue;
+            }
             bool area = false;
             for (int i = 1; i + 1 < polygon.Count; i++)
                 area |= Vector3.Cross(At(polygon[i]) - At(polygon[0]), At(polygon[i + 1]) - At(polygon[0])).LengthSquared() >= 1e-10f;
@@ -95,6 +116,14 @@ internal sealed partial class RagdollSkinSurface
                         return new(shapedTriangle, retained.Barycentric, Vector3.Dot(retained.Barycentric, new(pinned[0], pinned[1], pinned[2])));
                 }
             surfaces.Add((shaped, posed, [.. polygon], pinned));
+            for (int i = 1; i + 1 < polygon.Count; i++)
+            {
+                var a = At(polygon[0]); var b = At(polygon[i]); var c = At(polygon[i + 1]);
+                float twiceArea = Vector3.Cross(b - a, c - a).Length();
+                if (twiceArea < 1e-5f) continue;
+                weightedCentre += (a + b + c) * (twiceArea / 3);
+                totalArea += twiceArea;
+            }
             foreach (var bary in polygon)
             {
                 var point = posed[0] * bary.X + posed[1] * bary.Y + posed[2] * bary.Z;
@@ -123,7 +152,8 @@ internal sealed partial class RagdollSkinSurface
                 return side * (Vector3.Dot(new(plane.X, plane.Y, plane.Z), p.Position) + plane.W);
             }
         }
-        var centre = query?.NearestToPoint == true ? palm : Vector3.Transform((minimum + maximum) * 0.5f, frame);
+        var centre = query?.NearestToPoint == true ? palm : query?.AreaCentre == true && totalArea > 0
+            ? weightedCentre / (float)totalArea : Vector3.Transform((minimum + maximum) * 0.5f, frame);
         float armDistance = float.MaxValue;
         foreach (var surface in surfaces)
         {

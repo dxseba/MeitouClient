@@ -16,9 +16,8 @@ internal sealed partial class CharacterRenderer
         internal CharacterAsset Asset = null!;
         internal Matrix4x4[] Skin = [];
         internal BonePose Pose = null!;
-        internal SurfaceContact? Original, Retained;
-        internal bool Preserve;
-        public Vector3 ReferencePoint { get; internal set; }
+        internal SurfaceContact? Retained;
+        public Vector3 SupportPoint { get; internal set; }
         public Vector3 RetainedPoint { get; internal set; }
         public Vector3 Translation { get; internal set; }
     }
@@ -39,12 +38,12 @@ internal sealed partial class CharacterRenderer
         return true;
     }
 
-    /// <summary>Samples the ordinary intact carry palette, clips that same pose, and changes only position when its original hand-contact material was removed.</summary>
-    public bool PrepareTorsoCarryReference(in CharacterInstance reference, in CharacterTorsoCut cut, Vector3 palm,
+    /// <summary>Preserves the ordinary carry palette and rotation, translating the retained half's central material onto the real upper arm.</summary>
+    public bool PrepareTorsoCarryReference(in CharacterInstance reference, in CharacterTorsoCut cut, Vector3 support,
         ref TorsoCarryReference? cached, out BonePose? pose, out Vector3 translation)
     {
         pose = null; translation = default;
-        if (!assets.TryGetValue(reference.Appearance, out var asset) || asset is not { BodySource: { } source, IsIcon: false }
+        if (!assets.TryGetValue(reference.Appearance, out var asset) || asset is not { BodySource: not null, IsIcon: false }
             || reference.World is not { } world) return false;
         if (reference.Build is { } build) ApplyBuild(asset, build);
         var rig = asset.Rig;
@@ -68,21 +67,11 @@ internal sealed partial class CharacterRenderer
         }
         finally { rig.Return(scratch); }
         var sampled = new CharState { Asset = asset, Bones = context.Skin, World = world, Posed = updateStamp, InWorld = true };
-        if (context.Original is null)
-        {
-            var uncut = new CharacterTorsoCut(new(0, 1, 0, 100000), 1, true);
-            context.Original = ClosestTorsoContact(sampled, uncut, palm, limbCuts: reference.LimbCuts, axialOnly: true)
-                ?? ClosestTorsoContact(sampled, uncut, palm, limbCuts: reference.LimbCuts);
-            if (context.Original is not { } original) return false;
-            context.Preserve = CarryMaterialSurvives(asset, source, original, cut, reference.LimbCuts);
-            var target = CarryMaterialPosition(asset, sampled, original);
-            context.Retained = context.Preserve ? original : ClosestTorsoContact(sampled, cut, target, limbCuts: reference.LimbCuts, axialOnly: true)
-                ?? ClosestTorsoContact(sampled, cut, target, limbCuts: reference.LimbCuts);
-            if (context.Retained is null) { context.Original = null; return false; }
-        }
-        context.ReferencePoint = CarryMaterialPosition(asset, sampled, context.Original!.Value);
+        context.Retained ??= CentralCarryContact(sampled, cut, support, reference.LimbCuts, null, out _);
+        if (context.Retained is null) return false;
+        context.SupportPoint = support;
         context.RetainedPoint = CarryMaterialPosition(asset, sampled, context.Retained!.Value);
-        context.Translation = context.Preserve ? Vector3.Zero : context.ReferencePoint - context.RetainedPoint;
+        context.Translation = support - context.RetainedPoint;
         pose = context.Pose; translation = context.Translation;
         return true;
     }
@@ -105,18 +94,4 @@ internal sealed partial class CharacterRenderer
         return point;
     }
 
-    bool CarryMaterialSurvives(CharacterAsset asset, Vertex[] source, SurfaceContact material, in CharacterTorsoCut cut, uint limbCuts)
-    {
-        var groups = woundMasks.BoneGroups(asset.Rig);
-        float torso = 0, limb = 0;
-        for (int i = 0; i < 3; i++)
-        {
-            var vertex = source[material.Triangle + i];
-            int group = TorsoCutSurface.Group(vertex, groups);
-            uint height = group is >= 1 and <= 4 ? limbCuts >> (8 * (group - 1)) & 255 : 0;
-            torso += material.Barycentric[i] * TorsoCutSurface.Band(vertex.Position, group, cut);
-            limb += material.Barycentric[i] * (height == 0 ? 1000 : vertex.Position.Y - height * 0.1f);
-        }
-        return torso >= -1e-5f && limb >= -1e-5f;
-    }
 }

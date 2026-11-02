@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Rendering;
 using Meitou.Rendering.Characters;
 using Meitou.Simulation;
 using Meitou.Simulation.Carrying;
@@ -32,29 +33,68 @@ sealed partial class GameHost
             + new Vector3(0, 4, 0);
     }
 
-    // Compare real hand contact; the intact carry reference, rather than an invented biceps target, determines the body placement.
-    void ReportTorsoGripContact(int frame)
+    readonly record struct TorsoGripMarker(int Side, Vector3 Centre, Vector3 Contact, Vector3 Support, float SkinGap);
+
+    IEnumerable<TorsoGripMarker> TorsoGripMarkers()
     {
         if (gpu.Characters is not { } renderer
-            || session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe) is not { TorsoBisection: { } cut } body) return;
+            || session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe) is not { TorsoBisection: { } cut } body) yield break;
         foreach (int side in new[] { 0, 1 })
         {
             var holder = side > 0 ? body.TorsoPositiveCarriedBy : body.CarriedBy;
             if (holder.IsNone) continue;
             long carrierKey = DrawKey(holder);
-            if (renderer.BonePosition(carrierKey, "Bip01 L Hand") is not { } hand) continue;
-            var finger = renderer.BonePosition(carrierKey, "Bip01 L Finger0") ?? renderer.BonePosition(carrierKey, "Bip01 L Finger1");
-            var palm = CarryPose.PalmPoint(hand, finger, renderer.BonePosition(carrierKey, "Bip01 L Forearm"));
+            if (renderer.BonePosition(carrierKey, "Bip01 L UpperArm") is not { } shoulder
+                || renderer.BonePosition(carrierKey, "Bip01 L Forearm") is not { } elbow) continue;
+            CharacterRenderer.CarryArmSupport? arm = null;
+            var support = renderer.UpperArmSupportPoint(carrierKey, shoulder, elbow, CarryPose.UpperArmProbe(shoulder, elbow), ref arm)
+                ?? CarryPose.BicepsSupport(shoulder, elbow);
             long pieceKey = TorsoDrawKey(body.Id, side);
             int? component = null;
             var pose = side > 0 ? body.TorsoRagdoll?.Positive : body.TorsoRagdoll?.Negative;
             if (body.Appearance is { } look && renderer.Rigs.For(look) is { } setup && setup.Rig.Order.Length > 0
                 && pose?.Components is { } groups && setup.Rig.Order[0] < groups.Length) component = groups[setup.Rig.Order[0]];
-            var surface = renderer.ClosestTorsoSurfacePoint(pieceKey, new(cut.Plane, side > 0 ? 1 : -1, cut.FullBody), palm, component);
-            if (surface is { } at)
-                Console.WriteLine($"carry grip   frame {frame} side {side}: palm-to-retained-skin {Vector3.Distance(palm, at):F4}, palm {palm}, surface {at}; pelvis {renderer.BonePosition(pieceKey, "Bip01 Pelvis")}, L foot {renderer.BonePosition(pieceKey, "Bip01 L Foot")}, R foot {renderer.BonePosition(pieceKey, "Bip01 R Foot")}");
+            var retained = new Meitou.Rendering.CharacterTorsoCut(cut.Plane, side > 0 ? 1 : -1, cut.FullBody);
+            if (renderer.TorsoGripCentre(pieceKey, retained, support, component) is not { } geometry) continue;
+            var surface = renderer.ClosestTorsoSurfacePoint(pieceKey, retained, support, component);
+            var contact = surface ?? geometry.Contact;
+            if (session.World.Systems.OfType<Meitou.Simulation.Ragdolls.RagdollSystem>().FirstOrDefault() is { } physics
+                && physics.TryTorsoCarryContact(session.World, body.Id, side > 0 ? 1 : -1, out var cachedContact, out _)) contact = cachedContact;
             if (torsoFalls.TryGetValue(body.Id, out var fall) && fall.CarryReferences.TryGetValue(side > 0 ? 1 : -1, out var held) && held.Reference is { } reference)
-                Console.WriteLine($"carry reference   frame {frame} side {side}: reference-to-contact {Vector3.Distance(reference.ReferencePoint, reference.RetainedPoint + reference.Translation):F4}, translation {reference.Translation}, kept {reference.Translation == Vector3.Zero}");
+                contact = reference.RetainedPoint + reference.Translation;
+            yield return new(side, geometry.Centre, contact, support,
+                surface is { } at ? Vector3.Distance(support, at) : float.PositiveInfinity);
+        }
+    }
+
+    void ReportTorsoGripContact(int frame)
+    {
+        foreach (var marker in TorsoGripMarkers())
+            Console.WriteLine($"carry grip   frame {frame} side {marker.Side}: arm-to-retained-skin {marker.SkinGap:F4}, centre {marker.Centre}, central contact {marker.Contact}, arm support {marker.Support}, contact-to-arm {Vector3.Distance(marker.Contact, marker.Support):F4}");
+    }
+
+    void DrawTorsoGripMarkers(DebugOverlay overlay, int width, int height)
+    {
+        var view = camera.View * camera.Projection(width / (float)Math.Max(height, 1), camera.Near, camera.ViewDistance);
+        Vector2? Screen(Vector3 world)
+        {
+            var clip = Vector4.Transform(new Vector4(world, 1), view);
+            if (clip.W <= 0.1f) return null;
+            return new((clip.X / clip.W * 0.5f + 0.5f) * width, (0.5f - clip.Y / clip.W * 0.5f) * height);
+        }
+        foreach (var marker in TorsoGripMarkers())
+        {
+            if (Screen(marker.Centre) is not { } centre || Screen(marker.Contact) is not { } contact || Screen(marker.Support) is not { } support) continue;
+            var cyan = new Vector4(0.1f, 0.95f, 1, 1); var yellow = new Vector4(1, 0.85f, 0.1f, 1); var green = new Vector4(0.2f, 1, 0.25f, 1);
+            overlay.Line(centre.X, centre.Y, contact.X, contact.Y, 1.5f, cyan);
+            overlay.Line(contact.X, contact.Y, support.X, support.Y, 1.5f, yellow);
+            overlay.Rect(centre.X - 3, centre.Y - 3, centre.X + 3, centre.Y + 3, cyan);
+            overlay.Rect(contact.X - 3, contact.Y - 3, contact.X + 3, contact.Y + 3, yellow);
+            overlay.Line(support.X - 5, support.Y, support.X + 5, support.Y, 2, green);
+            overlay.Line(support.X, support.Y - 5, support.X, support.Y + 5, 2, green);
+            overlay.Text($"{marker.Side}: centre", centre.X + 6, centre.Y - 16, cyan);
+            overlay.Text("middle grip", contact.X + 6, contact.Y, yellow);
+            overlay.Text("arm", support.X + 6, support.Y + 15, green);
         }
     }
 

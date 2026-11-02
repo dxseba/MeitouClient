@@ -1,12 +1,15 @@
 using System.Numerics;
 using Meitou.Data.Characters;
 using Meitou.Data.Physics;
+using Meitou.Data.Ogre;
+using Meitou.Data.Gameplay.Bodies;
 using Meitou.Rendering;
 using Meitou.Rendering.Characters;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Carrying;
 using Meitou.Simulation.Ragdolls;
+using Meitou.Simulation.Saving;
 using Meitou.Simulation.Wounds;
 using static Meitou.Tests.Bodies.BodyFixtures;
 using SimWorld = Meitou.Simulation.World;
@@ -19,30 +22,45 @@ public partial class RagdollInstalledSkinTests
     {
         public string Gait = "";
         public float Time;
+        public bool Lifting;
         public IReadOnlyList<AnimationLayer> Publish(CharacterAnimation animation, List<AnimationLayer> into)
         {
             into.Clear();
-            if (ReferenceEquals(animation, carrier)) { into.Add(new(Gait, Time, 1)); into.Add(new("carrying left arm only", 0, 1)); }
+            if (ReferenceEquals(animation, carrier))
+            {
+                into.Add(new(Lifting ? CarrySystem.LiftClip : Gait, Time, 1));
+                if (!Lifting) into.Add(new("carrying left arm only", 0, 1));
+            }
             else into.Add(new(CarrySystem.CarriedClip, 0, 1));
             return into;
         }
     }
 
     [Theory, Slow]
-    [InlineData(false, false)] [InlineData(true, false)]
-    [InlineData(false, true)] [InlineData(true, true)]
-    public void Installed_halves_preserve_actual_whole_carry_seats_and_rendered_descendants(bool female, bool missingLeg)
+    [InlineData(false, false, TorsoBisectionStyle.Transverse, 2)] [InlineData(true, false, TorsoBisectionStyle.Transverse, 2)]
+    [InlineData(false, true, TorsoBisectionStyle.Transverse, 2)] [InlineData(true, true, TorsoBisectionStyle.Transverse, 2)]
+    [InlineData(false, true, TorsoBisectionStyle.Oblique, 2)] [InlineData(true, false, TorsoBisectionStyle.Vertical, 1)]
+    public void Installed_half_middle_contacts_real_upper_arm_skin_without_changing_whole_carry_motion(bool female, bool missingLeg, TorsoBisectionStyle style, int direction)
     {
         var (rig, definition, model, setup, rigs, look) = Installed(female);
         var walk = Assert.Single(rig.Skeleton.Animations.Where(a => a.Name.StartsWith("walk", StringComparison.OrdinalIgnoreCase)
             && !a.Name.Contains("carrying", StringComparison.OrdinalIgnoreCase)).Take(1));
         var jog = Assert.Single(rig.Skeleton.Animations.Where(a => a.Name.StartsWith("jog", StringComparison.OrdinalIgnoreCase)
             && !a.Name.Contains("carrying", StringComparison.OrdinalIgnoreCase)).Take(1));
+        var lift = Assert.IsType<LayerDef>(rig.Layer(rigs.Database, CarrySystem.LiftClip));
         var carrierAnimation = new CharacterAnimation();
         var animation = new WholeCarryQaAnimations(carrierAnimation) { Gait = walk.Name };
+        var carrierStats = CharacterStats.FromValues(Enumerable.Repeat(100f, StatsInfo.Count).ToArray());
+        var carrierBuild = CharacterShape.BuildFromStats(female, carrierStats, static (stats, stat) => stats[stat], Healthy().Hunger);
+        var carrierReshape = rigs.Reshape(look, carrierBuild);
+        Assert.NotNull(carrierReshape);
+        var carrierSetup = new CharacterPoseSetup { Rig = rig, Shape = carrierReshape.Value.Shape,
+            GroundOffset = carrierReshape.Value.GroundOffset, Fixed = setup.Fixed, Idle = setup.Idle };
+        Assert.NotNull(carrierSetup.Shape);
         using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 41 }, new OpenGroundWalkability((_, _) => 0), [animation, physics]);
-        var cut = new TorsoBisectionState(new(0, 1, 0, -12));
+        var cut = style == TorsoBisectionStyle.Transverse ? new TorsoBisectionState(new(0, 1, 0, -12))
+            : TorsoBisectionPolicy.StateForDirection(direction, 1, Vector2.UnitX, -MathF.PI / 2, style);
         CharacterCold Corpse(bool bisected)
         {
             var cold = new CharacterCold { Name = bisected ? "Cut QA" : "Whole QA", Race = Human, Medical = Healthy(), Appearance = look,
@@ -59,7 +77,7 @@ public partial class RagdollInstalledSkinTests
         halfCold.Animation = new();
         CharacterId Holder(CharacterId body, float x, int side)
         {
-            var cold = new CharacterCold { Name = "QA carrier", Appearance = look, Race = Human, Medical = Healthy(), Animation = carrierAnimation,
+            var cold = new CharacterCold { Name = "QA carrier", Appearance = look, Race = Human, Medical = Healthy(), Stats = carrierStats, Animation = carrierAnimation,
                 Carrying = body, CarryingTorsoSide = side };
             return world.Characters.Spawn(new() { Position = new(x, 0, 1000), Health = 100 }, cold, world.Tick);
         }
@@ -69,7 +87,9 @@ public partial class RagdollInstalledSkinTests
         halfCold.CarriedBy = holders[-1]; halfCold.TorsoPositiveCarriedBy = holders[1];
         var remaining = missingLeg ? Assert.IsType<RagdollDefinition>(RagdollSeverance.Split(definition, 2, SeveredLevels.Height(SeveredLevels.Of(halfId, 2), 2)).Remaining) : definition;
         var fragments = new Dictionary<int, RagdollDefinition>();
-        foreach (int side in new[] { -1, 1 }) fragments[side] = Assert.IsType<RagdollDefinition>(RagdollCut.Build(remaining, cut.Plane, side, false));
+        var bodySurface = RagdollSkinSurface.Read(OgreMeshReader.ReadFile(rigs.FindMesh(look.BodyMesh)!));
+        foreach (int side in new[] { -1, 1 }) fragments[side] = Assert.IsType<RagdollDefinition>(RagdollCut.Build(remaining, cut.Plane, side, cut.FullBody,
+            cut.FullBody ? bodySurface.Bridges(rig, remaining, cut.Plane, side) : null));
         var source = model.Parts.SelectMany(part => part.Indices.Select(index => part.Vertices[index])).ToArray();
         var vertices = model.Parts.SelectMany(part => part.Vertices).Where((_, index) => index % 2 == 0).ToArray();
         var groups = new uint[8];
@@ -86,19 +106,25 @@ public partial class RagdollInstalledSkinTests
         }).Where(sample => sample.Actor >= 0).ToArray();
         var scratch = rig.Rent();
         (int Triangle, Vector3 Bary)? originalSeat = null;
+        var middleWitnesses = new Dictionary<int, List<MiddleMaterial>>();
         int pinnedChecks = 0, childChecks = 0;
         float wholeDynamic = 0, halfDynamic = 0;
         try
         {
-            foreach (var gait in new[] { walk, jog }) for (int phase = 0; phase < 3; phase++)
+            var stages = Enumerable.Range(0, 4).Select(phase => (Name: CarrySystem.LiftClip, Time: lift.Clip.Length * (0.4f + phase * 0.18f), Lifting: true, Phase: phase))
+                .Concat(new[] { walk, jog }.SelectMany(gait => Enumerable.Range(0, 3).Select(phase => (gait.Name, Time: gait.Length * phase / 3, Lifting: false, Phase: phase))));
+            foreach (var stage in stages)
             {
-                animation.Gait = gait.Name; animation.Time = gait.Length * phase / 3;
+                int phase = stage.Phase;
+                animation.Gait = stage.Name; animation.Time = stage.Time; animation.Lifting = stage.Lifting;
                 float yaw = phase * 0.9f - 0.6f;
                 world.Characters.Place(controlHolder.Slot, new(1000, 0, 1000 + phase * 4), yaw);
                 world.Characters.Place(wholeId.Slot, new(1000, 0, 1000 + phase * 4), yaw);
                 foreach (int side in new[] { -1, 1 }) world.Characters.Place(holders[side].Slot, new(side > 0 ? 1800 : 1400, 0, 1000 + phase * 4), yaw);
                 world.Characters.Place(halfId.Slot, new(1400, 0, 1000 + phase * 4), yaw);
-                world.RunTicks(8);
+                bool pickup = middleWitnesses.Count == 0;
+                world.PhysicsSpeed = pickup ? 10000 : 1; // Observe pickup geometry before the dynamic endpoints settle.
+                world.RunTicks(pickup ? 1 : 8);
                 var layers = new List<ActiveLayer>();
                 if (rig.Layer(rigs.Database, CarrySystem.CarriedClip) is { } carry) layers.Add(new(carry, 0, 1));
                 foreach (var (layer, time) in setup.Fixed) layers.Add(new(layer, time, 1));
@@ -112,21 +138,24 @@ public partial class RagdollInstalledSkinTests
                 scratch.Pose(setup.Shape, layers.ToArray(), animated);
                 var carrierLayers = animation.Publish(carrierAnimation, []).Select(l => (Def: rig.Layer(rigs.Database, l.Name), l.Time, l.Weight))
                     .Where(l => l.Def is not null).Select(l => new ActiveLayer(l.Def!, l.Time, l.Weight)).Concat(setup.Fixed.Select(l => new ActiveLayer(l.Def, l.Time, 1))).ToArray();
-                scratch.PoseDerived(setup.Shape, carrierLayers);
+                var carrierPalette = new Matrix4x4[rig.BoneCount];
+                scratch.Pose(carrierSetup.Shape, carrierLayers, carrierPalette);
+                int upperArm = Assert.IsType<int>(rig.Handle("Bip01 L UpperArm"));
+                int forearm = Assert.IsType<int>(rig.Handle("Bip01 L Forearm"));
+                var carrierShoulder = scratch.DerivedPosition[upperArm];
+                var carrierElbow = scratch.DerivedPosition[forearm];
                 int hand = Assert.IsType<int>(rig.Handle("Bip01 L Hand"));
                 Vector3? Point(string name) => rig.Handle(name) is { } h ? scratch.DerivedPosition[h] : null;
                 var palm = CarryPose.PalmPoint(scratch.DerivedPosition[hand], Point("Bip01 L Finger0") ?? Point("Bip01 L Finger1"), Point("Bip01 L Forearm"));
                 var control = Assert.Single(world.Snapshot.Characters, c => c.Id == controlHolder);
-                var controlWorld = CharacterRigs.Placement(setup, control.Position, control.Yaw, 1);
+                Assert.Equal(carrierBuild, Assert.IsType<BodyBuild>(control.Build));
+                var controlWorld = CharacterRigs.Placement(carrierSetup, control.Position, control.Yaw, 1);
                 var wholeAt = (whole.Carry ?? CarryPose.Fallback).World(whole.Position, whole.Yaw);
                 var wholeWorld = CharacterRigs.Placement(setup, wholeAt.Position, wholeAt.Rotation, 1);
                 Assert.True(Matrix4x4.Invert(wholeWorld, out var wholeInverse));
                 palm = Vector3.Transform(palm, controlWorld * wholeInverse);
                 if (originalSeat is null) originalSeat = WholeQaClosestSeat(source, groups, wholePalette, rig, palm);
                 var seat = originalSeat.Value;
-                Vector3 Material(Matrix4x4[] palette) => Skin(source[seat.Triangle], palette) * seat.Bary.X
-                    + Skin(source[seat.Triangle + 1], palette) * seat.Bary.Y + Skin(source[seat.Triangle + 2], palette) * seat.Bary.Z;
-                var referenceSeat = Material(wholePalette);
                 var halfAt = (cutBody.Carry ?? CarryPose.Fallback).World(cutBody.Position, cutBody.Yaw);
                 var halfWorld = CharacterRigs.Placement(setup, halfAt.Position, halfAt.Rotation, 1);
                 foreach (int side in new[] { -1, 1 })
@@ -145,9 +174,8 @@ public partial class RagdollInstalledSkinTests
                     for (int bone = 0; bone < palette.Length; bone++) palette[bone] *= halfWorld * ownInverse;
                     Vector3 Origin(int bone, Matrix4x4[] skin) => Vector3.Transform(rig.BindPosition[bone], skin[bone]);
                     var shift = Origin(rootBone, palette) - Origin(rootBone, wholePalette);
-                    string sample = $"female{female}/missingLeg{missingLeg}/side{side}/{gait.Name}/{phase}";
-                    if (side < 0) Assert.True(shift.Length() < 0.005f, sample + $": original retained hip seat moved by {shift}");
-                    else Assert.True(shift.Length() > 0.05f, sample + ": the missing original hip seat must be relocated to retained trunk skin");
+                    string sample = $"female{female}/{style}/missingLeg{missingLeg}/side{side}/{stage.Name}/{phase}";
+
                     foreach (var actor in fragment.Bodies)
                     {
                         int bone = actor.Bone;
@@ -169,13 +197,79 @@ public partial class RagdollInstalledSkinTests
                             halfDynamic = MathF.Max(halfDynamic, 1 - MathF.Abs(Quaternion.Dot(actualRotation, animatedRotation)));
                         }
                     }
-                    float seatGap = WholeQaSeatGap(source, groups, palette, rig, referenceSeat, cut, side, pose.Components, root, wholePose);
-                    Assert.True(seatGap < 0.02f, sample + $": remaining anatomical seat misses actual whole support by {seatGap:F5}");
+                    var saved = Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(physics.SaveState(halfId)).Torso);
+                    var anchors = Assert.IsType<SavedFragmentAnchors>(side > 0 ? saved.PositiveAnchors : saved.NegativeAnchors).Anchors;
+                    int Group(int bone) => bone < rig.BoneCount ? (rig.ByHandle[bone]?.Name == "Bip01 Jaw" ? 6 : WoundMasks.BodyGroup(rig.ByHandle[bone]?.Name ?? "")) : 0;
+                    bool Valid(int bone)
+                    {
+                        int at = bone;
+                        while (at >= 0 && fragment.BodyOfBone[at] < 0) at = rig.Parent[at];
+                        int group = Group(bone);
+                        return group is not (>= 1 and <= 4) || at >= 0 && Group(at) == group;
+                    }
+                    float Share(Vertex vertex, bool pinned)
+                    {
+                        float total = 0;
+                        for (int influence = 0; influence < 4; influence++)
+                        {
+                            int bone = (int)(vertex.Bones >> (8 * influence) & 255);
+                            if (vertex.Weights[influence] <= 0 || !Valid(bone) || pose.Components[bone] != root) continue;
+                            if (!pinned || !wholePose.Set[fragment.Bodies[anchors[bone]].Bone]) total += vertex.Weights[influence];
+                        }
+                        return total;
+                    }
+                    bool RootTriangle(Vertex[] triangle)
+                    {
+                        var votes = new Dictionary<int, float>();
+                        foreach (var vertex in triangle) for (int influence = 0; influence < 4; influence++)
+                        {
+                            int bone = (int)(vertex.Bones >> (8 * influence) & 255);
+                            if (vertex.Weights[influence] <= 0 || !Valid(bone)) continue;
+                            int component = pose.Components[bone];
+                            votes[component] = votes.GetValueOrDefault(component) + vertex.Weights[influence];
+                        }
+                        return votes.Count > 0 && votes.MaxBy(vote => vote.Value).Key == root;
+                    }
+                    float Stump(Vertex vertex)
+                    {
+                        if (!missingLeg || TorsoCutSurface.Group(vertex, groups) != 3) return 1000;
+                        float height = SeveredLevels.Height(SeveredLevels.Of(halfId, 2), 2);
+                        return height > 0 ? vertex.Position.Y - height : -1000;
+                    }
+                    var bodyFaces = MiddleFaces(source, palette,
+                    [v => TorsoCutSurface.Band(v.Position, TorsoCutSurface.Group(v, groups), new(cut.Plane, side, cut.FullBody)),
+                        v => Share(v, false) - 0.5f, v => Share(v, true) - 0.5f, Stump], RootTriangle);
+                    var carrierNode = CharacterRigs.Placement(carrierSetup, holder.Position, holder.Yaw, 1) * ownInverse;
+                    var armPalette = carrierPalette.Select(matrix => matrix * carrierNode).ToArray();
+                    var shoulder = Vector3.Transform(carrierShoulder, carrierNode);
+                    var elbow = Vector3.Transform(carrierElbow, carrierNode);
+                    var axis = elbow - shoulder;
+                    var upper = Vector3.TransformNormal(Vector3.UnitY, ownInverse);
+                    upper -= axis * (Vector3.Dot(upper, axis) / axis.LengthSquared());
+                    if (upper.LengthSquared() < 1e-8f)
+                    {
+                        upper = Vector3.TransformNormal(Vector3.UnitX, ownInverse);
+                        upper -= axis * (Vector3.Dot(upper, axis) / axis.LengthSquared());
+                    }
+                    upper = Vector3.Normalize(upper);
+                    float ArmShare(Vertex vertex)
+                    {
+                        float total = 0;
+                        for (int k = 0; k < 4; k++) if ((vertex.Bones >> (8 * k) & 255) == upperArm) total += vertex.Weights[k];
+                        return total;
+                    }
+                    float Station(Vertex vertex) => Vector3.Dot(Skin(vertex, armPalette) - shoulder, axis) / axis.LengthSquared();
+                    var armFaces = MiddleFaces(source, armPalette,
+                    [v => ArmShare(v) - 0.5f, v => Station(v) - 0.4f, v => 0.6f - Station(v),
+                        v => Vector3.Dot(Skin(v, armPalette) - (shoulder + elbow) * 0.5f, upper)]);
+                    CheckMiddleOracle(sample, side, style == TorsoBisectionStyle.Transverse && side < 0 && !missingLeg,
+                        source, palette, armPalette, bodyFaces, armFaces, shift, v => Share(v, false),
+                        new(seat.Triangle, seat.Bary), shoulder, elbow, upper, middleWitnesses);
                     var frames = new Dictionary<int, (Matrix4x4 Whole, Matrix4x4 Half)>();
                     foreach (var vertex in descendantSamples)
                     {
                         if (fragment.BodyOfBone[vertex.Actor] < 0 || pose.Components[vertex.Actor] != root
-                            || TorsoCutSurface.Band(vertex.Vertex.Position, TorsoCutSurface.Group(vertex.Vertex, groups), new(cut.Plane, side)) < 0
+                            || TorsoCutSurface.Band(vertex.Vertex.Position, TorsoCutSurface.Group(vertex.Vertex, groups), new(cut.Plane, side, cut.FullBody)) < 0
                             || missingLeg && TorsoCutSurface.Group(vertex.Vertex, groups) == 3) continue;
                         if (!frames.TryGetValue(vertex.Actor, out var inverse))
                         {
@@ -209,10 +303,6 @@ public partial class RagdollInstalledSkinTests
         }).MinBy(candidate => candidate.Distance);
         return (best.Face.Triangle, best.Face.BA * best.Bary.X + best.Face.BB * best.Bary.Y + best.Face.BC * best.Bary.Z);
     }
-
-    static float WholeQaSeatGap(Vertex[] source, uint[] groups, Matrix4x4[] palette, SkeletonRig rig, Vector3 reference,
-        TorsoBisectionState cut, int side, int[] components, int root, BonePose wholeOverrides) => MathF.Sqrt(WholeQaFaces(source, groups, palette, rig, cut, side, components, root, wholeOverrides)
-            .Min(face => FoliageLodBuilder.DistanceSquared(reference, face.A, face.B, face.C)));
 
     static List<WholeQaFace> WholeQaFaces(Vertex[] source, uint[] groups, Matrix4x4[] palette, SkeletonRig rig,
         TorsoBisectionState? cut = null, int side = 1, int[]? components = null, int root = 0, BonePose? dynamic = null)

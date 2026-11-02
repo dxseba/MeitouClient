@@ -180,7 +180,7 @@ sealed partial class GameHost
             gpu.Characters?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);
             DrawWorld(w, h);
-            if (scene == "torso-carry") ReportTorsoGripContact(f);
+            if (scene is "torso-carry" or "carry-reference") ReportTorsoGripContact(f);
             if (overlay is not null)
             {
                 overlay.Target = target;
@@ -188,6 +188,7 @@ sealed partial class GameHost
                 if (g.UiPanel == "body-parts") player.SceneShowBodyPartLabels(camera.Target);
                 if (scene == "menu" && lead is not null && !player.OpenSceneMenu(SceneMenus[f], lead.Position)) Console.WriteLine($"scene     menu {SceneMenus[f]}: none on screen");
                 player.Draw(overlay, w, h);
+                if (scene is "torso-carry" or "carry-reference") { DrawTorsoGripMarkers(overlay, w, h); overlay.Flush(w, h); }
                 if (g.UiPanel == "body-parts") Console.WriteLine("body labels   " + string.Join("; ", player.BodyFragmentLabelsDrawn.Select(p => p.Label.Name)));
             }
             display.EndFrame();

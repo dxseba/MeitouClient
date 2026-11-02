@@ -23,6 +23,7 @@ public sealed partial class RagdollSystem
         public bool NegativeCarried, PositiveCarried;
         public bool[]? NegativeCarriedBodies, PositiveCarriedBodies;
         public TorsoGrip? NegativeGrip, PositiveGrip;
+        public RagdollSkinSurface.Grip? NegativeSupport, PositiveSupport;
         public CharacterId NegativeGripHolder = CharacterId.None, PositiveGripHolder = CharacterId.None;
     }
 
@@ -415,6 +416,8 @@ public sealed partial class RagdollSystem
             HashPiece(f.Negative, ref hasher);
             HashTorsoGrip(f.PositiveGrip, ref hasher);
             HashTorsoGrip(f.NegativeGrip, ref hasher);
+            HashTorsoSurface(f.PositiveSupport, ref hasher);
+            HashTorsoSurface(f.NegativeSupport, ref hasher);
             HashOffsets(f.PositiveAnchors, f.PositiveOffsets, ref hasher);
             HashOffsets(f.NegativeAnchors, f.NegativeOffsets, ref hasher);
             if (!f.PositiveGripHolder.IsNone || !f.NegativeGripHolder.IsNone)

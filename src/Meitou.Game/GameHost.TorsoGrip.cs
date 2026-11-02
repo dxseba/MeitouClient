@@ -32,13 +32,15 @@ sealed partial class GameHost
         var reference = instance with { Key = key, Position = heldAt, World = world, Rotation = null, FreezeFrom = null, Poses = poses, Bones = bones, TorsoCut = null };
         if (!fall.GroundPalettes.ContainsKey(side) && renderer.CaptureFrozenTorsoPose(key) is { } original) fall.GroundPalettes[side] = original;
         var cached = fall.CarryReferences.GetValueOrDefault(side);
-        if (cached.Holder != holder) cached = (holder, null);
+        if (cached.Holder != holder) cached = (holder, null, null);
         var context = cached.Reference;
-        // Even a first frame without the carrier hand must restore this side's floor pose on release.
-        fall.CarryReferences[side] = (holder, context);
-        if (TorsoCarrierPalm(renderer, carrier, carrierAt, yaw) is not { } palm) return reference with { TorsoCut = cut };
-        bool prepared = renderer.PrepareTorsoCarryReference(reference, cut, palm, ref context, out var carried, out var translation);
-        fall.CarryReferences[side] = (holder, context);
+        // The lift rotates the arm; only the half's material stays cached, never an old underside arm contact.
+        CharacterRenderer.CarryArmSupport? arm = null;
+        // Even a first frame without the carrier pose must restore this side's floor pose on release.
+        fall.CarryReferences[side] = (holder, context, arm);
+        if (TorsoCarrierSupport(renderer, carrier, carrierAt, yaw, ref arm) is not { } support) return reference with { TorsoCut = cut };
+        bool prepared = renderer.PrepareTorsoCarryReference(reference, cut, support, ref context, out var carried, out var translation);
+        fall.CarryReferences[side] = (holder, context, arm);
         if (!prepared) return reference with { TorsoCut = cut };
         return reference with
         {
@@ -52,16 +54,20 @@ sealed partial class GameHost
         if (fall.CarryReferences.Remove(side) && fall.GroundPalettes.TryGetValue(side, out var original)) renderer.RestoreFrozenTorsoPose(key, original);
     }
 
-    Vector3? TorsoCarrierPalm(CharacterRenderer renderer, CharacterSnapshot carrier, Vector3 at, float yaw)
+    Vector3? TorsoCarrierSupport(CharacterRenderer renderer, CharacterSnapshot carrier, Vector3 at, float yaw, ref CharacterRenderer.CarryArmSupport? cached)
     {
         long key = DrawKey(carrier.Id);
-        if (renderer.LastDrawn(key, "Bip01 L Hand") is not { } hand) return null;
+        if (renderer.LastDrawn(key, "Bip01 L UpperArm") is not { } upper || renderer.BonePosition(key, "Bip01 L Forearm") is not { } forearm) return null;
         var rebase = Matrix4x4.Identity;
-        if (carrier.Appearance is { } look && renderer.Rigs.For(look) is { } setup && Matrix4x4.Invert(hand.World, out var inverse))
-            rebase = inverse * CharacterRigs.Placement(setup, at, yaw, carrier.Scale);
-        Vector3 Move(Vector3 point) => Vector3.Transform(point, rebase);
-        var finger = renderer.BonePosition(key, "Bip01 L Finger0") ?? renderer.BonePosition(key, "Bip01 L Finger1");
-        var forearm = renderer.BonePosition(key, "Bip01 L Forearm");
-        return CarryPose.PalmPoint(Move(hand.Bone), finger is { } f ? Move(f) : null, forearm is { } arm ? Move(arm) : null);
+        var placement = upper.World;
+        if (carrier.Appearance is { } look && renderer.Rigs.For(look) is { } setup && Matrix4x4.Invert(upper.World, out var inverse))
+        {
+            placement = CharacterRigs.Placement(setup, at, yaw, carrier.Scale);
+            rebase = inverse * placement;
+        }
+        var shoulder = Vector3.Transform(upper.Bone, rebase);
+        var elbow = Vector3.Transform(forearm, rebase);
+        return renderer.UpperArmSupportPoint(key, shoulder, elbow, CarryPose.UpperArmProbe(shoulder, elbow), ref cached, placement)
+            ?? CarryPose.BicepsSupport(shoulder, elbow);
     }
 }

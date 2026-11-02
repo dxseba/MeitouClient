@@ -20,7 +20,8 @@ sealed partial class GameHost
         public required Vector3 PositivePivot, NegativePivot, CutAt, Origin, Along;
         public required Quaternion PositiveTurn, NegativeTurn;
         public required (Vector3 Point, float Radius)[] PositiveBounds, NegativeBounds;
-        public readonly Dictionary<int, (CharacterId Holder, Meitou.Rendering.Characters.CharacterRenderer.TorsoCarryReference? Reference)> CarryReferences = [];
+        public readonly Dictionary<int, (CharacterId Holder, Meitou.Rendering.Characters.CharacterRenderer.TorsoCarryReference? Reference,
+            Meitou.Rendering.Characters.CharacterRenderer.CarryArmSupport? Support)> CarryReferences = [];
         public readonly Dictionary<int, Meitou.Rendering.Characters.CharacterRenderer.FrozenTorsoPose> GroundPalettes = [];
     }
 

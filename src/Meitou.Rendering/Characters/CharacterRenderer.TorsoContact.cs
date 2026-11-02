@@ -4,7 +4,9 @@ namespace Meitou.Rendering.Characters;
 
 internal sealed partial class CharacterRenderer
 {
-    readonly record struct ContactPoint(Vector3 Position, float Band, float LimbBand, float Influence, Vector3 Barycentric);
+    readonly record struct ContactPoint(Vector3 Position, float Band, float LimbBand, float Influence, Vector3 Barycentric, float Eligible = 1, float Station = 0);
+    readonly record struct ContactFace(int Triangle, ContactPoint A, ContactPoint B, ContactPoint C);
+    readonly record struct ArmWindow(Vector3 Shoulder, Vector3 Elbow);
     internal readonly record struct SurfaceContact(int Triangle, Vector3 Barycentric, Vector3 Position);
 
     /// <summary>Closest retained posed skin point. preferMiddle measures bounds in the existing posing frame, using point only for arm-facing ties; defaults remain unrestricted.</summary>
@@ -22,7 +24,7 @@ internal sealed partial class CharacterRenderer
 
     SurfaceContact? ClosestTorsoContact(CharState state, in CharacterTorsoCut cut, Vector3 point, int? component = null,
         Matrix4x4? placement = null, bool preferUpperBand = false, bool preferMiddle = false, Matrix4x4? boundsFrame = null,
-        uint limbCuts = 0, bool axialOnly = false)
+        uint limbCuts = 0, bool axialOnly = false, List<ContactFace>? collect = null, bool[]? eligibleBones = null, ArmWindow? armWindow = null)
     {
         if (!float.IsFinite(point.LengthSquared()) || !TorsoCutSurface.TryNormalize(cut, out var kept)
             || state.Asset is not { IsIcon: false, BodySource: { } source } asset || state.Posed < 0) return null;
@@ -39,7 +41,7 @@ internal sealed partial class CharacterRenderer
         var reference = boundsFrame ?? placement ?? state.World;
         var toBounds = Matrix4x4.Identity;
         if (preferMiddle && !Matrix4x4.Invert(reference, out toBounds)) return null;
-        Span<ContactPoint> polygon = stackalloc ContactPoint[8], clipped = stackalloc ContactPoint[8];
+        Span<ContactPoint> polygon = stackalloc ContactPoint[12], clipped = stackalloc ContactPoint[12];
         Span<int> ids = stackalloc int[12];
         Span<float> votes = stackalloc float[12];
         SurfaceContact? closest = null;
@@ -91,8 +93,19 @@ internal sealed partial class CharacterRenderer
                     var delta = morphs[slot - 1];
                     skin = skin with { Position = skin.Position + new Vector3(delta.X, delta.Y, delta.Z) };
                 }
-                polygon[vertex] = new(Vector3.Transform(PoseCutVertex(skin, state), rebase), band, limbBand, influence,
-                    vertex == 0 ? Vector3.UnitX : vertex == 1 ? Vector3.UnitY : Vector3.UnitZ);
+                float eligible = eligibleBones is null ? 1 : 0;
+                if (eligibleBones is not null)
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int bone = (int)(skin.Bones >> (k * 8) & 255);
+                        if (bone < eligibleBones.Length && eligibleBones[bone]) eligible += skin.Weights[k];
+                    }
+                var posed = Vector3.Transform(PoseCutVertex(skin, state), rebase);
+                var axis = armWindow is { } arm ? arm.Elbow - arm.Shoulder : Vector3.Zero;
+                float station = armWindow is { } window && axis.LengthSquared() > 1e-8f
+                    ? Vector3.Dot(posed - window.Shoulder, axis) / axis.LengthSquared() : 0;
+                polygon[vertex] = new(posed, band, limbBand, influence,
+                    vertex == 0 ? Vector3.UnitX : vertex == 1 ? Vector3.UnitY : Vector3.UnitZ, eligible, station);
             }
             if (hidden) continue;
             if (component is { } selected)
@@ -109,6 +122,27 @@ internal sealed partial class CharacterRenderer
             {
                 retained = ClipContact(polygon, clipped, retained, plane: 2);
                 face = clipped;
+            }
+            if (eligibleBones is not null)
+            {
+                Span<ContactPoint> eligible = component is null ? clipped : polygon;
+                retained = ClipContact(face, eligible, retained, plane: 4);
+                face = eligible;
+            }
+            if (armWindow is not null)
+            {
+                Span<ContactPoint> station = face.Overlaps(polygon) ? clipped : polygon;
+                retained = ClipContact(face, station, retained, plane: 5);
+                Span<ContactPoint> upper = station.Overlaps(polygon) ? clipped : polygon;
+                retained = ClipContact(station, upper, retained, plane: 6);
+                face = upper;
+            }
+            if (collect is not null)
+            {
+                for (int i = 1; i + 1 < retained; i++)
+                    if (Vector3.Cross(face[i].Position - face[0].Position, face[i + 1].Position - face[0].Position).LengthSquared() >= 1e-10f)
+                        collect.Add(new(triangle, face[0], face[i], face[i + 1]));
+                continue;
             }
             if (measureBounds && pass == 0)
             {
@@ -162,7 +196,8 @@ internal sealed partial class CharacterRenderer
                 float t = before / (before - after);
                 target[kept++] = new(Vector3.Lerp(previous.Position, current.Position, t),
                     previous.Band + (current.Band - previous.Band) * t, previous.LimbBand + (current.LimbBand - previous.LimbBand) * t,
-                    previous.Influence + (current.Influence - previous.Influence) * t, Vector3.Lerp(previous.Barycentric, current.Barycentric, t));
+                    previous.Influence + (current.Influence - previous.Influence) * t, Vector3.Lerp(previous.Barycentric, current.Barycentric, t),
+                    previous.Eligible + (current.Eligible - previous.Eligible) * t, previous.Station + (current.Station - previous.Station) * t);
             }
             if (after >= 0) target[kept++] = current;
             (previous, before) = (current, after);
@@ -170,7 +205,11 @@ internal sealed partial class CharacterRenderer
         return kept;
     }
 
-    static float ContactBand(ContactPoint point, int plane, float floor) => plane switch { 0 => point.Band, 1 => point.LimbBand, 2 => point.Influence - 0.5f, 3 => point.Position.Y - floor, _ => floor - point.Position.Y };
+    static float ContactBand(ContactPoint point, int plane, float floor) => plane switch
+    {
+        0 => point.Band, 1 => point.LimbBand, 2 => point.Influence - 0.5f, 3 => point.Position.Y - floor,
+        4 => point.Eligible - 0.5f, 5 => point.Station - 0.4f, 6 => 0.6f - point.Station, _ => floor - point.Position.Y,
+    };
 
     static bool AxialContactTriangle(Meitou.Data.Characters.SkeletonRig rig, Vertex[] source, int triangle)
     {

@@ -37,7 +37,7 @@ public partial class RagdollInstalledSkinTests
     [InlineData(TorsoBisectionStyle.Transverse,2)]
     [InlineData(TorsoBisectionStyle.Vertical,1)]
     [InlineData(TorsoBisectionStyle.Oblique,2)]
-    public void Installed_cut_halves_reuse_the_original_whole_body_seat_and_preserve_pinned_carry_pose_through_walk_jog_and_turning(TorsoBisectionStyle style,int direction)
+    public void Installed_cut_halves_keep_central_material_supported_on_real_upper_arm_skin_through_walk_jog_and_turning(TorsoBisectionStyle style,int direction)
     {
         var(rig,definition,model,setup,rigs,look)=Installed();
         var walk=rig.Skeleton.Animations.FirstOrDefault(a=>a.Name.StartsWith("walk",StringComparison.OrdinalIgnoreCase)&&!a.Name.Contains("carrying",StringComparison.OrdinalIgnoreCase));
@@ -68,7 +68,6 @@ public partial class RagdollInstalledSkinTests
         var groups=new uint[8];
         foreach(var bone in rig.Skeleton.Bones)
             if(bone.Handle<64)groups[bone.Handle/8]|=(uint)(bone.Name=="Bip01 Jaw"?6:WoundMasks.BodyGroup(bone.Name))<<(bone.Handle%8*4);
-        var originalContacts=new Dictionary<int,RagdollSkinSurface.Grip>();
         var scratch=rig.Rent();
         try
         {
@@ -85,9 +84,10 @@ public partial class RagdollInstalledSkinTests
                     scratch.PoseDerived(setup.Shape,layers.ToArray());
                     int upperArm=Assert.IsType<int>(rig.Handle("Bip01 L UpperArm"));
                     int forearm=Assert.IsType<int>(rig.Handle("Bip01 L Forearm"));
-                    int hand=Assert.IsType<int>(rig.Handle("Bip01 L Hand"));
-                    Vector3? finger=rig.Handle("Bip01 L Finger0")is int f?scratch.DerivedPosition[f]:null;
-                    var localPalm=CarryPose.PalmPoint(scratch.DerivedPosition[hand],finger,scratch.DerivedPosition[forearm]);
+                    var localShoulder=scratch.DerivedPosition[upperArm];
+                    var localElbow=scratch.DerivedPosition[forearm];
+                    var carrierSkin=new Matrix4x4[rig.BoneCount];
+                    scratch.Pose(setup.Shape,layers.ToArray(),carrierSkin);
                     var shown=Assert.Single(world.Snapshot.Characters,c=>c.Id==id);
                     var halves=Assert.IsType<TorsoRagdollPose>(shown.TorsoRagdoll);
                     var held=(shown.Carry??CarryPose.Fallback).World(shown.Position,shown.Yaw);
@@ -95,28 +95,19 @@ public partial class RagdollInstalledSkinTests
                     foreach(int side in new[]{-1,1})
                     {
                         var holder=Assert.Single(world.Snapshot.Characters,c=>c.Id==holders[side]);
-                        var palm=Vector3.Transform(localPalm,CharacterRigs.Placement(setup,holder.Position,holder.Yaw,1));
+                        var carrierPlacement=CharacterRigs.Placement(setup,holder.Position,holder.Yaw,1);
+                        var armSkin=carrierSkin.Select(m=>m*carrierPlacement).ToArray();
+                        var supportMaterial=Assert.IsType<RagdollSkinSurface.Grip>(bodySurface.FindUpperArmSupport(look,rig,definition,armSkin,
+                            Vector3.Transform(localShoulder,carrierPlacement),Vector3.Transform(localElbow,carrierPlacement)));
+                        var support=supportMaterial.Posed(armSkin);
                         var pose=side>0?halves.Positive:halves.Negative;
                         var skin=new Matrix4x4[rig.BoneCount];
                         scratch.Pose(setup.Shape,[],skin,pose);
                         var attach=(side>0?shown.TorsoPositiveCarry:shown.Carry)??CarryPose.Fallback;
                         var referenceAt=attach.World(holder.Position,holder.Yaw);
                         var referencePlacement=CharacterRigs.Placement(setup,referenceAt.Position,referenceAt.Rotation,1);
-                        var carryLayersForSeat=new List<ActiveLayer>();
-                        if(rig.Layer(rigs.Database,CarrySystem.CarriedClip)is{}carryForSeat)carryLayersForSeat.Add(new(carryForSeat,0,1));
-                        foreach(var(def,time)in setup.Fixed)carryLayersForSeat.Add(new(def,time,1));
-                        var originalSkin=new Matrix4x4[rig.BoneCount];
-                        scratch.Pose(setup.Shape,carryLayersForSeat.ToArray(),originalSkin);
-                        for(int b=0;b<originalSkin.Length;b++)originalSkin[b]*=referencePlacement;
-                        if(!originalContacts.TryGetValue(side,out var originalMaterial))
-                        {
-                            originalMaterial=Assert.IsType<RagdollSkinSurface.Grip>(bodySurface.FindGrip(look,rig,default,1,true,new int[rig.BoneCount],0,
-                                definition,originalSkin,palm,query:new(NearestToPoint:true,AxialOnly:true,Uncut:true)));
-                            originalContacts[side]=originalMaterial;
-                        }
-                        var originalContact=originalMaterial.Posed(originalSkin);
-                        float gap=VisibleContactGap(source,groups,new(cut.Plane,side,cut.FullBody),skin,placement,originalContact,pose.Components!);
-                        Assert.True(gap<.005f,$"{style}/{side}/{gait.Name}/{phase}: original whole seat/skin gap {gap:F6}");
+                        float gap=VisibleContactGap(source,groups,new(cut.Plane,side,cut.FullBody),skin,placement,support,pose.Components!);
+                        Assert.True(gap<.005f,$"{style}/{side}/{gait.Name}/{phase}: actual upper-arm/half skin gap {gap:F6}");
                         var both=Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(physics.SaveState(id)).Torso);
                         var piece=side>0?both.Positive:both.Negative;
                         var partial=definitions[side];
