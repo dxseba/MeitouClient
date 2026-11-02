@@ -20,6 +20,7 @@ public sealed unsafe partial class ParticleRenderer
     {
         int count = RobotDischargeGeometry.Build(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(RobotDischarges), dischargeStrokes);
         if (count == 0) return;
+        AddRobotSmoke(frame, eye, forward, nearPlane);
         if (scratch.Length < count) scratch = new ParticleInstance[Math.Max(count, scratch.Length * 2)];
         var arcTexture = RobotArcTexture();
         DrawnRobotDischargeQuads += AddRobotDischargeBatch(frame, eye, forward, nearPlane, count, true, arcTexture ?? tracerTexture,

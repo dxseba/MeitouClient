@@ -197,7 +197,9 @@ Blue-white arcs and dense warm sparks follow cached cut-rim contacts on both tor
 fragments and the neck stump, or both ends of a severed limb (including the basic falling-piece fallback). Contact queries pose at most
 48 stored rim samples; they never triangulate the cut again. Robot bowel placement is excluded
 before section queries. Particle geometry is capped at 64 anchors and 1,024 quads in two
-additive batches, with no persistent particle units. Sources without a cached contact use a
+additive batches, with no persistent particle units. A little black smoke rises and dissipates beside
+the arcs on the same paused lifetime, capped at 128 puffs in one alpha-blended batch.
+Sources without a cached contact use a
 bone/fallback point. The CC0 arc texture's source, author and hashes are in
 [Effects/CREDITS.md](../../src/Meitou.Rendering/Effects/CREDITS.md). These effects are transient;
 saved cut states do not replay or preserve their electrical lifetime.

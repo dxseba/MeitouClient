@@ -62,7 +62,7 @@ internal sealed partial class CharacterRenderer
     /// <summary>The cached cut rim posed in the last drawn frame, without rebuilding or querying the skin.</summary>
     public CharacterCutContact? CutContact(long key)
     {
-        if (!states.TryGetValue(key, out var state) || state.Seen != updateStamp || !state.InWorld || state.Posed < 0) return null;
+        if (!states.TryGetValue(key, out var state) || state.Seen != updateStamp || !state.InWorld || state.Posed < 0 || state.TorsoCut is null) return null;
         return CutContactGeometry.Pose(content.CutRim(key), state.Bones, state.World);
     }
 

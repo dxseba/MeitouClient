@@ -126,6 +126,6 @@ sealed partial class GameHost
             || session.World.Characters.Cold(sandboxFoe.Slot)?.Race?.IsRobot != true) return;
         Console.WriteLine($"robot cut frame {frame}: spark bursts {robotSparkBursts}, discharges {robotDischarges.Count}, "
             + $"anchors {gpu.Particles?.RobotDischarges.Count ?? 0}, electrical quads {gpu.Particles?.DrawnRobotDischargeQuads ?? 0}, "
-            + $"organic bowel props {gutFalls.Count}");
+            + $"smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}, organic bowel props {gutFalls.Count}");
     }
 }

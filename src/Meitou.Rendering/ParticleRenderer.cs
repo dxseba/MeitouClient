@@ -121,18 +121,33 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         in float vSoft;
         out vec4 fragColour;
         uniform sampler2D uTexture;
-        uniform int uDischarge;                     // 1 horizontal electrical texture, 2 spark streak; both premultiply alpha for additive blending
+        uniform int uDischarge;                     // 1 horizontal arc, 2 spark (premultiplied additive), 3 alpha-blended soot
         uniform sampler2D uSoftDepth;               // the scene's depth at this target's size (the Meitou fog switch), as a colour
         uniform vec4 uSoft;                         // x: 0 hard (the game's), 1 fade the alpha, 2 the colour and alpha (additive), 3 towards white (modulate); y, z: the depth slice's near, far; w: 1 when depth is 0..1
         uniform float uCoverageMax, uCoverageGain;
         uniform int uCoverage;                      // 0: colour; 1: the particle's alpha, 2: its brightest channel (the upscalers' reactive mask); 3 / 4: the low-resolution target's premultiplied alpha / additive
+        float sootHash(vec2 p) { return fract(sin(dot(p, vec2(17.17, 91.37))) * 143758.67); }
+        float sootNoise(vec2 p)
+        {
+            vec2 cell = floor(p), f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(sootHash(cell), sootHash(cell + vec2(1.0, 0.0)), f.x),
+                mix(sootHash(cell + vec2(0.0, 1.0)), sootHash(cell + vec2(1.0)), f.x), f.y);
+        }
+        vec4 soot(vec2 uv)
+        {
+            vec2 p = uv * 2.0 - 1.0;
+            float cloud = 0.6 * sootNoise(p * 3.4 + 3.0) + 0.3 * sootNoise(p * 7.1 + 8.0) + 0.1 * sootNoise(p * 14.2);
+            float edge = length(p) + (0.5 - cloud) * 0.36;
+            return vec4(vec3(1.0), (1.0 - smoothstep(0.25, 1.0, edge)) * (0.65 + 0.35 * cloud));
+        }
         void main()
         {
             // basic.hlsl: texture * colour * vertex colour. A recoloured burst (negative vertex rgb, Burst's recolour) takes that colour instead of the texture's hue, keeping its brightness.
-            vec4 t = texture(uTexture, uDischarge == 1 ? vUv.yx : vUv);
+            vec4 t = uDischarge == 3 ? soot(vUv) : texture(uTexture, uDischarge == 1 ? vUv.yx : vUv);
             if (min(vColour.r, min(vColour.g, vColour.b)) < 0.0) t.rgb = vec3(max(t.r, max(t.g, t.b)));
             vec4 c = t * abs(vColour);
-            if (uDischarge != 0) c.rgb *= c.a;
+            if (uDischarge == 1 || uDischarge == 2) c.rgb *= c.a;
             // Meitou fog: dust and smoke lit as the scene is (the game's sprites are flat, and not fogged): darker where the sun is shadowed, brighter seen
             // towards the sun, then seen through the haze in front of them like the land behind; an additive sprite (fire) only dimmed by the haze.
             if (uLitFragment.x > 0.5 && uLitFragment.z < 1.5)
@@ -627,6 +642,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         Array.Clear(divisorCounts);
         drawnParticles = 0;
         DrawnRobotDischargeQuads = 0;
+        DrawnRobotSmokePuffs = 0;
         drawnUnits = 0;
         coveragePending = false;
         if (!Enabled || (weatherGroups.Groups.Count == 0 && placerGroups.Count == 0 && Tracers.Count == 0 && RobotDischarges.Count == 0)) return;
@@ -857,7 +873,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
                 program.Bind(textureSlot, d.Texture.Sampled());
                 program.Set(dischargeMode, d.Discharge);
                 // The soft fade by blend: an alpha sprite fades its alpha, an additive or colour-blended one its colour, a modulating one towards white.
-                int fade = softDepth is null || d.Discharge != 0 ? 0 : m.Blend switch
+                int fade = softDepth is null || d.Discharge is 1 or 2 ? 0 : m.Blend switch
                 {
                     ParticleBlend.Alpha => 1, ParticleBlend.Add or ParticleBlend.ColourBlend => 2, ParticleBlend.Modulate => 3, _ => 0,
                 };
