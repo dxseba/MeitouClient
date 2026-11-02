@@ -39,6 +39,7 @@ sealed partial class GameHost
         public bool Resting, Landed, Flesh, Bloody;
         public long Born;
         public uint Colour;
+        public uint BloodColour = DefaultBloodColour;
         /// <summary>The splash particles' colour for a race whose blood is not red (<see cref="BloodRecolour"/>).</summary>
         public Vector3? Recolour;
     }
@@ -120,7 +121,7 @@ sealed partial class GameHost
             var spinAxis = Vector3.Normalize(new Vector3(bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f) + new Vector3(1e-3f));
             pieces.Add(new Piece
             {
-                Mesh = mesh, Scale = scale, Extent = extent, Floor = floor, Born = world.Tick, Colour = bleeds ? 0xFF000000 | Abgr(m.Colour) : 0, Recolour = BloodRecolour(m.Colour), Flesh = flesh,
+                Mesh = mesh, Scale = scale, Extent = extent, Floor = floor, Born = world.Tick, Colour = bleeds ? 0xFF000000 | Abgr(m.Colour) : 0, Recolour = BloodRecolour(m.Colour), Flesh = flesh, BloodColour = m.Colour,
                 Position = centre,
                 Velocity = new Vector3(d.X * speed, 30 + bloodRandom.NextSingle() * 50, d.Y * speed),
                 Rotation = Quaternion.Normalize(new Quaternion(bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f)),
@@ -174,7 +175,7 @@ sealed partial class GameHost
         foreach (var p in pieces)
         {
             for (int s = 0; s < steps && !p.Resting && h > 0; s++) Step(p, h);
-            gpu.DebrisPieces.Add(new DebrisPiece(p.Mesh, p.Scale, p.Rotation, p.Position, Bloody: p.Bloody));
+            gpu.DebrisPieces.Add(new DebrisPiece(p.Mesh, p.Scale, p.Rotation, p.Position, Bloody: p.Bloody, BloodColour: p.BloodColour));
         }
     }
 

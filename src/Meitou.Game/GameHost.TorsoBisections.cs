@@ -259,6 +259,7 @@ sealed partial class GameHost
         var gut = new GutFall
         {
             Position = cutAt + along * 0.6f, Velocity = along * 2 + Vector3.UnitY,
+            BloodColour = session.World.Characters.Cold(id.Slot)?.Race?.BloodColour ?? DefaultBloodColour,
             Floor = session.World.Walkability.GroundHeight(cutAt.X, cutAt.Z, cutAt.Y)
                 + (gpu.Debris?.Extent(DebrisRenderer.Bowel)?.Y ?? 0.35f) - 0.35f,
         };

@@ -1185,7 +1185,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         r.AlphaThreshold = m.AlphaThreshold;
         r.ShirtColour = new Vector4(m.ShirtColour, m.GlossMult);
         r.SkinTone = m.WeaponBloodAxis.W > 0 ? m.WeaponBloodAxis : new Vector4(m.SkinTone, has[CharacterShaders.SlotBlendNormal] ? m.MuscleBlend : 0);
-        r.HairColour = new Vector4(m.HairColour, 1);
+        // RGB uses hair colour; the unused alpha carries an exact 24-bit integer without growing the material.
+        r.HairColour = new Vector4(m.HairColour, m.BloodColour & 0xFFFFFF);
         r.HairAlpha = m.HairAlpha; r.HairMult = m.HairMult; r.BeardAlpha = m.BeardAlpha;
         r.DiffuseChannel = m.DiffuseChannel; r.AlphaChannel = m.AlphaChannel;
         r.Colour1 = m.Colour1; r.Colour2 = m.Colour2;

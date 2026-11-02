@@ -67,7 +67,7 @@ static partial class TorsoCutSurface
     }
 
     static void AppendLimbBoneSection(Vertex[] floor, List<(int A, int B, int C)> triangles, Vector3[] outline, uint[] groups,
-        in CharacterTorsoCut cut, Vector3 u, Vector3 v, int remaining, Action<Vertex, Vertex, Vertex> emit)
+        in CharacterTorsoCut cut, Vector3 u, Vector3 v, int remaining, Action<Vertex, Vertex, Vertex> emit, uint bloodColour)
     {
         const int segments = 16, needed = segments * 9;
         if (remaining < needed || triangles.Count == 0) return;
@@ -107,7 +107,7 @@ static partial class TorsoCutSurface
         {
             float rough = 1 + 0.05f * MathF.Sin(angle * 5 + origin.Y * 4);
             var p = origin + (u * MathF.Cos(angle) + v * MathF.Sin(angle) * 0.78f) * (radius * scale * rough);
-            var colour = marrow ? new Vector4(0.30f, 0.055f, 0.045f, 0) : new Vector4(0.70f, 0.61f, 0.43f, 0);
+            var colour = marrow ? GorePalette.Recolour(new Vector4(0.30f, 0.055f, 0.045f, 0), bloodColour) : new Vector4(0.70f, 0.61f, 0.43f, 0);
             return new() { Position = p, Normal = -kept, Uv = floor[0].Uv, Tangent = new(p, Layer), Colour = colour, Bones = middle.Bones, Weights = middle.Weights };
         }
         var centreVertex = At(0, 0, true);

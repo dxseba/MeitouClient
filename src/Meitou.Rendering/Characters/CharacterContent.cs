@@ -129,6 +129,8 @@ internal sealed class PartMaterial
     public bool VertexColoured;
     /// <summary>Takes blood (<see cref="CharacterShaders.Bloody"/>; <see cref="BloodFull"/>: the whole mesh at the full amount, a stump): <see cref="Colour1"/> holds the blood colour, <see cref="Colour2"/> x and y the race's <c>blood horizontal</c> and <c>blood vertical</c>.</summary>
     public bool Bloody, BloodFull;
+    /// <summary>The owner race's fluid for wound shading, independent of clothing dyes.</summary>
+    public uint BloodColour = 0x800000;
     /// <summary>Rigid melee blade's signed local length axis and grip-to-tip length; zero for other materials.</summary>
     public Vector4 WeaponBloodAxis;
     /// <summary>A headless body's neck cap (<see cref="CharacterShaders.Wound"/>): <see cref="Colour1"/> the race's blood colour, the diffuse slot the splatter map; <see cref="Mechanical"/> a robot race's.</summary>
@@ -375,14 +377,16 @@ internal sealed class CharacterContent : IDisposable
         return meshes[key] = ready is null ? null : Upload(ready);
     }
 
-    /// <summary>Kenshi Gore Lab's Ecorche file from the install's mods folder, fitted to this body's skin; null without the file or the bones. Shared per body mesh/rig/gender and retained head/body.</summary>
-    LoadedMesh? AnatomyMesh(SkeletonRig rig, string bodyPath, WoundPoint[] skin, bool female, MeshMorphs? morphs, bool headless, bool headOnly)
+    /// <summary>Kenshi Gore Lab's Ecorche file from the install's mods folder, fitted to this body's skin; null without the file or the bones. Shared per body mesh, rig, gender, retained region and blood palette.</summary>
+    LoadedMesh? AnatomyMesh(SkeletonRig rig, string bodyPath, WoundPoint[] skin, bool female, MeshMorphs? morphs,
+        bool headless, bool headOnly, uint bloodColour)
     {
         var headMode = headOnly ? "head" : headless ? "body" : "whole";
-        var key = ("anatomy@" + bodyPath.ToLowerInvariant() + "@" + headMode, rig.BoneCount, female, (string?)rig.Skeleton.GetHashCode().ToString());
+        var pathKey = "anatomy@" + bodyPath.ToLowerInvariant() + "@" + headMode + "@" + bloodColour;
+        var key = (pathKey, rig.BoneCount, female, (string?)rig.Skeleton.GetHashCode().ToString());
         if (meshes.TryGetValue(key, out var cached)) return cached;
         var made = CharacterAnatomy.Build(rig, skin, HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [], female, morphs,
-            headless, headOnly, Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy"));
+            headless, headOnly, Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy"), bloodColour);
         return meshes[key] = made is null ? null : UploadAnatomy(made);
     }
     public HeadWoundView HeadPlacement(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp) =>
@@ -391,13 +395,14 @@ internal sealed class CharacterContent : IDisposable
     public IReadOnlyList<AssetPart> TorsoParts(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp, int[]? components = null) =>
         torsoCutPool.Resolve(key, asset, parts, cut, groups, stamp, components);
 
-    LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase)
+    LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase, uint bloodColour)
     {
-        var key = ("head-relief@" + bodyPath.ToLowerInvariant() + "@" + morphBase, rig.BoneCount, false, (string?)rig.Skeleton.GetHashCode().ToString());
+        var pathKey = "head-relief@" + bodyPath.ToLowerInvariant() + "@" + morphBase + "@" + bloodColour;
+        var key = (pathKey, rig.BoneCount, false, (string?)rig.Skeleton.GetHashCode().ToString());
         if (meshes.TryGetValue(key, out var cached)) return cached;
         if (rig.Handle("Bip01 Head") is not { } head || !HeadSurfaces.TryGetValue(bodyPath.ToLowerInvariant(), out var surface)) return null;
         var vertices = new List<Vertex>();
-        uint supported = HeadWoundSurface.Append(vertices, surface, head, shapeDeltas);
+        uint supported = HeadWoundSurface.Append(vertices, surface, head, shapeDeltas, bloodColour);
         return meshes[key] = vertices.Count == 0 ? null : UploadAnatomy(vertices) with { HeadReliefProfiles = supported };
     }
 
@@ -868,22 +873,26 @@ internal sealed class CharacterContent : IDisposable
             asset.Lamps.Add((bone, Matrix4x4.CreateTranslation(local), asset.AttachCount++, carried.Light));
         }
 
-        // Ecorche is a human body, fitted under the skin of any person race that has its bones.
-        if (!asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin && AnatomyMesh(rig, bodyPath, skin, c.Female, body.Morphs, c.Headless, c.HeadOnly) is { } anatomy)
+        // Ecorche is fitted under each humanoid, with the actual race's soft-tissue palette.
+        uint bloodColour = unchecked((uint)c.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
+        if (!asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin
+            && AnatomyMesh(rig, bodyPath, skin, c.Female, body.Morphs, c.Headless, c.HeadOnly, bloodColour) is { } anatomy)
             asset.Parts.Add(new AssetPart
             {
                 Label = "anatomy", Mesh = anatomy.Gpu, Shared = true, Anatomy = true, BoundsCentre = anatomy.Centre, BoundsRadius = anatomy.Radius,
-                Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "anatomy" },
+                Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true,
+                    Description = "anatomy", BloodColour = bloodColour },
             });
 
         // Face relief is small and per morph; keep the much larger internal anatomy shared between faces.
-        if (!c.Headless && !asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase) is { } relief)
+        if (!c.Headless && !asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase, bloodColour) is { } relief)
         {
             asset.Parts.First(p => p.IsBody).HeadReliefProfiles = relief.HeadReliefProfiles;
             asset.Parts.Add(new AssetPart
             {
                 Label = "head wound relief", IsHeadRelief = true, Mesh = relief.Gpu, Shared = true, Anatomy = true, BoundsCentre = relief.Centre, BoundsRadius = relief.Radius,
-                Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true, Description = "head wound relief" },
+                Material = new PartMaterial { Shading = CharacterShaders.ShadeItem, VertexColoured = true, DoubleSided = true,
+                    Description = "head wound relief", BloodColour = bloodColour },
             });
         }
 
@@ -940,6 +949,7 @@ internal sealed class CharacterContent : IDisposable
     {
         var m = new PartMaterial
         {
+            BloodColour = unchecked((uint)c.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF,
             Shading = CharacterShaders.ShadeItem, Description = $"RACE '{c.Race.Name}' neck wound", Wound = true, Mechanical = c.Race.GetBool("is robot"),
             Colour1 = new Vector4(CharacterAppearance.Rgb(c.Race.GetInt("blood colour", 0x800000) & 0xFFFFFF), 1),
         };
@@ -977,6 +987,7 @@ internal sealed class CharacterContent : IDisposable
         var colour = c.BodyLayers.Take(3).Select(l => l.Colour).FirstOrDefault(x => x is not null);
         var m = new PartMaterial
         {
+            BloodColour = unchecked((uint)c.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF,
             DoubleSided = true, Shading = CharacterShaders.ShadeBody, Description = $"RACE '{c.Race.Name}' body",
             SkinTone = c.SkinToneParameter, HairColour = c.HairColour,
             HairAlpha = Channel(c.Hair?.GetInt("head alpha channel" + f, 1) ?? 1), HairMult = Channel(c.Hair?.GetInt("head channel" + f) ?? 0),
@@ -1013,7 +1024,7 @@ internal sealed class CharacterContent : IDisposable
     {
         var item = part.Record;
         string f = c.Female ? " female" : "";
-        var m = new PartMaterial();
+        var m = new PartMaterial { BloodColour = unchecked((uint)c.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF };
         if (item.Type == FcsRecordType.ATTACHMENT)
         {
             // Hair and beards: brightness and alpha are channels of the diffuse texture.

@@ -79,7 +79,7 @@ static class CharacterShaders
             uint tex[{{TextureSlotCount}}];
             vec4 shirtColour;    // w: an item's gloss multiplier (an icon's material `specular mult`; 1 otherwise)
             vec4 skinTone;
-            vec4 hairColour;
+            vec4 hairColour;     // rgb hair; w exact 24-bit race blood RGB
             vec4 hairAlpha;
             vec4 hairMult;
             vec4 beardAlpha;
@@ -437,6 +437,21 @@ static class CharacterShaders
             return best;
         }
 
+        // Wound fluids are independent of clothing dyes. Every RGB24 value is exact in the spare float.
+        vec3 raceBlood(CharMaterial m)
+        {
+            uint rgb = uint(m.hairColour.w);
+            return vec3(float((rgb >> 16u) & 255u), float((rgb >> 8u) & 255u), float(rgb & 255u)) / 255.0;
+        }
+
+        // Same palette transform as GorePalette: neutral highlights remain, red chroma follows the race.
+        vec3 goreColour(vec3 source, CharMaterial m)
+        {
+            if (uint(m.hairColour.w) == 0x800000u) return source;
+            float chroma = max(source.r - min(source.g, source.b), 0.0);
+            return clamp(source + (raceBlood(m) * (255.0 / 128.0) - vec3(1.0, 0.0, 0.0)) * chroma, 0.0, 1.0);
+        }
+
         // Open flesh over the albedo, from the character's wound mask.
         void woundSurface(inout vec3 albedo, inout float gloss, CharMaterial m, inout vec3 bend)
         {
@@ -450,17 +465,17 @@ static class CharacterShaders
             // A painted cut, rim to core: bruise, thin fat, wet meat with fine grain, dark bottom.
             // Wet runs from the cuts, thick and glossy where they pool down the middle.
             float run = smoothstep(0.1, 0.55, tex(vWounds, vec2(vUv.x, (vUv.y + 1.0) * 0.5)).g);
-            albedo = mix(albedo, vec3(0.24, 0.012, 0.014), run * 0.92);
+            albedo = mix(albedo, goreColour(vec3(0.24, 0.012, 0.014), m), run * 0.92);
             gloss = mix(gloss, 0.85, run);
             float grain = 0.82 + 0.18 * sin((vUv.x + vUv.y) * 900.0 + sin(vUv.x * 310.0) * 2.0);
-            albedo = mix(albedo, albedo * vec3(0.8, 0.5, 0.48), cut.b);
+            albedo = mix(albedo, albedo * goreColour(vec3(0.8, 0.5, 0.48), m), cut.b);
             float lump = 0.5 + 0.5 * sin(vUv.x * 410.0 + sin(vUv.y * 260.0) * 2.5) * sin(vUv.y * 370.0 + sin(vUv.x * 210.0) * 2.5);
-            vec3 meat = mix(m.colour1.rgb * 0.75, m.colour1.rgb * 0.3, lump) * grain;
+            vec3 meat = mix(raceBlood(m) * 0.75, raceBlood(m) * 0.3, lump) * grain;
             albedo = mix(albedo, meat, smoothstep(0.1, 0.45, cut.g));
             // Only a broken thread of fat at the lip, not a band; the heart stays dark red, never black.
             float lip = smoothstep(0.1, 0.3, cut.g) * (1.0 - smoothstep(0.3, 0.5, cut.g)) * smoothstep(0.45, 0.7, lump);
             albedo = mix(albedo, vec3(0.6, 0.47, 0.3), lip * 0.7);
-            albedo = mix(albedo, m.colour1.rgb * 0.22, smoothstep(0.5, 1.0, cut.r));
+            albedo = mix(albedo, raceBlood(m) * 0.22, smoothstep(0.5, 1.0, cut.r));
             gloss = mix(gloss, 0.75, cut.g);
         }
         layout(location = 0) out vec4 fragColour;
@@ -664,7 +679,7 @@ static class CharacterShaders
                 {
                     if (((vHeadRelief & {{HeadReliefFlag}}u) != 0u && open < 0.85) || (vHeadOpen >= 2u && open < headSwordCleft(vSkinPos, vHeadProfile, vHeadFrame))) discard;
                     float wet = 1.0 - smoothstep(0.85, 1.35, open), bone = 1.0 - smoothstep(0.48, 0.60, open);
-                    albedo = mix(mix(albedo, vec3(0.3, 0.02, 0.025), wet), vec3(0.61, 0.55, 0.44), bone);
+                    albedo = mix(mix(albedo, goreColour(vec3(0.3, 0.02, 0.025), m), wet), vec3(0.61, 0.55, 0.44), bone);
                     gloss = mix(gloss, 0.75, wet);
                 }
             }
@@ -674,7 +689,7 @@ static class CharacterShaders
                 if (vSkinPos.y < 17.0) tornLip = (vSkinPos.y - 16.72) * 7.5 + 0.05 * sin(vBlood.y * 35.0);   // under the chin the triangles reach down the neck: the edge is a height there
                 if (tornLip > 0.6) discard;
                 float wet = smoothstep(0.15, 0.5, tornLip);
-                albedo = mix(albedo, m.colour1.rgb * 0.55, wet);
+                albedo = mix(albedo, raceBlood(m) * 0.55, wet);
                 gloss = mix(gloss, 0.75, wet);
             }
             if (vCutBand < 1000.0)
@@ -682,12 +697,22 @@ static class CharacterShaders
                 float edge = vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0);
                 if (edge < 0.0) discard;
                 float band = 1.0 - smoothstep(0.1, 0.32, edge);
-                albedo = mix(albedo, !gl_FrontFacing && edge < 0.2 ? vec3(0.7, 0.64, 0.5) : m.colour1.rgb * 0.55, band);
+                albedo = mix(albedo, !gl_FrontFacing && edge < 0.2 ? vec3(0.7, 0.64, 0.5) : raceBlood(m) * 0.55, band);
                 gloss = mix(gloss, 0.7, band);
             }
             bool torsoExposed = (vAnatomy == 1u || ((vHeadRelief & 1u) != 0u && vAnatomy == 2u)) && vClipLayer < 7.5 && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
-            if (vTorsoBand < 999.0 && vAnatomy == 0u && ((vHeadRelief & 1u) == 0u || vHeadHair == 0u)) { float wet = 1.0 - smoothstep(0.02, 0.20, vTorsoBand); albedo = mix(albedo, vec3(0.27, 0.015, 0.02), wet); gloss = mix(gloss, 0.75, wet); }
-            if (vPlated > 0.0 && vClip > -0.5) { float smear = smoothstep(-0.5, 0.2, vClip + 0.25 * sin(vBlood.y * 23.0 + vBlood.x * 5.0)); albedo = mix(albedo, vec3(0.16, 0.01, 0.012), smear * 0.9); gloss = mix(gloss, 0.7, smear); }
+            if (vTorsoBand < 999.0 && vAnatomy == 0u && ((vHeadRelief & 1u) == 0u || vHeadHair == 0u))
+            {
+                float wet = 1.0 - smoothstep(0.02, 0.20, vTorsoBand);
+                albedo = mix(albedo, goreColour(vec3(0.27, 0.015, 0.02), m), wet);
+                gloss = mix(gloss, 0.75, wet);
+            }
+            if (vPlated > 0.0 && vClip > -0.5)
+            {
+                float smear = smoothstep(-0.5, 0.2, vClip + 0.25 * sin(vBlood.y * 23.0 + vBlood.x * 5.0));
+                albedo = mix(albedo, goreColour(vec3(0.16, 0.01, 0.012), m), smear * 0.9);
+                gloss = mix(gloss, 0.7, smear);
+            }
             else if (!torsoExposed && vClip > 0.0 && (vAnatomy != 0u || vClip + 0.18 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
             if (vAnatomy == 3u) discard;   // the lower teeth left with the jaw
             if (vAnatomy != 0u)
@@ -718,12 +743,13 @@ static class CharacterShaders
                 {
                     float mottled = fullBodyFleshNoise(vSkinPos * 4.1);
                     float fibre = smoothstep(0.53, 0.74, fullBodyFleshNoise(vSkinPos * vec3(38.0, 2.1, 31.0) + mottled * 0.7));
-                    albedo = (m.colour1.rgb * 0.36 + vec3(0.025, 0.009, 0.007)) * (0.90 + 0.18 * mottled) + fibre * vec3(0.020, 0.009, 0.006);
+                    albedo = (raceBlood(m) * 0.36 + goreColour(vec3(0.025, 0.009, 0.007), m))
+                        * (0.90 + 0.18 * mottled) + fibre * goreColour(vec3(0.020, 0.009, 0.006), m);
                     gloss = 0.53 + 0.10 * fullBodyFleshNoise(vSkinPos * 12.7);
                 }
                 else
                 {
-                    albedo = m.colour1.rgb * 0.5 * (0.7 + 0.3 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));   // legacy cavity lining
+                    albedo = raceBlood(m) * 0.5 * (0.7 + 0.3 * sin(vBlood.x * 11.0 + sin(vBlood.y * 40.0) * 2.0));   // legacy cavity lining
                     gloss = 0.3;
                 }
             }

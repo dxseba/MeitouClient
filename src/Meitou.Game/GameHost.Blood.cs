@@ -130,7 +130,7 @@ sealed partial class GameHost
 
     const float BloodRunSeconds = 5, GutLifeSeconds = 600, StumpBoneOut = 1.1f;
 
-    sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; }
+    sealed class GutFall { public Vector3 Position, Velocity; public Quaternion Rotation = Quaternion.Identity; public float Floor, Age; public uint BloodColour = DefaultBloodColour; }
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
     readonly HashSet<CharacterId> gutsSpilled = [];
 
@@ -146,14 +146,15 @@ sealed partial class GameHost
             var id = world.Characters.IdOf(slot);
             if (!hot.Alive || wounds.Of(id) is not { DeepAbdomen: true } || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id) || world.Characters.Cold(slot)?.Race?.Name is not ("Greenlander" or "Scorchlander")) continue;
             var forward = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
-            gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y };
+            gutFalls[id] = new GutFall { Position = hot.Position + new Vector3(0, 11.5f, 0) + forward * 1.2f, Velocity = forward * 1.5f, Floor = hot.Position.Y,
+                BloodColour = world.Characters.Cold(slot)?.Race?.BloodColour ?? DefaultBloodColour };
         }
         foreach (var (who, gone) in gutFalls.ToArray())
             if (gone.Age > GutLifeSeconds) { gutFalls.Remove(who); gutsSpilled.Add(who); }   // spilled once: the wound stays and does not spill again
         foreach (var fall in gutFalls.Values)
         {
             StepGut(fall, dt);
-            if (draw) gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.Bowel, 1, fall.Rotation, fall.Position));
+            if (draw) gpu.DebrisPieces.Add(new Meitou.Rendering.DebrisPiece(Meitou.Rendering.DebrisRenderer.Bowel, 1, fall.Rotation, fall.Position, BloodColour: fall.BloodColour));
         }
     }
 
@@ -222,6 +223,8 @@ sealed partial class GameHost
         while (woundQueue.TryDequeue(out var e))
         {
             if (e.Kind == CombatEventKind.BodyBisected) BeginTorsoCut(e, world);
+            uint bloodColour = world.Characters.IsAlive(e.Victim)
+                ? world.Characters.Cold(e.Victim.Slot)?.Race?.BloodColour ?? DefaultBloodColour : DefaultBloodColour;
             // A hit throws real drops along the blow, out of the wound.
             if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && gpu?.Particles is { } drops)
             {
@@ -231,7 +234,7 @@ sealed partial class GameHost
                 for (int i = 0; i < 1 + (int)(force * 3); i++)
                 {
                     var spray = Vector3.Normalize(new Vector3(along.X + (bloodRandom.NextSingle() - 0.5f), 0.3f + bloodRandom.NextSingle() * 0.6f, along.Y + (bloodRandom.NextSingle() - 0.5f)));
-                    drops.Burst(BurstSpray, from, Turn(Vector3.UnitZ, spray), 0.1f + force * 0.2f, MistSize * 0.5f, MistLife * 0.6f);
+                    drops.Burst(BurstSpray, from, Turn(Vector3.UnitZ, spray), 0.1f + force * 0.2f, MistSize * 0.5f, MistLife * 0.6f, BloodRecolour(bloodColour));
                 }
             }
             // A heavy blow knocks a splinter of bone and a scrap of flesh out of the wound.
@@ -244,7 +247,7 @@ sealed partial class GameHost
                     var along = e.Direction.LengthSquared() > 1e-6f ? Vector2.Normalize(e.Direction) : Vector2.UnitX;
                     pieces.Add(new Piece
                     {
-                        Mesh = mesh, Scale = scale, Extent = size * scale, Floor = float.NaN, Born = world.Tick, Flesh = flesh, Colour = 0, Bloody = true,
+                        Mesh = mesh, Scale = scale, Extent = size * scale, Floor = float.NaN, Born = world.Tick, Flesh = flesh, Colour = 0, Bloody = true, BloodColour = bloodColour,
                         Position = e.Position + new Vector3(0, 6 + bloodRandom.NextSingle() * 8, 0),
                         Velocity = new Vector3(along.X * 18 + bloodRandom.NextSingle() * 12 - 6, 18 + bloodRandom.NextSingle() * 16, along.Y * 18 + bloodRandom.NextSingle() * 12 - 6),
                         Rotation = Quaternion.Identity, Spin = new Vector3(5, 3, 7),

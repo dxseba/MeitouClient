@@ -46,7 +46,8 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
             slot.SourceParts = null;
             slot.Components = components;
             var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
-            var vertices = TorsoCutSurface.Build(source, groups, cut, morphs, components);
+            uint bloodColour = unchecked((uint)asset.Appearance.Race.GetInt("blood colour", 0x800000));
+            var vertices = TorsoCutSurface.Build(source, groups, cut, morphs, components, bloodColour);
             slot.Ready = vertices is { Length: > 0 and <= VertexCapacity };
             if (slot.Ready)
             {

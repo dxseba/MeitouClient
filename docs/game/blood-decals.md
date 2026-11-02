@@ -6,6 +6,31 @@ patches (`Plugin_Terrain_x64.dll`). Implementation: `TerrainDecalStore`, `Terrai
 `TerrainDecalRenderer` and the terrain colour shader. Settings: [settings.md](../formats/settings.md#graphics-decals-and-effects);
 save layout: [save.md](../formats/save.md#folder-and-state-mapping).
 
+## Race colours
+
+**Verified** (installed `gamedata.base`, `Newwworld.mod`, `Dialogue.mod`, `rebirth.mod` loaded with
+`FcsReader` / `GameDatabase.Load(LoadOrder.BaseGame(install))`; compared the integer `blood colour`
+with `RaceData.From`). The colour belongs to each RACE record, not to a broad human/insect category:
+
+| Core race | Blood RGB |
+| --- | --- |
+| Greenlander, Scorchlander, Shek; ordinary Hive Worker, Soldier, Prince and Queen; South Hive Worker, Soldier and Prince | `#800000` |
+| Deadhive Prince | `#E4BC32` |
+| Deadhive Worker and Soldier | `#EDECD1` |
+| Skimmer | `#AEAE28` |
+| Spider | `#C66300` |
+| Small Spider | `#800000` |
+| Skeleton and its humanoid variants; robot worker/guard spiders | `#362118` |
+| Big-Bones; Crimper | `#242424`; `#1C1B17` |
+
+Beep (`57390-rebirth.mod`) references Hive Worker Drone (`18960-gamedata.base`), whose explicit
+colour is `#800000`; the current installed mod order also keeps that value. He does not use the
+Deadhive Prince's yellow. Mods can choose other colours: **Verified** by the same probe with
+`LoadOrder.FromInstall(install)`, `Hiver_Expansion.mod` defines Praetorian `#F0C000`, South Praetorian
+`#BA3668`, and Deadhive Praetorian `#C5CFCD`; `Horned Hiver.mod` defines its three horned races
+`#E4BC32`. These are content values, not engine overrides. Recheck the merged RACE when the mod
+order changes; never infer its blood from the character's name or race-name substring.
+
 ## Types and textures
 
 **Verified** (`FUN_1408dfaf0` strings, `resources.cfg`): four types by the folder name of each
@@ -134,6 +159,13 @@ characters carry blood on their skin, not only on the ground.
   sandbox is white without a material because the sandbox has no world-object layer, so the debris path (no material) drew it.
 
 The loose bowel is uploaded with packed `GpuVertex.ObjectSize` (44-byte) vertices, matching the debris pass; raw `Vertex` bytes use another stride and draw stretched triangles. Procedural character caps retain raw float attributes because their tangent holds bind-space coordinates and anatomy layer tags.
+
+Gore palettes use that same RACE value for wound runs, cut rims, muscle, organs, mouth, brain,
+and loose wet scraps/bowel. Neutral bone and fat retain their palettes. Soft-tissue red chroma
+is replaced by race fluid chroma with neutral highlights retained; default #800000 is an exact
+identity. Shared anatomy/relief mesh keys include the blood palette; individual cut slots use
+their owner appearance. Shader fluid is stored separately from clothing dyes in the spare
+material hair-colour W (exact RGB24 integer; GPU layout unchanged).
 
 ## Blood on surfaces (Meitou)
 

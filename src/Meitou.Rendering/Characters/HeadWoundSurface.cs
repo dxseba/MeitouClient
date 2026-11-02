@@ -97,7 +97,7 @@ static partial class HeadWoundSurface
         return result.ToArray();
     }
 
-    public static uint Append(List<Vertex> destination, Vertex[] source, int headBone, Vector4[]? morphs)
+    public static uint Append(List<Vertex> destination, Vertex[] source, int headBone, Vector4[]? morphs, uint bloodColour = GorePalette.DefaultBlood)
     {
         source = Nearby(source, Centre, 1.6f);
         if (source.Length == 0) return 0;
@@ -163,8 +163,8 @@ static partial class HeadWoundSurface
                     bool inner = broken && band is 4 or 5;
                     float grain = 0.94f + 0.06f * MathF.Sin(u * 31 + side * 5);
                     float exposure = Math.Clamp(1.3f - MathF.Abs(u + 0.03f) / 0.36f, 0, 1) * (side > 0 ? 0.60f : 1);
-                    var tissue = new Vector4(0.28f, 0.025f, 0.03f, 0);
-                    colours[row, band] = (flesh ? tissue : inner ? new Vector4(0.32f, 0.19f, 0.15f, 0)
+                    var tissue = GorePalette.Recolour(new Vector4(0.28f, 0.025f, 0.03f, 0), bloodColour);
+                    colours[row, band] = (flesh ? tissue : inner ? GorePalette.Recolour(new Vector4(0.32f, 0.19f, 0.15f, 0), bloodColour)
                         : Vector4.Lerp(tissue, new Vector4(0.61f, 0.55f, 0.44f, 0), exposure)) * grain;
                 }
             }

@@ -124,13 +124,14 @@ static partial class HeadWoundSurface
     }
 
     /// <summary>Fits a long cut to a small curved head without changing its anchor or blade axis.</summary>
-    public static Vertex[]? FitPlacementVertices(Vertex[] source, in HeadWoundFrame frame, int headBone, Vector4[]? morphs, int profile, bool broken, out HeadWoundFrame fitted)
+    public static Vertex[]? FitPlacementVertices(Vertex[] source, in HeadWoundFrame frame, int headBone, Vector4[]? morphs, int profile, bool broken,
+        out HeadWoundFrame fitted, uint bloodColour = GorePalette.DefaultBlood)
     {
         fitted = frame;
         for (int attempt = 0; attempt < 4; attempt++)
         {
             var candidate = frame with { HalfLength = frame.HalfLength * (1 - attempt * 0.05f) };
-            if (PlacementVertices(source, candidate, headBone, morphs, profile, broken) is not { Length: > 0 } vertices) continue;
+            if (PlacementVertices(source, candidate, headBone, morphs, profile, broken, bloodColour) is not { Length: > 0 } vertices) continue;
             fitted = candidate;
             return vertices;
         }
@@ -138,7 +139,8 @@ static partial class HeadWoundSurface
     }
 
     /// <summary>One active cut, with its original-skin frame and barycentrically interpolated face morph.</summary>
-    public static Vertex[]? PlacementVertices(Vertex[] source, in HeadWoundFrame frame, int headBone, Vector4[]? morphs, int profile, bool broken)
+    public static Vertex[]? PlacementVertices(Vertex[] source, in HeadWoundFrame frame, int headBone, Vector4[]? morphs, int profile, bool broken,
+        uint bloodColour = GorePalette.DefaultBlood)
     {
         var f = frame;
         source = Nearby(source, f.Centre, f.HalfLength + 0.6f);
@@ -163,8 +165,8 @@ static partial class HeadWoundSurface
                 bool flesh = MathF.Abs(side) >= 0.85f, inner = broken && band is 4 or 5;
                 float grain = 0.94f + 0.06f * MathF.Sin(u * 31 + side * 5);
                 float exposure = Math.Clamp(1.3f - MathF.Abs(u + 0.03f) / 0.36f, 0, 1) * (side > 0 ? 0.60f : 1);
-                var tissue = new Vector4(0.28f, 0.025f, 0.03f, 0);
-                colours[row, band] = (flesh ? tissue : inner ? new Vector4(0.32f, 0.19f, 0.15f, 0)
+                var tissue = GorePalette.Recolour(new Vector4(0.28f, 0.025f, 0.03f, 0), bloodColour);
+                colours[row, band] = (flesh ? tissue : inner ? GorePalette.Recolour(new Vector4(0.32f, 0.19f, 0.15f, 0), bloodColour)
                     : Vector4.Lerp(tissue, new Vector4(0.61f, 0.55f, 0.44f, 0), exposure)) * grain;
             }
         }

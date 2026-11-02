@@ -60,7 +60,8 @@ sealed class CharacterHeadWoundPool(IGpuContext gpu) : IDisposable
             return slot.View = Fallback(asset, headState);
         var parts = asset.HeadPaintedParts.ToList();
         var morphs = asset.Morph?.Poses.Deltas(asset.Morph.Weights, asset.Morph.CutHorns);
-        var vertices = HeadWoundSurface.FitPlacementVertices(source, frame, asset.HeadBone, morphs, profile, (headState >> 7 & 3) >= 2, out var fitted);
+        var vertices = HeadWoundSurface.FitPlacementVertices(source, frame, asset.HeadBone, morphs, profile, (headState >> 7 & 3) >= 2, out var fitted,
+            unchecked((uint)asset.Appearance.Race.GetInt("blood colour", 0x800000)));
         frame = fitted;
         bool ready = vertices is { Length: > 0 and <= VertexCapacity };
         if (ready)

@@ -28,7 +28,7 @@ static class CharacterAnatomy
     /// <summary>The bowel's group: with the torso's until it spills, then gone (<see cref="DebrisRenderer.Bowel"/>).</summary>
     const int LooseBowelGroup = 5;
     public static List<Vertex>? Build(SkeletonRig rig, WoundPoint[] skin, Vertex[] headSource, bool female, MeshMorphs? morphs,
-        bool headless, bool headOnly, string path)
+        bool headless, bool headOnly, string path, uint bloodColour = GorePalette.DefaultBlood)
     {
         path = GameFiles.Resolve(path);
         if (skin.Length == 0 || !File.Exists(path) || rig.Handle("Bip01 Pelvis") is not { } pelvis || rig.Handle("Bip01 Neck") is not { } neck || Math.Max(pelvis, neck) >= rig.BindPosition.Length) return null;
@@ -94,6 +94,7 @@ static class CharacterAnatomy
             if (!headSupported && batch.Bone is "Bip01 Head" or "Bip01 Jaw") continue;
             if ((rig.Handle(batch.Bone) ?? (batch.Bone == "Bip01 Jaw" ? rig.Handle("Bip01 Head") : null)) is not { } bone) continue;
             var colour = batch.Layer switch { 0 => new Vector4(0.61f, 0.49f, 0.32f, 1), 1 => new Vector4(0.36f, 0.075f, 0.07f, 1), 2 => new Vector4(0.64f, 0.54f, 0.36f, 1), 3 => new Vector4(0.55f, 0.40f, 0.23f, 1), _ => new Vector4(0.55f, 0.12f, 0.12f, 1) };
+            if (batch.Layer != 0) colour = GorePalette.Recolour(colour, bloodColour);
             // The face keeps skull/teeth and its dark inside; remove whole soft-tissue triangles to preserve later layer/bone boundaries.
             IEnumerable<EcorcheVertex> sourceVertices = batch.Layer == 0 ? batch.Vertices : AnatomyTriangles.BelowHeight(batch.Vertices, (16.9f - hip.Y) / scale + 9.956298f);
             foreach (var v in sourceVertices)
@@ -110,7 +111,7 @@ static class CharacterAnatomy
                 var over = Nearest(fitted, WoundMasks.BodyGroup(batch.Bone), bone);
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
                 if ((batch.Layer != 0 || WoundMasks.BodyGroup(batch.Bone) != 0) && height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);   // bone keeps its true shape: the depth push hides what stands proud
-                vertices.Add(AnatomyTriangles.FollowBone(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? OrganColour((int)MathF.Floor(v.Uv.X / 10)) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) } }, bone));
+                vertices.Add(AnatomyTriangles.FollowBone(new Vertex { Position = fitted, Normal = v.Normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? GorePalette.Recolour(OrganColour((int)MathF.Floor(v.Uv.X / 10)), bloodColour) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : WoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) } }, bone));
             }
         }
         // The body's back wall (Gore Lab's cavity lining): what a line of sight through the torso ends on. Layer 7, the torso's group.
@@ -119,7 +120,7 @@ static class CharacterAnatomy
         {
             var p = new Vector3(wallX[row * CavityLiningData.Columns + column], CavityLiningData.Y0 + (CavityLiningData.Y1 - CavityLiningData.Y0) * row / (CavityLiningData.Rows - 1), wallZ[row * CavityLiningData.Columns + column]);
             var over = Nearest(p, 0);
-            return new Vertex { Position = p, Normal = Vector3.Normalize(new Vector3(-p.X, 0, 0.5f - p.Z)), Uv = over.Uv, Tangent = new Vector4(0, 0, 0, 7), Colour = new Vector4(0.2f, 0.03f, 0.035f, 0), Bones = over.Bones, Weights = over.Weights };
+            return new Vertex { Position = p, Normal = Vector3.Normalize(new Vector3(-p.X, 0, 0.5f - p.Z)), Uv = over.Uv, Tangent = new Vector4(0, 0, 0, 7), Colour = GorePalette.Recolour(new Vector4(0.2f, 0.03f, 0.035f, 0), bloodColour), Bones = over.Bones, Weights = over.Weights };
         }
         var axial = new[] { "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2", "Bip01 Neck" }
             .Select(name => rig.Handle(name)).Where(handle => handle.HasValue).Select(handle => (int)handle!.Value).ToArray();
@@ -154,6 +155,7 @@ static class CharacterAnatomy
             foreach (var part in mouth)
             {
                 var colour = part.Bone.Contains("constrictor") ? new Vector4(0.26f, 0.05f, 0.05f, 0) : part.Bone == "Gingiva" ? new Vector4(0.55f, 0.2f, 0.2f, 0) : new Vector4(0.5f, 0.17f, 0.18f, 0);
+                colour = GorePalette.Recolour(colour, bloodColour);
                 for (int t = 0; t < part.Vertices.Length; t++)
                 {
                     var v = part.Vertices[t];
@@ -179,7 +181,7 @@ static class CharacterAnatomy
                 foreach (var v in part.Vertices)
                 {
                     var p = (v.Position - (min + max) / 2) * fit + place;
-                    vertices.Add(new Vertex { Position = p, Normal = v.Normal, Uv = skin[0].Uv, Tangent = new Vector4(p, 6), Colour = new Vector4(0.6f, 0.4f, 0.4f, 0), Bones = (uint)brainBone, Weights = new Vector4(1, 0, 0, 0) });
+                    vertices.Add(new Vertex { Position = p, Normal = v.Normal, Uv = skin[0].Uv, Tangent = new Vector4(p, 6), Colour = GorePalette.Recolour(new Vector4(0.6f, 0.4f, 0.4f, 0), bloodColour), Bones = (uint)brainBone, Weights = new Vector4(1, 0, 0, 0) });
                 }
         }
         // Clustered on a fine grid: seen only through cuts, the file's detail is lost, and triangles that collapse go.
