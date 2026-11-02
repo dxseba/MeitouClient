@@ -101,7 +101,17 @@ public sealed partial class CombatSystem
         if (table.IdOf(a) == TestPowerOf) packet = packet with { Cut = packet.Cut * TestPower, Blunt = packet.Blunt * TestPower, Pierce = packet.Pierce * TestPower };
         var mechanism = CombatWoundMechanisms.Classify(fighter, packet, direction);
 
-        var ctx = MakeContext(world, d, dc);
+        float brutality = ac.Brutality.Level;
+        float challenge = CanTrainBrutality(world, a, d, D)
+            ? Math.Clamp(xp.SkillDifferenceFactor(Eff(ac, fighter.Unarmed ? StatsEnumerated.MartialArts : StatsEnumerated.MeleeAttack),
+                Eff(dc, StatsEnumerated.MeleeDefence)), 0, 6) : 0;
+        Span<float> usefulBeforeHit = dc.Medical.Parts.Count <= 64 ? stackalloc float[dc.Medical.Parts.Count] : new float[dc.Medical.Parts.Count];
+        for (int i = 0; i < usefulBeforeHit.Length; i++)
+            usefulBeforeHit[i] = MathF.Max(0, dc.Medical.Parts[i].Flesh + dc.Medical.Parts[i].MaxHp - dc.Medical.Parts[i].Stun);
+        var ctx = MakeContext(world, d, dc) with
+        {
+            AllowDecapitation = !dc.Race.IsRobot && !target.IsAnimal && BrutalityPolicy.CanDecapitate(brutality, mechanism),
+        };
         var events = hitEvents;   // Apply is serial, so one list serves every hit
         events.Clear();
         bool aliveBeforeHit = !dc.Medical.Dead;
@@ -118,7 +128,9 @@ public sealed partial class CombatSystem
         ulong visualSeed = Wounds.TorsoBisectionPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), CombatRolls.BlowCounter(a, seq, blow, 0));
         bool bisected = TryBisect(dc, part, damage, mechanism, aliveBeforeHit,
             CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.BodyBisection, CombatRolls.BlowCounter(a, seq, blow, 0)), direction, events,
-            visualSeed, cutTravel, prev[d].Yaw);
+            visualSeed, cutTravel, prev[d].Yaw, brutality: brutality);
+        if ((uint)part < (uint)usefulBeforeHit.Length && challenge > 0)
+            ac.Brutality.Award(BrutalityPolicy.UsefulDamage(damage, usefulBeforeHit[part]) * challenge * MathF.Max(0, constants.ExpGainMultiplier));
         FloatHit(world, d, dc, ac.IsPlayer, part, damage, absorbed);
         A.Landed++;
         D.Taken++;
@@ -142,7 +154,7 @@ public sealed partial class CombatSystem
                     break;
             }
         }
-        PublishHit(world, CombatHitSource.Melee, table.IdOf(a), d, dc.Medical, part, damage, -toAttacker, events, direction, tech.LowStrike, mechanism, bisected);
+        PublishHit(world, CombatHitSource.Melee, table.IdOf(a), d, dc.Medical, part, damage, -toAttacker, events, direction, tech.LowStrike, mechanism, bisected, attackerBrutality: brutality);
         // A shackled defender is knocked out instead of staggered a quarter of the time (Character::_startStumble: MedicalSystem::knockout with factor 0.002, the floor of 3 s).
         if (!dc.Medical.Incapacitated && Meitou.Simulation.Locks.LockSystem.WornShackles(dc) is not null
             && CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.Shackled, CombatRolls.BlowCounter(a, seq, blow, 0)) < ShackledKnockout)
@@ -282,6 +294,35 @@ public sealed partial class CombatSystem
         float stop = tech.StopProgress(blow);
         if (stop < 1) attacker.AttackEnd = Math.Min(attacker.AttackEnd, attacker.AttackStart + (int)MathF.Ceiling(stop * attacker.AttackTicks));
         attacker.NextBlow = 0;
+    }
+
+    /// <summary>Pre-hit contested melee only: conscious enemies able to retaliate, outside furniture, carrying and getting-up states.</summary>
+    internal bool CanTrainBrutality(World world, int attacker, int defender, in CombatSlot target)
+    {
+        var table = world.Characters;
+        if (attacker == defender || table.Cold(attacker) is not { Medical: { Dead: false, Incapacitated: false }, Stats: not null } source
+            || table.Cold(defender) is not { Medical: { Dead: false, Incapacitated: false, PlayingDead: false }, Fighter.CanAttack: true, CarriedBy.IsNone: true } victim
+            || victim.InSomething != global::Meitou.Simulation.Locks.HeldState.None || victim.IsImprisoned || CharacterFacts.GettingUp(victim, world.Tick)
+            || Carrying.CarrySystem.Asleep(table, defender) || target.Down
+            || !CanRetaliateForBrutality(victim.Fighter!, victim.Medical!)) return false;
+
+        bool allied = source.Faction == victim.Faction || Relations is { } relations
+            && relations.Contains(source.Faction) && relations.Contains(victim.Faction)
+            && (relations.IsAlly(source.Faction, victim.Faction) || relations.IsAlly(victim.Faction, source.Faction));
+        bool retaliating = target.TargetSlot == attacker && target.TargetGeneration == table.IdOf(attacker).Generation;
+        if (allied || !retaliating && !CharacterFacts.RegardsEnemy(Relations, source.Faction, victim.Faction)) return false;
+
+        return victim.InCombat || target.TargetSlot >= 0 || target.AttackTech >= 0 || target.ReactTech >= 0;
+    }
+
+    static bool CanRetaliateForBrutality(Fighter fighter, MedicalState medical)
+    {
+        if (fighter.IsAnimal || medical.ArmWorks(left: true) || medical.ArmWorks(left: false)) return true;
+        if (medical.Prone) return false;
+        // A fresh leg loss must not wait for the next medical tick to establish the crawling posture.
+        foreach (var part in medical.Parts)
+            if (part.IsLeg && part.Limb is LimbState.Stump or LimbState.Crushed) return false;
+        return true; // Standing armless people can still use kicks.
     }
 
     void GainCombatXp(CharacterCold attacker, CharacterCold defender, XpEvent attackerEvent, XpEvent? defenderEvent, float damageTaken = 0)

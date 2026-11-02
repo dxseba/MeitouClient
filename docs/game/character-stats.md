@@ -37,6 +37,17 @@ gear factors, hunger below 1. The general stat getter `FUN_140884ac0` asks for e
 [elsewhere](#effective-stealth)); dexterity and strength readers (`FUN_140883a80`, `FUN_140883ba0`, ...) for all
 but light and dust. Meitou: `MedicalState.Light` from `SightMap.Light` each tick.
 
+### Brutality (Meitou)
+
+**Design choice**: a separate passive skill, 0–100, outside the original's fixed stat IDs. Cumulative
+experience is authoritative; level n needs `10*n²` experience (100,000 at mastery), with the HUD
+showing the current level and the experience fraction toward the next. Combat gates and training:
+[combat](combat.md). New players start at zero. Newly generated humanoid NPCs start at the mean of
+raw melee attack and their strongest melee weapon/martial-arts skill, clamped to 0–100; faction does
+not enter it. Loaded characters, including NPCs, default to zero when their save lacks the extension
+and are never reseeded. Live, stored and offscreen saved progress enters the deterministic hash;
+zero contributes no new hash bytes. Persistence: [save](../formats/save.md).
+
 ### Effective stealth
 
 **Verified** (decompile; in game "no hunger or arm term", #46): the getter sends stat 16 not to the table but

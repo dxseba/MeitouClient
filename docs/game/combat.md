@@ -5,6 +5,14 @@ constants. Tables/formulas/evidence scopes retained below; [stats](character-sta
 state/XP, [animation](../animation.md) owns layers/root motion. Implementation: Gameplay.Combat,
 Simulation.Combat and Animation; approximate engine scheduling is not original parity.
 
+## Brutality (Meitou)
+
+**Design choice** (`BrutalityPolicy`, `CombatSystem.Apply`): this separate persistent skill trains once per landed melee hit against a conscious, unrestrained enemy able to fight back. Faction hostility or a defender genuinely targeting the attacker qualifies; selecting an otherwise neutral person alone does not. Same-faction/allied, sleeping, playing-dead, getting-up, carried and caged targets give no XP. Grounded people without either working arm cannot retaliate and give no XP; crawling punchers, usable prosthetics and standing armless kickers remain eligible. Executions give no XP.
+
+XP is delivered post-armour cut + blunt + pierce, capped at the struck part's pre-hit usable health range, multiplied by the native attacker-versus-defender skill-difference factor (clamped 0–6) and global XP rate. Armour stun and overkill do not train it. The native skill-difference penalty can reduce gain to zero against much weaker enemies (a 25-point gap with base constants). The hit captures Brutality before awarding XP, so crossing an unlock cannot upgrade that same hit. Progression/save: [character stats](character-stats.md#brutality-meitou).
+
+Levels below 20 keep ordinary injuries and native limb loss. Levels 20–39 permit superficial severe head wounds; 40+ permit major head wounds and organic head decapitation from a lethal Slash, including deliberate attacks on living downed enemies. The medical destruction threshold still applies. Bolts, Thrust and Crush cannot use that decapitation gate. At 60+, sufficiently powerful, already lethal chest Slash hits can [bisect the torso](../simulation.md#torso-bisection-meitou); level alone never makes a nonlethal hit fatal. Forced debug wound/bisection scenes bypass these gates without granting skill XP.
+
 ## Weapons and damage
 
 **Verified** (packet `FUN_1408868b0` from `FUN_140883ba0`/`FUN_140883c60`/`FUN_140883d10`, disassembled; item stats `FUN_140897f30`, `FUN_140889cd0`;

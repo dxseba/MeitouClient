@@ -83,6 +83,12 @@ loading are scoped by the binary references. Meitou: `Meitou.Data.Save` folder r
 Capture at a boundary; read/write on workers; replace the active world only after successful load.
 [Simulation save coverage](../simulation.md#saves) lists un-restored state.
 
+**Brutality (Meitou)**: optional GAMESTATE_CHARACTER float `meitou brutality xp` stores cumulative
+experience, 0–100,000; level is derived as `sqrt(xp/10)`, capped at 100. Missing, nonfinite or negative
+values load as zero; finite excess clamps to mastery. Original STATS keys and unrelated extension
+fields stay untouched. Capture includes live players/NPCs and stored NPC platoons; unloading and
+reactivating retains the same progression, without applying new-NPC seeding to a loaded character.
+
 ## Compatibility exceptions
 
 Do not normalize string bytes, NaNs, zero/non-size byteSize, sparse slots or unknown key sets.

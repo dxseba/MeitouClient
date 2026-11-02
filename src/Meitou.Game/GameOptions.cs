@@ -31,6 +31,7 @@ sealed class GameOptions
     public float? SandboxYaw, SandboxPower, SandboxHitAngle;
     /// <summary>Set every stored attribute and skill of the sandbox hero before the first tick.</summary>
     public float? SandboxStats;
+    public float? SandboxBrutality;
     public int? SandboxHeadWound, SandboxCutDirection;
     public ulong? SandboxBisectVariant;
     public Meitou.Simulation.Wounds.TorsoBisectionStyle SandboxBisectStyle;
@@ -105,7 +106,8 @@ sealed class GameOptions
           --data-check               print every game data and level file problem of the load order (missing mod, changed record type...) and exit: 0 none, 1 some
           --sandbox [n]              animation sandbox: no world, a flat 1000x1000 wireframe floor (lines every 10, bold every 100) with 1 character (n = 2: two facing each other 30 units apart; more: the rest idle in rings round them, up to 1000); Z/X/C walk/run/free, [ ] fixed speed, P patrol, G fight, Y follow; works with --screenshot --ticks
           --sandbox-character <name> the CHARACTER or ANIMAL_CHARACTER record the sandbox spawns (default: the first member of the default new-game start)
-          --sandbox-stats <n>        set all hero attributes and skills to n (including values above 100); other fighters keep their stats
+          --sandbox-brutality <n>    hero Brutality level 0..100 (otherwise sandbox-stats, capped at 100)
+          --sandbox-stats <n>        set native hero attributes and skills to n (including values above 100); Brutality caps at 100
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), fight (the G key, with --sandbox 2), e.g. run,patrol (with --move-to or --screenshot)
           --sandbox-bisect          with --sandbox 2: force one lethal sideways chest cleave at tick 120 for visual inspection
           --sandbox-bisect-style <kind> auto (default), transverse, vertical, diagonal, or oblique; oblique crosses the trunk toward a shoulder
@@ -232,6 +234,11 @@ sealed class GameOptions
                 case "--sandbox-bisect": g.SandboxBisect = g.SandboxDummy = g.SandboxBare = true; break;
                 case "--sandbox-behead": g.SandboxBehead = true; break;
                 case "--sandbox-sever-level": g.SandboxSever = true; g.SandboxSeverLevel = int.Parse(Next()); break;
+                case "--sandbox-brutality":
+                    g.SandboxBrutality = float.Parse(Next(), CultureInfo.InvariantCulture);
+                    if (!float.IsFinite(g.SandboxBrutality.Value) || g.SandboxBrutality.Value is < 0 or > 100)
+                        throw new ArgumentException("--sandbox-brutality must be finite and between 0 and 100");
+                    break;
                 case "--sandbox-stats":
                     g.SandboxStats = float.Parse(Next(), CultureInfo.InvariantCulture);
                     if (!float.IsFinite(g.SandboxStats.Value) || g.SandboxStats.Value < 0) throw new ArgumentException("--sandbox-stats must be non-negative and finite");

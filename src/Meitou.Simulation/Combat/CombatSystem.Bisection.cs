@@ -44,7 +44,7 @@ public sealed partial class CombatSystem
         int direction = attackerSlot >= 0 ? HitOutcomes.Facing(techniqueDirection, HitOutcomes.Behind(table.Next[attackerSlot].Position, position, yaw)) : techniqueDirection;
         float cut = MathF.Max(200, medical.Parts[chest].MaxHp * 3);
         var input = new TorsoBisectionInput(CombatHitSource.Melee, CombatWoundMechanism.Slash, medical.Parts[chest].Template,
-            direction, cut, medical.Parts[chest].MaxHp, Robot: race.IsRobot, Animal: fighter.IsAnimal);
+            direction, cut, medical.Parts[chest].MaxHp, Robot: race.IsRobot, Animal: fighter.IsAnimal) { Brutality = 100, Lethal = true };
         if (!TorsoBisectionPolicy.SupportsStyle(direction, style) || !TorsoBisectionPolicy.ShouldBisect(input, 0)) return false;
         var events = new List<MedicalEvent>();
         var damage = new HitDamage(cut, 0, 0);
@@ -55,25 +55,26 @@ public sealed partial class CombatSystem
         DepositWeaponBlood(strikingItem, race, damage, true, organicBeforeHit, CombatWoundMechanism.Slash);
         var source = attackerSlot >= 0 ? table.IdOf(attackerSlot) : CharacterId.None;
         ulong variation = visualSeed ?? TorsoBisectionPolicy.VisualSeedFor(world.Seed, victimId, source, (ulong)world.Tick);
-        if (!TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, direction, events, variation, travel, yaw, style)) return false;
+        if (!TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, direction, events, variation, travel, yaw, style, brutality: 100)) return false;
         Knockdown(world, victimSlot, victim, travel, cut);
         TaskStart.Stand(table, victimSlot);
         table.Next[victimSlot].Velocity = Vector3.Zero;
         PublishHit(world, CombatHitSource.Melee, source,
-            victimSlot, medical, chest, damage, travel, events, direction, mechanism: CombatWoundMechanism.Slash, bodyBisected: true);
+            victimSlot, medical, chest, damage, travel, events, direction, mechanism: CombatWoundMechanism.Slash, bodyBisected: true, attackerBrutality: 100);
         return true;
     }
 
     /// <summary>Commits a qualifying melee cleave after its ordinary damage; an existing cut and a pre-hit corpse are never cut again.</summary>
     internal static bool TryBisect(CharacterCold victim, int part, in HitDamage damage, CombatWoundMechanism mechanism,
         bool aliveBeforeHit, float roll, int cutDirection, List<MedicalEvent> events, ulong visualSeed = 0, Vector2 travel = default, float victimYaw = 0,
-        TorsoBisectionStyle style = TorsoBisectionStyle.Auto)
+        TorsoBisectionStyle style = TorsoBisectionStyle.Auto, float brutality = 0)
     {
         if (victim is not { Medical: { } medical, Race: { } race, Fighter: { } fighter }
             || (uint)part >= (uint)medical.Parts.Count) return false;
         var struck = medical.Parts[part];
         var input = new TorsoBisectionInput(CombatHitSource.Melee, mechanism, struck.Template, cutDirection, damage.Cut,
-            struck.MaxHp, aliveBeforeHit, victim.TorsoBisection is not null, race.IsRobot, fighter.IsAnimal);
+            struck.MaxHp, aliveBeforeHit, victim.TorsoBisection is not null, race.IsRobot, fighter.IsAnimal)
+            { Brutality = brutality, Lethal = medical.Dead };
         if (!TorsoBisectionPolicy.ShouldBisect(input, roll)) return false;
         var state = TorsoBisectionPolicy.StateForDirection(cutDirection, visualSeed, travel, victimYaw, style);
         if (!state.IsValid) return false;

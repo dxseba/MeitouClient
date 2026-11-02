@@ -148,6 +148,8 @@ public sealed class CharacterCold
     /// </summary>
     public List<StuckBolt>? StuckBolts { get; set; }
     public Meitou.Simulation.Bodies.CharacterStats? Stats { get; set; }
+    /// <summary>Meitou's passive combat skill; independent of the original's stat-number layout.</summary>
+    public Meitou.Simulation.Bodies.BrutalityProgress Brutality { get; set; } = new();
     public Meitou.Simulation.Bodies.MedicalState? Medical { get; set; }
     /// <summary>Sandbox only (the animation sandbox of the game host): replaces the movement mode of every order, and the speed the character walks at (0: the speed chain's). Not hashed; the normal game never sets them.</summary>
     public byte? ModeOverride { get; set; }
@@ -697,6 +699,7 @@ public sealed class CharacterTable
             k.OrderQueue.Hash(ref hasher);
             hasher.Add((int)k.DrawnWeapon);
             BodyHash.Add(ref hasher, k.Stats, k.Medical);
+            k.Brutality.Hash(ref hasher);
             if (k.Inventory is null) hasher.Add(-1); else k.Inventory.Hash(ref hasher);
             hasher.Add(k.DiedTick);
             if (k.HasFlies) hasher.Add(0x466C6965);

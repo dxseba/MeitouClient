@@ -15,7 +15,7 @@ public enum CombatHitSource { Melee, Bolt, Execution }
 /// <param name="CutDirection">The melee blow's direction after <see cref="HitOutcomes.Facing"/>; -1 for a bolt or an execution.</param>
 /// <param name="Mechanism">The visual attack kind, classified before armour; unspecified keeps legacy readers and synthetic events compatible.</param>
 public readonly record struct CombatEvent(CombatEventKind Kind, long Tick, CombatHitSource Source, CharacterId Attacker, CharacterId Victim,
-    int Part, int LimbSlot, Vector3 Position, Vector2 Direction, HitDamage Damage, float VictimYaw = 0, int CutDirection = -1, bool LowStrike = false, CombatWoundMechanism Mechanism = CombatWoundMechanism.Unspecified);
+    int Part, int LimbSlot, Vector3 Position, Vector2 Direction, HitDamage Damage, float VictimYaw = 0, int CutDirection = -1, bool LowStrike = false, CombatWoundMechanism Mechanism = CombatWoundMechanism.Unspecified, float AttackerBrutality = 0);
 
 public sealed partial class CombatSystem
 {
@@ -24,12 +24,14 @@ public sealed partial class CombatSystem
     public static float TestPower { get; set; } = 1;
 
     /// <summary>Publishes a hit and its medical events. Serial, like the hits themselves.</summary>
-    internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false, CombatWoundMechanism mechanism = CombatWoundMechanism.Unspecified, bool bodyBisected = false)
+    internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false, CombatWoundMechanism mechanism = CombatWoundMechanism.Unspecified, bool bodyBisected = false, float? attackerBrutality = null)
     {
         foreach (var ev in events)
             if (ev.Kind == MedicalEventKind.PartSevered && medical.Parts[ev.Part].Template.LimbSlot is >= 0 and <= 3 and var limb && cutDirection >= 0)
                 Wounds.SeveredLevels.Note(world.Characters.IdOf(victim), limb, cutDirection, lowStrike);
         if (world.CombatEvents is not { } queue) return;
+        float brutality = attackerBrutality ?? (world.Characters.TryResolveNext(attacker, out int sourceSlot)
+            ? world.Characters.Cold(sourceSlot)?.Brutality.Level ?? 0 : 0);
         var id = world.Characters.IdOf(victim);
         var position = world.Characters.Previous[victim].Position;
         float yaw = world.Characters.Previous[victim].Yaw;
@@ -47,6 +49,6 @@ public sealed partial class CombatSystem
         if (bodyBisected) Enqueue(CombatEventKind.BodyBisected, part, damage);
 
         void Enqueue(CombatEventKind kind, int eventPart, in HitDamage d) => queue.Enqueue(new CombatEvent(kind, world.Tick, source, attacker, id, eventPart,
-            eventPart >= 0 ? medical.Parts[eventPart].Template.LimbSlot : -1, position, direction, d, yaw, cutDirection, lowStrike, mechanism));
+            eventPart >= 0 ? medical.Parts[eventPart].Template.LimbSlot : -1, position, direction, d, yaw, cutDirection, lowStrike, mechanism, brutality));
     }
 }

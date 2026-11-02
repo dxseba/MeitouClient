@@ -10,12 +10,16 @@ public enum TorsoBisectionStyle { Auto = 0, Transverse = 1, Vertical = 2, Diagon
 /// <summary>The delivered chest hit and the victim's state before it landed.</summary>
 public readonly record struct TorsoBisectionInput(CombatHitSource Source, CombatWoundMechanism Mechanism,
     BodyPartTemplate Part, int CutDirection, float Cut, float Maximum, bool AliveBeforeHit = true,
-    bool AlreadyBisected = false, bool Robot = false, bool Animal = false);
+    bool AlreadyBisected = false, bool Robot = false, bool Animal = false)
+{
+    public float Brutality { get; init; }
+    public bool Lethal { get; init; }
+}
 
-/// <summary>Meitou's rare, lethal chest cleave; the supplied roll reads no existing random stream.</summary>
+/// <summary>Meitou's skill-gated cleave of an already lethal chest hit; its roll reads no existing random stream.</summary>
 public static class TorsoBisectionPolicy
 {
-    public const float MinimumCut = 70, MaximumHpFraction = 0.75f, BaseChance = 0.10f, MaximumChance = 0.20f;
+    public const float MinimumCut = 70, MaximumHpFraction = 0.75f, BaseChance = 0.10f, MaximumChance = 0.95f;
     public const float MinimumHeight = 11.5f, MaximumHeight = 13.5f, MaximumTiltDegrees = 30, AzimuthVariationDegrees = 30;
     public const float MaximumSlopeX = 0.55f, MaximumSlopeZ = 0.24f;
     // Conservative junction bounds measured on installed human/Shek male/female and worker/soldier/prince meshes.
@@ -31,14 +35,14 @@ public static class TorsoBisectionPolicy
 
     public static float Chance(in TorsoBisectionInput input)
     {
-        if (!input.AliveBeforeHit || input.AlreadyBisected || input.Robot || input.Animal
+        if (!input.AliveBeforeHit || !input.Lethal || input.AlreadyBisected || input.Robot || input.Animal
             || input.Source != CombatHitSource.Melee || input.Mechanism != CombatWoundMechanism.Slash
             || input.CutDirection is not (1 or 2 or 3 or 7 or 9)
             || input.Part is not { Type: BodyPartType.Torso, StringId: ArmourData.ChestPartId }
             || !float.IsFinite(input.Cut) || !float.IsFinite(input.Maximum) || input.Maximum <= 0) return 0;
         float threshold = MathF.Max(MinimumCut, MaximumHpFraction * input.Maximum);
         if (input.Cut < threshold) return 0;
-        return BaseChance + (MaximumChance - BaseChance) * Math.Clamp(input.Cut / threshold - 1, 0, 1);
+        return BrutalityPolicy.BisectionChance(input.Brutality);
     }
 
     /// <summary>True for an eligible hit and a roll in [0, chance); callers may supply a fixed roll for a deterministic scene.</summary>

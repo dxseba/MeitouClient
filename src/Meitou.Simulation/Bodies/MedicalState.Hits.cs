@@ -148,7 +148,7 @@ public sealed partial class MedicalState
         {
             Die(DeathCause.VitalPart, events);
             // Meitou (Decapitation): the blow's rule cuts the head off too; the original returns here for every vital part (the head's record has severance set).
-            if (inHitPath && ctx.Options.Decapitation && blowSevers && p.Template.Type == BodyPartType.Head) Decapitate(events);
+            if (inHitPath && ctx.Options.Decapitation && ctx.AllowDecapitation && blowSevers && p.Template.Type == BodyPartType.Head) Decapitate(events);
             return;
         }
         bool severs = inHitPath ? blowSevers : setting >= Dismemberment.Frequent && p.Limb == LimbState.Original && p.Template.Severance;

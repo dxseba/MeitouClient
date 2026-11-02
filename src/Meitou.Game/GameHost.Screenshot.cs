@@ -178,8 +178,7 @@ sealed partial class GameHost
             gpu.Dispose();
             return 0;
         }
-        string?[] panels = g.UiShowcase
-            ? [null, "hud-expanded", "inventory", "limbs", "stats", "overview", "overview-faction", "building", "menu", "new-game", "save", "load", "title", "title-new-game", "title-load", "title-import", "title-credits", "title-exit", "build", "editor", "editor-face", "editor-hair", "edited", "trade", "talk"] : [null];
+        string?[] panels = StillPanels();
         foreach (string? panelName in panels)
         {
             if (panelName == "trade" && !ShowcaseTrade()) continue;

@@ -51,6 +51,15 @@ sealed partial class PlayerInterface
             float y = panel.Bounds.Y;
             for (int i = 0; i < StatPanels[column].Length; i++)
             {
+                if (column == 2 && i == 4)
+                {
+                    const string brutalityAction = "stat:brutality", brutalityFont = "Kenshi_StandardFont_Medium";
+                    Text($"{name}-label-brutality", Loc.Tr("Brutality"), brutalityFont, statInk, "Left VCenter", brutalityAction);
+                    Text($"{name}-value-brutality", MathF.Floor(lead?.BrutalityLevel ?? 0).ToString("0", CultureInfo.InvariantCulture),
+                        brutalityFont, statInk, "Right VCenter", brutalityAction);
+                    y += rowHeight;
+                }
+
                 foreach (var heading in StatHeadings[column].Where(h => h.Before == i))
                 {
                     Text($"{name}-heading-{i}", heading.Caption, "Kenshi_StandardFont_Large", TitleColour, "Left VCenter", "", heading: true);
@@ -89,6 +98,12 @@ sealed partial class PlayerInterface
 
     void AddStatDescription(List<UiControl> controls)
     {
+        if (selectedStat == "brutality")
+        {
+            AddBrutalityDescription(controls);
+            return;
+        }
+
         if (!int.TryParse(selectedStat, out int selected) || selected <= 0 || selected >= StatsInfo.Count
             || controls.FirstOrDefault(c => c.Name == "Description1Panel") is not { } left
             || controls.FirstOrDefault(c => c.Name == "Description2Panel") is not { } right) return;

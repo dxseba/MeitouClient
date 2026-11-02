@@ -105,6 +105,13 @@ sealed partial class GameHost
                 medical.Blood = MedicalState.BloodCapacity(race, stats.Strength, medical.HasStatsObject, medical.ScaleK, medical.ScaleZ);
             Console.WriteLine($"sandbox stats   hero: all {count} attributes and skills = {level.ToString(CultureInfo.InvariantCulture)}");
         }
+        if (world.Characters.Cold(sandboxHero.Slot) is { } sandboxHeroState)
+        {
+            float brutality = g.SandboxBrutality ?? Math.Clamp(g.SandboxStats ?? 0, 0, 100);
+            sandboxHeroState.Brutality = Meitou.Simulation.Bodies.BrutalityProgress.FromLevel(brutality);
+            Console.WriteLine($"sandbox brutality   hero: {brutality.ToString(CultureInfo.InvariantCulture)}");
+        }
+
         if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2, maleHuman: g.SandboxBare);
         // n above 2: the rest stand idle in rings round the pair (the player's faction, so they keep out of the fight), 15 units apart, a look each;
         // --sandbox-races: then one of every person race, in the rings after them.
@@ -303,7 +310,8 @@ sealed partial class GameHost
             direction = -new Vector2(c * outward.X + s * outward.Y, -s * outward.X + c * outward.Y);
         }
         woundQueue.Enqueue(new Meitou.Simulation.Combat.CombatEvent(Meitou.Simulation.Combat.CombatEventKind.Hit, world.Tick, Meitou.Simulation.Combat.CombatHitSource.Melee, sandboxHero, sandboxFoe,
-            part, medical.Parts[part].Template.LimbSlot, position, direction, damage, yaw, cut, Mechanism: mechanism));
+            part, medical.Parts[part].Template.LimbSlot, position, direction, damage, yaw, cut, Mechanism: mechanism,
+            AttackerBrutality: world.Characters.Cold(sandboxHero.Slot)?.Brutality.Level ?? 0));
     }
 
     void SandboxBare()

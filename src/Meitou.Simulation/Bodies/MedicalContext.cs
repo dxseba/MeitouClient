@@ -32,6 +32,9 @@ public readonly struct MedicalContext(GameConstants constants, BodyOptions optio
     /// <summary>The owner has a stats object (false for simple creatures): the hit path severs limbs only for characters that have one.</summary>
     public bool HasStats { get; init; } = true;
 
+    /// <summary>Whether this hit may use Meitou decapitation; combat supplies the attacker's unlock/mechanism without changing ordinary limb loss.</summary>
+    public bool AllowDecapitation { get; init; } = true;
+
     /// <summary>The owner is exempt from wear and limb loss (the object at character slot <c>+0x248</c>; meaning <b>Unknown</b>).</summary>
     public bool ExemptFromWear { get; init; }
 

@@ -195,6 +195,10 @@ public sealed class CharacterSnapshot
     /// <summary>The bolts stuck in the character (<see cref="CharacterCold.StuckBolts"/>).</summary>
     public IReadOnlyList<StuckBolt> StuckBolts { get; internal set; } = [];
     public string Name { get; internal set; } = "";
+    /// <summary>Meitou Brutality level (0..100), independent of the native stat list.</summary>
+    public float BrutalityLevel { get; internal set; }
+    /// <summary>Experience within the current Brutality level (0..1); 1 at mastery.</summary>
+    public float BrutalityProgress { get; internal set; }
     public int SquadId { get; internal set; } = -1;
     /// <summary>One of the player's characters, and whether it is selected.</summary>
     public bool IsPlayer { get; internal set; }

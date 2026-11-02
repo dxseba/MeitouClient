@@ -14,10 +14,10 @@ namespace Meitou.Tests.Combat;
 public class TorsoBisectionTests
 {
     static readonly BodyPartTemplate CanonicalChest = Chest with { StringId = ArmourData.ChestPartId };
-    static TorsoBisectionInput Eligible => new(CombatHitSource.Melee, CombatWoundMechanism.Slash, CanonicalChest, 2, 75, 100);
+    static TorsoBisectionInput Eligible => new(CombatHitSource.Melee, CombatWoundMechanism.Slash, CanonicalChest, 2, 75, 100) { Brutality = 60, Lethal = true };
 
     [Fact]
-    public void Only_extreme_delivered_cuts_qualify_and_the_chance_stays_rare()
+    public void Only_powerful_lethal_hits_qualify_and_extra_damage_does_not_bypass_the_skill_chance()
     {
         Assert.Equal(0, TorsoBisectionPolicy.Chance(Eligible with { Cut = 74.99f }));
         Assert.Equal(0.10f, TorsoBisectionPolicy.Chance(Eligible));
@@ -25,9 +25,9 @@ public class TorsoBisectionTests
         Assert.Equal(0.10f, TorsoBisectionPolicy.Chance(Eligible with { Maximum = 200, Cut = 150 }));
         Assert.Equal(0, TorsoBisectionPolicy.Chance(Eligible with { Maximum = 50, Cut = 69.99f }));
         Assert.Equal(0.10f, TorsoBisectionPolicy.Chance(Eligible with { Maximum = 50, Cut = 70 }));
-        Assert.InRange(TorsoBisectionPolicy.Chance(Eligible with { Cut = 112.5f }), 0.1499f, 0.1501f);
-        Assert.Equal(0.20f, TorsoBisectionPolicy.Chance(Eligible with { Cut = 150 }));
-        Assert.Equal(0.20f, TorsoBisectionPolicy.Chance(Eligible with { Cut = 10000 }));
+        Assert.Equal(0.10f, TorsoBisectionPolicy.Chance(Eligible with { Cut = 112.5f }));
+        Assert.Equal(0.10f, TorsoBisectionPolicy.Chance(Eligible with { Cut = 150 }));
+        Assert.Equal(0.10f, TorsoBisectionPolicy.Chance(Eligible with { Cut = 10000 }));
         Assert.True(TorsoBisectionPolicy.ShouldBisect(Eligible, 0.099f));
         Assert.False(TorsoBisectionPolicy.ShouldBisect(Eligible, 0.10f));
     }
@@ -56,6 +56,7 @@ public class TorsoBisectionTests
             Eligible with { Part = CanonicalChest with { Type = BodyPartType.Arm } },
             Eligible with { AliveBeforeHit = false }, Eligible with { AlreadyBisected = true },
             Eligible with { Robot = true }, Eligible with { Animal = true },
+            Eligible with { Lethal = false }, Eligible with { Brutality = 59.99f },
         ];
         foreach (var input in excluded) Assert.False(TorsoBisectionPolicy.ShouldBisect(input, 0));
         foreach (int direction in new[] { 1, 2, 3, 7, 9 })
@@ -322,9 +323,10 @@ public class TorsoBisectionTests
             var victim = Victim(out int chest);
             var events = new List<MedicalEvent>();
             int axis = style == TorsoBisectionStyle.Transverse ? 3 : 1;
-            Assert.True(CombatSystem.TryBisect(victim, chest, new(200, 0, 0), CombatWoundMechanism.Slash, true, 0, axis, events, seed, Vector2.UnitX, 0.4f, style));
+            victim.Medical!.ApplyHit(chest, new(500, 0, 0), Context(victim.Race), events);
+            Assert.True(CombatSystem.TryBisect(victim, chest, new(500, 0, 0), CombatWoundMechanism.Slash, true, 0, axis, events, seed, Vector2.UnitX, 0.4f, style, brutality: 100));
             var fixedPlane = victim.TorsoBisection!.Value;
-            Assert.False(CombatSystem.TryBisect(victim, chest, new(500, 0, 0), CombatWoundMechanism.Slash, true, 0, 2, events, seed + 1, Vector2.UnitY, 2));
+            Assert.False(CombatSystem.TryBisect(victim, chest, new(500, 0, 0), CombatWoundMechanism.Slash, true, 0, 2, events, seed + 1, Vector2.UnitY, 2, brutality: 100));
             Assert.Equal(fixedPlane, victim.TorsoBisection);
             var source = new TorsoBisections();
             Assert.True(source.Set(new(3, 1), fixedPlane));
@@ -347,6 +349,7 @@ public class TorsoBisectionTests
             new Combatant { Attack = 100, Defence = 100, WeaponSkill = 100, Dexterity = 100,
                 Weapon = CombatFixtures.Katana with { CutDamageMultiplier = 25 } },
             new Combatant { Attack = 0, Defence = 0, Dodge = 0, Weapon = null });
+        world.Characters.Cold(attacker.Slot)!.Brutality = BrutalityProgress.FromLevel(100);
         var victim = world.Characters.Cold(defender.Slot)!;
         var race = new RaceData { StringId = Human.StringId, Name = Human.Name, Anatomy = [new(CanonicalChest, 100, 100)] };
         victim.Race = race;
@@ -358,7 +361,7 @@ public class TorsoBisectionTests
         float chance = CombatRolls.Float(world.Seed, Rng.Key(defender), CombatRoll.BodyBisection, counter);
         Assert.InRange(chance, 0, TorsoBisectionPolicy.MaximumChance);
         Assert.True(TorsoBisectionPolicy.ShouldBisect(new(CombatHitSource.Melee, hit.Mechanism, CanonicalChest,
-            hit.CutDirection, hit.Damage.Cut, victim.Medical.Parts[0].MaxHp), chance));
+            hit.CutDirection, hit.Damage.Cut, victim.Medical.Parts[0].MaxHp) { Brutality = 100, Lethal = true }, chance));
         Assert.NotNull(victim.TorsoBisection);
         ulong visual = TorsoBisectionPolicy.VisualSeedFor(world.Seed, defender, attacker, counter);
         Assert.Equal(TorsoBisectionPolicy.StateForDirection(hit.CutDirection, visual, hit.Direction, hit.VictimYaw), victim.TorsoBisection!.Value);
@@ -370,27 +373,21 @@ public class TorsoBisectionTests
     }
 
     [Fact]
-    public void A_successful_cut_kills_once_without_applying_damage_twice_or_changing_the_saved_plane()
+    public void A_powerful_nonlethal_chest_hit_stays_nonlethal_even_at_mastery()
     {
         var victim = Victim(out int chest);
         var medical = victim.Medical!;
         var events = new List<MedicalEvent>();
-        var damage = new HitDamage(80, 0, 0);
+        var damage = new HitDamage(120, 0, 0);
         medical.ApplyHit(chest, damage, Context(victim.Race), events);
         Assert.False(medical.Dead);
         var part = medical.Parts[chest];
         var before = (part.Flesh, part.Stun, part.Bandage, part.Rig, medical.Blood);
-        Assert.True(CombatSystem.TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, 2, events));
-        Assert.True(medical.Dead);
-        Assert.Equal(DeathCause.VitalPart, medical.Cause);
+        Assert.False(CombatSystem.TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, 2, events, brutality: 100));
+        Assert.False(medical.Dead);
+        Assert.Null(victim.TorsoBisection);
         Assert.Equal(before, (part.Flesh, part.Stun, part.Bandage, part.Rig, medical.Blood));
-        Assert.Single(events, e => e.Kind == MedicalEventKind.Died);
-        var saved = victim.TorsoBisection;
-        Assert.NotNull(saved);
-        Assert.False(CombatSystem.TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, 3, events));
-        Assert.Equal(saved, victim.TorsoBisection);
-        medical.KillFromBisection(events);
-        Assert.Single(events, e => e.Kind == MedicalEventKind.Died);
+        Assert.DoesNotContain(events, e => e.Kind == MedicalEventKind.Died);
     }
 
     [Fact]
@@ -402,13 +399,13 @@ public class TorsoBisectionTests
         victim.Medical!.ApplyHit(chest, damage, Context(victim.Race), events);
         Assert.True(victim.Medical.Dead);
         Assert.Single(events, e => e.Kind == MedicalEventKind.Died);
-        Assert.True(CombatSystem.TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, 3, events));
+        Assert.True(CombatSystem.TryBisect(victim, chest, damage, CombatWoundMechanism.Slash, true, 0, 3, events, brutality: 100));
         Assert.Single(events, e => e.Kind == MedicalEventKind.Died);
 
         var corpse = Victim(out chest);
         corpse.Medical!.Butcher();
         events.Clear();
-        Assert.False(CombatSystem.TryBisect(corpse, chest, damage, CombatWoundMechanism.Slash, false, 0, 3, events));
+        Assert.False(CombatSystem.TryBisect(corpse, chest, damage, CombatWoundMechanism.Slash, false, 0, 3, events, brutality: 100));
         Assert.Null(corpse.TorsoBisection);
         Assert.Empty(events);
         Assert.Equal(DeathCause.Butchered, corpse.Medical.Cause);
@@ -426,9 +423,9 @@ public class TorsoBisectionTests
         cold.Race = setup.Race;
         cold.Medical = setup.Medical;
         var events = new List<MedicalEvent>();
-        var damage = new HitDamage(80, 0, 0);
+        var damage = new HitDamage(350, 0, 0);
         cold.Medical!.ApplyHit(chest, damage, Context(cold.Race), events);
-        bool bisected = CombatSystem.TryBisect(cold, chest, damage, CombatWoundMechanism.Slash, true, 0, 2, events);
+        bool bisected = CombatSystem.TryBisect(cold, chest, damage, CombatWoundMechanism.Slash, true, 0, 2, events, brutality: 100);
         combat.PublishHit(world, CombatHitSource.Melee, attacker, defender.Slot, cold.Medical, chest, damage,
             Vector2.UnitX, events, 2, mechanism: CombatWoundMechanism.Slash, bodyBisected: bisected);
         var published = queue.ToArray();
@@ -440,7 +437,7 @@ public class TorsoBisectionTests
             (cut.Attacker, cut.Victim, cut.Part, cut.Damage, cut.Direction, cut.Mechanism));
 
         events.Clear();
-        bisected = CombatSystem.TryBisect(cold, chest, damage, CombatWoundMechanism.Slash, false, 0, 2, events);
+        bisected = CombatSystem.TryBisect(cold, chest, damage, CombatWoundMechanism.Slash, false, 0, 2, events, brutality: 100);
         combat.PublishHit(world, CombatHitSource.Melee, attacker, defender.Slot, cold.Medical, chest, damage,
             Vector2.UnitX, events, 2, mechanism: CombatWoundMechanism.Slash, bodyBisected: bisected);
         Assert.Single(queue, e => e.Kind == CombatEventKind.BodyBisected);

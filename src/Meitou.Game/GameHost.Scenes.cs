@@ -149,7 +149,7 @@ sealed partial class GameHost
         var near = session.CurrentSnapshot.Characters.Where(c => !c.IsPlayer && Vector3.Distance(c.Position, me.Position) < 200)
             .Select(c => $"{c.Name} [{c.Task}{(session.World.Characters.TryResolveNext(c.Id, out int cs) && session.World.Characters.Cold(cs) is { } cc ? $" faction {cc.Faction}{(cc.Fleeing ? ", fleeing" : "")}{(cc.Fighter is { CanAttack: false } ? ", no attack" : "")}" : "")}{(c.InCombat ? ", fighting" : "")}{(c.FightsPlayer ? ", vs player" : "")}{(c.Body is { Unconscious: true } ? ", down" : c.Body is { Dead: true } ? ", dead" : "")}]");
         return $"{me.Name} at {me.Position.X:0}, {me.Position.Z:0}: task {me.Task}, {me.Activity}, weapon {(me.WeaponDrawn ? me.BackDrawn ? "back" : "hip" : "none")}, " +
-            $"weapon blood hip {me.HipWeaponBlood.W:0.00}, back {me.BackWeaponBlood.W:0.00}; in bed {me.InBed}, weather {me.WeatherNotice}, {blood}, {parts}; enemies fighting {enemies.Count}{(turrets.Length > 0 ? $"; gunners: {turrets}" : "")}; near: {string.Join(", ", near)}";
+            $"Brutality {me.BrutalityLevel:0.000}; weapon blood hip {me.HipWeaponBlood.W:0.00}, back {me.BackWeaponBlood.W:0.00}; in bed {me.InBed}, weather {me.WeatherNotice}, {blood}, {parts}; enemies fighting {enemies.Count}{(turrets.Length > 0 ? $"; gunners: {turrets}" : "")}; near: {string.Join(", ", near)}";
     }
 
     /// <summary>

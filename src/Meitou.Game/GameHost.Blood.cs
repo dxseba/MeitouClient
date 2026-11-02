@@ -173,7 +173,6 @@ sealed partial class GameHost
     long woundHealStep;
 
     const string WoundFile = "wounds.meitou";
-    const int JawBlows = 4;
     readonly SevereHeadWounds severeHeads = new();
     readonly HashSet<CharacterId> restoredJaws = [];
     string? woundsFrom;
@@ -256,41 +255,33 @@ sealed partial class GameHost
             // Visual severity uses the delivered channel, while the pre-armour mechanism distinguishes clubs from blades.
             var mechanism = HeadMechanism(e);
             float headForce = mechanism == CombatWoundMechanism.Crush ? e.Damage.Cut + e.Damage.Blunt + e.Damage.Pierce : e.Damage.Cut + e.Damage.Pierce;
-            // The fourth heavy head blow opens one of the three head-wound forms.
+            // Skill and delivered force gate authored head forms; ordinary wound stamps remain independent.
             if (e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && headForce >= 15 && part.Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head)
-            {
-                var head = severeHeads.Of(e.Victim) ?? new SevereHeadWoundState(0);
-                head = head with { HeavyHits = head.HeavyHits < int.MaxValue ? head.HeavyHits + 1 : int.MaxValue };
-                // The opening hit fixes the direction; later force can enlarge it without rotating it.
-                if (head.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull && head.Profile < 3)
-                {
-                    if (head.Placement is { } fixedPlacement) head = head with { Placement = HeadWoundPlacementPolicy.Enlarge(fixedPlacement, headForce) };
-                    else if (headForce >= 35) head = head with { Profile = head.Profile + 3 }; // old preset-only saves
-                }
-                if (head.HeavyHits == JawBlows && head.Kind == SevereHeadWoundKind.None)
-                {
-                    var kind = (g.SandboxHeadWound ?? e.Victim.Slot % 3) switch
-                    {
-                        1 => SevereHeadWoundKind.Scalp,
-                        2 => SevereHeadWoundKind.BrokenSkull,
-                        _ => SevereHeadWoundKind.JawLost,
-                    };
-                    var placement = kind == SevereHeadWoundKind.JawLost ? null : HeadWoundPlacementPolicy.Estimate(e.Direction, e.VictimYaw, e.CutDirection,
-                        headForce, Rng.Hash(world.Seed, Rng.Key(e.Victim), RngPurpose.HeadWoundVisual, (ulong)e.Tick));
-                    head = head with
-                    {
-                        Kind = kind,
-                        Mechanism = mechanism,
-                        Profile = kind == SevereHeadWoundKind.JawLost ? 0 : (int)HeadProfile(e.CutDirection, placement is null ? headForce : 0),
-                        Placement = placement,
-                    };
-                }
-                severeHeads.Set(e.Victim, head);
-                cold.SevereHeadWound = head;
-                if (cold.Save?.Source.Handle is { IsNull: false } handle) severeHeads.Bind(e.Victim, (handle.C, handle.I));
-            }
+                UpdateSevereHead(world, e, cold, mechanism, headForce);
             wounds.Apply(e, part.Template.StringId switch { "101-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Chest, "100-gamedata.quack" => Meitou.Simulation.Wounds.WoundRegion.Abdomen, _ => Meitou.Simulation.Wounds.WoundRegion.Unknown }, part.MaxHp);
         }
+    }
+
+    void UpdateSevereHead(World world, in CombatEvent hit, CharacterCold victim, CombatWoundMechanism mechanism, float force)
+    {
+        var before = severeHeads.Of(hit.Victim) ?? new SevereHeadWoundState(0);
+        bool fixture = IsSandbox && g.SandboxDummy && g.SandboxHeadWound is not null;
+        var requested = (fixture ? g.SandboxHeadWound!.Value : hit.Victim.Slot % 3) switch
+        {
+            1 => SevereHeadWoundKind.Scalp,
+            2 => SevereHeadWoundKind.BrokenSkull,
+            _ => SevereHeadWoundKind.JawLost,
+        };
+        var placement = HeadWoundPlacementPolicy.Estimate(hit.Direction, hit.VictimYaw, hit.CutDirection, force,
+            Rng.Hash(world.Seed, Rng.Key(hit.Victim), RngPurpose.HeadWoundVisual, (ulong)hit.Tick));
+        int profile = (int)HeadProfile(hit.CutDirection, placement is null ? force : 0);
+        var head = BrutalityHeadPolicy.Apply(before, fixture ? 100 : hit.AttackerBrutality, force, requested, mechanism,
+            profile, placement, forceForm: fixture);
+        if (head == before) return;
+
+        severeHeads.Set(hit.Victim, head);
+        victim.SevereHeadWound = head;
+        if (victim.Save?.Source.Handle is { IsNull: false } handle) severeHeads.Bind(hit.Victim, (handle.C, handle.I));
     }
 
     void RefreshSevereHeadStates(World world)

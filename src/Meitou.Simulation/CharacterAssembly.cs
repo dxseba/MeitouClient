@@ -216,6 +216,8 @@ sealed class CharacterAssembly(PopulationData data)
                 if (piece.Type == Meitou.Data.Fcs.FcsRecordType.ARMOUR && piece.Section != "main") piece.Uniform = data.Factions[cold.Faction].Id;
         Dye(cold, cold.Inventory);
         cold.Fighter = FighterOf(record, cold.Inventory, cold.Medical, cold.Race?.StringId);
+        if (!cold.IsPlayer && (data.PlayerFaction < 0 || cold.Faction != data.PlayerFaction) && !cold.Fighter.IsAnimal)
+            cold.Brutality = BrutalityProgress.FromCombat(stats);
         cold.WaterFactor = raceData.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
         cold.RoadPreference = data.RoadPreferenceOf(cold.Faction);
         hot.MaxSpeed = Speed.Run(raceData, stats, medical, 1, statsFactor: cold.Fighter?.AthleticsFactor ?? 1);

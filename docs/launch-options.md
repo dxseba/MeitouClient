@@ -47,7 +47,8 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox [n]` | 1 to 1000 | off; 1 when bare | Animation sandbox on a flat wireframe floor. n = 2: two facing each other; more: the rest idle in rings. |
 | `--sandbox-character <name>` | CHARACTER or ANIMAL_CHARACTER name or id | first member of the default start | Character the sandbox spawns. |
 | `--sandbox-mode <list>` | walk, run, free, a speed in u/s, patrol, fight (comma list) | none (idle) | The sandbox hero's start state, e.g. `run,patrol`. |
-| `--sandbox-stats <n>` | non-negative finite number | from character data | Sets all 34 stored hero attributes and skills to n, including values above 100, before the first tick. Starts with full blood at the new strength; other fighters keep their stats. |
+| `--sandbox-stats <n>` | non-negative finite number | from character data | Sets all 34 stored native hero attributes and skills to n, including values above 100, before the first tick. Starts with full blood at the new strength; other fighters keep their stats. |
+| `--sandbox-brutality <n>` | finite 0..100 | `--sandbox-stats`, capped at 100; otherwise 0 | Sets the sandbox hero's separate Brutality skill before the first tick. Override this to test unlocks without changing physical stats. |
 | `--sandbox-power <n>` | number | off | The hero's melee damage, 100 being normal: 1000 hits ten times as hard. |
 | `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Fighters are male humans. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
 | `--sandbox-part <name>` | head, chest, stomach, left arm... | off | With `--sandbox-dummy`: test hits only on that body part. |
