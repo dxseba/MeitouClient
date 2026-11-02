@@ -179,7 +179,8 @@ public sealed partial class CombatSystem
         else Stagger(world, ref D, d, dc, damage.Cut + damage.Blunt + damage.Pierce + damage.ExtraStun > DamageFormulas.StumbleThreshold(toughness, combat), now, CombatRolls.BlowCounter(a, seq, blow, 0));
         GainCombatXp(ac, dc, XpEvent.HitDealt, XpEvent.HitTaken, packet.Cut + packet.Blunt + packet.Pierce + packet.Stun);
         Punch(world, a, ac, dc, tech, blow, 2);
-        Sound(world, SoundKind.Hit, d, a, prev[d].Position, heavy: D.HitHeavy, unarmed: fighter.Unarmed, robot: ac.Race.IsRobot);
+        Sound(world, SoundKind.Hit, d, a, prev[d].Position, heavy: D.HitHeavy, unarmed: fighter.Unarmed, robot: ac.Race.IsRobot,
+            armoured: absorbed.Cut + absorbed.Blunt + absorbed.Pierce > 0);
         Splash(world, d, dc, -new Vector2(toAttacker.X, toAttacker.Y), damage.Cut + damage.Blunt + damage.Pierce);
         HitRagdoll(world, d, dc, part, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce, wasIncapacitated, knockout || death, prev[a].Position);
         if (death && world.Luckyren) dc.Burst = -new Vector2(toAttacker.X, toAttacker.Y);

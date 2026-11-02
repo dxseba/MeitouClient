@@ -96,7 +96,7 @@ sealed partial class GameHost
         axis = axis.LengthSquared() > 1e-8f ? Vector3.Normalize(axis) : Vector3.UnitY;
         pieces.Add(new Piece
         {
-            Mesh = mesh.Path, Scale = scale, Extent = mesh.Extent * scale, Floor = floor, Born = session.World.Tick,
+            Mesh = mesh.Path, LandingSound = "Robotic_Component", Scale = scale, Extent = mesh.Extent * scale, Floor = floor, Born = session.World.Tick,
             Position = origin + new Vector3(aside.X * 0.25f, NextRobotScrap(ref random) * 0.3f, aside.Y * 0.25f),
             Velocity = new Vector3(flat.X, 8 + NextRobotScrap(ref random) * 11, flat.Y),
             Rotation = Quaternion.CreateFromYawPitchRoll(NextRobotScrap(ref random) * MathF.Tau,

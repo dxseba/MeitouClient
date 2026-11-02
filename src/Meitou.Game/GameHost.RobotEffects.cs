@@ -123,6 +123,6 @@ sealed partial class GameHost
         Console.WriteLine($"robot cut frame {frame}: spark bursts {robotSparkBursts}, discharges {robotDischarges.Count}, "
             + $"anchors {gpu.Particles?.RobotDischarges.Count ?? 0}, electrical quads {gpu.Particles?.DrawnRobotDischargeQuads ?? 0}, "
             + $"smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}, scrap bursts {robotScrapBursts}, "
-            + $"scrap pieces {robotScrapPieces}, organic bowel props {gutFalls.Count}");
+            + $"scrap pieces {robotScrapPieces}, organic bowel props {gutFalls.Count}, audible debris {characterSounds?.DebrisSounds ?? 0}");
     }
 }

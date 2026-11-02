@@ -37,6 +37,8 @@ sealed partial class GameHost
         public float Scale;
         public float Floor;
         public bool Resting, Landed, Flesh, Bloody;
+        public string? LandingSound;
+        public byte AudibleBounces;
         public long Born;
         public uint Colour;
         public uint BloodColour = DefaultBloodColour;
@@ -122,7 +124,7 @@ sealed partial class GameHost
             var spinAxis = Vector3.Normalize(new Vector3(bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f) + new Vector3(1e-3f));
             pieces.Add(new Piece
             {
-                Mesh = mesh, Scale = scale, Extent = extent, Floor = floor, Born = world.Tick, Colour = bleeds && !robot ? 0xFF000000 | Abgr(m.Colour) : 0, Recolour = BloodRecolour(m.Colour), Flesh = flesh, BloodColour = m.Colour,
+                Mesh = mesh, Scale = scale, Extent = extent, Floor = floor, Born = world.Tick, LandingSound = robot ? "Robotic_Component" : flesh ? "Meat" : "Building_Material", Colour = bleeds && !robot ? 0xFF000000 | Abgr(m.Colour) : 0, Recolour = BloodRecolour(m.Colour), Flesh = flesh, BloodColour = m.Colour,
                 Position = centre,
                 Velocity = new Vector3(d.X * speed, 30 + bloodRandom.NextSingle() * 50, d.Y * speed),
                 Rotation = Quaternion.Normalize(new Quaternion(bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f, bloodRandom.NextSingle() - 0.5f)),
@@ -369,11 +371,16 @@ sealed partial class GameHost
         float thin = MathF.Min(p.Extent.X, MathF.Min(p.Extent.Y, p.Extent.Z));
         if (p.Position.Y - thin > floor) return;
         p.Position.Y = floor + thin;
+        if (p.LandingSound is { } material && p.AudibleBounces < 2 && MathF.Abs(p.Velocity.Y) >= 5)
+        {
+            characterSounds?.DebrisLanding(p.Position, material, MathF.Abs(p.Velocity.Y), p.AudibleBounces);
+            p.AudibleBounces++;
+        }
         if (!p.Landed && p.Colour != 0 && decalStore is { } store)
             store.Add(TerrainDecalType.Splash, p.Position, new Vector2(p.Velocity.X, p.Velocity.Z), 0.12f, p.Colour, TerrainDecalStore.NewLife, bloodRandom);
         if (!p.Landed && p.Flesh)
         {
-            characterSounds?.Splat(p.Position);
+            if (p.LandingSound is null) characterSounds?.Splat(p.Position);
             if (p.Colour != 0 && !o.NoParticles) gpu.Particles?.Burst(BurstSplash, p.Position, Quaternion.Identity, 0.15f, 1.3f, 1.5f, p.Recolour);
         }
         p.Landed = true;

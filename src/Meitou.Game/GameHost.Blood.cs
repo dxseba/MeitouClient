@@ -227,7 +227,7 @@ sealed partial class GameHost
                     var along = e.Direction.LengthSquared() > 1e-6f ? Vector2.Normalize(e.Direction) : Vector2.UnitX;
                     pieces.Add(new Piece
                     {
-                        Mesh = mesh, Scale = scale, Extent = size * scale, Floor = float.NaN, Born = world.Tick, Flesh = flesh, Colour = 0, Bloody = true, BloodColour = bloodColour,
+                        Mesh = mesh, Scale = scale, Extent = size * scale, Floor = float.NaN, Born = world.Tick, Flesh = flesh, LandingSound = flesh ? "Meat" : "Building_Material", Colour = 0, Bloody = true, BloodColour = bloodColour,
                         Position = e.Position + new Vector3(0, 6 + bloodRandom.NextSingle() * 8, 0),
                         Velocity = new Vector3(along.X * 18 + bloodRandom.NextSingle() * 12 - 6, 18 + bloodRandom.NextSingle() * 16, along.Y * 18 + bloodRandom.NextSingle() * 12 - 6),
                         Rotation = Quaternion.Identity, Spin = new Vector3(5, 3, 7),

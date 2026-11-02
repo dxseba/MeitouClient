@@ -128,7 +128,10 @@ sealed partial class GameHost
         switch (e.Kind)
         {
             case SoundKind.Blocked: sounds.Blocked(subject, e.AttackerUnarmed, e.AttackerRobot); break;
-            case SoundKind.Hit: sounds.Hit(subject, e.Heavy, e.AttackerUnarmed, e.AttackerRobot); break;
+            case SoundKind.Hit:
+                if (o.MeitouBlood) sounds.GoreHit(subject, e.Heavy, e.AttackerUnarmed, e.AttackerRobot, e.Armoured);
+                else sounds.Hit(subject, e.Heavy, e.AttackerUnarmed, e.AttackerRobot);
+                break;
             case SoundKind.BoltHit: sounds.BoltHit(subject, e.Armoured); break;
             case SoundKind.BoltStuck: sounds.BoltStuck(e.Position, groundSurfaces?.At(e.Position.X, e.Position.Z) ?? -1); break;
             case SoundKind.Shot: sounds.Shot(subject); break;

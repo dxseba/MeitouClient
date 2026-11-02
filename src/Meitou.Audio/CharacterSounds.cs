@@ -87,7 +87,7 @@ public enum CharacterLoop : byte { None, Build, Medic, Unlock }
 /// </list>
 /// Characters beyond <see cref="TrackRadius"/> have no object (the exe keeps one for every loaded character; nothing farther than 1000 units is ever heard).
 /// </summary>
-public sealed class CharacterSounds
+public sealed partial class CharacterSounds
 {
     /// <summary>Characters nearer than this to the camera get a game object; they lose it beyond <see cref="DropRadius"/>.</summary>
     public const float TrackRadius = 1100, DropRadius = 1400;
@@ -181,6 +181,7 @@ public sealed class CharacterSounds
     {
         camera = eye;
         frame++;
+        debrisSoundsThisFrame = 0;
     }
 
     /// <summary>Ends a frame: characters not handed over since the last one are gone, and lose their objects.</summary>
@@ -197,6 +198,8 @@ public sealed class CharacterSounds
     {
         foreach (var e in entries.Values) player.UnregisterObject(e.Object);
         entries.Clear();
+        lastDebrisSound = long.MinValue;
+        debrisSoundsThisFrame = 0;
     }
 
     void Remove(ulong key)
@@ -575,5 +578,5 @@ public sealed class CharacterSounds
     }
 
     /// <summary>One line for the statistics.</summary>
-    public string StatsLine() => $"{Objects} characters, {Footsteps} footsteps, {Swings} swings, {Impacts} impacts, {Voices} voices, {Jobs} job sounds";
+    public string StatsLine() => $"{Objects} characters, {Footsteps} footsteps, {Swings} swings, {Impacts} impacts, {Voices} voices, {Jobs} job sounds, {MaterialImpacts} material impacts, {DebrisSounds} debris contacts";
 }

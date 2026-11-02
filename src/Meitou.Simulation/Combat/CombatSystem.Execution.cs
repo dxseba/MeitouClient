@@ -82,7 +82,8 @@ public sealed partial class CombatSystem
             D.ReactTech = -1;
         }
         var toAttacker = new Vector2(prev[a].Position.X - prev[d].Position.X, prev[a].Position.Z - prev[d].Position.Z);
-        Sound(world, SoundKind.Hit, d, a, prev[d].Position, unarmed: fighter.Unarmed, robot: ac.Race!.IsRobot);
+        Sound(world, SoundKind.Hit, d, a, prev[d].Position, unarmed: fighter.Unarmed, robot: ac.Race!.IsRobot,
+            armoured: absorbed.Cut + absorbed.Blunt + absorbed.Pierce > 0);
         Splash(world, d, dc, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce);
         HitRagdoll(world, d, dc, part, -toAttacker, damage.Cut + damage.Blunt + damage.Pierce, wasIncapacitated, death, prev[a].Position);
         if (medical.Incapacitated) Sound(world, SoundKind.Down, d, a, prev[d].Position, fatal: death);
