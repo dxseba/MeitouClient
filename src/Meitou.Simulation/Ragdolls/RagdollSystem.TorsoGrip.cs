@@ -169,26 +169,15 @@ public sealed partial class RagdollSystem
             if (body.Type == PhysicsShapeType.Mesh)
             {
                 var points = RagdollCut.Points(body);
-                var pool = new BepuUtilities.Memory.BufferPool();
-                try
+                if (!RagdollHull.TryTriangles(points, out var triangles)) continue;
+                for (int i = 0; i + 2 < triangles.Length; i += 3)
                 {
-                    BepuPhysics.Collidables.ConvexHullHelper.ComputeHull(points, pool, out var hull);
-                    try
-                    {
-                        for (int f = 0; f < hull.FaceStartIndices.Length; f++)
-                        {
-                            hull.GetFace(f, out var face);
-                            for (int i = 1; i + 1 < face.VertexCount; i++)
-                            {
-                                var a = points[face[0]]; var c = points[face[i]]; var d = points[face[i + 1]];
-                                var bary = RagdollSkinSurface.ClosestBarycentric(wanted, a, c, d);
-                                Candidate(a * bary.X + c * bary.Y + d * bary.Z);
-                            }
-                        }
-                    }
-                    finally { hull.Dispose(pool); }
+                    var a = points[triangles[i]];
+                    var c = points[triangles[i + 1]];
+                    var d = points[triangles[i + 2]];
+                    var bary = RagdollSkinSurface.ClosestBarycentric(wanted, a, c, d);
+                    Candidate(a * bary.X + c * bary.Y + d * bary.Z);
                 }
-                finally { pool.Clear(); }
             }
             else if (body.Type == PhysicsShapeType.Box)
             {

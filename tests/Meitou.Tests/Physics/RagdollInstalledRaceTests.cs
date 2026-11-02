@@ -70,7 +70,7 @@ public class RagdollInstalledRaceTests
         finally { setup.Rig.Return(scratch); }
     }
 
-    static void AssertInertia(RagdollBody body, string context)
+    internal static void AssertInertia(RagdollBody body, string context)
     {
         BodyInertia inertia;
         Vector3 rebuiltCentre = Vector3.Zero;
@@ -95,7 +95,7 @@ public class RagdollInstalledRaceTests
                 var pool = new BufferPool();
                 try
                 {
-                    var hull = new BepuPhysics.Collidables.ConvexHull(body.Hull, pool, out var centre);
+                    Assert.True(RagdollHull.TryCreate(body.Hull, pool, out var hull, out var centre), context + " checked hull creation");
                     try
                     {
                         Assert.True(Finite(centre), context + " hull centre");

@@ -623,7 +623,8 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
                     made[b] = (all.Add(capsule), capsule.ComputeInertia(body.Mass));
                     break;
                 case PhysicsShapeType.Mesh:
-                    var hull = new BepuPhysics.Collidables.ConvexHull(body.Hull, physics.Pool, out _);
+                    if (body.Hull is null || !RagdollHull.TryCreate(body.Hull, physics.Pool, out var hull, out _))
+                        throw new InvalidDataException($"Validated ragdoll hull '{body.Name}' could not be rebuilt.");
                     made[b] = (all.Add(hull), hull.ComputeInertia(body.Mass));
                     break;
                 default:

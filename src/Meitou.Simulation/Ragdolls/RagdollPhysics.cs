@@ -166,7 +166,7 @@ internal sealed class RagdollPhysics : IDisposable
             physics.Cover(new Vector3(16, 0, 16), 20, new WarmUpEnvironment(), 0);
             Span<Vector3> corners = stackalloc Vector3[8];
             for (int i = 0; i < 8; i++) corners[i] = new Vector3((i & 1) - 0.5f, ((i >> 1) & 1) - 0.5f, ((i >> 2) & 1) - 0.5f) * 2;
-            var hull = new ConvexHull(corners, physics.Pool, out _);
+            if (!RagdollHull.TryCreate(corners.ToArray(), physics.Pool, out var hull, out _)) return;
             (TypedIndex Shape, BodyInertia Inertia)[] shapes =
             [
                 (simulation.Shapes.Add(new Sphere(1)), new Sphere(1).ComputeInertia(1)), (simulation.Shapes.Add(new Capsule(0.6f, 2.5f)), new Capsule(0.6f, 2.5f).ComputeInertia(1)),

@@ -113,7 +113,7 @@ public sealed class RagdollDefinition
                 var pool = new BepuUtilities.Memory.BufferPool();
                 try
                 {
-                    var made = new BepuPhysics.Collidables.ConvexHull(scaled, pool, out var centre);
+                    if (!RagdollHull.TryCreate(scaled, pool, out var made, out var centre)) continue;
                     made.Dispose(pool);
                     points = [.. scaled.Select(p => p - centre)];
                     bind = new RigidTransform(bind.Apply(centre), bind.Rotation);

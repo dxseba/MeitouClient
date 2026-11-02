@@ -218,13 +218,13 @@ public static class RagdollCut
         var pool = new BufferPool();
         try
         {
-            var first = new BepuPhysics.Collidables.ConvexHull(points, pool, out var firstCentre);
+            if (!RagdollHull.TryCreate(points, pool, out var first, out var firstCentre)) return false;
             try
             {
                 if (!Finite(firstCentre) || !Positive(first.ComputeInertia(mass)) || firstCentre.X < min.X - tolerance || firstCentre.X > max.X + tolerance
                     || firstCentre.Y < min.Y - tolerance || firstCentre.Y > max.Y + tolerance || firstCentre.Z < min.Z - tolerance || firstCentre.Z > max.Z + tolerance) return false;
                 var moved = points.Select(p => p - firstCentre).ToArray();
-                var repeat = new BepuPhysics.Collidables.ConvexHull(moved, pool, out var repeatCentre);
+                if (!RagdollHull.TryCreate(moved, pool, out var repeat, out var repeatCentre)) return false;
                 try
                 {
                     // Shapes() constructs this same centred point cloud again: validate that exact operation before publishing it.
