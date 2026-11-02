@@ -2,6 +2,7 @@ using System.Numerics;
 using Meitou.Data.Characters;
 using Meitou.Rendering;
 using Meitou.Simulation;
+using Meitou.Simulation.Wounds;
 
 namespace Meitou.Game;
 
@@ -29,6 +30,9 @@ sealed partial class GameHost
         public required ulong Blood;
         /// <summary>A cut-off limb part: <see cref="CharacterInstance.PartOnly"/>.</summary>
         public uint PartOnly;
+        public int FragmentId;
+        public CharacterTorsoCut? HeadCut;
+        public float RestHeight = HeadRestHeight;
         /// <summary>The shown tick its fall started (NaN until its look is drawn) and the seconds into it that it landed, at what height (NaN: still falling).</summary>
         public double Tick = double.NaN;
         public float Landed = float.NaN, RestY;
@@ -54,9 +58,10 @@ sealed partial class GameHost
     void CutHead(CharacterSnapshot c, CharacterAppearance look)
     {
         if (c.DetachedRagdolls.Any(p => p.Part == -1)) return;
-        if (!look.Headless || gpu.Characters is not { } characters || !headsSeen.Add(c.Id)) return;
-        long from = DrawKey(c.Id), key = from ^ (1L << 54);
-        if (characters.LastDrawn(from, "Bip01 Head") is not ({ } world, { Headless: false } before, var start) || !characters.HoldPose(key, from)) return;
+        if (!look.Headless && c.HeadCut is not { IsValid: true, Mode: HeadCutMode.AttachedSplit }) return;
+        if (gpu.Characters is not { } characters || !headsSeen.Add(c.Id)) return;
+        long from = DrawKey(c.Id);
+        if (characters.LastDrawn(from, "Bip01 Head") is not ({ } world, { Headless: false } before, var start)) return;
         ulong roll = unchecked((ulong)from * 0x9E3779B97F4A7C15UL ^ (ulong)session.ShownTick * 0xBF58476D1CE4E5B9UL);   // a look, not the simulation's: no world roll
         roll ^= roll >> 31;
         float angle = (roll & 0xFFFF) / 65536f * MathF.Tau, reach = 3 + ((roll >> 16) & 0xFFFF) / 65536f * 4;
@@ -64,15 +69,28 @@ sealed partial class GameHost
         // Thrown: it tumbles over the way it flies, faster the faster it goes.
         var flat = new Vector2(thrown.X, thrown.Z);
         if (flat.LengthSquared() > 1) angle = MathF.Atan2(flat.Y, flat.X);
-        var head = new FallingHead
+        int[] fragments = c.HeadCut is { IsValid: true } cut
+            ? cut.Mode == HeadCutMode.DetachedSplit ? [1, 2] : cut.Mode == HeadCutMode.AttachedSplit ? [1] : [0]
+            : [0];
+        foreach (int fragment in fragments)
         {
-            Key = key, From = from, Look = before.SeveredHead(), World = world, Start = start,
-            Aside = new Vector2(start.X + MathF.Cos(angle) * reach, start.Z + MathF.Sin(angle) * reach),
-            Axis = new Vector3(-MathF.Sin(angle), 0, MathF.Cos(angle)), Spin = 2.5f + ((roll >> 32) & 0xFFFF) / 65536f * 3 + flat.Length() * 0.1f, Velocity = thrown,
-            Flight = MathF.Sqrt(2 * MathF.Max(start.Y - session.World.Walkability.GroundHeight(start.X, start.Z, start.Y) - HeadRestHeight, 0) / FallGravity), Blood = c.BloodAmounts,
-        };
-        heads.Add(head);
-        characters.Prefetch(head.Look);
+            long key = DetachedDrawKey(from, -1, fragment);
+            if (!characters.HoldPose(key, from)) continue;
+            float heading = angle + (fragment == 2 ? MathF.PI : 0);
+            float restHeight = fragment == 0 ? HeadRestHeight : .85f;
+            var head = new FallingHead
+            {
+                Key = key, From = from, Look = before.SeveredHead(), World = world, Start = start,
+                Aside = new(start.X + MathF.Cos(heading) * reach, start.Z + MathF.Sin(heading) * reach),
+                Axis = new(-MathF.Sin(heading), 0, MathF.Cos(heading)),
+                Spin = 2.5f + ((roll >> 32) & 0xFFFF) / 65536f * 3 + flat.Length() * .1f, Velocity = thrown,
+                Flight = MathF.Sqrt(2 * MathF.Max(start.Y - session.World.Walkability.GroundHeight(start.X, start.Z, start.Y)
+                    - restHeight, 0) / FallGravity), Blood = c.BloodAmounts,
+                FragmentId = fragment, HeadCut = DetachedHeadClip(c, fragment), RestHeight = restHeight,
+            };
+            heads.Add(head);
+            characters.Prefetch(head.Look);
+        }
         Spurt(from, look, start);
         while (heads.Count > Math.Max(config.GroundItemLimit, 1)) heads.RemoveAt(0);
     }
@@ -133,12 +151,16 @@ sealed partial class GameHost
             var at = new Vector3(h.Start.X + (h.Aside.X - h.Start.X) * s + h.Velocity.X * t, h.Start.Y + h.Velocity.Y * t - 0.5f * FallGravity * t * t, h.Start.Z + (h.Aside.Y - h.Start.Z) * s + h.Velocity.Z * t);
             if (float.IsNaN(h.Landed))
             {
-                float floor = SurfaceUnder(characters, new Vector2(at.X, at.Z), h) + HeadRestHeight;
+                float floor = SurfaceUnder(characters, new Vector2(at.X, at.Z), h) + h.RestHeight;
                 if (at.Y <= floor) (h.Landed, h.RestY) = (t, floor);
             }
             if (!float.IsNaN(h.Landed)) at.Y = h.RestY;
             var world = h.World * Matrix4x4.CreateTranslation(-h.Start) * Matrix4x4.CreateFromAxisAngle(h.Axis, h.Spin * t) * Matrix4x4.CreateTranslation(at);
-            list.Add(new CharacterInstance(h.Key, h.Look, at, 0, []) { World = world, FreezeFrom = h.From, Blood = h.Blood, PartOnly = h.PartOnly, Wounds = h.PartOnly != 0 ? [new CharacterWoundMark("", "", 0, default, 1, 0, 1, 0)] : [] });
+            list.Add(new CharacterInstance(h.Key, h.Look, at, 0, [])
+            {
+                World = world, FreezeFrom = h.From, Blood = h.Blood, PartOnly = h.PartOnly, TorsoCut = h.HeadCut,
+                Wounds = h.PartOnly != 0 ? [new CharacterWoundMark("", "", 0, default, 1, 0, 1, 0)] : [],
+            });
         }
     }
 
@@ -159,7 +181,7 @@ sealed partial class GameHost
                 if (key == head.From && bone is "Bip01 Neck" or "Bip01 Head") continue;
                 if (characters.BonePosition(key, bone) is not { } p || p.Y >= ground + LyingBelow || Vector2.DistanceSquared(new Vector2(p.X, p.Z), at) >= radius * radius) continue;
                 float surface = p.Y + radius * 0.6f;
-                if (surface + HeadRestHeight < head.Start.Y) top = MathF.Max(top, surface);
+                if (surface + head.RestHeight < head.Start.Y) top = MathF.Max(top, surface);
             }
         }
         return top;

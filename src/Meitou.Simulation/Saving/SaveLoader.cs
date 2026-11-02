@@ -135,7 +135,8 @@ public static partial class SaveLoader
         var campaignHomes = WarSave.PlatoonHomes(context.Wars.Values);
         foreach (var platoon in save.Platoons)
         {
-            if (platoon.Record.Bools.GetValueOrDefault(TorsoCarrySave.StandaloneKey)) continue;   // fragment owners load below, without an extra squad
+            if (platoon.Record.Bools.GetValueOrDefault(TorsoCarrySave.StandaloneKey)
+                || platoon.Record.Bools.GetValueOrDefault(HeadCutSave.CorpseKey)) continue;   // fragment owners load below, without an extra squad
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;
             if (mine && platoon.IsLoaded)
                 LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly, context);

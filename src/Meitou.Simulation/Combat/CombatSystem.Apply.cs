@@ -108,9 +108,15 @@ public sealed partial class CombatSystem
         Span<float> usefulBeforeHit = dc.Medical.Parts.Count <= 64 ? stackalloc float[dc.Medical.Parts.Count] : new float[dc.Medical.Parts.Count];
         for (int i = 0; i < usefulBeforeHit.Length; i++)
             usefulBeforeHit[i] = MathF.Max(0, dc.Medical.Parts[i].Flesh + dc.Medical.Parts[i].MaxHp - dc.Medical.Parts[i].Stun);
+        var headTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
+        ulong headSeed = Wounds.HeadCutPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), CombatRolls.BlowCounter(a, seq, blow, 0));
+        var headCut = !dc.Race.IsRobot && !target.IsAnimal
+            ? Wounds.HeadCutPolicy.Candidate(brutality, mechanism, direction, packet.Cut, headSeed, headTravel, prev[d].Yaw) : null;
         var ctx = MakeContext(world, d, dc) with
         {
-            AllowDecapitation = !dc.Race.IsRobot && !target.IsAnimal && BrutalityPolicy.CanDecapitate(brutality, mechanism),
+            AllowDecapitation = !dc.Race.IsRobot && !target.IsAnimal && BrutalityPolicy.CanDecapitate(brutality, mechanism)
+                && headCut is not { Mode: Wounds.HeadCutMode.AttachedSplit },
+            HeadCutCandidate = headCut,
         };
         var events = hitEvents;   // Apply is serial, so one list serves every hit
         events.Clear();
@@ -148,6 +154,7 @@ public sealed partial class CombatSystem
             {
                 case MedicalEventKind.KnockedOut: knockout = true; xp.ToughnessFromKnockOut(dc.Stats, dc.Race); break;
                 case MedicalEventKind.Died: death = true; break;
+                case MedicalEventKind.HeadCut: dc.HeadCut = ctx.HeadCutCandidate; break;
                 case MedicalEventKind.Decapitated: table.LimbsChanged.Enqueue((d, -1)); break;   // the look loses its head (nothing drops)
                 case MedicalEventKind.PartSevered: xp.ToughnessFromLimbLoss(dc.Stats, dc.Race); table.LimbsChanged.Enqueue((d, dc.Medical.Parts[ev.Part].Template.LimbSlot));
                     world.Defer(new Dialogue.DialogueEvent(table.IdOf(d), CharacterId.None, dc.Medical.Parts[ev.Part].Template.LimbSlot is 2 or 3 ? 70 : 71) { Tick = world.Tick + 1 });   // LOST_LEG / LOST_ARM

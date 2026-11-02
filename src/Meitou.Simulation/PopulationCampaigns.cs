@@ -1350,7 +1350,13 @@ public sealed partial class PopulationSystem : IStateHashed
             {
                 h.Add(Rng.StableHash(k.TemplateId));
                 h.Add(k.Stored.Members.Count);
-                foreach (var m in k.Stored.Members) { h.Add(m.Position.X); h.Add(m.Position.Z); m.Cold.Brutality.Hash(ref h); }
+                foreach (var m in k.Stored.Members)
+                {
+                    h.Add(m.Position.X);
+                    h.Add(m.Position.Z);
+                    m.Cold.Brutality.Hash(ref h);
+                    if (m.Cold.HeadCut is { } headCut) headCut.Hash(ref h);
+                }
             }
         }
     }

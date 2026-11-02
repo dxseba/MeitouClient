@@ -8,7 +8,7 @@ namespace Meitou.Simulation.Saving;
 
 public static partial class SaveLoader
 {
-    /// <summary>Restore carried cut owners immediately, even when only the positive half is near the player.</summary>
+    /// <summary>Restore carried torso owners and saved head-cut corpses without duplicating their original inventory or squad.</summary>
     static void LoadCarriedTorsoOwners(World world, SaveGame save, PopulationData data, SaveLoadOptions options, LoadedSave loaded,
         int playerIndex, Dictionary<string, RaceData?> races, Dictionary<string, BodyPartTemplate?> parts, CharacterAssembly assembly, SavedPopulation context)
     {
@@ -28,15 +28,17 @@ public static partial class SaveLoader
         }
         foreach (var platoon in save.Platoons)
         {
-            bool standalone = platoon.Record.Bools.GetValueOrDefault(TorsoCarrySave.StandaloneKey);
+            bool standalone = platoon.Record.Bools.GetValueOrDefault(TorsoCarrySave.StandaloneKey)
+                || platoon.Record.Bools.GetValueOrDefault(HeadCutSave.CorpseKey);
             foreach (var sc in platoon.Characters)
             {
                 var handle = (sc.Handle.C, sc.Handle.I);
-                if ((!standalone && !required.Contains(handle)) || context.Spawned.ContainsKey(handle)) continue;
+                bool headCorpse = sc.GameState?.Bools.GetValueOrDefault(HeadCutSave.CorpseKey) == true;
+                if ((!standalone && !headCorpse && !required.Contains(handle)) || context.Spawned.ContainsKey(handle)) continue;
                 if (SavedCharacters.Read(sc, platoon.Name, data, options.Appearances, races, parts, loaded.Notes.Add) is not { Medical.Dead: true } prepared) continue;
-                var probe = new CharacterCold { Save = new() { Source = sc, PlatoonName = platoon.Name, Slot = sc.Handle.I, Ragdoll = RagdollSave.Read(sc.GameState) } };
+                var probe = new CharacterCold { HeadCut = prepared.HeadCut, Save = new() { Source = sc, PlatoonName = platoon.Name, Slot = sc.Handle.I, Ragdoll = RagdollSave.Read(sc.GameState) } };
                 TorsoCarrySave.Read(sc.GameState, probe);
-                if (probe.TorsoBisection is not { IsValid: true }) continue;
+                if (probe.TorsoBisection is not { IsValid: true } && probe.HeadCut is not { IsValid: true }) continue;
                 int faction = data.FactionIndex(sc.OwnerFactionId.Length > 0 ? sc.OwnerFactionId : platoon.FactionId);
                 var squad = new Squad { Id = -1, TemplateId = platoon.SquadTemplate, Faction = faction, Position = sc.Position };
                 var id = SavedCharacters.Make(world, prepared, platoon.Name, squad, faction, playerIndex, false, sc.Position,

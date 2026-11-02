@@ -1,10 +1,47 @@
 using System.Numerics;
+using Meitou.Simulation.Wounds;
 
 namespace Meitou.Simulation.Ragdolls;
 
 /// <summary>Partitions ordinary head and limb losses into the remaining body and a free articulated part.</summary>
 public static class RagdollSeverance
 {
+    /// <summary>Only Head/Jaw actors are sliced; an attached negative half keeps its original neck connection.</summary>
+    public static (RagdollDefinition? Remaining, RagdollDefinition? Positive, RagdollDefinition? Negative) SplitHead(
+        RagdollDefinition source, Vector4 plane, HeadCutMode mode)
+    {
+        float length = new Vector3(plane.X, plane.Y, plane.Z).Length();
+        if (!float.IsFinite(length) || length < 1e-6f || !float.IsFinite(plane.W)) return (null, null, null);
+        plane /= length;
+        bool attached = mode == HeadCutMode.AttachedSplit;
+        var remaining = RagdollCut.Filter(source,
+            body => !Matches(body.Name, -1) ? body : attached ? RagdollCut.Clip(body, -plane) : null,
+            moveAnchor: joint =>
+            {
+                var a = source.Bodies[joint.A];
+                var b = source.Bodies[joint.B];
+                if (!attached || !Matches(a.Name, -1) && !Matches(b.Name, -1)) return null;
+                return IntoHeadHalf(source, joint, -plane);
+            });
+        var head = RagdollCut.Filter(source, body => Matches(body.Name, -1) ? body : null);
+        var positive = Half(plane);
+        var negative = mode == HeadCutMode.DetachedSplit ? Half(-plane) : null;
+        return (remaining, positive, negative);
+
+        RagdollDefinition? Half(Vector4 retained) => head is null ? null : RagdollCut.Filter(head,
+            body => RagdollCut.Clip(body, retained), moveAnchor: joint => IntoHeadHalf(head, joint, retained));
+    }
+
+    static Vector3? IntoHeadHalf(RagdollDefinition source, RagdollJoint joint, Vector4 retained)
+    {
+        var a = source.Bodies[joint.A].Bind.Apply(joint.OffsetA);
+        var b = source.Bodies[joint.B].Bind.Apply(joint.OffsetB);
+        if (Vector4.Dot(retained, new(a, 1)) >= .0001f && Vector4.Dot(retained, new(b, 1)) >= .0001f) return null;
+        var anchor = (a + b) * .5f;
+        float distance = Vector4.Dot(retained, new(anchor, 1));
+        return anchor + new Vector3(retained.X, retained.Y, retained.Z) * MathF.Max(0, .0001f - distance);
+    }
+
     /// <summary>
     /// Part -1 is the head, 0/1 the left/right arm, 2/3 the left/right leg. The neck stays with the chest.
     /// Height zero removes the whole named limb; a positive bind-space height removes only its lower portion.

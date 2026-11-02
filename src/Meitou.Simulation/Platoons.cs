@@ -182,7 +182,12 @@ public sealed class PlatoonRegistry
             {
                 // Only for stored squads, so worlds without them hash as before.
                 h.Add(stored.Members.Count);
-                foreach (var m in stored.Members) { h.Add(m.Position); m.Cold.Brutality.Hash(ref h); }
+                foreach (var m in stored.Members)
+                {
+                    h.Add(m.Position);
+                    m.Cold.Brutality.Hash(ref h);
+                    if (m.Cold.HeadCut is { } headCut) headCut.Hash(ref h);
+                }
                 h.Add(stored.Anchor);
                 h.Add(stored.Pinned);
             }
@@ -206,6 +211,13 @@ public sealed class PlatoonRegistry
                     {
                         h.Add(0x42725376); h.Add(member.Slot);
                         Bodies.BrutalityProgress.HashExperience(ref h, experience);
+                    }
+                foreach (var member in saved.Members)
+                    if (member.Live.IsNone && !member.Gone && (member.HeadCut ?? Saving.HeadCutSave.Read(member.Source.GameState)) is { } headCut)
+                    {
+                        h.Add(0x48435376);
+                        h.Add(member.Slot);
+                        headCut.Hash(ref h);
                     }
             }
         }

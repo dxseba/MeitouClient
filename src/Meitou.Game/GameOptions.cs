@@ -32,6 +32,7 @@ sealed class GameOptions
     /// <summary>Set every stored attribute and skill of the sandbox hero before the first tick.</summary>
     public float? SandboxStats;
     public float? SandboxBrutality;
+    public string? SandboxHeadCut;
     public int? SandboxHeadWound, SandboxCutDirection;
     public ulong? SandboxBisectVariant;
     public Meitou.Simulation.Wounds.TorsoBisectionStyle SandboxBisectStyle;
@@ -113,6 +114,7 @@ sealed class GameOptions
           --sandbox-bisect-style <kind> auto (default), transverse, vertical, diagonal, or oblique; oblique crosses the trunk toward a shoulder
           --sandbox-bisect-variant <n> repeat a torso cut's angle and height from this visual seed
           --sandbox-severe-only     with --sandbox-dummy: hide generic wound marks and falling jaw to inspect permanent head state without a wound mask
+          --sandbox-head-cut <form>  force one lethal head cut: auto, neck, transverse, oblique, vertical, split
           --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
           --sandbox-cut-direction <n> with --sandbox-dummy: fixed blade axis 1 down, 2 left, 3 right
           --sandbox-hit-mechanism <kind> with --sandbox-dummy: slash (default), thrust, or crush for visual comparison
@@ -218,6 +220,12 @@ sealed class GameOptions
                     if (!float.IsFinite(g.SandboxHitDamage) || g.SandboxHitDamage <= 0) throw new ArgumentException("--sandbox-hit-damage must be positive and finite");
                     break;
                 case "--sandbox-severe-only": g.SandboxSevereOnly = true; break;
+                case "--sandbox-head-cut":
+                    g.SandboxHeadCut = Next().ToLowerInvariant();
+                    if (g.SandboxHeadCut is not ("auto" or "neck" or "transverse" or "oblique" or "vertical" or "split"))
+                        throw new ArgumentException("--sandbox-head-cut must be auto, neck, transverse, oblique, vertical, or split");
+                    g.SandboxDummy = g.SandboxBare = true;
+                    break;
                 case "--sandbox-head-wound": g.SandboxHeadWound = int.Parse(Next()); break;
                 case "--sandbox-bisect-style":
                     g.SandboxBisectStyle = Next().ToLowerInvariant() switch

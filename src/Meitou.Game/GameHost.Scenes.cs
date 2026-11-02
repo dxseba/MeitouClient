@@ -15,7 +15,7 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>The scenes <see cref="StageScene"/> knows.</summary>
-    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "weapon-blood", "torso-carry", "carry-reference", "downed-attack"];
+    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "weapon-blood", "torso-carry", "carry-reference", "downed-attack", "head-cut"];
 
     /// <summary>The menu scene's targets, one frame each.</summary>
     static readonly string[] SceneMenus = ["character", "door", "container", "cage"];
@@ -39,6 +39,9 @@ sealed partial class GameHost
         var at = leader.Position;
         switch (scene)
         {
+            case "head-cut":
+                if (!IsSandbox || g.SandboxHeadCut is null) throw new ArgumentException("--scene head-cut needs --sandbox 2 --sandbox-head-cut <form>");
+                return null;
             case "downed-attack": return StageDownedAttack();
             case "torso-carry": return StageTorsoCarry();
             case "carry-reference": return StageCarryReference();
@@ -130,7 +133,7 @@ sealed partial class GameHost
             session.Tick();
             session.AdvanceSimulation(session.Ticks.TickSeconds);
             UpdateNav(wait: true);
-            if (g.SandboxBisect || g.Scene == "weapon-blood")
+            if (g.SandboxBisect || g.SandboxHeadCut is not null || g.Scene == "weapon-blood")
             {
                 UpdateWounds(session.World);
                 UpdateGuts(session.World, (float)session.Ticks.TickSeconds, draw: false);
@@ -180,6 +183,13 @@ sealed partial class GameHost
             gpu.Characters?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);
             DrawWorld(w, h);
+            if (scene == "head-cut")
+            {
+                camera.Target = HeadCutSceneFocus();
+                gpu.Characters?.Settle(camera.Eye);
+                DrawWorld(w, h);
+                ReportHeadCutScene(f);
+            }
             if (scene is "torso-carry" or "carry-reference") ReportTorsoGripContact(f);
             if (overlay is not null)
             {

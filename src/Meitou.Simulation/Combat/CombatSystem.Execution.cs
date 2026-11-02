@@ -31,9 +31,15 @@ public sealed partial class CombatSystem
             : DamageFormulas.Packet(skill, Eff(ac, StatsEnumerated.Dexterity) * fighter.DexterityMult, str, fighter.Weapon!, kind, race.StringId, fighter.DamageOutput, combat);
         var mechanism = CombatWoundMechanisms.Classify(fighter, packet);
         float brutality = ac.Brutality.Level;
+        var travel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
+        ulong headSeed = Wounds.HeadCutPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), (ulong)(uint)blow);
+        var headCut = !race.IsRobot && dc.Fighter is not { IsAnimal: true }
+            ? Wounds.HeadCutPolicy.Candidate(brutality, mechanism, -1, packet.Cut, headSeed, travel, prev[d].Yaw) : null;
         var ctx = MakeContext(world, d, dc) with
         {
-            AllowDecapitation = !race.IsRobot && dc.Fighter is not { IsAnimal: true } && BrutalityPolicy.CanDecapitate(brutality, mechanism),
+            AllowDecapitation = !race.IsRobot && dc.Fighter is not { IsAnimal: true } && BrutalityPolicy.CanDecapitate(brutality, mechanism)
+                && headCut is not { Mode: Wounds.HeadCutMode.AttachedSplit },
+            HeadCutCandidate = headCut,
         };
         var events = hitEvents;
         events.Clear();
@@ -58,6 +64,7 @@ public sealed partial class CombatSystem
             switch (ev.Kind)
             {
                 case MedicalEventKind.Died: death = true; break;
+                case MedicalEventKind.HeadCut: dc.HeadCut = ctx.HeadCutCandidate; break;
                 case MedicalEventKind.Decapitated: table.LimbsChanged.Enqueue((d, -1)); break;   // the look loses its head (nothing drops)
                 case MedicalEventKind.PartSevered:
                     xp.ToughnessFromLimbLoss(dc.Stats!, race);

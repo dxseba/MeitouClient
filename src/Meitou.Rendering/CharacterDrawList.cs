@@ -12,8 +12,8 @@ public readonly record struct CharacterWoundMark(string BoneA, string BoneB, flo
 /// <summary>An estimated surface anchor in the original body bind space; not a measured blade collision.</summary>
 public readonly record struct CharacterHeadWoundPlacement(Vector3 Point, Vector3 Normal, Vector3 Tangent, float LengthScale = 1, float WidthScale = 1);
 
-/// <summary>A separation in original bind space: dot(Plane.xyz, position) + Plane.w = 0; KeepSide selects its positive or negative half. FullBody clips every group; otherwise arms/head stay upper and legs lower.</summary>
-public readonly record struct CharacterTorsoCut(Vector4 Plane, int KeepSide, bool FullBody = false);
+/// <summary>A separation in original bind space: dot(Plane.xyz, position) + Plane.w = 0; KeepSide selects its positive or negative half. FullBody clips every group; otherwise arms/head stay upper and legs lower. HeadOnly scopes a normalized head-box plane to head skin, hair and anatomy.</summary>
+public readonly record struct CharacterTorsoCut(Vector4 Plane, int KeepSide, bool FullBody = false, bool HeadOnly = false);
 
 /// <summary>
 /// A character to draw this frame, already interpolated by the host. <see cref="Key"/> is stable while the character exists, so

@@ -146,6 +146,7 @@ sealed partial class GameHost
             }
             AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses)
             {
+                TorsoCut = AttachedHeadClip(c),
                 Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
                 HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Scale = c.Scale, Hidden = hiddenIndoors.Contains(c.Id), FullRateAnimation = c.IsPlayer, Rotation = rotation, Build = c.Build, Blood = c.BloodAmounts,
@@ -224,7 +225,10 @@ sealed partial class GameHost
         var look = HeldLook(c.Appearance!, c.HeldTool, out var heldPending);
         CutHead(c, look);
         bool hidden = hiddenIndoors.Contains(c.Id);
-        list.Distant.Add(new CharacterInstance(DrawKey(c.Id), look, c.Position, DrawnYaw(c), []) { Scale = c.Scale, Hidden = hidden, Build = c.Build });
+        list.Distant.Add(new CharacterInstance(DrawKey(c.Id), look, c.Position, DrawnYaw(c), [])
+        {
+            Scale = c.Scale, Hidden = hidden, Build = c.Build, TorsoCut = AttachedHeadClip(c),
+        });
         if (heldPending is not null) list.Distant.Add(new CharacterInstance(DrawKey(c.Id) ^ (1L << 55), heldPending, c.Position, DrawnYaw(c), []) { Hidden = true });
     }
     // By character slot, what the draw list hands the renderer, refilled every frame instead of made anew (the renderer reads them only in that frame's update):
@@ -323,6 +327,7 @@ sealed partial class GameHost
             var glide = player.EditorBlend(c.Id);   // after the preview, which may just have swapped the look
             AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), look, position, yaw, poses)
             {
+                TorsoCut = AttachedHeadClip(c),
                 Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
                 HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Bolts = BoltsOf(c), Scale = c.Scale, Hidden = inBar is null && hiddenIndoors.Contains(c.Id), FullRateAnimation = editing is not null || fullRate.Contains(c.Id) || c.Id == sandboxHero && sandboxPicker?.Current is not null,

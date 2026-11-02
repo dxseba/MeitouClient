@@ -35,6 +35,9 @@ public readonly struct MedicalContext(GameConstants constants, BodyOptions optio
     /// <summary>Whether this hit may use Meitou decapitation; combat supplies the attacker's unlock/mechanism without changing ordinary limb loss.</summary>
     public bool AllowDecapitation { get; init; } = true;
 
+    /// <summary>A candidate committed only by the original destroyed-head severance gate; null retains legacy whole-head removal.</summary>
+    public Wounds.HeadCutState? HeadCutCandidate { get; init; }
+
     /// <summary>The owner is exempt from wear and limb loss (the object at character slot <c>+0x248</c>; meaning <b>Unknown</b>).</summary>
     public bool ExemptFromWear { get; init; }
 

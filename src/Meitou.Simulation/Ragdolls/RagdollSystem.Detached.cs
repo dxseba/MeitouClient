@@ -7,13 +7,14 @@ using Meitou.Simulation.Wounds;
 namespace Meitou.Simulation.Ragdolls;
 
 /// <summary>A severed head (-1) or limb (0..3), fully articulated in its owner's drawn model space.</summary>
-public sealed record DetachedRagdollPose(int Part, BonePose Bones, int GroundItemId = 0);
+public sealed record DetachedRagdollPose(int Part, BonePose Bones, int GroundItemId = 0, int FragmentId = 0);
 
 public sealed partial class RagdollSystem
 {
     sealed class DetachedPiece
     {
         public required int Part;
+        public int FragmentId;
         public required Ragdoll Body;
         public required int[] Anchors;
         public required RigidTransform[] Offsets;
@@ -26,6 +27,7 @@ public sealed partial class RagdollSystem
     sealed class DetachedOwner
     {
         public int Missing, Robotic;
+        public HeadCutState? HeadCut;
         public RagdollDefinition? Source, Remaining;
         public readonly List<DetachedPiece> Pieces = [];
         public readonly List<RagdollDefinition> Retired = [];
@@ -50,7 +52,8 @@ public sealed partial class RagdollSystem
     BonePose? BuildRemaining(Ragdoll body, CharacterCold cold, Matrix4x4 placement)
     {
         if (options is not { AdvancedRagdolls: true } || (body.Mask & RagdollPart.Whole) == 0 || (body.Mask & RagdollPart.CarryMode) != 0
-            || body.BlendLeft > 0 || !detachedOwners.TryGetValue(body.Id, out var owner) || owner.Missing == 0) return null;
+            || body.BlendLeft > 0 || !detachedOwners.TryGetValue(body.Id, out var owner)
+            || owner.Missing == 0 && owner.HeadCut is null) return null;
         if (!ReferenceEquals(owner.RemainingBody, body))
         {
             // A complete pose keeps surviving calves/feet at their actual collision bodies, instead of reconstructing them from a fallen pelvis.
@@ -91,17 +94,18 @@ public sealed partial class RagdollSystem
         }
         bool firstSeen = detachedSeen.Add(id);
         bool torso = cold.TorsoBisection is not null;
+        HeadCutState? headCut = cold.HeadCut is { IsValid: true } cut ? cut : null;
         bool first = !detachedOwners.TryGetValue(id, out var owner);
         if (first)
         {
-            if (missing == 0 && robotic == 0) return;
+            if (missing == 0 && robotic == 0 && headCut is null) return;
             owner = new DetachedOwner();
             detachedOwners.Add(id, owner);
             detachedOrder.Add(id);
         }
         int previousMissing = owner!.Missing, previousRobotic = owner.Robotic;
         owner.Robotic = robotic;
-        if (missing == previousMissing) return;
+        if (missing == previousMissing && headCut == owner.HeadCut) return;
         if (SetupOf(look) is not { } setup || DefinitionOf(look, setup.Rig, 1) is not { } source) return;
         owner.Source = source;
         ragdolls.TryGetValue(id, out var before);
@@ -128,9 +132,31 @@ public sealed partial class RagdollSystem
             }
         var boneWorld = InitialBoneWorld(prototype, cold, placement, source, original);
         RagdollDefinition? remaining = source;
+        bool restoredHead = firstSeen && cold.Save is not null;
+        var ownerPosition = hot.Position;
+        var headPlane = Vector4.Zero;
+        bool slicedHead = headCut is { } headState && SkinSurfaceFor(look)?.HeadPlane(setup.Rig, headState.Plane, out headPlane) == true;
+        if (slicedHead && headCut is { } state)
+        {
+            var split = RagdollSeverance.SplitHead(source, headPlane, state.Mode);
+            remaining = split.Remaining;
+            if (!torso && owner.HeadCut != headCut)
+            {
+                foreach (var old in owner.Pieces.Where(p => p.Part == -1).ToArray())
+                {
+                    ReleaseDetachedPiece(old);
+                    owner.Pieces.Remove(old);
+                }
+                var normal = Vector3.TransformNormal(new(headPlane.X, headPlane.Y, headPlane.Z), placement);
+                normal = normal.LengthSquared() > 1e-8f ? Vector3.Normalize(normal) : Vector3.UnitX;
+                if (split.Positive is { } positive) Spawn(positive, -1, state.Mode == HeadCutMode.NeckDetach ? 0 : 1, normal);
+                if (split.Negative is { } negative) Spawn(negative, -1, 2, -normal);
+            }
+        }
         int newlyMissing = missing & ~previousMissing & ~previousRobotic;
         for (int part = -1; part <= 3; part++)
         {
+            if (part == -1 && slicedHead) continue;
             if ((missing & 1 << (part + 1)) == 0 || remaining is null) continue;
             float height = part < 0 ? 0 : SeveredLevels.Height(SeveredLevels.Of(id, part, world.Tick), part);
             var split = RagdollSeverance.Split(remaining, part, height);
@@ -142,23 +168,10 @@ public sealed partial class RagdollSystem
                 ReleaseDetachedPiece(oldPiece);
                 owner.Pieces.Remove(oldPiece);
             }
-            var piece = Make(definition, initialSetup);
-            var initial = FromOriginal(definition);
-            Rebuild(piece, RagdollPart.Whole, initial, start, true, world.Seed);
-            Inherit(piece);
-            // A forearm or head can be the whole detached chain; give those the blow's tumble as well.
-            if (piece.Bodies[piece.Definition.Root] is { } root && start.Push.LengthSquared() > 1e-8f)
-            {
-                var spin = Vector3.Cross(start.Push, Vector3.UnitY) * 0.1f;
-                if (spin.Length() > MaxPushSpin) spin = Vector3.Normalize(spin) * MaxPushSpin;
-                physics.Simulation.Bodies[root].Velocity.Angular += spin;
-            }
-            SetTone(piece, medical.Dead ? Tone.Dead : Tone.Unconscious);
-            var (anchors, offsets) = FragmentAnchors(piece, boneWorld, initial);
-            string bone = part < 0 ? "" : medical.PartSpan.ToArray().First(p => p.Template.LimbSlot == part).Template.BoneName2;
-            owner.Pieces.Add(new DetachedPiece { Part = part, Body = piece, Anchors = anchors, Offsets = offsets, ItemBone = bone });
+            Spawn(definition, part, 0, Vector3.Zero);
         }
         owner.Missing = missing;
+        owner.HeadCut = headCut;
         var oldDefinition = owner.Remaining;
         owner.Remaining = remaining ?? source; // A humanoid retains its spine/pelvis even after every ordinary limb loss.
         // A torso cut takes the previous body itself; initial loaded stumps must leave saved-pose restoration to the normal path.
@@ -186,6 +199,39 @@ public sealed partial class RagdollSystem
         }
         owner.Published = [];
 
+        void Spawn(RagdollDefinition definition, int part, int fragment, Vector3 separation)
+        {
+            var piece = Make(definition, initialSetup);
+            var initial = FromOriginal(definition);
+            bool restored = part == -1 && restoredHead;
+            var motion = restored ? default : (start.Velocity + separation * 1.5f, start.Push);
+            Rebuild(piece, RagdollPart.Whole, initial, motion, true, world.Seed);
+            if (!restored) Inherit(piece, separation * 1.5f);
+            if (!restored && piece.Bodies[piece.Definition.Root] is { } root && start.Push.LengthSquared() > 1e-8f)
+            {
+                var spin = Vector3.Cross(start.Push, Vector3.UnitY) * .1f;
+                if (spin.Length() > MaxPushSpin) spin = Vector3.Normalize(spin) * MaxPushSpin;
+                physics.Simulation.Bodies[root].Velocity.Angular += spin;
+            }
+            SetTone(piece, medical.Dead ? Tone.Dead : Tone.Unconscious);
+            var (anchors, offsets) = FragmentAnchors(piece, boneWorld, initial);
+            if (restored)
+            {
+                var flat = new Vector3(separation.X, 0, separation.Z);
+                flat = flat.LengthSquared() > 1e-8f ? Vector3.Normalize(flat) : fragment == 2 ? -Vector3.UnitX : Vector3.UnitX;
+                var at = ownerPosition + flat * 2.5f;
+                at.Y = world.Walkability.GroundHeight(at.X, at.Z, ownerPosition.Y) + 1.35f;
+                Shift(piece, at - piece.Pose[definition.Root].Position);
+                piece.Age = FreezeLatest;
+                Freeze(piece);
+            }
+            string bone = part < 0 ? "" : medical.PartSpan.ToArray().First(p => p.Template.LimbSlot == part).Template.BoneName2;
+            owner.Pieces.Add(new DetachedPiece
+            {
+                Part = part, FragmentId = fragment, Body = piece, Anchors = anchors, Offsets = offsets, ItemBone = bone,
+            });
+        }
+
         Ragdoll Make(RagdollDefinition definition, CharacterPoseSetup? poseSetup = null) => new()
         {
             Id = id, Definition = definition, Setup = poseSetup ?? setup, Scale = 1,
@@ -197,13 +243,13 @@ public sealed partial class RagdollSystem
             int old = source.BodyOfBone[body.Bone];
             return body.BoneInBody.Inverse().Then(source.Bodies[old].BoneInBody.Then(original[old]));
         })];
-        void Inherit(Ragdoll piece)
+        void Inherit(Ragdoll piece, Vector3 extra = default)
         {
             for (int b = 0; b < piece.Definition.Bodies.Length; b++)
             {
                 int old = source.BodyOfBone[piece.Definition.Bodies[b].Bone];
                 if (previousVelocity[old] is not { } velocity || piece.Bodies[b] is not { } handle || !piece.Dynamic[b]) continue;
-                velocity.Linear += Vector3.Cross(velocity.Angular, piece.Pose[b].Position - original[old].Position) + start.Push;
+                velocity.Linear += Vector3.Cross(velocity.Angular, piece.Pose[b].Position - original[old].Position) + start.Push + extra;
                 physics.Simulation.Bodies[handle].Velocity = velocity;
             }
         }
@@ -271,7 +317,8 @@ public sealed partial class RagdollSystem
                     changed = true;
                 }
             }
-            if (changed) owner.Published = owner.Pieces.Select(part => new DetachedRagdollPose(part.Part, part.Published!, part.GroundItemId)).ToArray();
+            if (changed) owner.Published = owner.Pieces.Select(part =>
+                new DetachedRagdollPose(part.Part, part.Published!, part.GroundItemId, part.FragmentId)).ToArray();
         }
     }
 
@@ -309,13 +356,15 @@ public sealed partial class RagdollSystem
         foreach (var id in detachedOrder)
         {
             var owner = detachedOwners[id];
-            if (owner.Missing == 0 && owner.Pieces.Count == 0) continue;
+            if (owner.Missing == 0 && owner.HeadCut is null && owner.Pieces.Count == 0) continue;
             hasher.Add(0x44455441);
             hasher.Add(id);
             hasher.Add(owner.Missing);
+            if (owner.HeadCut is { } headCut) headCut.Hash(ref hasher);
             foreach (var part in owner.Pieces)
             {
                 hasher.Add(part.Part);
+                if (part.FragmentId != 0) hasher.Add(part.FragmentId);
                 hasher.Add(part.GroundItemId);
                 hasher.Add(part.Body.Frozen);
                 hasher.Add(part.Body.Age);

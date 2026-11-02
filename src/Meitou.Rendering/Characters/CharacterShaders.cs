@@ -229,14 +229,24 @@ static class CharacterShaders
                 if (abs(keepSide) > 0.5)
                 {
                     bool fullBody = torso[1].z > 0.5;
+                    bool headOnlyCut = torso[1].z > 1.5;
+                    float headWeight = 0.0;
+                    if (headOnlyCut)
+                        for (uint k = 0u; k < 4u; k++)
+                        {
+                            uint bone = aBones[k];
+                            uint bits = bone < 32u ? floatBitsToUint(torso[2].x) : floatBitsToUint(torso[2].y);
+                            if (bone < 64u && (bits >> (bone % 32u) & 1u) != 0u) headWeight += aWeights[k];
+                        }
                     if (fullBody) vHeadRelief |= 1u;
                     uint at = 0u;
                     for (uint k = 1u; k < 4u; k++) if (aWeights[k] > aWeights[at]) at = k;
                     uint primary = aBones[at];
                     mat4 header = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
                     uint group = (floatBitsToUint(header[1 + primary / 32u][primary / 8u % 4u]) >> (primary % 8u * 4u)) & 15u;
-                    vTorsoBand = fullBody ? dot(torso[0], vec4(aPosition, 1.0)) * keepSide : (group == 1u || group == 2u || group == 6u) ? keepSide * 1000.0
+                    vTorsoBand = fullBody ? dot(torso[0], vec4(headOnlyCut ? local : aPosition, 1.0)) * keepSide : (group == 1u || group == 2u || group == 6u) ? keepSide * 1000.0
                         : (group == 3u || group == 4u) ? -keepSide * 1000.0 : dot(torso[0], vec4(aPosition, 1.0)) * keepSide;
+                    if (headOnlyCut && headWeight < 0.45) vTorsoBand = 1000.0;
                     if (!fullBody && (aInstanceData.z & {{HairWoundFlag}}u) != 0u) vTorsoBand = keepSide * 1000.0;
                     if (anatomy && aTangent.w > 31.5 && aTangent.w < 32.5) vTorsoBand = 1000.0;
                 }

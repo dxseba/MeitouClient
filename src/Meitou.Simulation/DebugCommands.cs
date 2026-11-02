@@ -43,6 +43,12 @@ public sealed record DebugBisect(CharacterId Character) : DebugCommand
     public TorsoBisectionStyle Style { get; init; } = TorsoBisectionStyle.Auto;
 }
 
+/// <summary>One lethal head-cut preview with normal medical gates and no skill XP.</summary>
+public sealed record DebugHeadCut(CharacterId Character, CharacterId Attacker, string Style, int CutDirection = 1) : DebugCommand
+{
+    public ulong? VisualSeed { get; init; }
+}
+
 /// <summary>
 /// One cut of <see cref="Cut"/> damage to each character: on the part whose template string id is <see cref="Part"/> (a character without one is skipped),
 /// else on a part chosen as a blow's is.
@@ -160,6 +166,9 @@ static class DebugCheats
                 break;
             case DebugBisect bisect when world.SystemOf<CombatSystem>() is { } combat:
                 combat.DebugBisect(world, bisect.Character, bisect.Attacker, bisect.VisualSeed, bisect.CutDirection, bisect.Style);
+                break;
+            case DebugHeadCut cutHead when world.SystemOf<CombatSystem>() is { } headCombat:
+                headCombat.DebugHeadCut(world, cutHead.Character, cutHead.Attacker, cutHead.Style, cutHead.CutDirection, cutHead.VisualSeed);
                 break;
             case DebugForceHits force when data is not null:
                 data.BodyOptions.ForcedHitPart = force.Part;

@@ -224,7 +224,17 @@ public class BrutalityCombatTests
         scene.Hit();
 
         Assert.True(scene.Victim.Medical.Dead);
-        Assert.Equal(decapitated, scene.Victim.Medical.Decapitated);
+        if (decapitated)
+        {
+            var cut = Assert.IsType<HeadCutState>(scene.Victim.HeadCut);
+            Assert.True(cut.IsValid);
+            Assert.Equal(cut.Mode != HeadCutMode.AttachedSplit, scene.Victim.Medical.Decapitated);
+        }
+        else
+        {
+            Assert.Null(scene.Victim.HeadCut);
+            Assert.False(scene.Victim.Medical.Decapitated);
+        }
         Assert.Equal(BrutalityProgress.FromLevel(level).Experience, scene.Source.Brutality.Experience);
     }
 

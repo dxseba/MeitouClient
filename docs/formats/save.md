@@ -89,6 +89,15 @@ values load as zero; finite excess clamps to mastery. Original STATS keys and un
 fields stay untouched. Capture includes live players/NPCs and stored NPC platoons; unloading and
 reactivating retains the same progression, without applying new-NPC seeding to a loaded character.
 
+**Geometric head cuts (Meitou)**: optional GAMESTATE_CHARACTER string `meitou head cut` stores
+`H1 mode nx ny nz offset`, with invariant round-trip floats. Modes 0/1/2 are neck detachment,
+attached split and detached split. The plane is fixed in normalized head-box coordinates
+`q=(bindPoint-headBoundsCentre)/halfExtent`, not global bind height. Invalid/unknown rows restore no
+cut; old saves remain unchanged. The cut survives loaded and stored NPCs. Bool `meitou head corpse`
+keeps a dead cut owner restorable through the existing fragment-owner path, with one inventory;
+a standalone owner uses the same marker on its platoon. Loose head-piece motion remains transient,
+as for existing detached heads; the saved cut restores the body's appearance without a new hit.
+
 ## Compatibility exceptions
 
 Do not normalize string bytes, NaNs, zero/non-size byteSize, sparse slots or unknown key sets.

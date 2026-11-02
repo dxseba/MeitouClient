@@ -16,7 +16,8 @@ public static partial class SaveCapture
         var table = world.Characters;
         for (int slot = 0; slot < table.HighWater; slot++)
         {
-            if (!table.Previous[slot].Alive || table.Cold(slot) is not { TorsoBisection.IsValid: true, Medical.Dead: true } cold) continue;
+            if (!table.Previous[slot].Alive || table.Cold(slot) is not { Medical.Dead: true } cold
+                || cold.TorsoBisection is not { IsValid: true } && cold.HeadCut is not { IsValid: true }) continue;
             var id = table.IdOf(slot);
             if (pass.Handles.ContainsKey(id)) continue;
             var faction = (uint)cold.Faction < (uint)data.Factions.Count ? data.Factions[cold.Faction] : null;
@@ -27,7 +28,7 @@ public static partial class SaveCapture
             {
                 var state = builder.Game.Factions.FirstOrDefault(f => f.Id == faction.Id);
                 platoon = builder.AddPlatoon(FreshName(builder.Game, state, faction.Name), faction.Name, faction.Id, cold.RecordId, table.Previous[slot].Position);
-                platoon.Record.Bools[TorsoCarrySave.StandaloneKey] = true;
+                platoon.Record.Bools[cold.TorsoBisection is { IsValid: true } ? TorsoCarrySave.StandaloneKey : HeadCutSave.CorpseKey] = true;
             }
             WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, sc, id, faction.Id, false, false);
             SetCharCount(platoon);

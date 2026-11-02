@@ -61,6 +61,8 @@ public enum RngPurpose : uint
     HeadWoundVisual = 30,
     /// <summary>The fixed torso bisection plane chosen by its opening blow (display only).</summary>
     TorsoBisectionVisual = 31,
+    /// <summary>The fixed head separation shape chosen by its opening blow (display only).</summary>
+    HeadCutVisual = 32,
 }
 
 /// <summary>

@@ -13,6 +13,8 @@ XP is delivered post-armour cut + blunt + pierce, capped at the struck part's pr
 
 Levels below 20 keep ordinary injuries and native limb loss. Levels 20–39 permit superficial severe head wounds; 40+ permit major head wounds and organic head decapitation from a lethal Slash, including deliberate attacks on living downed enemies. The medical destruction threshold still applies. Bolts, Thrust and Crush cannot use that decapitation gate. At 60+, sufficiently powerful, already lethal chest Slash hits can [bisect the torso](../simulation.md#torso-bisection-meitou); level alone never makes a nonlethal hit fatal. Forced debug wound/bisection scenes bypass these gates without granting skill XP.
 
+**Design choice** (`HeadCutPolicy`): a qualifying destroyed head fixes one immutable plane in normalized head bounds, with its positive side falling. Sideways Slash hits vary between a low oblique neck cut and a higher horizontal/diagonal split; downward Slash hits can split vertically or diagonally, sometimes detaching both sides on a strong blow. An attached split leaves the negative head remainder on the body and does not set `MedicalState.Decapitated`; whole-head styles do. `MedicalEventKind.HeadCut` is emitted only by the existing lethal head destruction/severance gate, so selecting a candidate cannot kill a survivor or cut a pre-hit corpse. A separate stateless visual hash chooses the shape without advancing combat randomness. Legacy headless saves without a cut state retain the previous whole-head result.
+
 ## Weapons and damage
 
 **Verified** (packet `FUN_1408868b0` from `FUN_140883ba0`/`FUN_140883c60`/`FUN_140883d10`, disassembled; item stats `FUN_140897f30`, `FUN_140889cd0`;

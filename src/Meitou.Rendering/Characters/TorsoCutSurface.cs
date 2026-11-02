@@ -15,14 +15,14 @@ static partial class TorsoCutSurface
         float length = n.Length();
         if (cut.KeepSide is not (-1 or 1) || !float.IsFinite(length) || length < 1e-5f || !float.IsFinite(cut.Plane.W)) return false;
         var plane = cut.Plane / length;
-        if (!cut.FullBody && plane.Y < 0.5f) return false;
-        normalized = new(plane, cut.KeepSide, cut.FullBody);
+        if (!cut.FullBody && !cut.HeadOnly && plane.Y < 0.5f) return false;
+        normalized = new(plane, cut.KeepSide, cut.FullBody, cut.HeadOnly);
         return true;
     }
 
     public static Matrix4x4 Packed(in CharacterTorsoCut cut) => new(
         cut.Plane.X, cut.Plane.Y, cut.Plane.Z, cut.Plane.W,
-        cut.KeepSide, ExposureDepth, cut.FullBody ? 1 : 0, 0,
+        cut.KeepSide, cut.HeadOnly ? 1.1f : ExposureDepth, cut.HeadOnly ? 2 : cut.FullBody ? 1 : 0, 0,
         0, 0, 0, 0,
         0, 0, 0, 0);
 
@@ -34,7 +34,8 @@ static partial class TorsoCutSurface
         return bone / 8 < groups.Length ? (int)(groups[bone / 8] >> (bone % 8 * 4) & 15) : 0;
     }
 
-    public static float Band(Vector3 position, int group, in CharacterTorsoCut cut) => (cut.FullBody ? 0 : group) switch
+    public static float Band(Vector3 position, int group, in CharacterTorsoCut cut) => cut.HeadOnly && group is not (6 or 7)
+        ? 1000 : (cut.FullBody || cut.HeadOnly ? 0 : group) switch
     {
         1 or 2 or 6 => cut.KeepSide * 1000,
         3 or 4 => -cut.KeepSide * 1000,
@@ -57,6 +58,7 @@ static partial class TorsoCutSurface
             near = MathF.Max(near, a); far = MathF.Min(far, b);
             if (near > far) return null;
         }
+        if (cut.HeadOnly && group is not (6 or 7)) return near;
         if (group != 0 && !cut.FullBody) return Band(default, group, cut) >= 0 ? near : null;
         var normal = new Vector3(cut.Plane.X, cut.Plane.Y, cut.Plane.Z);
         float at = Band(origin, group, cut), slope = Vector3.Dot(normal, direction) * cut.KeepSide;
@@ -101,7 +103,8 @@ static partial class TorsoCutSurface
             for (int k = 0; k < 3; k++)
             {
                 var a = source[i + k]; var b = source[i + (k + 1) % 3];
-                float da = Band(a.Position, Group(a, groups), cut), db = Band(b.Position, Group(b, groups), cut);
+                float da = Band(a.Position + (cut.HeadOnly ? Delta(a) : default), Group(a, groups), cut);
+                float db = Band(b.Position + (cut.HeadOnly ? Delta(b) : default), Group(b, groups), cut);
                 if (da >= 0) yield return a with { Position = a.Position + Delta(a) };
                 if ((da < 0) == (db < 0)) continue;
                 float t = da / (da - db);
@@ -184,7 +187,10 @@ static partial class TorsoCutSurface
         }
         Point Edge(in Vertex a, in Vertex b, float t, int component, uint fallbackBone)
         {
-            var point = Interpolate(new(a.Position, Delta(a), a.Bones, a.Weights), new(b.Position, Delta(b), b.Bones, b.Weights), t);
+            var da = Delta(a); var db = Delta(b);
+            var point = normalized.HeadOnly
+                ? Interpolate(new(a.Position + da, default, a.Bones, a.Weights), new(b.Position + db, default, b.Bones, b.Weights), t)
+                : Interpolate(new(a.Position, da, a.Bones, a.Weights), new(b.Position, db, b.Bones, b.Weights), t);
             int region = Group(new Vertex { Bones = point.Bones, Weights = point.Weights }, groups);
             point = point with { Region = region == 6 ? 0 : region };
             if (component < 0 || components is null) return point;
@@ -206,7 +212,8 @@ static partial class TorsoCutSurface
             var hit = new List<int>(3);
             void Intersect(Vertex p, Vertex q)
             {
-                float dp = Vector3.Dot(n, p.Position) + normalized.Plane.W, dq = Vector3.Dot(n, q.Position) + normalized.Plane.W;
+                float dp = Vector3.Dot(n, p.Position + (normalized.HeadOnly ? Delta(p) : default)) + normalized.Plane.W;
+                float dq = Vector3.Dot(n, q.Position + (normalized.HeadOnly ? Delta(q) : default)) + normalized.Plane.W;
                 if (MathF.Abs(dp) < 1e-5f) hit.Add(Add(Edge(p, q, 0, component, fallbackBone)));
                 else if ((dp < 0) != (dq < 0)) hit.Add(Add(Edge(p, q, dp / (dp - dq), component, fallbackBone)));
             }

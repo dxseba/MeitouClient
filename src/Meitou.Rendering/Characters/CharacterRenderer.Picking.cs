@@ -161,7 +161,7 @@ internal sealed partial class CharacterRenderer
         {
             if (!part.ShowsWith(s.WeaponDrawn, s.RangedDrawn, back: s.BackDrawn) || part.PickBoxes.Length == 0) continue;
             if (!part.Shared && (part.AttachIndex < 0 || part.AttachIndex >= s.Attach.Length)) continue;
-            if (!part.Shared && s.TorsoCut is { } rigidCut && part.Bone >= 0 && TorsoCutSurface.Band(asset.Rig.BindPosition[part.Bone], woundMasks.GroupOfBone(asset.Rig, part.Bone), rigidCut) < 0) continue;
+            if (!part.Shared && s.TorsoCut is { } rigidCut && part.Bone >= 0 && TorsoCutSurface.Band(asset.Rig.BindPosition[part.Bone], rigidCut.HeadOnly ? HeadCutSurface.Group(asset, part.Bone) : woundMasks.GroupOfBone(asset.Rig, part.Bone), rigidCut) < 0) continue;
             var model = part.Shared ? s.World : s.Attach[part.AttachIndex] * s.World;
             foreach (var box in part.PickBoxes)
             {
@@ -171,7 +171,7 @@ internal sealed partial class CharacterRenderer
                 var localDirection = Vector3.TransformNormal(direction, inverse);
                 var min = box.Min - new Vector3(PickPadding); var max = box.Max + new Vector3(PickPadding);
                 float? hit = part.Shared && s.TorsoCut is { } cut
-                    ? TorsoCutSurface.RayBox(localOrigin, localDirection, min, max, box.Bone >= 0 ? woundMasks.GroupOfBone(asset.Rig, box.Bone) : 0, cut)
+                    ? TorsoCutSurface.RayBox(localOrigin, localDirection, min, max, box.Bone >= 0 ? cut.HeadOnly ? HeadCutSurface.Group(asset, box.Bone) : woundMasks.GroupOfBone(asset.Rig, box.Bone) : 0, cut)
                     : Slab(localOrigin, localDirection, min, max);
                 if (hit is { } t && t < best)
                     best = t;

@@ -362,6 +362,8 @@ public sealed class CharacterSnapshot
     public Ragdolls.TorsoRagdollPose? TorsoRagdoll { get; internal set; }
     /// <summary>The logical cut, including when a compatible physical ragdoll is unavailable.</summary>
     public Wounds.TorsoBisectionState? TorsoBisection { get; internal set; }
+    /// <summary>A fixed lethal head separation, also published without advanced physics.</summary>
+    public Wounds.HeadCutState? HeadCut { get; internal set; }
     /// <summary>Independent physical head/limb pieces, in this snapshot owner's drawn model space.</summary>
     public IReadOnlyList<Ragdolls.DetachedRagdollPose> DetachedRagdolls { get; internal set; } = [];
 }

@@ -456,6 +456,7 @@ public static partial class SaveCapture
         {
             g.Strings["name"] = cold.Name;
             BrutalitySave.Write(g, cold.Brutality);
+            HeadCutSave.Write(g, cold.HeadCut, cold.Medical is { Dead: true });
             g.Bools["is leader"] = isLeader;
             BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
             CrimeSave.Write(g, cold);
@@ -577,6 +578,7 @@ public static partial class SaveCapture
                     {
                         BountySave.Write(g, m.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
                         BrutalitySave.Write(g, m.Brutality);
+                        HeadCutSave.Write(g, m.HeadCut, m.Medical is { Dead: true } || m.Dead);
                         RagdollSave.Write(g, null);   // its ragdoll went with it
                     }
                     if (m.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));

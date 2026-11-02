@@ -31,7 +31,7 @@ public sealed partial class RagdollSystem
 /// <summary>The actual body surface used to distinguish a continuous cut limb from an independent skin island.</summary>
 internal sealed partial class RagdollSkinSurface
 {
-    internal readonly record struct Point(Vector3 Position, uint Bones, Vector4 Weights, uint Vertex = 0, ushort Target = 0);
+    internal readonly record struct Point(Vector3 Position, uint Bones, Vector4 Weights, uint Vertex = 0, ushort Target = 0, float UvY = 0);
     internal readonly record struct Triangle(Point A, Point B, Point C);
     readonly record struct BridgePoint(Vector3 Position, float[] Votes);
     readonly Triangle[] triangles;
@@ -48,7 +48,11 @@ internal sealed partial class RagdollSkinSurface
             if (data?.ReadPositions() is not { } positions) continue;
             var assignments = sub.UseSharedVertices ? mesh.BoneAssignments : sub.BoneAssignments;
             ushort target = sub.UseSharedVertices ? (ushort)0 : (ushort)(mesh.SubMeshes.IndexOf(sub) + 1);
-            var points = positions.Select((position, i) => new Point(position, 0, default, (uint)i, target)).ToArray();
+            var uvElement = data.Find(OgreVertexSemantic.TextureCoordinates);
+            var uv = uvElement is null ? null : data.ReadFloats(uvElement);
+            int uvStride = uvElement?.Type.ComponentCount() ?? 0;
+            var points = positions.Select((position, i) => new Point(position, 0, default, (uint)i, target,
+                uv is not null && uvStride > 1 ? uv[i * uvStride + 1] : 0)).ToArray();
             int lowest = assignments.Where(a => a.BoneIndex < 256).Select(a => (int)a.BoneIndex).DefaultIfEmpty(-1).Min();
             foreach (var group in assignments.GroupBy(a => a.VertexIndex))
             {

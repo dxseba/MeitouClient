@@ -684,7 +684,7 @@ internal sealed unsafe partial class CharacterRenderer
     bool TorsoPartVisible(in Live live, AssetPart part)
     {
         if (live.TorsoCut is not { } cut || part.Shared || part.Bone < 0 || part.Bone >= live.Asset.Rig.BindPosition.Length) return true;
-        return TorsoCutSurface.Band(live.Asset.Rig.BindPosition[part.Bone], woundMasks.GroupOfBone(live.Asset.Rig, part.Bone), cut) >= 0;
+        return TorsoCutSurface.Band(live.Asset.Rig.BindPosition[part.Bone], cut.HeadOnly ? HeadCutSurface.Group(live.Asset, part.Bone) : woundMasks.GroupOfBone(live.Asset.Rig, part.Bone), cut) >= 0;
     }
 
     /// <summary>The limb bits a chosen cut height takes over from the game's fixed hide.</summary>

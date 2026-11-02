@@ -251,6 +251,13 @@ sealed partial class GameHost
     void SandboxDummyHit()
     {
         var world = session.World;
+        if (g.SandboxHeadCut is { } headStyle)
+        {
+            if (!sandboxFoe.IsNone && world.Tick == 120)
+                world.Commands.Enqueue(new Meitou.Simulation.DebugHeadCut(sandboxFoe, sandboxHero, headStyle, g.SandboxCutDirection ?? 1)
+                    { Tick = world.Tick });
+            return;
+        }
         if (g.SandboxBisect)
         {
             if (g.Scene == "carry-reference") return; // The paired scene first lifts an intact body.

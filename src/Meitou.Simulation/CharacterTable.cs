@@ -201,6 +201,8 @@ public sealed class CharacterCold
     public Wounds.SevereHeadWoundState? SevereHeadWound { get; set; }
     /// <summary>Fixed visual torso separation retained through NPC storage and written only to Meitou's torso sidecar.</summary>
     public Wounds.TorsoBisectionState? TorsoBisection { get; set; }
+    /// <summary>The fixed lethal head cut retained with the corpse, including any attached remainder.</summary>
+    public Wounds.HeadCutState? HeadCut { get; set; }
     /// <summary>The look was changed in the character editor (<see cref="Editing.EditCharacter"/>): a save writes its CHARACTER_APPEARANCE back.</summary>
     public bool LookEdited { get; set; }
     /// <summary>RACE <c>pathfind footprint radius</c> (0: not known, paths use the default human); what the navmesh keeps clear.</summary>
@@ -697,6 +699,7 @@ public sealed class CharacterTable
             hasher.Add(k.PathRequest);
             hasher.Add(k.IsPlayer);
             k.OrderQueue.Hash(ref hasher);
+            if (k.HeadCut is { } headCut) headCut.Hash(ref hasher);
             hasher.Add((int)k.DrawnWeapon);
             BodyHash.Add(ref hasher, k.Stats, k.Medical);
             k.Brutality.Hash(ref hasher);

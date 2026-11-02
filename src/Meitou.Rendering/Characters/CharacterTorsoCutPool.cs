@@ -25,7 +25,8 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
 
     public IReadOnlyList<AssetPart> Resolve(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp, int[]? components = null)
     {
-        if (asset.Blending || asset.BodySource is not { Length: > 0 } source) return parts;
+        var source = cut.HeadOnly ? HeadCutSurface.Skin(asset) : asset.BodySource;
+        if (asset.Blending || source is not { Length: > 0 }) return parts;
         if (!byKey.TryGetValue(key, out var slot))
         {
             if (slots.Count < Capacity) { slot = new Slot(); slots.Add(slot); }

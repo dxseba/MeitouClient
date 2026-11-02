@@ -158,6 +158,19 @@ Shared hair uses instance bit 5 to read the head header without skin deformation
 
 **Observed** (installed CE body meshes, broken-skull close-ups): Shek, Worker/Soldier/Prince Hivers, Scorchlander and human retain fitted exterior wounds after head-volume correction, without the earlier brain protrusions beside/below the head or over Shek shoulders. The Soldier opening faces upward; a steep overhead view shows the fitted width and central cleft that are foreshortened from the front, while detailed brain gyri remain difficult to assess. Human force probes 15/30/35/60 show gradual size growth along the same axis, and the female force-60 opening fits beneath the tested hair. Two scripted combat snapshots (blocking/shuffling and a downcut, with a dummy opening) retain the wound on the turning/tilting human head. Other body morphs, hairstyles, race/angle combinations and the full animation set remain unverified.
 
+### Head separation
+
+**Design choice**: `CharacterTorsoCut.HeadOnly` scopes a saved normalized head-box plane to actual Head/Jaw skin, hair and internal anatomy.
+`HeadCutSurface` derives the box from negative-V head skin with at least half Head/Jaw influence, excluding articulated horn bounds and torso spikes.
+The plane is resolved once into bind space; the head's own triangle subset supplies its closed wound rim/backing, never a whole-body section.
+Face morphs enter head intersections once. Existing wound groups and the 35-matrix palette header stay unchanged; two unused torso-frame words carry head membership.
+Colour, depth and motion use the same clip. An attached negative half follows its body's clipped Head/Jaw actors; detached positive/negative pieces have distinct keys.
+Physics clips only head actors, retaining original internal joints with anchors moved inside their kept half. A missing physical rig uses the existing analytic drop.
+
+**Observed** (native `--scene head-cut` captures): transverse, oblique and vertical cuts retain a head remnant and drop one piece; complete splits drop two independently settling pieces.
+Installed human, Worker (Beep) and female Shek (Ruka) shapes use their own head bounds. Loose-piece positions/velocities are transient; saved cuts reconstruct settled pieces without a new impact.
+Eligibility: [Brutality](game/combat.md#brutality-meitou). State: [save](formats/save.md).
+
 ### Torso separation
 
 `CharacterInstance.TorsoCut` carries a bind-space plane, kept side (+1/-1) and optional `FullBody` mode. `TorsoCutSurface` normalizes finite planes and requires upward Y >= 0.5 only for legacy transverse mode. Colour, depth and motion clip skin/shared clothing/anatomy against the same ragged plane. In transverse mode, arm groups 1/2, jaw group 6 and hair stay wholly with the upper half, while leg groups 3/4 stay below. Full-body mode evaluates the same signed plane distance for every body group and shared hair, including head, pelvis and leg fragments. Rigid gear, lights, stuck bolts and pick boxes select the same half by bone. The torso matrix stores plane, kept side, exposure depth and FullBody in row2.z; the header remains 35 matrices. Existing `vHeadRelief` spare bits carry full-body exposure and mouth-window state, without adding varyings.

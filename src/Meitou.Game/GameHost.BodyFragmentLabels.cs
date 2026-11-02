@@ -68,12 +68,13 @@ sealed partial class GameHost
             foreach (var part in c.DetachedRagdolls)
             {
                 if (part.GroundItemId > 0 && loot.Contains(part.GroundItemId)) continue;
-                long pieceKey = part.Part == -1 ? key ^ (1L << 54) : key ^ (1L << 53) ^ ((long)part.Part << 48);
+                long pieceKey = DetachedDrawKey(key, part.Part, part.FragmentId);
                 var names = FragmentLabelBones.FirstOrDefault(p => p.Part == part.Part).Bones ?? [];
                 var points = names.Select(name => renderer.BonePosition(pieceKey, name)).Where(at => at is not null).Select(at => at!.Value).ToArray();
                 if (points.Length == 0) continue;
                 var at = points.Aggregate(Vector3.Zero, (sum, position) => sum + position) / points.Length;
-                result.Add(new(pieceKey, c.Id, Name(c.Name, BodyFragmentNames.Part(part.Part)), at, BodyFragmentLabelKind.Detached));
+                string partName = part.Part == -1 && part.FragmentId != 0 ? $"Head fragment {part.FragmentId}" : BodyFragmentNames.Part(part.Part);
+                result.Add(new(pieceKey, c.Id, Name(c.Name, partName), at, BodyFragmentLabelKind.Detached));
             }
         }
         if (headsEpoch == worldEpoch)
@@ -88,7 +89,8 @@ sealed partial class GameHost
                 if (owner is not null && kind is >= 0 and <= 3 && snapshot.GroundItems.Any(item => item.Fall is { } fall && fall.Character == owner.Id
                     && FragmentLabelBones.First(p => p.Part == kind).Bones.Contains(fall.Bone, StringComparer.OrdinalIgnoreCase))) continue;
                 string ownerName = owner?.Name ?? part.Look.Character?.Name ?? Loc.Tr("Unknown");
-                result.Add(new(part.Key, owner?.Id ?? CharacterId.None, Name(ownerName, BodyFragmentNames.Part(kind)), at, BodyFragmentLabelKind.Detached));
+                string partName = kind == -1 && part.FragmentId != 0 ? $"Head fragment {part.FragmentId}" : BodyFragmentNames.Part(kind);
+                result.Add(new(part.Key, owner?.Id ?? CharacterId.None, Name(ownerName, partName), at, BodyFragmentLabelKind.Detached));
             }
         return result;
     }

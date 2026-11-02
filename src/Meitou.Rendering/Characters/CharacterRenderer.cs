@@ -521,7 +521,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             {
                 int h = rig.Handle(bolt.Bone) ?? root;
                 if ((uint)h >= (uint)state.Bones.Length) continue;
-                if (l.TorsoCut is { } torso && TorsoCutSurface.Band(rig.BindPosition[h], woundMasks.GroupOfBone(rig, h), torso) < 0) continue;
+                if (l.TorsoCut is { } torso && TorsoCutSurface.Band(rig.BindPosition[h], torso.HeadOnly ? HeadCutSurface.Group(l.Asset, h) : woundMasks.GroupOfBone(rig, h), torso) < 0) continue;
                 // The bone's posed frame: its binding transform times its skin matrix (which is relative to the binding), placed in the world.
                 var bind = Matrix4x4.CreateScale(rig.BindScale[h]) * Matrix4x4.CreateFromQuaternion(Quaternion.Conjugate(rig.BindRotationInverse[h]))
                     * Matrix4x4.CreateTranslation(rig.BindPosition[h]);
@@ -557,7 +557,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             ref var l = ref live[i];
             if (l.PortraitOnly || l.Asset.IsIcon || l.Asset.Lamps.Count == 0) continue;
             foreach (var lamp in l.Asset.Lamps)
-                if (lamp.AttachIndex < l.State.Attach.Length && (l.TorsoCut is not { } torso || TorsoCutSurface.Band(l.Asset.Rig.BindPosition[lamp.Bone], woundMasks.GroupOfBone(l.Asset.Rig, lamp.Bone), torso) >= 0))
+                if (lamp.AttachIndex < l.State.Attach.Length && (l.TorsoCut is not { } torso || TorsoCutSurface.Band(l.Asset.Rig.BindPosition[lamp.Bone], torso.HeadOnly ? HeadCutSurface.Group(l.Asset, lamp.Bone) : woundMasks.GroupOfBone(l.Asset.Rig, lamp.Bone), torso) >= 0))
                     into.Add(lamp.Light with { Position = (l.State.Attach[lamp.AttachIndex] * l.World).Translation });
         }
     }
@@ -728,14 +728,15 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         l.LostGroups = inst.LostGroups;
         l.LimbCuts = inst.LimbCuts;
         l.PartOnly = inst.PartOnly;
-        l.TorsoCut = inst.TorsoCut is { } torso && TorsoCutSurface.TryNormalize(torso, out var normalized) ? normalized : null;
-        l.TorsoFrame = l.TorsoCut is { } cut ? TorsoCutSurface.Packed(cut) : default;
+        var requestedCut = inst.TorsoCut is { HeadOnly: true } headCut ? HeadCutSurface.Resolve(asset, headCut) : inst.TorsoCut;
+        l.TorsoCut = requestedCut is { } torso && TorsoCutSurface.TryNormalize(torso, out var normalized) ? normalized : null;
+        l.TorsoFrame = l.TorsoCut is { } cut ? cut.HeadOnly ? HeadCutSurface.Pack(asset, cut) : TorsoCutSurface.Packed(cut) : default;
         l.HasWounds = l.WoundMask != 0 || (l.LostGroups | l.LimbCuts | l.PartOnly) != 0 || l.TorsoCut is not null;
         var head = l.HasWounds && inst.HeadWoundPlacement is { } placement
             ? content.HeadPlacement(inst.Key, asset, placement, inst.LostGroups, updateStamp)
             : CharacterHeadWoundPool.Fallback(asset, inst.LostGroups);
         l.DrawParts = l.TorsoCut is { } cap
-            ? content.TorsoParts(inst.Key, asset, head.Parts, cap, woundMasks.BoneGroups(asset.Rig), updateStamp, inst.Bones?.Components)
+            ? content.TorsoParts(inst.Key, asset, head.Parts, cap, cap.HeadOnly ? HeadCutSurface.Groups(asset) : woundMasks.BoneGroups(asset.Rig), updateStamp, inst.Bones?.Components)
             : head.Parts;
         l.HeadFrame = head.Frame;
         l.HeadReliefReady = head.ReliefReady;
