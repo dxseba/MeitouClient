@@ -20,7 +20,8 @@ sealed partial class GameHost
         public required Vector3 PositivePivot, NegativePivot, CutAt, Origin, Along;
         public required Quaternion PositiveTurn, NegativeTurn;
         public required (Vector3 Point, float Radius)[] PositiveBounds, NegativeBounds;
-        public readonly Dictionary<int, (CharacterId Holder, Vector3 Point)> Grips = [];
+        public readonly Dictionary<int, (CharacterId Holder, Meitou.Rendering.Characters.CharacterRenderer.TorsoCarryReference? Reference)> CarryReferences = [];
+        public readonly Dictionary<int, Meitou.Rendering.Characters.CharacterRenderer.FrozenTorsoPose> GroundPalettes = [];
     }
 
     void ClearTorsoCuts()
@@ -175,19 +176,12 @@ sealed partial class GameHost
                     yaw = Meitou.Engine.Time.Interp.LerpAngle(DrawnYaw(oldCarrier), yaw, session.SimulationAlpha);
                 }
                 var held = (attachment ?? Meitou.Simulation.Carrying.CarryPose.Fallback).World(carrierAt, yaw);
-                var pivot = side > 0 ? fall.PositivePivot : fall.NegativePivot;
-                var placed = fall.World * Matrix4x4.CreateTranslation(-pivot)
-                    * Matrix4x4.CreateFromQuaternion(held.Rotation) * Matrix4x4.CreateTranslation(held.Position);
-                placed = TorsoGripPlacement(fall, side, holder, carrier, carrierAt, yaw, placed, renderer,
-                    side > 0 ? upper : lower, new(cut.Plane, side, cut.FullBody));
-                list.Add(instance with
-                {
-                    Key = side > 0 ? upper : lower, Position = held.Position, World = placed, Hidden = side > 0 ? hiddenTorsoPositive.Contains(c.Id) : instance.Hidden,
-                    FreezeFrom = lower, Bones = null, Rotation = null, TorsoCut = new(cut.Plane, side, cut.FullBody),
-                });
+                list.Add(TorsoCarryReferenceInstance(fall, side, holder, carrier, instance, carrierAt, yaw,
+                    held.Position, held.Rotation, renderer, side > 0 ? upper : lower, new(cut.Plane, side, cut.FullBody))
+                    with { Hidden = side > 0 ? hiddenTorsoPositive.Contains(c.Id) : instance.Hidden });
                 continue;
             }
-            fall.Grips.Remove(side);
+            RestoreTorsoGroundPose(fall, side, side > 0 ? upper : lower, renderer);
             // The uncarried half keeps its own world anchor while the other one is transported.
             Vector3 delta = (side > 0 ? c.TorsoPositivePosition ?? fall.Origin : c.Position) - fall.Origin;
             var turn = Quaternion.Slerp(Quaternion.Identity, side > 0 ? fall.PositiveTurn : fall.NegativeTurn, ease);

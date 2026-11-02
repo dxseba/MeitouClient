@@ -7,27 +7,30 @@ namespace Meitou.Simulation.Ragdolls;
 
 public sealed partial class RagdollSystem
 {
-    sealed record TorsoGrip(RagdollSkinSurface.Grip? Surface, int Body, Vector3 Local);
+    sealed record TorsoGrip(RagdollSkinSurface.Grip? Surface, int Body, Vector3 Local,
+        RagdollSkinSurface.Grip? ReferenceSurface, int ReferenceBody, Vector3 ReferenceLocal, bool OriginalSeat);
 
-    Vector3? BicepsOf(CharacterTable table, CharacterId holder)
+    Vector3? PalmOf(CharacterTable table, CharacterId holder)
     {
         if (!table.TryResolveNext(holder, out int i)) return null;
         ref readonly var hot = ref table.Next[i];
         if (table.Cold(i) is not { Appearance: { } look } carrier || SetupOf(look) is not { } setup
-            || setup.Rig.Handle("Bip01 L UpperArm") is not int shoulder || setup.Rig.Handle("Bip01 L Forearm") is not int elbow)
+            || setup.Rig.Handle("Bip01 L Hand") is not int hand)
             return CarryPose.Fallback.World(hot.Position, hot.Yaw).Position;
         var scratch = setup.Rig.Rent();
         try
         {
             PoseDerived(scratch, setup, carrier);
             var placement = CharacterRigs.Placement(setup, hot.Position, hot.Yaw, carrier.Medical?.ScaleK ?? 1);
-            var upperArm = Vector3.Transform(scratch.DerivedPosition[shoulder], placement);
-            var forearm = Vector3.Transform(scratch.DerivedPosition[elbow], placement);
-            return CarryPose.BicepsSupport(upperArm, forearm);
+            Vector3? Point(string name) => setup.Rig.Handle(name) is int bone ? Vector3.Transform(scratch.DerivedPosition[bone], placement) : null;
+            return CarryPose.PalmPoint(Vector3.Transform(scratch.DerivedPosition[hand], placement),
+                Point("Bip01 L Finger0") ?? Point("Bip01 L Finger1"), Point("Bip01 L Forearm"));
         }
         finally { setup.Rig.Return(scratch); }
     }
-    void AlignTorsoGrip(TorsoFragments fragments, Ragdoll piece, CharacterCold cold, int side, RigidTransform[] target, bool[] carried, Vector3 palm, Matrix4x4 placement)
+
+    void AlignTorsoGrip(TorsoFragments fragments, Ragdoll piece, CharacterCold cold, int side, RigidTransform[] target,
+        bool[] carried, Vector3 palm, Matrix4x4 placement, ActiveLayer[] layers, bool entering)
     {
         var anchors = side > 0 ? fragments.PositiveAnchors : fragments.NegativeAnchors;
         var offsets = side > 0 ? fragments.PositiveOffsets : fragments.NegativeOffsets;
@@ -36,14 +39,22 @@ public sealed partial class RagdollSystem
         var scratch = rig.Rent();
         try
         {
-            var poseTargets = new RigidTransform[target.Length];
-            for (int b = 0; b < target.Length; b++) poseTargets[b] = carried[b] ? target[b] : piece.Pose[b];
+            // The reference is the original carry animation and CarryAttach, before any cut-half correction.
+            var referenceSkin = new Matrix4x4[rig.BoneCount];
+            scratch.Pose(piece.Setup.Shape, layers, referenceSkin);
+            for (int h = 0; h < referenceSkin.Length; h++) referenceSkin[h] *= placement;
+            scratch.PoseDerived(piece.Setup.Shape, layers);
+            var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
+            var referenceActors = fragments.Source.Bodies.Select(body => body.BoneInBody.Inverse().Then(new RigidTransform(
+                Vector3.Transform(scratch.DerivedPosition[body.Bone], placement), Quaternion.Normalize(turn * scratch.DerivedRotation[body.Bone])))).ToArray();
+            if (grip?.OriginalSeat == true) return;
+
+            var pinned = carried.Select((root, b) => root && !Simulates(piece, RagdollPart.CarryMode, piece.Definition.Bodies[b])).ToArray();
+            var pinnedBones = anchors.Select(b => pinned[b]).ToArray();
+            var poseTargets = target.Select((pose, b) => carried[b] && (entering || pinned[b]) ? pose : piece.Pose[b]).ToArray();
             var bones = BuildFragmentPose(piece, anchors, offsets, Matrix4x4.Identity, poseTargets);
-            var layers = new List<ActiveLayer>();
-            if (rig.Layer(rigs.Database, CarrySystem.CarriedClip, piece.Setup.Animal) is { } carry) layers.Add(new(carry, 0, 1));
-            foreach (var (def, time) in piece.Setup.Fixed) layers.Add(new(def, time, 1));
             var skin = new Matrix4x4[rig.BoneCount];
-            scratch.Pose(piece.Setup.Shape, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers), skin, bones);
+            scratch.Pose(piece.Setup.Shape, layers, skin, bones);
             if (grip is null)
             {
                 var limbCuts = Enumerable.Repeat(-1f, 4).ToArray();
@@ -51,36 +62,60 @@ public sealed partial class RagdollSystem
                     foreach (var part in medical.Parts)
                         if (part.Limb == Bodies.LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb)
                             limbCuts[limb] = Wounds.SeveredLevels.Height(Wounds.SeveredLevels.Of(piece.Id, limb), limb);
-                var surface = cold.Appearance is { } look ? SkinSurfaceFor(look)?.FindGrip(look, rig, fragments.Cut.Plane, side, fragments.Cut.FullBody,
-                    bones.Components!, bones.Components![piece.Definition.Bodies[piece.Definition.Root].Bone], piece.Definition, skin, palm, limbCuts, placement) : null;
-                grip = surface is not null ? new(surface, -1, default) : ColliderGrip(piece, target, carried, palm, placement);
+                RagdollSkinSurface.Grip? reference = null, surface = null;
+                if (cold.Appearance is { } look && SkinSurfaceFor(look) is { } bodySkin)
+                {
+                    reference = bodySkin.FindGrip(look, rig, default, 1, true, new int[rig.BoneCount], 0,
+                        fragments.Source, referenceSkin, palm, limbCuts, query: new(NearestToPoint: true, AxialOnly: true, Uncut: true));
+                    if (reference is not null)
+                    {
+                        var originalContact = reference.Posed(referenceSkin);
+                        var query = new RagdollSkinSurface.GripQuery(NearestToPoint: true, AxialOnly: true, Retained: reference, PinnedBones: pinnedBones);
+                        int root = bones.Components![piece.Definition.Bodies[piece.Definition.Root].Bone];
+                        surface = bodySkin.FindGrip(look, rig, fragments.Cut.Plane, side, fragments.Cut.FullBody,
+                            bones.Components, root, piece.Definition, skin, originalContact, limbCuts, query: query)
+                            ?? bodySkin.FindGrip(look, rig, fragments.Cut.Plane, side, fragments.Cut.FullBody,
+                                bones.Components, root, piece.Definition, skin, originalContact, limbCuts, query: query with { AxialOnly = false });
+                    }
+                }
+                if (reference is not null && surface is not null)
+                    grip = new(surface, -1, default, reference, -1, default,
+                        surface.Triangle == reference.Triangle && surface.Barycentric == reference.Barycentric);
+                else
+                {
+                    var original = ColliderGrip(fragments.Source, referenceActors, _ => true, palm, axialOnly: true);
+                    var originalContact = reference is null ? referenceActors[original.Body].Apply(original.Local) : reference.Posed(referenceSkin);
+                    var selected = ColliderGrip(piece.Definition, target, b => pinned[b], originalContact, axialOnly: true);
+                    bool retained = Vector3.DistanceSquared(target[selected.Body].Apply(selected.Local), originalContact) <= 1e-10f;
+                    grip = new(null, selected.Body, selected.Local, reference, original.Body, original.Local, retained);
+                }
             }
+            // Retaining the ordinary hip/trunk material means exactly the intact placement: no extra translation.
+            if (grip.OriginalSeat) return;
+            var support = grip.ReferenceSurface is { } originalSurface ? originalSurface.Posed(referenceSkin)
+                : referenceActors[grip.ReferenceBody].Apply(grip.ReferenceLocal);
             var contact = grip.Surface is { } saved ? saved.Posed(skin) : target[grip.Body].Apply(grip.Local);
-            var shift = (palm - contact) / (grip.Surface?.RootShare ?? 1);
+            var shift = (support - contact) / (grip.Surface?.RootShare ?? 1);
             if (!float.IsFinite(shift.LengthSquared())) return;
             for (int b = 0; b < target.Length; b++)
-                if (carried[b]) target[b] = target[b] with { Position = target[b].Position + shift };
+                if (carried[b] && (entering || pinned[b])) target[b] = target[b] with { Position = target[b].Position + shift };
         }
         finally { rig.Return(scratch); }
     }
 
-    static TorsoGrip ColliderGrip(Ragdoll piece, RigidTransform[] target, bool[] carried, Vector3 support, Matrix4x4 boundsFrame)
+    static (int Body, Vector3 Local) ColliderGrip(RagdollDefinition definition, RigidTransform[] target, Func<int, bool> allowed, Vector3 support, bool axialOnly)
     {
-        if (!Matrix4x4.Invert(boundsFrame, out var toBounds)) { boundsFrame = Matrix4x4.Identity; toBounds = Matrix4x4.Identity; }
-        var bounds = new List<Vector3>();
-        for (int b = 0; b < target.Length; b++)
-            if (carried[b]) foreach (var p in RagdollCut.Points(piece.Definition.Bodies[b])) bounds.Add(Vector3.Transform(target[b].Apply(p), toBounds));
-        if (bounds.Count == 0) return new(null, piece.Definition.Root, Vector3.Zero);
-        var centre = Vector3.Transform((bounds.Aggregate(new Vector3(float.MaxValue), Vector3.Min) + bounds.Aggregate(new Vector3(float.MinValue), Vector3.Max)) * 0.5f, boundsFrame);
-        int best = piece.Definition.Root;
+        bool HasAxial(int b) => Axial(definition.Bodies[b].Name) && !definition.Bodies[b].Name.Contains("Head", StringComparison.Ordinal)
+            && !definition.Bodies[b].Name.Contains("Jaw", StringComparison.Ordinal) && !definition.Bodies[b].Name.Contains("Neck", StringComparison.Ordinal);
+        bool axialExists = axialOnly && Enumerable.Range(0, target.Length).Any(b => allowed(b) && HasAxial(b));
+        int best = definition.Root;
         Vector3 local = default;
-        float nearest = float.MaxValue, armDistance = float.MaxValue;
+        float nearest = float.MaxValue;
         for (int b = 0; b < target.Length; b++)
         {
-            if (!carried[b]) continue;
-            var body = piece.Definition.Bodies[b];
-            var wanted = target[b].Inverse().Apply(centre);
-            var arm = target[b].Inverse().Apply(support);
+            if (!allowed(b) || axialExists && !HasAxial(b)) continue;
+            var body = definition.Bodies[b];
+            var wanted = target[b].Inverse().Apply(support);
             if (body.Type == PhysicsShapeType.Mesh)
             {
                 var points = RagdollCut.Points(body);
@@ -118,32 +153,37 @@ public sealed partial class RagdollSystem
                 float length = body.Type == PhysicsShapeType.Capsule ? body.Size.Y * 0.5f : 0;
                 var axis = new Vector3(0, Math.Clamp(wanted.Y, -length, length), 0);
                 var direction = wanted - axis;
-                if (direction.LengthSquared() < 1e-8f) direction = new(arm.X, 0, arm.Z);
                 if (direction.LengthSquared() < 1e-8f) direction = Vector3.UnitX;
                 Candidate(axis + Vector3.Normalize(direction) * body.Size.X);
             }
             void Candidate(Vector3 point)
             {
-                var world = target[b].Apply(point);
-                float distance = Vector3.DistanceSquared(world, centre), toArm = Vector3.DistanceSquared(world, support);
-                if (distance > nearest + 1e-5f || MathF.Abs(distance - nearest) <= 1e-5f && toArm >= armDistance) return;
-                nearest = distance; armDistance = toArm; best = b; local = point;
+                float distance = Vector3.DistanceSquared(target[b].Apply(point), support);
+                if (distance >= nearest) return;
+                nearest = distance; best = b; local = point;
             }
         }
-        return new(null, best, local);
+        return (best, local);
     }
+
     static void HashTorsoGrip(TorsoGrip? grip, ref StateHasher hash)
     {
         if (grip is null) return;
         hash.Add(0x47726970);
-        hash.Add(grip.Body);
-        hash.Add(grip.Local);
-        if (grip.Surface is not { } surface) return;
-        hash.Add(surface.Barycentric);
-        hash.Add(surface.RootShare);
-        foreach (var point in new[] { surface.Triangle.A, surface.Triangle.B, surface.Triangle.C })
+        hash.Add(grip.Body); hash.Add(grip.Local);
+        hash.Add(grip.ReferenceBody); hash.Add(grip.ReferenceLocal); hash.Add(grip.OriginalSeat);
+        HashSurface(grip.Surface, ref hash);
+        HashSurface(grip.ReferenceSurface, ref hash);
+        static void HashSurface(RagdollSkinSurface.Grip? surface, ref StateHasher hash)
         {
-            hash.Add(point.Position); hash.Add((int)point.Bones);
-            hash.Add(point.Weights.X); hash.Add(point.Weights.Y); hash.Add(point.Weights.Z); hash.Add(point.Weights.W);
+            hash.Add(surface is not null);
+            if (surface is null) return;
+            hash.Add(surface.Barycentric); hash.Add(surface.RootShare);
+            foreach (var point in new[] { surface.Triangle.A, surface.Triangle.B, surface.Triangle.C })
+            {
+                hash.Add(point.Position); hash.Add((int)point.Bones);
+                hash.Add(point.Weights.X); hash.Add(point.Weights.Y); hash.Add(point.Weights.Z); hash.Add(point.Weights.W);
+            }
         }
-    }}
+    }
+}

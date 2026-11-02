@@ -19,7 +19,7 @@ public class RagdollTorsoGripTests
     [InlineData(0, -1)] [InlineData(0, 1)]
     [InlineData(1, -1)] [InlineData(1, 1)]
     [InlineData(2, -1)] [InlineData(2, 1)]
-    public void A_retained_half_rests_on_the_biceps_and_keeps_the_same_grip_while_its_carrier_moves_and_turns(int style, int side)
+    public void A_retained_half_reuses_the_original_whole_body_contact_while_its_carrier_moves_and_turns(int style, int side)
     {
         var plane = style switch { 0 => new Vector4(0, 1, 0, -10), 1 => new(1, 0, 0, 0.25f), _ => new(0.6f, 0.7f, 0.2f, -7.7f) };
         plane /= new Vector3(plane.X, plane.Y, plane.Z).Length();
@@ -46,7 +46,7 @@ public class RagdollTorsoGripTests
             try
             {
                 scratch.PoseDerived(scene.Setup.Shape, []);
-                palm = CarryPose.BicepsSupport(scratch.DerivedPosition[1], scratch.DerivedPosition[2]);
+                palm = CarryPose.PalmPoint(scratch.DerivedPosition[3], forearm: scratch.DerivedPosition[2]);
                 palm = Vector3.Transform(palm, CharacterRigs.Placement(scene.Setup, position, yaw, 1));
                 var attachment=side>0?scene.Snapshot.TorsoPositiveCarry:scene.Snapshot.Carry;
                 var heldPlacement=(attachment??CarryPose.Fallback).World(position,yaw);
@@ -56,6 +56,7 @@ public class RagdollTorsoGripTests
                     Vector3.Transform(scratch.DerivedPosition[body.Bone],placement),Quaternion.Normalize(rotation*scratch.DerivedRotation[body.Bone])))).ToArray();
             }
             finally { scene.Setup.Rig.Return(scratch); }
+            palm = ReferenceContact(scene, side, carrier);
             var held = State(side);
             var distances = own.Bodies.Select((body, i) => Distance(body, held.Pose[i].Inverse().Apply(palm))).ToArray();
             var connected = new HashSet<int> { own.Root };
@@ -66,12 +67,12 @@ public class RagdollTorsoGripTests
                 foreach (var joint in own.Joints)
                     if (connected.Contains(joint.A) != connected.Contains(joint.B)) changed |= connected.Add(joint.A) | connected.Add(joint.B);
             } while (changed);
-            foreach(int b in connected)
+            foreach(int b in connected.Where(b => own.Bodies[b].Name is not ("Bip01 L Forearm" or "Bip01 R Forearm" or "Bip01 Head")))
             {
                 Assert.True(MathF.Abs(Quaternion.Dot(reference[b].Rotation,held.Pose[b].Rotation))>.99999f);
                 Assert.InRange(Vector3.Distance(reference[b].Position-reference[own.Root].Position,held.Pose[b].Position-held.Pose[own.Root].Position),0,.001f);
             }
-            Assert.True(distances.Min() < 0.001f, $"style={style},side={side}: nearest surface {distances.Min()}");
+            Assert.True(distances.Min() < 0.001f, $"style={style},side={side}: nearest surface {distances.Min()}, support {palm}, actual root {held.Pose[own.Root]}, expected root {reference[own.Root]}");
             if (heldBody < 0)
             {
                 heldBody = Array.IndexOf(distances, distances.Min());
@@ -192,31 +193,39 @@ public class RagdollTorsoGripTests
             [0,0],0,definition,[Matrix4x4.Identity,Matrix4x4.Identity],new(0,15,1)));
         Assert.InRange(grip.Posed([Matrix4x4.Identity,Matrix4x4.Identity]).Y,17.8999f,17.9001f);
     }
-    internal static void AssertBicepsContact(Scene scene,int side,CharacterId carrier)
+    internal static Vector3 ReferenceContact(Scene scene, int side, CharacterId carrier)
     {
-        var cut=scene.Cold.TorsoBisection!.Value;
-        var definition=Assert.IsType<RagdollDefinition>(RagdollCut.Build(scene.SourceDefinition,cut.Plane,side,cut.FullBody));
-        var saved=Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(scene.Physics.SaveState(scene.Id)).Torso);
-        var held=side>0?saved.Positive:saved.Negative;
-        var connected=new HashSet<int>{definition.Root};
-        bool changed;
-        do
-        {
-            changed=false;
-            foreach(var joint in definition.Joints)
-                if(connected.Contains(joint.A)!=connected.Contains(joint.B))changed|=connected.Add(joint.A)|connected.Add(joint.B);
-        }while(changed);
-        var scratch=scene.Setup.Rig.Rent();
+        var scratch = scene.Setup.Rig.Rent();
         try
         {
-            scratch.PoseDerived(scene.Setup.Shape,[]);
-            var local=CarryPose.BicepsSupport(scratch.DerivedPosition[1],scratch.DerivedPosition[2]);
-            var shown=Assert.Single(scene.World.Snapshot.Characters,c=>c.Id==carrier);
-            var palm=Vector3.Transform(local,CharacterRigs.Placement(scene.Setup,shown.Position,shown.Yaw,1));
-            float gap=connected.Min(b=>Distance(definition.Bodies[b],held.Pose[b].Inverse().Apply(palm)));
-            Assert.InRange(gap,0,.001f);
+            scratch.PoseDerived(scene.Setup.Shape, []);
+            // Physics reads simulation coordinates. DrawnPosition can lower a healthy snapshot to the synthetic water surface.
+            ref readonly var holder = ref scene.World.Characters.Previous[carrier.Slot];
+            var palm = Vector3.Transform(CarryPose.PalmPoint(scratch.DerivedPosition[3], forearm: scratch.DerivedPosition[2]),
+                CharacterRigs.Placement(scene.Setup, holder.Position, holder.Yaw, 1));
+            var attach = (side > 0 ? scene.Snapshot.TorsoPositiveCarry : scene.Snapshot.Carry) ?? CarryPose.Fallback;
+            // This minimal scene has no CarrySystem.KeepLinks: an ordinary negative owner keeps its own hot node.
+            ref readonly var owner = ref scene.World.Characters.Previous[scene.Id.Slot];
+            var held = side > 0 ? attach.World(holder.Position, holder.Yaw) : attach.World(owner.Position, owner.Yaw);
+            var placement = CharacterRigs.Placement(scene.Setup, held.Position, held.Rotation, 1);
+            var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
+            var source = scene.SourceDefinition.Bodies[scene.SourceDefinition.Root];
+            var root = source.BoneInBody.Inverse().Then(new RigidTransform(Vector3.Transform(scratch.DerivedPosition[source.Bone], placement),
+                Quaternion.Normalize(turn * scratch.DerivedRotation[source.Bone])));
+            // The fixture's ordinary contact is on its sole axial box, rather than on the carrier's biceps.
+            return root.Apply(Vector3.Clamp(root.Inverse().Apply(palm), -source.Size * .5f, source.Size * .5f));
         }
-        finally{scene.Setup.Rig.Return(scratch);}
+        finally { scene.Setup.Rig.Return(scratch); }
+    }
+
+    internal static void AssertReferenceContact(Scene scene, int side, CharacterId carrier)
+    {
+        var cut = scene.Cold.TorsoBisection!.Value;
+        var definition = Assert.IsType<RagdollDefinition>(RagdollCut.Build(scene.SourceDefinition, cut.Plane, side, cut.FullBody));
+        var saved = Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(scene.Physics.SaveState(scene.Id)).Torso);
+        var held = side > 0 ? saved.Positive : saved.Negative;
+        var contact = ReferenceContact(scene, side, carrier);
+        Assert.InRange(Distance(definition.Bodies[definition.Root], held.Pose[definition.Root].Inverse().Apply(contact)), 0, .001f);
     }
     [Fact]
     public void Middle_contact_uses_the_full_3D_extent_instead_of_grabbing_a_horizontal_endpoint()
@@ -239,6 +248,68 @@ public class RagdollTorsoGripTests
             [0,0,0,0],0,scene.SourceDefinition,skin,new(20,4,-3),boundsFrame:frame));
         Assert.InRange(Vector3.Distance(grip.Posed(skin),Vector3.Transform(Vector3.Zero,frame)),0,.0001f);
     }
+    [Fact]
+    public void The_original_material_contact_is_reused_exactly_when_its_triangle_survives_the_cut()
+    {
+        using var scene = new Scene();
+        var surface = RagdollSkinSurface.Read(Mesh([new(-2,-2,0),new(2,-2,0),new(0,2,0)],[0,0,0]));
+        var skin = Enumerable.Repeat(Matrix4x4.Identity, 4).ToArray();
+        var look = scene.Cold.Appearance!;
+        var reference = Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(look, scene.Setup.Rig, default, 1, true,
+            [0,0,0,0], 0, scene.SourceDefinition, skin, new(1,-1,2), query: new(NearestToPoint:true, AxialOnly:true, Uncut:true)));
+        var kept = Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(look, scene.Setup.Rig, new(0,1,0,1.5f), 1, true,
+            [0,0,0,0], 0, scene.SourceDefinition, skin, new(0,100,0), query: new(NearestToPoint:true, AxialOnly:true, Retained:reference)));
+        Assert.Equal(reference.Triangle, kept.Triangle);
+        Assert.Equal(reference.Barycentric, kept.Barycentric);
+        Assert.Equal(reference.Posed(skin), kept.Posed(skin));
+    }
+
+    [Fact]
+    public void A_removed_seat_moves_to_the_nearest_retained_trunk_instead_of_a_nearer_hand_endpoint()
+    {
+        using var scene = new Scene();
+        var surface = RagdollSkinSurface.Read(Mesh([new(-1,0,0),new(1,0,0),new(0,2,0),new(-1,0,4),new(1,0,4),new(0,2,4)],[0,0,0,2,2,2]));
+        var skin = Enumerable.Repeat(Matrix4x4.Identity,4).ToArray();
+        var selected = Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance!,scene.Setup.Rig,default,1,true,
+            [0,0,0,0],0,scene.SourceDefinition,skin,new(0,1,4),query:new(NearestToPoint:true,AxialOnly:true,Uncut:true)));
+        Assert.InRange(MathF.Abs(selected.Posed(skin).Z),0,.0001f);
+    }
+
+    [Fact]
+    public void A_carried_retained_forearm_uses_ordinary_carry_dynamics_and_reseeds_on_a_new_holder()
+    {
+        using var scene = new Scene(cut: new(new(0,1,0,-10), false));
+        scene.World.RunTicks(120);
+        var holderCold = new CharacterCold { Name="First carrier",Appearance=scene.Cold.Appearance,Race=Human,Medical=Healthy(),Carrying=scene.Id,CarryingTorsoSide=1 };
+        var holder = scene.World.Characters.Spawn(new(){Position=new(100,0,100),Health=100},holderCold,scene.World.Tick);
+        scene.Cold.TorsoPositiveCarriedBy=holder;
+        scene.World.RunTick();
+        var first = State();
+        var cutDefinition=Assert.IsType<RagdollDefinition>(RagdollCut.Build(scene.SourceDefinition,new(0,1,0,-10),1,false));
+        int forearm=Array.FindIndex(cutDefinition.Bodies,b=>b.Name=="Bip01 L Forearm");
+        Assert.True(forearm>=0);
+        scene.World.Characters.Place(holder.Slot,new(104,0,100),0);
+        scene.World.RunTick();
+        var dangling=State();
+        Assert.InRange(Vector3.Distance(first.Pose[cutDefinition.Root].Position+new Vector3(4,0,0),dangling.Pose[cutDefinition.Root].Position),0,.0001f);
+        var beforeLocal=first.Pose[forearm].Position-first.Pose[cutDefinition.Root].Position;
+        var afterLocal=dangling.Pose[forearm].Position-dangling.Pose[cutDefinition.Root].Position;
+        Assert.True(Vector3.Distance(beforeLocal,afterLocal)>.05f
+            || MathF.Abs(Quaternion.Dot(first.Pose[forearm].Rotation,dangling.Pose[forearm].Rotation))<.999f,
+            $"Dynamic forearm should lag the moving torso: before {beforeLocal}, after {afterLocal}");
+        var replacementCold=new CharacterCold{Name="Second carrier",Appearance=scene.Cold.Appearance,Race=Human,Medical=Healthy(),Carrying=scene.Id,CarryingTorsoSide=1};
+        var replacement=scene.World.Characters.Spawn(new(){Position=new(300,0,100),Health=100},replacementCold,scene.World.Tick);
+        holderCold.Carrying=CharacterId.None;
+        scene.Cold.TorsoPositiveCarriedBy=replacement;
+        scene.World.RunTick();
+        var transferred=State();
+        Assert.True(transferred.Pose[forearm].Position.X>280);
+        Assert.InRange(Vector3.Distance(transferred.Pose[forearm].Position,transferred.Pose[cutDefinition.Root].Position),0,15);
+        AssertReferenceContact(scene,1,replacement);
+
+        SavedRagdoll State()=>Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(scene.Physics.SaveState(scene.Id)).Torso).Positive;
+    }
+
     static OgreMesh Mesh(Vector3[] positions,int[] bones)
     {
         var data=new OgreVertexData {VertexCount=(uint)positions.Length};

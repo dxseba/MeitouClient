@@ -32,7 +32,7 @@ sealed partial class GameHost
             + new Vector3(0, 4, 0);
     }
 
-    // Measure the rendered upper-arm support against retained skin, after both characters are posed.
+    // Compare real hand contact; the intact carry reference, rather than an invented biceps target, determines the body placement.
     void ReportTorsoGripContact(int frame)
     {
         if (gpu.Characters is not { } renderer
@@ -42,13 +42,19 @@ sealed partial class GameHost
             var holder = side > 0 ? body.TorsoPositiveCarriedBy : body.CarriedBy;
             if (holder.IsNone) continue;
             long carrierKey = DrawKey(holder);
-            if (renderer.BonePosition(carrierKey, "Bip01 L UpperArm") is not { } shoulder
-                || renderer.BonePosition(carrierKey, "Bip01 L Forearm") is not { } elbow) continue;
-            var support = CarryPose.BicepsSupport(shoulder, elbow);
+            if (renderer.BonePosition(carrierKey, "Bip01 L Hand") is not { } hand) continue;
+            var finger = renderer.BonePosition(carrierKey, "Bip01 L Finger0") ?? renderer.BonePosition(carrierKey, "Bip01 L Finger1");
+            var palm = CarryPose.PalmPoint(hand, finger, renderer.BonePosition(carrierKey, "Bip01 L Forearm"));
             long pieceKey = TorsoDrawKey(body.Id, side);
-            var surface = renderer.ClosestTorsoSurfacePoint(pieceKey, new(cut.Plane, side > 0 ? 1 : -1, cut.FullBody), support);
+            int? component = null;
+            var pose = side > 0 ? body.TorsoRagdoll?.Positive : body.TorsoRagdoll?.Negative;
+            if (body.Appearance is { } look && renderer.Rigs.For(look) is { } setup && setup.Rig.Order.Length > 0
+                && pose?.Components is { } groups && setup.Rig.Order[0] < groups.Length) component = groups[setup.Rig.Order[0]];
+            var surface = renderer.ClosestTorsoSurfacePoint(pieceKey, new(cut.Plane, side > 0 ? 1 : -1, cut.FullBody), palm, component);
             if (surface is { } at)
-                Console.WriteLine($"carry grip   frame {frame} side {side}: biceps-to-skin {Vector3.Distance(support, at):F4}, support {support}, surface {at}; pelvis {renderer.BonePosition(pieceKey, "Bip01 Pelvis")}, L foot {renderer.BonePosition(pieceKey, "Bip01 L Foot")}, R foot {renderer.BonePosition(pieceKey, "Bip01 R Foot")}");
+                Console.WriteLine($"carry grip   frame {frame} side {side}: palm-to-retained-skin {Vector3.Distance(palm, at):F4}, palm {palm}, surface {at}; pelvis {renderer.BonePosition(pieceKey, "Bip01 Pelvis")}, L foot {renderer.BonePosition(pieceKey, "Bip01 L Foot")}, R foot {renderer.BonePosition(pieceKey, "Bip01 R Foot")}");
+            if (torsoFalls.TryGetValue(body.Id, out var fall) && fall.CarryReferences.TryGetValue(side > 0 ? 1 : -1, out var held) && held.Reference is { } reference)
+                Console.WriteLine($"carry reference   frame {frame} side {side}: reference-to-contact {Vector3.Distance(reference.ReferencePoint, reference.RetainedPoint + reference.Translation):F4}, translation {reference.Translation}, kept {reference.Translation == Vector3.Zero}");
         }
     }
 

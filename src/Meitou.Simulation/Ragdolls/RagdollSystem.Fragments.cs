@@ -123,6 +123,11 @@ public sealed partial class RagdollSystem
         var boneWorld = InitialBoneWorld(prototype, cold, placement, source, original);
         var (positiveAnchors, positiveOffsets) = FragmentAnchors(positive, boneWorld, positiveReference);
         var (negativeAnchors, negativeOffsets) = FragmentAnchors(negative, boneWorld, negativeReference);
+        if (restore)
+        {
+            RestoreFragmentOffsets(saved!.Torso!.PositiveAnchors, positive, positiveAnchors, positiveOffsets);
+            RestoreFragmentOffsets(saved.Torso.NegativeAnchors, negative, negativeAnchors, negativeOffsets);
+        }
         var fragments = new TorsoFragments
         {
             Cut = cut, Source = source, Positive = positive, Negative = negative,
@@ -232,6 +237,15 @@ public sealed partial class RagdollSystem
         return (anchors, offsets);
     }
 
+    static void RestoreFragmentOffsets(SavedFragmentAnchors? saved, Ragdoll piece, int[] anchors, RigidTransform[] offsets)
+    {
+        if (saved is null || saved.Anchors.Length != anchors.Length || saved.Offsets.Length != offsets.Length
+            || !saved.Anchors.SequenceEqual(anchors) || saved.Offsets.Any(p => !float.IsFinite(p.Position.LengthSquared())
+                || !float.IsFinite(p.Rotation.LengthSquared()) || p.Rotation.LengthSquared() < 1e-12f)) return;
+        for (int h = 0; h < offsets.Length; h++)
+            if (piece.Definition.BodyOfBone[h] < 0) offsets[h] = saved.Offsets[h] with { Rotation = Quaternion.Normalize(saved.Offsets[h].Rotation) };
+    }
+
     static int LimbFamily(string name)
     {
         int side = name.Contains(" L ", StringComparison.Ordinal) ? 1 : name.Contains(" R ", StringComparison.Ordinal) ? 2 : 0;
@@ -244,7 +258,7 @@ public sealed partial class RagdollSystem
     static bool Axial(string name) => name == "Bip01" || name.Contains("Pelvis", StringComparison.Ordinal) || name.Contains("Spine", StringComparison.Ordinal)
         || name.Contains("Neck", StringComparison.Ordinal) || name.Contains("Head", StringComparison.Ordinal) || name.Contains("Jaw", StringComparison.Ordinal);
 
-    // Carrying pins the root component of each cut side independently; disconnected shoulder chains remain free.
+    // Carrying owns each cut side's root component independently; disconnected shoulder chains remain free.
     static bool[] RootComponent(RagdollDefinition definition)
     {
         var component = new bool[definition.Bodies.Length];
@@ -366,7 +380,11 @@ public sealed partial class RagdollSystem
         if (!torsoRagdolls.TryGetValue(id, out var f)) return null;
         SavedRagdoll Save(Ragdoll piece) => new(piece.Frozen, piece.Age, (RigidTransform[])piece.Pose.Clone());
         var negative = Save(f.Negative);
-        return negative with { Torso = new SavedTorsoRagdoll(f.Cut, Save(f.Positive), negative) };
+        return negative with { Torso = new SavedTorsoRagdoll(f.Cut, Save(f.Positive), negative)
+        {
+            PositiveAnchors = new((int[])f.PositiveAnchors.Clone(), (RigidTransform[])f.PositiveOffsets.Clone()),
+            NegativeAnchors = new((int[])f.NegativeAnchors.Clone(), (RigidTransform[])f.NegativeOffsets.Clone()),
+        } };
     }
 
     void RemoveTorsoRagdoll(CharacterId id)
@@ -397,9 +415,19 @@ public sealed partial class RagdollSystem
             HashPiece(f.Negative, ref hasher);
             HashTorsoGrip(f.PositiveGrip, ref hasher);
             HashTorsoGrip(f.NegativeGrip, ref hasher);
+            HashOffsets(f.PositiveAnchors, f.PositiveOffsets, ref hasher);
+            HashOffsets(f.NegativeAnchors, f.NegativeOffsets, ref hasher);
             if (!f.PositiveGripHolder.IsNone || !f.NegativeGripHolder.IsNone)
             {
                 hasher.Add(0x47724864); hasher.Add(f.PositiveGripHolder); hasher.Add(f.NegativeGripHolder);
+            }
+        }
+        static void HashOffsets(int[] anchors, RigidTransform[] offsets, ref StateHasher hash)
+        {
+            for (int h = 0; h < anchors.Length; h++)
+            {
+                hash.Add(anchors[h]); hash.Add(offsets[h].Position);
+                hash.Add(offsets[h].Rotation.X); hash.Add(offsets[h].Rotation.Y); hash.Add(offsets[h].Rotation.Z); hash.Add(offsets[h].Rotation.W);
             }
         }
         static void HashPiece(Ragdoll piece, ref StateHasher hash)

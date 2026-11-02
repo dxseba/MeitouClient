@@ -11,20 +11,24 @@ namespace Meitou.Simulation.Saving;
 public sealed record SavedRagdoll(bool Frozen, float Age, RigidTransform[] Pose, SavedTorsoRagdoll? Torso = null);
 
 /// <summary>The exact physical sides of a cut; the immutable cut plane identifies the matching collider topology.</summary>
-public sealed record SavedTorsoRagdoll(TorsoBisectionState Cut, SavedRagdoll Positive, SavedRagdoll Negative);
+public sealed record SavedTorsoRagdoll(TorsoBisectionState Cut, SavedRagdoll Positive, SavedRagdoll Negative)
+{
+    public SavedFragmentAnchors? PositiveAnchors { get; init; }
+    public SavedFragmentAnchors? NegativeAnchors { get; init; }
+}
 
 /// <summary>
 /// A knocked-down or dead character's ragdoll in a save (docs/game/ragdolls.md "Saves"): Meitou's own GAMESTATE_CHARACTER string <c>meitou ragdoll</c>, "frozen age count" then
 /// position and rotation (x y z, x y z w) per body, invariant floats. Only a whole-body ragdoll is written (carried and limb ragdolls follow the animation and are made again);
 /// the original saves none and ignores the key. Read once, when the character is made from the save; the ragdoll system takes it the first time it sees the character.
 /// </summary>
-public static class RagdollSave
+public static partial class RagdollSave
 {
     public const string Key = "meitou ragdoll";
 
     public static void Write(FcsRecord state, SavedRagdoll? ragdoll)
     {
-        if (ragdoll is null) { state.Strings.Remove(Key); return; }
+        if (ragdoll is null) { state.Strings.Remove(Key); WriteAnchors(state, null); return; }
         var s = new StringBuilder();
         if (ragdoll.Torso is { } torso)
         {
@@ -37,6 +41,7 @@ public static class RagdollSave
         }
         else Append(s, ragdoll);
         state.Strings[Key] = s.ToString();
+        WriteAnchors(state, ragdoll.Torso);
     }
 
     /// <summary>The saved ragdoll; null when there is none or the text does not parse.</summary>
@@ -52,7 +57,8 @@ public static class RagdollSave
                 || !TryF(header[3], out float z) || !TryF(header[4], out float w) || header[5] is not ("0" or "1")) return null;
             var cut = new TorsoBisectionState(new(x, y, z, w), header[5] == "1");
             if (!cut.IsValid || ReadBody(sections[1]) is not { } positive || ReadBody(sections[2]) is not { } negative) return null;
-            return negative with { Torso = new SavedTorsoRagdoll(cut, positive, negative) };
+            var anchors = ReadAnchors(state, positive.Pose.Length, negative.Pose.Length);
+            return negative with { Torso = new SavedTorsoRagdoll(cut, positive, negative) { PositiveAnchors = anchors.Positive, NegativeAnchors = anchors.Negative } };
         }
         return ReadBody(text);
     }

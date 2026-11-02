@@ -10,19 +10,21 @@ public sealed partial class RagdollSystem
 {
     void UpdateTorsoCarry(World world, TorsoFragments fragments, CharacterCold cold, in CharacterHot hot)
     {
-        if (fragments.NegativeGripHolder != cold.CarriedBy)
+        bool negativeHolderChanged = fragments.NegativeGripHolder != cold.CarriedBy;
+        if (negativeHolderChanged)
         {
             fragments.NegativeGrip = null;
             fragments.NegativeGripHolder = cold.CarriedBy;
         }
         bool negativeCarried = !cold.CarriedBy.IsNone;
         UpdateTorsoPieceCarry(fragments.Negative, cold, negativeCarried, Placement(fragments.Negative, cold, hot),
-            ref fragments.NegativeCarried, ref fragments.NegativeCarriedBodies, fragments, -1, BicepsOf(world.Characters, cold.CarriedBy));
+            ref fragments.NegativeCarried, ref fragments.NegativeCarriedBodies, fragments, -1, PalmOf(world.Characters, cold.CarriedBy), newHolder: negativeHolderChanged);
 
         var table = world.Characters;
         bool positiveCarried = table.TryResolveNext(cold.TorsoPositiveCarriedBy, out int holder);
         var positiveGripHolder = positiveCarried ? cold.TorsoPositiveCarriedBy : CharacterId.None;
-        if (fragments.PositiveGripHolder != positiveGripHolder)
+        bool positiveHolderChanged = fragments.PositiveGripHolder != positiveGripHolder;
+        if (positiveHolderChanged)
         {
             fragments.PositiveGrip = null;
             fragments.PositiveGripHolder = positiveGripHolder;
@@ -36,8 +38,8 @@ public sealed partial class RagdollSystem
             cold.TorsoPositiveYaw = carrier.Yaw;
         }
         UpdateTorsoPieceCarry(fragments.Positive, cold, positiveCarried, placement,
-            ref fragments.PositiveCarried, ref fragments.PositiveCarriedBodies, fragments, 1, BicepsOf(table, cold.TorsoPositiveCarriedBy),
-            release: cold.TorsoPositiveReleaseAt is not null, forceCarriedPose: true);
+            ref fragments.PositiveCarried, ref fragments.PositiveCarriedBodies, fragments, 1, PalmOf(table, cold.TorsoPositiveCarriedBy),
+            release: cold.TorsoPositiveReleaseAt is not null, forceCarriedPose: true, newHolder: positiveHolderChanged);
         if (!positiveCarried && cold.TorsoPositiveReleaseAt is { } released)
         {
             var piece = fragments.Positive;
@@ -56,12 +58,20 @@ public sealed partial class RagdollSystem
     }
 
     void UpdateTorsoPieceCarry(Ragdoll piece, CharacterCold cold, bool carried, Matrix4x4 placement,
-        ref bool wasCarried, ref bool[]? carriedBodies, TorsoFragments fragments, int side, Vector3? palm, bool release = false, bool forceCarriedPose = false)
+        ref bool wasCarried, ref bool[]? carriedBodies, TorsoFragments fragments, int side, Vector3? palm, bool release = false, bool forceCarriedPose = false, bool newHolder = false)
     {
         if (!carried && !wasCarried && !release) return;
-        if (carried != wasCarried || release)
+        bool entering = carried && (!wasCarried || newHolder);
+        carriedBodies ??= RootComponent(piece.Definition);
+        var layers = carried ? TorsoCarryLayers(piece, cold, forceCarriedPose) : [];
+        var target = carried ? AnimatedTorsoCarry(piece, placement, layers) : [];
+        if (carried)
         {
-            carriedBodies ??= RootComponent(piece.Definition);
+            RefreshCarriedOffsets(fragments, piece, side, placement, layers, target, carriedBodies);
+            if (palm is { } hand) AlignTorsoGrip(fragments, piece, cold, side, target, carriedBodies, hand, placement, layers, entering);
+        }
+        if (carried != wasCarried || release || entering)
+        {
             foreach (var joint in piece.Joints) physics.Simulation.Solver.Remove(joint);
             piece.Joints.Clear();
             SetTone(piece, Tone.None);
@@ -72,8 +82,14 @@ public sealed partial class RagdollSystem
                 var body = physics.Simulation.Bodies[handle];
                 if (carriedBodies[b])
                 {
-                    if (carried) body.BecomeKinematic();
+                    // Match ordinary carry: the head and forearms hang under their original joints.
+                    if (carried && !Simulates(piece, RagdollPart.CarryMode, piece.Definition.Bodies[b])) body.BecomeKinematic();
                     else body.SetLocalInertia(kinds[b].Inertia);
+                    if (entering)
+                    {
+                        body.Pose = new RigidPose(target[b].Position, target[b].Rotation);
+                        piece.Pose[b] = target[b];
+                    }
                     body.Velocity = default;
                     body.Awake = true;
                 }
@@ -87,34 +103,73 @@ public sealed partial class RagdollSystem
             wasCarried = carried;
         }
         if (!carried) return;
-        var target = forceCarriedPose ? AnimatedTorsoCarry(piece, cold, placement) : Animated(piece, cold, placement);
-        if (palm is { } hand) AlignTorsoGrip(fragments, piece, cold, side, target, carriedBodies!, hand, placement);
         for (int b = 0; b < piece.Bodies.Length; b++)
         {
-            if (!carriedBodies![b] || piece.Bodies[b] is not { } handle) continue;
+            if (!carriedBodies[b] || piece.Bodies[b] is not { } handle) continue;
             var body = physics.Simulation.Bodies[handle];
-            body.Pose = new RigidPose(target[b].Position, target[b].Rotation);
-            body.Velocity = default;
-            piece.Pose[b] = target[b];
+            if (!piece.Dynamic[b])
+            {
+                body.Pose = new RigidPose(target[b].Position, target[b].Rotation);
+                body.Velocity = default;
+                piece.Pose[b] = target[b];
+            }
+            body.Awake = true;
         }
     }
 
-    // The logical negative half may lie on the ground while the positive half is on another person's shoulder.
-    // Pose that half as carried without changing the corpse's own animation or the other half's physical bones.
-    RigidTransform[] AnimatedTorsoCarry(Ragdoll piece, CharacterCold cold, Matrix4x4 placement)
+    // Use the real carried animation when it exists. A positive-only holder cannot change the logical negative owner's animation.
+    ActiveLayer[] TorsoCarryLayers(Ragdoll piece, CharacterCold cold, bool forceCarriedPose)
+    {
+        var layers = new List<ActiveLayer>();
+        bool hasCarry = false;
+        if (cold.Animation is { } animation && animations is not null)
+            foreach (var layer in animations.Publish(animation, []))
+                if (piece.Setup.Rig.Layer(rigs.Database, layer.Name, piece.Setup.Animal) is { } def)
+                {
+                    layers.Add(new(def, MathF.Max(layer.Time, 0), layer.Weight));
+                    hasCarry |= layer.Name == CarrySystem.CarriedClip;
+                }
+        if (forceCarriedPose && !hasCarry && piece.Setup.Rig.Layer(rigs.Database, CarrySystem.CarriedClip, piece.Setup.Animal) is { } carry)
+        {
+            layers.Clear();
+            layers.Add(new(carry, 0, 1));
+        }
+        foreach (var (def, time) in piece.Setup.Fixed) layers.Add(new(def, time, 1));
+        return [.. layers];
+    }
+
+    static RigidTransform[] AnimatedTorsoCarry(Ragdoll piece, Matrix4x4 placement, ActiveLayer[] layers)
     {
         var rig = piece.Setup.Rig;
-        if (rig.Layer(rigs.Database, CarrySystem.CarriedClip, piece.Setup.Animal) is not { } carried)
-            return Animated(piece, cold, placement);
         var scratch = rig.Rent();
         try
         {
-            var layers = new List<ActiveLayer> { new(carried, 0, 1) };
-            foreach (var (def, time) in piece.Setup.Fixed) layers.Add(new ActiveLayer(def, time, 1));
-            scratch.PoseDerived(piece.Setup.Shape, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers));
+            scratch.PoseDerived(piece.Setup.Shape, layers);
             var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
             return [.. piece.Definition.Bodies.Select(body => body.BoneInBody.Inverse().Then(new RigidTransform(
                 Vector3.Transform(scratch.DerivedPosition[body.Bone], placement), Quaternion.Normalize(turn * scratch.DerivedRotation[body.Bone]))))];
+        }
+        finally { rig.Return(scratch); }
+    }
+
+    static void RefreshCarriedOffsets(TorsoFragments fragments, Ragdoll piece, int side, Matrix4x4 placement,
+        ActiveLayer[] layers, RigidTransform[] target, bool[] root)
+    {
+        var anchors = side > 0 ? fragments.PositiveAnchors : fragments.NegativeAnchors;
+        var offsets = side > 0 ? fragments.PositiveOffsets : fragments.NegativeOffsets;
+        var rig = piece.Setup.Rig;
+        var scratch = rig.Rent();
+        try
+        {
+            scratch.PoseDerived(piece.Setup.Shape, layers);
+            var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
+            for (int h = 0; h < anchors.Length; h++)
+            {
+                int b = anchors[h];
+                if (!root[b] || piece.Definition.BodyOfBone[h] >= 0) continue;
+                var animated = new RigidTransform(Vector3.Transform(scratch.DerivedPosition[h], placement), Quaternion.Normalize(turn * scratch.DerivedRotation[h]));
+                offsets[h] = animated.Then(target[b].Inverse());
+            }
         }
         finally { rig.Return(scratch); }
     }

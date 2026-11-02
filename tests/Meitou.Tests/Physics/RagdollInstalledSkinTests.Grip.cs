@@ -37,7 +37,7 @@ public partial class RagdollInstalledSkinTests
     [InlineData(TorsoBisectionStyle.Transverse,2)]
     [InlineData(TorsoBisectionStyle.Vertical,1)]
     [InlineData(TorsoBisectionStyle.Oblique,2)]
-    public void Installed_cut_halves_keep_their_original_carry_pose_while_translated_to_a_middle_biceps_contact_through_walk_jog_and_turning(TorsoBisectionStyle style,int direction)
+    public void Installed_cut_halves_reuse_the_original_whole_body_seat_and_preserve_pinned_carry_pose_through_walk_jog_and_turning(TorsoBisectionStyle style,int direction)
     {
         var(rig,definition,model,setup,rigs,look)=Installed();
         var walk=rig.Skeleton.Animations.FirstOrDefault(a=>a.Name.StartsWith("walk",StringComparison.OrdinalIgnoreCase)&&!a.Name.Contains("carrying",StringComparison.OrdinalIgnoreCase));
@@ -68,6 +68,7 @@ public partial class RagdollInstalledSkinTests
         var groups=new uint[8];
         foreach(var bone in rig.Skeleton.Bones)
             if(bone.Handle<64)groups[bone.Handle/8]|=(uint)(bone.Name=="Bip01 Jaw"?6:WoundMasks.BodyGroup(bone.Name))<<(bone.Handle%8*4);
+        var originalContacts=new Dictionary<int,RagdollSkinSurface.Grip>();
         var scratch=rig.Rent();
         try
         {
@@ -84,7 +85,9 @@ public partial class RagdollInstalledSkinTests
                     scratch.PoseDerived(setup.Shape,layers.ToArray());
                     int upperArm=Assert.IsType<int>(rig.Handle("Bip01 L UpperArm"));
                     int forearm=Assert.IsType<int>(rig.Handle("Bip01 L Forearm"));
-                    var localPalm=CarryPose.BicepsSupport(scratch.DerivedPosition[upperArm],scratch.DerivedPosition[forearm]);
+                    int hand=Assert.IsType<int>(rig.Handle("Bip01 L Hand"));
+                    Vector3? finger=rig.Handle("Bip01 L Finger0")is int f?scratch.DerivedPosition[f]:null;
+                    var localPalm=CarryPose.PalmPoint(scratch.DerivedPosition[hand],finger,scratch.DerivedPosition[forearm]);
                     var shown=Assert.Single(world.Snapshot.Characters,c=>c.Id==id);
                     var halves=Assert.IsType<TorsoRagdollPose>(shown.TorsoRagdoll);
                     var held=(shown.Carry??CarryPose.Fallback).World(shown.Position,shown.Yaw);
@@ -96,8 +99,24 @@ public partial class RagdollInstalledSkinTests
                         var pose=side>0?halves.Positive:halves.Negative;
                         var skin=new Matrix4x4[rig.BoneCount];
                         scratch.Pose(setup.Shape,[],skin,pose);
-                        float gap=VisibleContactGap(source,groups,new(cut.Plane,side,cut.FullBody),skin,placement,palm,pose.Components!);
-                        Assert.True(gap<.005f,$"{style}/{side}/{gait.Name}/{phase}: biceps/skin gap {gap:F6}");
+                        var attach=(side>0?shown.TorsoPositiveCarry:shown.Carry)??CarryPose.Fallback;
+                        var referenceAt=attach.World(holder.Position,holder.Yaw);
+                        var referencePlacement=CharacterRigs.Placement(setup,referenceAt.Position,referenceAt.Rotation,1);
+                        var carryLayersForSeat=new List<ActiveLayer>();
+                        if(rig.Layer(rigs.Database,CarrySystem.CarriedClip)is{}carryForSeat)carryLayersForSeat.Add(new(carryForSeat,0,1));
+                        foreach(var(def,time)in setup.Fixed)carryLayersForSeat.Add(new(def,time,1));
+                        var originalSkin=new Matrix4x4[rig.BoneCount];
+                        scratch.Pose(setup.Shape,carryLayersForSeat.ToArray(),originalSkin);
+                        for(int b=0;b<originalSkin.Length;b++)originalSkin[b]*=referencePlacement;
+                        if(!originalContacts.TryGetValue(side,out var originalMaterial))
+                        {
+                            originalMaterial=Assert.IsType<RagdollSkinSurface.Grip>(bodySurface.FindGrip(look,rig,default,1,true,new int[rig.BoneCount],0,
+                                definition,originalSkin,palm,query:new(NearestToPoint:true,AxialOnly:true,Uncut:true)));
+                            originalContacts[side]=originalMaterial;
+                        }
+                        var originalContact=originalMaterial.Posed(originalSkin);
+                        float gap=VisibleContactGap(source,groups,new(cut.Plane,side,cut.FullBody),skin,placement,originalContact,pose.Components!);
+                        Assert.True(gap<.005f,$"{style}/{side}/{gait.Name}/{phase}: original whole seat/skin gap {gap:F6}");
                         var both=Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(physics.SaveState(id)).Torso);
                         var piece=side>0?both.Positive:both.Negative;
                         var partial=definitions[side];
@@ -109,14 +128,12 @@ public partial class RagdollInstalledSkinTests
                         try
                         {
                             referenceScratch.PoseDerived(setup.Shape,carryLayers.ToArray());
-                            var attach=(side>0?shown.TorsoPositiveCarry:shown.Carry)??CarryPose.Fallback;
-                            var referenceAt=attach.World(holder.Position,holder.Yaw);
-                            var referencePlacement=CharacterRigs.Placement(setup,referenceAt.Position,referenceAt.Rotation,1);
                             var referenceTurn=Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(referencePlacement with{M41=0,M42=0,M43=0}));
                             var reference=partial.Bodies.Select(body=>body.BoneInBody.Inverse().Then(new RigidTransform(
                                 Vector3.Transform(referenceScratch.DerivedPosition[body.Bone],referencePlacement),
                                 Quaternion.Normalize(referenceTurn*referenceScratch.DerivedRotation[body.Bone])))).ToArray();
-                            foreach(int b in Enumerable.Range(0,partial.Bodies.Length).Where(b=>pose.Components[partial.Bodies[b].Bone]==component))
+                            foreach(int b in Enumerable.Range(0,partial.Bodies.Length).Where(b=>pose.Components[partial.Bodies[b].Bone]==component
+                                && partial.Bodies[b].Name is not ("Bip01 Head" or "Bip01 L Forearm" or "Bip01 R Forearm")))
                             {
                                 Assert.True(MathF.Abs(Quaternion.Dot(reference[b].Rotation,piece.Pose[b].Rotation))>.99999f);
                                 Assert.InRange(Vector3.Distance(reference[b].Position-reference[partial.Root].Position,piece.Pose[b].Position-piece.Pose[partial.Root].Position),0,.001f);
