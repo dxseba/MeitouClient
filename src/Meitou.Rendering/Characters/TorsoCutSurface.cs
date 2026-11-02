@@ -68,7 +68,7 @@ static partial class TorsoCutSurface
 
     static float Ragged(Vector3 p) => 0.018f * MathF.Sin(p.X * 13 + p.Y * 7 + p.Z * 11) + 0.012f * MathF.Sin(p.X * 29 + p.Z * 17);
     static Vector3 Round(Vector3 p) => new(MathF.Round(p.X, 4), MathF.Round(p.Y, 4), MathF.Round(p.Z, 4));
-    readonly record struct Point(Vector3 Position, Vector3 Morph, uint Bones, Vector4 Weights, int Component = -1);
+    readonly record struct Point(Vector3 Position, Vector3 Morph, uint Bones, Vector4 Weights, int Component = -1, int Region = -1);
 
     static Point Interpolate(Point a, Point b, float t)
     {
@@ -84,7 +84,7 @@ static partial class TorsoCutSurface
         uint bones = 0;
         var w = Vector4.Zero;
         for (int k = 0; k < top.Length; k++) { bones |= top[k].Key << (k * 8); w[k] = top[k].Value / sum; }
-        return new(Vector3.Lerp(a.Position, b.Position, t), Vector3.Lerp(a.Morph, b.Morph, t), bones, w, a.Component == b.Component ? a.Component : -1);
+        return new(Vector3.Lerp(a.Position, b.Position, t), Vector3.Lerp(a.Morph, b.Morph, t), bones, w, a.Component == b.Component ? a.Component : -1, a.Region == b.Region ? a.Region : -1);
     }
 
     /// <summary>Kept body samples and exact cut-edge samples, with the body morph applied once before skinning.</summary>
@@ -185,6 +185,8 @@ static partial class TorsoCutSurface
         Point Edge(in Vertex a, in Vertex b, float t, int component, uint fallbackBone)
         {
             var point = Interpolate(new(a.Position, Delta(a), a.Bones, a.Weights), new(b.Position, Delta(b), b.Bones, b.Weights), t);
+            int region = Group(new Vertex { Bones = point.Bones, Weights = point.Weights }, groups);
+            point = point with { Region = region == 6 ? 0 : region };
             if (component < 0 || components is null) return point;
             var weights = point.Weights;
             for (int k = 0; k < 4; k++)
@@ -225,14 +227,31 @@ static partial class TorsoCutSurface
             // the closed torso. Split actual section-edge crossings so its visible head outline joins the body.
             Vector2 Project(int i) => new(Vector3.Dot(points[i].Position, u), Vector3.Dot(points[i].Position, v));
             var segments = Enumerable.Range(0, points.Count).SelectMany(a => adjacent[a].Where(b => a < b).Select(b => (A: a, B: b, From: Project(a), To: Project(b)))).ToArray();
+            var shell = new int[points.Count];
+            Array.Fill(shell, -1);
+            int shellCount = 0;
+            for (int start = 0; start < shell.Length; start++)
+            {
+                if (shell[start] >= 0) continue;
+                var pending = new Stack<int>();
+                pending.Push(start); shell[start] = shellCount;
+                while (pending.TryPop(out int at))
+                    foreach (int neighbour in adjacent[at])
+                        if (shell[neighbour] < 0) { shell[neighbour] = shellCount; pending.Push(neighbour); }
+                shellCount++;
+            }
             var splits = segments.Select(s => new List<(float At, int Index)> { (0, s.A), (1, s.B) }).ToArray();
             static float Cross(Vector2 a, Vector2 b) => a.X * b.Y - a.Y * b.X;
+            static uint Regions(Point a, Point b) => a.Region < 0 || b.Region < 0 ? uint.MaxValue : 1u << a.Region | 1u << b.Region;
             bool crossed = false;
             for (int first = 0; first < segments.Length; first++)
                 for (int second = first + 1; second < segments.Length; second++)
                 {
                     var a = segments[first]; var b = segments[second];
                     if (points[a.A].Component != points[b.A].Component) continue;
+                    // A wrist beside a hip can intersect the torso outline while sharing its articulated component.
+                    // Their cap surfaces must remain separate when the carry pose moves that wrist away.
+                    if (shell[a.A] != shell[b.A] && (Regions(points[a.A], points[a.B]) != 1 || Regions(points[b.A], points[b.B]) != 1)) continue;
                     if (a.A == b.A || a.A == b.B || a.B == b.A || a.B == b.B
                         || MathF.Max(a.From.X, a.To.X) + 1e-5f < MathF.Min(b.From.X, b.To.X) || MathF.Max(b.From.X, b.To.X) + 1e-5f < MathF.Min(a.From.X, a.To.X)
                         || MathF.Max(a.From.Y, a.To.Y) + 1e-5f < MathF.Min(b.From.Y, b.To.Y) || MathF.Max(b.From.Y, b.To.Y) + 1e-5f < MathF.Min(a.From.Y, a.To.Y)) continue;

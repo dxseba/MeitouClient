@@ -12,6 +12,11 @@ public sealed partial class RagdollSystem
 
     Func<int, int, bool>? SkinBridgeFor(CharacterAppearance look, SkeletonRig rig, RagdollDefinition definition, Vector4 plane, int side)
     {
+        return SkinSurfaceFor(look)?.Bridges(rig, definition, plane, side);
+    }
+
+    RagdollSkinSurface? SkinSurfaceFor(CharacterAppearance look)
+    {
         if (rigs.FindMesh(look.BodyMesh) is not { } found) return null;
         string path = GameFiles.Resolve(found);
         var surface = cutSkins.GetOrAdd(path, static file => new(() =>
@@ -19,19 +24,20 @@ public sealed partial class RagdollSystem
             try { return RagdollSkinSurface.Read(OgreMeshReader.ReadFile(file)); }
             catch (Exception e) when (e is IOException or OgreFormatException or InvalidDataException) { return null; }
         })).Value;
-        return surface?.Bridges(rig, definition, plane, side);
+        return surface;
     }
 }
 
 /// <summary>The actual body surface used to distinguish a continuous cut limb from an independent skin island.</summary>
-internal sealed class RagdollSkinSurface
+internal sealed partial class RagdollSkinSurface
 {
-    readonly record struct Point(Vector3 Position, uint Bones, Vector4 Weights);
-    readonly record struct Triangle(Point A, Point B, Point C);
+    internal readonly record struct Point(Vector3 Position, uint Bones, Vector4 Weights, uint Vertex = 0, ushort Target = 0);
+    internal readonly record struct Triangle(Point A, Point B, Point C);
     readonly record struct BridgePoint(Vector3 Position, float[] Votes);
     readonly Triangle[] triangles;
 
-    RagdollSkinSurface(Triangle[] triangles) => this.triangles = triangles;
+    readonly OgrePose[] morphs;
+    RagdollSkinSurface(Triangle[] triangles, OgrePose[] morphs) => (this.triangles, this.morphs) = (triangles, morphs);
 
     public static RagdollSkinSurface Read(OgreMesh mesh)
     {
@@ -41,7 +47,8 @@ internal sealed class RagdollSkinSurface
             var data = sub.UseSharedVertices ? mesh.SharedVertexData : sub.VertexData;
             if (data?.ReadPositions() is not { } positions) continue;
             var assignments = sub.UseSharedVertices ? mesh.BoneAssignments : sub.BoneAssignments;
-            var points = positions.Select(position => new Point(position, 0, default)).ToArray();
+            ushort target = sub.UseSharedVertices ? (ushort)0 : (ushort)(mesh.SubMeshes.IndexOf(sub) + 1);
+            var points = positions.Select((position, i) => new Point(position, 0, default, (uint)i, target)).ToArray();
             int lowest = assignments.Where(a => a.BoneIndex < 256).Select(a => (int)a.BoneIndex).DefaultIfEmpty(-1).Min();
             foreach (var group in assignments.GroupBy(a => a.VertexIndex))
             {
@@ -52,11 +59,11 @@ internal sealed class RagdollSkinSurface
                 uint bones = 0;
                 var weights = Vector4.Zero;
                 for (int k = 0; k < top.Length; k++) { bones |= (uint)top[k].BoneIndex << (k * 8); weights[k] = top[k].Weight / total; }
-                points[group.Key] = new(points[group.Key].Position, bones, weights);
+                points[group.Key] = points[group.Key] with { Bones = bones, Weights = weights };
             }
             if (lowest >= 0)
                 for (int i = 0; i < points.Length; i++)
-                    if (points[i].Weights == Vector4.Zero) points[i] = new(points[i].Position, (uint)lowest, Vector4.UnitX);
+                    if (points[i].Weights == Vector4.Zero) points[i] = points[i] with { Bones = (uint)lowest, Weights = Vector4.UnitX };
             var indices = sub.Indices.Indices;
             if (sub.Operation == OgreOperationType.TriangleList)
                 for (int i = 0; i + 2 < indices.Length; i += 3) Add(indices[i], indices[i + 1], indices[i + 2]);
@@ -69,7 +76,7 @@ internal sealed class RagdollSkinSurface
                 if (a < points.Length && b < points.Length && c < points.Length) triangles.Add(new(points[a], points[b], points[c]));
             }
         }
-        return new([.. triangles]);
+        return new([.. triangles], [.. mesh.Poses]);
     }
 
     /// <summary>A positive-area surviving triangle with both actor regions proves their material connection.</summary>

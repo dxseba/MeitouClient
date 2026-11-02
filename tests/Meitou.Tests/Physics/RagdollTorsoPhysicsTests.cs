@@ -26,7 +26,7 @@ public class RagdollTorsoPhysicsTests
         public bool Buildings(Vector3 min, Vector3 max, List<Vector3> triangles) => true;
     }
 
-    sealed class Scene : IDisposable
+    internal sealed class Scene : IDisposable
     {
         public SimWorld World { get; }
         public RagdollSystem Physics { get; }
@@ -34,7 +34,8 @@ public class RagdollTorsoPhysicsTests
         public CharacterCold Cold { get; }
         public CharacterPoseSetup Setup { get; }
         public BodyOptions Options { get; }
-        public Scene(bool advanced = true, SavedRagdoll? restore = null, bool torso = true)
+        public RagdollDefinition SourceDefinition { get; }
+        public Scene(bool advanced = true, SavedRagdoll? restore = null, bool torso = true, TorsoBisectionState? cut = null)
         {
             var skeleton = new OgreSkeleton();
             skeleton.Bones.Add(new() { Handle = 0, Name = "Bip01", Position = new(0, 11, 0) });
@@ -51,6 +52,7 @@ public class RagdollTorsoPhysicsTests
             ], [(0, 1, new Vector3(2, 11, 0)), (1, 2, new Vector3(3, 8, 0))]);
             // The non-physical hand still needs the full skeleton handle range.
             definition = new() { Bodies = definition.Bodies, Joints = definition.Joints, Root = 0, Joined = definition.Joined, BodyOfBone = [0, 1, 2, -1] };
+            SourceDefinition = definition;
             var database = new GameDatabase();
             var file = new FcsFile();
             file.Records.Add(new() { StringId = "fragment-race", Name = "Fragment race", RecordType = FcsRecordType.RACE, Flags = 0x10 });
@@ -63,7 +65,7 @@ public class RagdollTorsoPhysicsTests
             Cold = new()
             {
                 Name = "Cut corpse", Appearance = new() { Race = database.Find("fragment-race")! }, Race = race,
-                Medical = Healthy(race), TorsoBisection = torso ? new(new(0, 1, 0, -10), true) : null,
+                Medical = Healthy(race), TorsoBisection = torso ? cut ?? new(new(0, 1, 0, -10), true) : null,
             };
             Cold.Medical.KillFromBisection();
             if (restore is not null)
@@ -202,7 +204,7 @@ public class RagdollTorsoPhysicsTests
         scene.Cold.CarriedBy = carrier;
         scene.World.RunTick();
         var carried = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
-        Assert.True(scene.BoneWorld(carried.Negative, 0).Y > 10);
+        RagdollTorsoGripTests.AssertPalmContact(scene,-1,carrier);
         Assert.InRange(scene.BoneWorld(carried.Negative, 2).Y, 0.1f, 3.5f);
         carrierCold.Carrying = CharacterId.None;
         scene.Cold.CarriedBy = CharacterId.None;
@@ -226,7 +228,7 @@ public class RagdollTorsoPhysicsTests
         scene.World.RunTick();
         var held = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
         var lifted = scene.BoneWorld(held.Positive, 0);
-        Assert.True(lifted.Y > 10);
+        RagdollTorsoGripTests.AssertPalmContact(scene,1,carrier);
         Assert.True(lifted.X > 80);
         Assert.InRange(Vector3.Distance(ground, scene.BoneWorld(held.Negative, 0)), 0, 0.1f);
         Assert.Equal(carrier, scene.Snapshot.TorsoPositiveCarriedBy);
@@ -252,7 +254,8 @@ public class RagdollTorsoPhysicsTests
         var held = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
         var negativeAt = scene.BoneWorld(held.Negative, 0);
         var positiveAt = scene.BoneWorld(held.Positive, 0);
-        Assert.True(negativeAt.Y > 10 && positiveAt.Y > 10);
+        RagdollTorsoGripTests.AssertPalmContact(scene,-1,negativeCarrier);
+        RagdollTorsoGripTests.AssertPalmContact(scene,1,positiveCarrier);
         Assert.True(Vector3.Distance(negativeAt, positiveAt) > 60);
         Assert.InRange(scene.BoneWorld(held.Negative, 2).Y, 0.1f, 3.5f);
         positiveCold.Carrying = CharacterId.None;

@@ -25,7 +25,7 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
         public bool Buildings(Vector3 min, Vector3 max, List<Vector3> triangles) => true;
     }
 
-    readonly record struct EdgePoint(Vector3 Bind, Vector3 Before, Vector3 After);
+    readonly record struct EdgePoint(Vector3 Bind, Vector3 Before, Vector3 After, float LimbBand = 1000);
 
     [Theory]
     [InlineData(TorsoBisectionStyle.Oblique, 2)]
@@ -181,6 +181,15 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
             foreach (var bone in rig.Skeleton.Bones)
                 if (bone.Handle < 64) groups[bone.Handle / 8] |= (uint)(bone.Name == "Bip01 Jaw" ? 6 : WoundMasks.BodyGroup(bone.Name)) << (bone.Handle % 8 * 4);
             var caps = new Dictionary<int, (Vertex[] Vertices, Vector3[] Baseline)>();
+            var limbHeights = new Dictionary<int, float>();
+            if (world.Characters.Cold(id.Slot)?.Medical is { } medical)
+                foreach (var part in medical.PartSpan)
+                    if (part.Limb == LimbState.Stump && part.Template.LimbSlot is >= 0 and <= 3 and var limb)
+                    {
+                        float height = SeveredLevels.Height(SeveredLevels.Of(id, limb), limb);
+                        limbHeights[limb + 1] = height > 0 ? height : limb < 2 ? 13.83f : 8.6f;
+                        output.WriteLine($"Visible limb group {limb + 1} starts at bind Y {limbHeights[limb + 1]}");
+                    }
 
             foreach (int tick in ticks)
             {
@@ -206,7 +215,7 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
                         caps[side] = (cap, cap.Select(vertex => Skin(vertex, beforeSkin)).ToArray());
                     }
                     scratch.Pose(setup.Shape, [], afterSkin, pose);
-                    CheckEdges(model, baseline, afterSkin, cut.Plane, side, tick, style);
+                    CheckEdges(model, baseline, afterSkin, cut.Plane, side, tick, style, groups, limbHeights);
                     CheckCapEdges(caps[side].Vertices, caps[side].Baseline, afterSkin, side, tick, style);
                 }
             }
@@ -222,9 +231,10 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
         return components[handle];
     }
 
-    void CheckEdges(Model model, Vector3[][] baseline, Matrix4x4[] skin, Vector4 plane, int side, int tick, TorsoBisectionStyle style)
+    void CheckEdges(Model model, Vector3[][] baseline, Matrix4x4[] skin, Vector4 plane, int side, int tick, TorsoBisectionStyle style, uint[] groups, IReadOnlyDictionary<int, float> limbHeights)
     {
-        Span<EdgePoint> clipped = stackalloc EdgePoint[4];
+        Span<EdgePoint> clipped = stackalloc EdgePoint[8];
+        Span<EdgePoint> visible = stackalloc EdgePoint[8];
         float worst = 0;
         string message = "";
         int checkedEdges = 0;
@@ -232,10 +242,18 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
         {
             var part = model.Parts[partIndex];
             var posed = part.Vertices.Select(vertex => Skin(vertex, skin)).ToArray();
-            EdgePoint Point(uint index) => new(part.Vertices[index].Position, baseline[partIndex][index], posed[index]);
+            EdgePoint Point(uint index)
+            {
+                var vertex = part.Vertices[index];
+                int group = TorsoCutSurface.Group(vertex, groups);
+                float band = limbHeights.TryGetValue(group, out float height) ? vertex.Position.Y - height : 1000;
+                return new(vertex.Position, baseline[partIndex][index], posed[index], band);
+            }
             for (int triangle = 0; triangle < part.Indices.Length; triangle += 3)
             {
                 int count = Clip(Point(part.Indices[triangle]), Point(part.Indices[triangle + 1]), Point(part.Indices[triangle + 2]), plane, side, clipped);
+                count = ClipVisibleLimb(clipped[..count], visible);
+                visible[..count].CopyTo(clipped);
                 for (int edge = 0; edge < count; edge++)
                 {
                     var a = clipped[edge];
@@ -297,7 +315,7 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
                 float ratio = after / limit;
                 if (ratio <= worst) continue;
                 worst = ratio;
-                message = $"{style} side{side} tick{tick} cap contour{cap[a].Uv.Y} triangle{triangle / 3}: rim edge {cap[a].Position}->{cap[b].Position} grew from {before:F3} to {after:F3} (limit {limit:F3})";
+                message = $"{style} side{side} tick{tick} cap contour{cap[a].Uv.Y} triangle{triangle / 3}: band{cap[a].Uv.X} edge {cap[a].Position}->{cap[b].Position} grew from {before:F3} to {after:F3} (limit {limit:F3}); bones{cap[a].Bones:X8}/{cap[b].Bones:X8}, weights{cap[a].Weights}/{cap[b].Weights}";
             }
         output.WriteLine(message);
         Assert.True(worst <= 1, message);
@@ -317,13 +335,31 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
             if (previousInside != currentInside)
             {
                 float amount = previousDistance / (previousDistance - currentDistance);
-                result[count++] = new(Vector3.Lerp(previous.Bind, current.Bind, amount), Vector3.Lerp(previous.Before, current.Before, amount), Vector3.Lerp(previous.After, current.After, amount));
+                result[count++] = new(Vector3.Lerp(previous.Bind, current.Bind, amount), Vector3.Lerp(previous.Before, current.Before, amount), Vector3.Lerp(previous.After, current.After, amount), previous.LimbBand + (current.LimbBand - previous.LimbBand) * amount);
             }
             if (currentInside) result[count++] = current;
         }
         return count;
     }
 
+    // vCutBand is interpolated in the same source triangle as positions; removed lower limb vertices do not draw.
+    static int ClipVisibleLimb(ReadOnlySpan<EdgePoint> source, Span<EdgePoint> result)
+    {
+        int count = 0;
+        for (int edge = 0; edge < source.Length; edge++)
+        {
+            var previous = source[(edge + source.Length - 1) % source.Length];
+            var current = source[edge];
+            bool previousInside = previous.LimbBand >= 0, currentInside = current.LimbBand >= 0;
+            if (previousInside != currentInside)
+            {
+                float amount = previous.LimbBand / (previous.LimbBand - current.LimbBand);
+                result[count++] = new(Vector3.Lerp(previous.Bind, current.Bind, amount), Vector3.Lerp(previous.Before, current.Before, amount), Vector3.Lerp(previous.After, current.After, amount), 0);
+            }
+            if (currentInside) result[count++] = current;
+        }
+        return count;
+    }
     static Vector3 Skin(Vertex vertex, Matrix4x4[] matrices)
     {
         var result = Vector3.Zero;

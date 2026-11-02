@@ -22,6 +22,8 @@ public sealed partial class RagdollSystem
         public Matrix4x4 PublishedIn;
         public bool NegativeCarried, PositiveCarried;
         public bool[]? NegativeCarriedBodies, PositiveCarriedBodies;
+        public TorsoGrip? NegativeGrip, PositiveGrip;
+        public CharacterId NegativeGripHolder = CharacterId.None, PositiveGripHolder = CharacterId.None;
     }
 
     readonly Dictionary<CharacterId, TorsoFragments> torsoRagdolls = [];
@@ -315,7 +317,7 @@ public sealed partial class RagdollSystem
         }
     }
 
-    static BonePose BuildFragmentPose(Ragdoll piece, int[] anchors, RigidTransform[] offsets, Matrix4x4 placement)
+    static BonePose BuildFragmentPose(Ragdoll piece, int[] anchors, RigidTransform[] offsets, Matrix4x4 placement, RigidTransform[]? worldPoses = null)
     {
         Matrix4x4.Invert(placement, out var toModel);
         var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
@@ -327,7 +329,7 @@ public sealed partial class RagdollSystem
         };
         for (int h = 0; h < pose.Set.Length; h++)
         {
-            var bone = offsets[h].Then(piece.Pose[anchors[h]]);
+            var bone = offsets[h].Then((worldPoses ?? piece.Pose)[anchors[h]]);
             pose.Set[h] = true;
             pose.Position[h] = Vector3.Transform(bone.Position, toModel);
             pose.Rotation[h] = Quaternion.Normalize(unturn * bone.Rotation);
@@ -393,6 +395,12 @@ public sealed partial class RagdollSystem
             hasher.Add(f.Cut.FullBody);
             HashPiece(f.Positive, ref hasher);
             HashPiece(f.Negative, ref hasher);
+            HashTorsoGrip(f.PositiveGrip, ref hasher);
+            HashTorsoGrip(f.NegativeGrip, ref hasher);
+            if (!f.PositiveGripHolder.IsNone || !f.NegativeGripHolder.IsNone)
+            {
+                hasher.Add(0x47724864); hasher.Add(f.PositiveGripHolder); hasher.Add(f.NegativeGripHolder);
+            }
         }
         static void HashPiece(Ragdoll piece, ref StateHasher hash)
         {

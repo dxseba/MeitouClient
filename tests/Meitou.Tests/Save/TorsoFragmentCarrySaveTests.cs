@@ -30,7 +30,8 @@ public class TorsoFragmentCarrySaveTests
         Assert.Equal(originalOwner.Handle, Hand.Read(Named(captured, "Positive carrier").GameState!, "carrying"));
         Assert.Equal(1, TorsoCarrySave.Side(Named(captured, "Positive carrier").GameState));
 
-        string folder = SaveSamples.Temp("torso-two-carries");
+        string root = SaveSamples.Temp("torso-two-carries");
+        string folder = Path.Combine(root, "slot");
         try
         {
             captured.Write(folder);
@@ -56,7 +57,7 @@ public class TorsoFragmentCarrySaveTests
             Assert.Equal(1, SaveInventory.Read(ownerAgain.Platoon.File!, ownerAgain.Inventory!).Where(i => i.BaseId == "70-t").Sum(i => i.Quantity));
             Assert.Single(restored.World.Saved!.Platoons.SelectMany(s => s.Members), m => m.Live == b);
         }
-        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
     [Fact]
@@ -67,7 +68,8 @@ public class TorsoFragmentCarrySaveTests
         var body = rig.Cut(negativeX: 10000, positiveX: 100);
         rig.PickUp(positive, body, 1);
         var captured = SaveCapture.Capture(rig.World, rig.Data, new(1, 13, 0));
-        string folder = SaveSamples.Temp("torso-positive-remote-owner");
+        string root = SaveSamples.Temp("torso-positive-remote-owner");
+        string folder = Path.Combine(root, "slot");
         try
         {
             captured.Write(folder);
@@ -82,7 +84,7 @@ public class TorsoFragmentCarrySaveTests
             Assert.InRange(restored.Hot(b).Position.X, 9999, 10001);
             Assert.InRange(restored.Cold(b).TorsoPositivePosition!.Value.X, 90, 110);
         }
-        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
     [Fact]

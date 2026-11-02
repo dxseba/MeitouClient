@@ -250,7 +250,7 @@ public static class RagdollCut
         double determinant = xx * (yy * zz - zy * zy) - yx * (yx * zz - zx * zy) + zx * (yx * zy - zx * yy);
         return xx > 0 && minor > 0 && determinant > 0;
     }
-    static Vector3[] Points(RagdollBody body)
+    internal static Vector3[] Points(RagdollBody body)
     {
         if (body.Type == PhysicsShapeType.Mesh) return body.Hull ?? [];
         if (body.Type is not (PhysicsShapeType.Sphere or PhysicsShapeType.Capsule))

@@ -20,6 +20,7 @@ sealed partial class GameHost
         public required Vector3 PositivePivot, NegativePivot, CutAt, Origin, Along;
         public required Quaternion PositiveTurn, NegativeTurn;
         public required (Vector3 Point, float Radius)[] PositiveBounds, NegativeBounds;
+        public readonly Dictionary<int, (CharacterId Holder, Vector3 Point)> Grips = [];
     }
 
     void ClearTorsoCuts()
@@ -177,6 +178,8 @@ sealed partial class GameHost
                 var pivot = side > 0 ? fall.PositivePivot : fall.NegativePivot;
                 var placed = fall.World * Matrix4x4.CreateTranslation(-pivot)
                     * Matrix4x4.CreateFromQuaternion(held.Rotation) * Matrix4x4.CreateTranslation(held.Position);
+                placed = TorsoGripPlacement(fall, side, holder, carrier, carrierAt, yaw, placed, renderer,
+                    side > 0 ? upper : lower, new(cut.Plane, side, cut.FullBody));
                 list.Add(instance with
                 {
                     Key = side > 0 ? upper : lower, Position = held.Position, World = placed, Hidden = side > 0 ? hiddenTorsoPositive.Contains(c.Id) : instance.Hidden,
@@ -184,6 +187,7 @@ sealed partial class GameHost
                 });
                 continue;
             }
+            fall.Grips.Remove(side);
             // The uncarried half keeps its own world anchor while the other one is transported.
             Vector3 delta = (side > 0 ? c.TorsoPositivePosition ?? fall.Origin : c.Position) - fall.Origin;
             var turn = Quaternion.Slerp(Quaternion.Identity, side > 0 ? fall.PositiveTurn : fall.NegativeTurn, ease);

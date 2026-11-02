@@ -135,6 +135,14 @@ public readonly record struct CarryAttach(System.Numerics.Vector3 Offset, System
 /// </summary>
 public static class CarryPose
 {
+    /// <summary>Centre of the posed left palm: towards its first finger, or beyond the wrist in the forearm direction on rigs without fingers.</summary>
+    public static System.Numerics.Vector3 PalmPoint(System.Numerics.Vector3 hand, System.Numerics.Vector3? firstFinger = null, System.Numerics.Vector3? forearm = null) =>
+        firstFinger is { } finger ? System.Numerics.Vector3.Lerp(hand, finger, 0.55f)
+        : forearm is { } arm ? hand + (hand - arm) * 0.18f : hand;
+
+    /// <summary>A retained fragment is gripped near its top so its weight hangs below the raised palm.</summary>
+    public static float UpperGripBand(float minimumY, float maximumY) => maximumY - MathF.Max(0.6f, (maximumY - minimumY) * 0.12f);
+
     // The offsets at height 0, 0.5 and 1 (units, the bone's frame).
     static readonly System.Numerics.Vector3 Short = new(-1.4f, 0, 1), Middle = new(-1.9f, -1, 2.6f), Tall = new(-3, -0.4f, 5);
 

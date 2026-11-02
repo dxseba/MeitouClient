@@ -172,11 +172,13 @@ sealed partial class GameHost
                 camera.Target = p;
             }
             ApplyCamera(session.Camera.Current);
+            if (scene == "torso-carry" && watch is { } torsoFocus) camera.Target = torsoFocus;
             if (scene is "bisect" or "weapon-blood") SandboxFollowCamera();
             UpdateBuildings();
             gpu.Characters?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);
             DrawWorld(w, h);
+            if (scene == "torso-carry") ReportTorsoGripContact(f);
             if (overlay is not null)
             {
                 overlay.Target = target;

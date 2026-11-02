@@ -28,7 +28,27 @@ sealed partial class GameHost
     Vector3? TorsoCarryFocus()
     {
         if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe) is not { } corpse) return null;
-        return (corpse.Position + (corpse.TorsoPositivePosition ?? corpse.Position)) * 0.5f + new Vector3(0, 4, 0);
+        return (corpse.Position + (corpse.TorsoPositivePosition ?? corpse.Position)) * 0.5f
+            + new Vector3(0, corpse.CarriedBy.IsNone && corpse.TorsoPositiveCarriedBy.IsNone ? 4 : 12, 0);
+    }
+
+    // Measure the rendered hand against actual retained skin, after DrawWorld has posed both characters.
+    void ReportTorsoGripContact(int frame)
+    {
+        if (gpu.Characters is not { } renderer
+            || session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe) is not { TorsoBisection: { } cut } body) return;
+        foreach (int side in new[] { 0, 1 })
+        {
+            var holder = side > 0 ? body.TorsoPositiveCarriedBy : body.CarriedBy;
+            if (holder.IsNone) continue;
+            long carrierKey = DrawKey(holder);
+            if (renderer.BonePosition(carrierKey, "Bip01 L Hand") is not { } hand) continue;
+            var finger = renderer.BonePosition(carrierKey, "Bip01 L Finger0") ?? renderer.BonePosition(carrierKey, "Bip01 L Finger1");
+            var palm = CarryPose.PalmPoint(hand, finger, renderer.BonePosition(carrierKey, "Bip01 L Forearm"));
+            var surface = renderer.ClosestTorsoSurfacePoint(TorsoDrawKey(body.Id, side), new(cut.Plane, side > 0 ? 1 : -1, cut.FullBody), palm);
+            if (surface is { } at)
+                Console.WriteLine($"carry grip   frame {frame} side {side}: palm-to-skin {Vector3.Distance(palm, at):F4}, palm {palm}, surface {at}");
+        }
     }
 
     void StepTorsoCarryScene(int frame)
@@ -46,6 +66,13 @@ sealed partial class GameHost
             if (!player.ScenePickUpTorso(sandboxFoe, side, points))
                 throw new InvalidOperationException($"The rendered torso half {side} could not be picked through its real context verb.");
             AdvanceScene(120);
+            if (frame == 2)
+            {
+                var at = session.CurrentSnapshot.Characters.First(c => c.Id == sandboxHero).Position;
+                world.Commands.Enqueue(new MoveOrder([sandboxHero], at + new Vector3(-12, 0, -8)) { Tick = world.Tick });
+                world.Commands.Enqueue(new MoveOrder([torsoSceneOther], at + new Vector3(12, 0, 8)) { Tick = world.Tick });
+                AdvanceScene(60);   // Exercise turning and walking with both independently held halves.
+            }
         }
         else if (frame is 3 or 4)
         {

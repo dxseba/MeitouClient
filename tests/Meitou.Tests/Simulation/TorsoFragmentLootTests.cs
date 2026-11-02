@@ -81,7 +81,8 @@ public sealed class TorsoFragmentLootTests
         var captured = SaveCapture.Capture(rig.World, rig.Data, new(1, 13, 0));
         var savedLooter = captured.Platoons.SelectMany(p => p.Characters).Single(c => c.Name == "Looter");
         Assert.Equal(kind, savedLooter.Ai!.Ints["meitou tjobK1"]);
-        string folder = SaveSamples.Temp("torso-positive-loot-order");
+        string root = SaveSamples.Temp("torso-positive-loot-order");
+        string folder = Path.Combine(root, "slot");
         try
         {
             captured.Write(folder);
@@ -94,6 +95,6 @@ public sealed class TorsoFragmentLootTests
             Assert.Equal(restoredBody, queued.Target);
             Assert.Equal(kind, queued.Owner.SaveKind(queued));
         }
-        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 }

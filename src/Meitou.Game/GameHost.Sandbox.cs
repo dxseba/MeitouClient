@@ -246,6 +246,15 @@ sealed partial class GameHost
         var world = session.World;
         if (g.SandboxBisect)
         {
+            // Reproduce a limb loss before the lethal torso cut, through the normal debug medical event path.
+            if (g.SandboxSever && !sandboxFoe.IsNone && world.Tick == 30)
+            {
+                int limb = g.SandboxPart?.Replace('-', ' ').ToLowerInvariant() switch
+                {
+                    "left arm" => 0, "right arm" => 1, "right leg" => 3, _ => 2,
+                };
+                world.Commands.Enqueue(new Meitou.Simulation.DebugSever(sandboxFoe, limb) { Tick = world.Tick });
+            }
             if (!sandboxFoe.IsNone && world.Tick == 120) world.Commands.Enqueue(new Meitou.Simulation.DebugBisect(sandboxFoe) { Tick = world.Tick, Attacker = sandboxHero, VisualSeed = g.SandboxBisectVariant, CutDirection = g.SandboxCutDirection ?? 2, Style = g.SandboxBisectStyle });
             return;
         }
