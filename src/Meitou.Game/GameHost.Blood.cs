@@ -65,6 +65,7 @@ sealed partial class GameHost
         var world = session.World;
         world.Luckyren = config.LuckyrenMode;
         UpdateBlockSparks(world);
+        UpdateRobotDischarges(world);
         if (decalStore is null && !config.LuckyrenMode && pieces.Count == 0)
         {
             world.BloodMarks = null;
@@ -162,7 +163,7 @@ sealed partial class GameHost
             woundsFor = world;
             woundQueue.Clear();
             wounds.Clear();
-            robotSparkBursts = 0;
+            ClearRobotDischarges();
             DisposeGuts();
             gutsSpilled.Clear();
             severeHeads.Clear();

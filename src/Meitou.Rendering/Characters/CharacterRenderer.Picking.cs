@@ -59,7 +59,14 @@ internal sealed partial class CharacterRenderer
         return Vector3.Transform(asset.Rig.BindPosition[h], s.Bones[h] * s.World);
     }
 
-    /// <summary>The fitted torso cut's outer-rim centre in its current posed world frame; null if neither the section nor spine is available.</summary>
+    /// <summary>The cached cut rim posed in the last drawn frame, without rebuilding or querying the skin.</summary>
+    public CharacterCutContact? CutContact(long key)
+    {
+        if (!states.TryGetValue(key, out var state) || state.Seen != updateStamp || !state.InWorld || state.Posed < 0) return null;
+        return CutContactGeometry.Pose(content.CutRim(key), state.Bones, state.World);
+    }
+
+    /// <summary>The fitted torso cut's outer-rim centre; null if neither section nor spine is available.</summary>
     public Vector3? TorsoCutPosition(long key, Vector4 plane) => TorsoCutPosition(key, new CharacterTorsoCut(plane, 1));
 
     /// <summary>The largest fitted contour's outer-rim centre, normally the trunk, in world space.</summary>

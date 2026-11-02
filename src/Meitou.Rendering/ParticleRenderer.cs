@@ -16,7 +16,7 @@ namespace Meitou.Rendering;
 /// (docs/formats/fogfeatures.md). The effects' fog volumes (the twisters' dust balls) are handed to <see cref="FogVolumes"/> (<see cref="CollectFogVolumes"/>).
 /// Nothing is recorded while no unit has a particle and there is no <see cref="Tracers"/> streak, so a clear weather with no placer in sight draws exactly what it did.
 /// </summary>
-public sealed unsafe class ParticleRenderer : IDisposable
+public sealed unsafe partial class ParticleRenderer : IDisposable
 {
     static readonly string Vertex = "#version 330 core\n" + AtmosphereShaders.Functions + FogVolumeShaders.Functions + """
 
@@ -121,6 +121,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
         in float vSoft;
         out vec4 fragColour;
         uniform sampler2D uTexture;
+        uniform int uDischarge;                     // 1 horizontal electrical texture, 2 spark streak; both premultiply alpha for additive blending
         uniform sampler2D uSoftDepth;               // the scene's depth at this target's size (the Meitou fog switch), as a colour
         uniform vec4 uSoft;                         // x: 0 hard (the game's), 1 fade the alpha, 2 the colour and alpha (additive), 3 towards white (modulate); y, z: the depth slice's near, far; w: 1 when depth is 0..1
         uniform float uCoverageMax, uCoverageGain;
@@ -128,9 +129,10 @@ public sealed unsafe class ParticleRenderer : IDisposable
         void main()
         {
             // basic.hlsl: texture * colour * vertex colour. A recoloured burst (negative vertex rgb, Burst's recolour) takes that colour instead of the texture's hue, keeping its brightness.
-            vec4 t = texture(uTexture, vUv);
+            vec4 t = texture(uTexture, uDischarge == 1 ? vUv.yx : vUv);
             if (min(vColour.r, min(vColour.g, vColour.b)) < 0.0) t.rgb = vec3(max(t.r, max(t.g, t.b)));
             vec4 c = t * abs(vColour);
+            if (uDischarge != 0) c.rgb *= c.a;
             // Meitou fog: dust and smoke lit as the scene is (the game's sprites are flat, and not fogged): darker where the sun is shadowed, brighter seen
             // towards the sun, then seen through the haze in front of them like the land behind; an additive sprite (fire) only dimmed by the haze.
             if (uLitFragment.x > 0.5 && uLitFragment.z < 1.5)
@@ -264,6 +266,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
         public bool Rain, Fire;
         /// <summary>The <see cref="Tracers"/>' draw: full size, counted in the reactive mask as rain.</summary>
         public bool Tracer;
+        public int Discharge;
     }
 
     ParticleRenderer(IGpuContext gpu, Func<string, string?> findTexture, ParticleLibrary library)
@@ -286,6 +289,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
         coverageLimit = program.Uniform("uCoverageMax");
         coverageGain = program.Uniform("uCoverageGain");
         textureSlot = program.Sampler("uTexture");
+        dischargeMode = program.Uniform("uDischarge");
         softDepthSlot = program.Sampler("uSoftDepth");
         soft = program.Uniform("uSoft");
         (litVertex, litFragment, particleEye) = (program.Uniform("uLitVertex"), program.Uniform("uLitFragment"), program.Uniform("uParticleEye"));
@@ -622,9 +626,10 @@ public sealed unsafe class ParticleRenderer : IDisposable
         Sync();
         Array.Clear(divisorCounts);
         drawnParticles = 0;
+        DrawnRobotDischargeQuads = 0;
         drawnUnits = 0;
         coveragePending = false;
-        if (!Enabled || (weatherGroups.Groups.Count == 0 && placerGroups.Count == 0 && Tracers.Count == 0)) return;
+        if (!Enabled || (weatherGroups.Groups.Count == 0 && placerGroups.Count == 0 && Tracers.Count == 0 && RobotDischarges.Count == 0)) return;
         draws.Clear();
         var frame = gpu.Frame;
         var forward = -new Vector3(view.M13, view.M23, view.M33);   // the view's -Z axis in the world
@@ -685,6 +690,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
             }
         }
         if (Tracers.Count > 0) AddTracers(frame, eye, forward, nearPlane);
+        if (RobotDischarges.Count > 0) AddRobotDischarges(frame, eye, forward, nearPlane);
         // A size is worth its two extra passes (the depth reduction, the composite) only when it saves enough fill: it is taken up from MinLayers and left
         // below half that (so a storm thickening or the view turning does not flip the dust between full size and low resolution, which looked
         // different, every few frames). Not after a vendor upscaler: there the low-resolution draws are kept out of what it upscales, and full-size
@@ -849,8 +855,9 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 float lit = m.Ambient ? ambient : 1;
                 program.Set(colourScale, m.ColourScale.X * lit, m.ColourScale.Y * lit, m.ColourScale.Z * lit, m.ColourScale.W);
                 program.Bind(textureSlot, d.Texture.Sampled());
+                program.Set(dischargeMode, d.Discharge);
                 // The soft fade by blend: an alpha sprite fades its alpha, an additive or colour-blended one its colour, a modulating one towards white.
-                int fade = softDepth is null ? 0 : m.Blend switch
+                int fade = softDepth is null || d.Discharge != 0 ? 0 : m.Blend switch
                 {
                     ParticleBlend.Alpha => 1, ParticleBlend.Add or ParticleBlend.ColourBlend => 2, ParticleBlend.Modulate => 3, _ => 0,
                 };
@@ -934,7 +941,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
 
     Task<RgbaImage?> StartDecode(string name)
     {
-        string? path = findTexture(name);
+        string? path = Path.IsPathRooted(name) && File.Exists(name) ? name : findTexture(name);
         var task = BackgroundWork.Run<RgbaImage?>(() =>
         {
             if (path is null || !File.Exists(path)) return null;

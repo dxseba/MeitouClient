@@ -18,6 +18,7 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
         public AssetPart? Cap;
         public IReadOnlyList<AssetPart>? SourceParts, View;
         public bool Ready;
+        public Vertex[] Rim = [];
     }
     readonly List<Slot> slots = [];
     readonly Dictionary<long, Slot> byKey = [];
@@ -54,6 +55,7 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
             var vertices = TorsoCutSurface.Build(source, groups, cut, morphs, components, bloodColour, mechanical: mechanical);
             vertices = WithBrainSection(vertices, asset, groups, cut, components, bloodColour);
             slot.Ready = vertices is { Length: > 0 and <= VertexCapacity };
+            slot.Rim = slot.Ready ? CutContactGeometry.Sample(vertices!) : [];
             if (slot.Ready)
             {
                 slot.Cap ??= Allocate();
@@ -85,6 +87,8 @@ sealed class CharacterTorsoCutPool(IGpuContext gpu) : IDisposable
         if (section is not { Length: > 0 } || (flesh?.Length ?? 0) + section.Length > VertexCapacity) return flesh;
         return [.. flesh ?? [], .. section];
     }
+
+    public ReadOnlySpan<Vertex> Rim(long key) => byKey.TryGetValue(key, out var slot) && slot.Ready ? slot.Rim : [];
 
     AssetPart Allocate()
     {

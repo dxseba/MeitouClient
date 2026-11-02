@@ -193,6 +193,10 @@ Layer 34 follows the same full-body/head planes, wound spheres and limb cut/part
 
 **Verified** (indexed skin vertices in installed `robot/robot.mesh` and its linked male skeleton): all 5,127 vertices with at least half Head/Jaw-descendant influence have nonnegative V. Rendering and ragdoll head planes therefore use the same bone membership without requiring an organic head UV chart.
 
+`CutContactGeometry` retains at most 48 outer-rim samples per existing cap slot. `CharacterRenderer.CutContact` poses only those samples against the last drawn bones/world; it never rebuilds a section or queries body skin. Cold, missing or unseen caps return no contact, so the host can use a bone fallback.
+
+Persistent robot discharges reuse the existing particle pipeline: at most 64 host anchors produce 1,024 analytic blue-white arc/warm spark quads, with two additive instance batches, scene depth testing and no depth writes. Their full-resolution reactive coverage and pre-composite colour participate in the existing temporal/bloom passes. Age and lifetime come from the host; no particle units or per-robot GPU buffers are created. The bundled horizontal arc texture is runtime-tinted; attribution and CC0 source are in `src/Meitou.Rendering/Effects/CREDITS.md`.
+
 ### Weapon blood
 
 Rigid melee blades use per-instance `HipWeaponBlood` / `BackWeaponBlood` (RGB, coverage), copied from the actual equipped item. `WeaponBloodFlag` (instance bit 6) reuses the four unused matrix-row W values and weapon-only `vHeadFrame` words; the body wound header, instance stride and varying count are unchanged. Eligible WEAPON parts use `bare sword`, or the whole weapon when no separate blade exists; sheath fields and `back2` backups are excluded. The longest signed local-bounds axis estimates grip-to-tip distance. Existing `bloody.png` splatter grows toward the tip, leaving the first 18% clear; blood changes albedo, gloss and metalness. Materials keep only immutable blade-axis/texture data; character/item colour and coverage never enter shared materials. Portrait/icon draws stay clean. Hit rules and item ownership: [blood-decals](game/blood-decals.md#blood-on-weapons-meitou).

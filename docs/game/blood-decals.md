@@ -189,6 +189,19 @@ at the struck head, chest, stomach or limb bone (a part-height fallback before i
 Legacy unspecified slash events remain compatible; bolts, Thrust, Crush and secondary
 sever/death/bisection notifications emit none. Effects use display particles and change no
 damage, skill XP or simulation rolls. Restoring saved cuts does not replay impact sparks.
+The same qualifying hit starts one `RobotDischargeTracker` entry per victim identity and struck
+part for 20–30 scaled game seconds; pause freezes its age. A later hit refreshes that entry,
+while replaying the exact same event does not. Medical death keeps it active; expiry, removed
+identity or a world change clears it. The 64-entry tracker evicts the oldest refreshed entry.
+Blue-white arcs and dense warm sparks follow cached cut-rim contacts on both torso/head
+fragments and the neck stump, or both ends of a severed limb (including the basic falling-piece fallback). Contact queries pose at most
+48 stored rim samples; they never triangulate the cut again. Robot bowel placement is excluded
+before section queries. Particle geometry is capped at 64 anchors and 1,024 quads in two
+additive batches, with no persistent particle units. Sources without a cached contact use a
+bone/fallback point. The CC0 arc texture's source, author and hashes are in
+[Effects/CREDITS.md](../../src/Meitou.Rendering/Effects/CREDITS.md). These effects are transient;
+saved cut states do not replay or preserve their electrical lifetime.
+
 Flat sandbox/battle scenes load combat effects without weather/map placers; an explicit
 `--no-particles` still disables them.
 Luckyren robot bursts retain the race's severed-limb meshes and fluid decals, omitting organic

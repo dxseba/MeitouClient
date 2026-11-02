@@ -261,6 +261,7 @@ sealed partial class GameHost
         }
         if (g.SandboxBisect)
         {
+            if (g.Scene == "bisect-stress") { QueueBisectionStress(); return; }
             if (g.Scene == "carry-reference") return; // The paired scene first lifts an intact body.
             // Reproduce a limb loss before the lethal torso cut, through the normal debug medical event path.
             if (g.SandboxSever && !sandboxFoe.IsNone && world.Tick == 30)

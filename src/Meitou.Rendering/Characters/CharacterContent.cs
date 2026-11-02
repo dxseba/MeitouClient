@@ -400,6 +400,8 @@ internal sealed class CharacterContent : IDisposable
     public IReadOnlyList<AssetPart> TorsoParts(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts, in CharacterTorsoCut cut, uint[] groups, long stamp, int[]? components = null) =>
         torsoCutPool.Resolve(key, asset, parts, cut, groups, stamp, components);
 
+    public ReadOnlySpan<Vertex> CutRim(long key) => torsoCutPool.Rim(key);
+
     LoadedMesh? MechanicalAnatomyMesh(SkeletonRig rig, string bodyPath, CharacterAppearance appearance)
     {
         var mode = appearance.HeadOnly ? "head" : appearance.Headless ? "body" : "whole";

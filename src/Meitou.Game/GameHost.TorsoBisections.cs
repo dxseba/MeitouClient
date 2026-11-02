@@ -87,7 +87,9 @@ sealed partial class GameHost
                 ref Slot(ref torsoNegativePoses, c.Id.Slot), ref Slot(ref torsoNegativeSpare, c.Id.Slot));
             list.Add(instance with { Key = lower, Bones = negative, FreezeFrom = null, TorsoCut = new(cut.Plane, -1, cut.FullBody) });
             list.Add(instance with { Key = upper, Bones = positive, FreezeFrom = null, Hidden = hiddenTorsoPositive.Contains(c.Id), TorsoCut = new(cut.Plane, 1, cut.FullBody) });
-            if (!gutFalls.ContainsKey(c.Id) && !gutsSpilled.Contains(c.Id)
+            // Robot cuts never spill bowel; skip the expensive section queries before entering that path.
+            if (c.Appearance?.Race.GetBool("is robot") != true
+                && !gutFalls.ContainsKey(c.Id) && !gutsSpilled.Contains(c.Id)
                 && renderer.TorsoCutPosition(lower, new CharacterTorsoCut(cut.Plane, -1, cut.FullBody)) is { } cutAt)
             {
                 var normal = renderer.TorsoCutNormal(lower, new(cut.Plane, 1, cut.FullBody)) ?? Vector3.UnitX;
