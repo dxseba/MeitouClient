@@ -6,8 +6,8 @@ internal sealed partial class CharacterRenderer
 {
     readonly record struct ContactPoint(Vector3 Position, float Band, float LimbBand, float Influence);
 
-    /// <summary>Closest point on retained posed body triangles. Optional component excludes loose chains; placement queries a frozen pose at a proposed node transform.</summary>
-    public Vector3? ClosestTorsoSurfacePoint(long key, in CharacterTorsoCut cut, Vector3 point, int? component = null, Matrix4x4? placement = null, bool preferUpperBand = false)
+    /// <summary>Closest retained posed skin point. preferMiddle measures bounds in the existing posing frame, using point only for arm-facing ties; defaults remain unrestricted.</summary>
+    public Vector3? ClosestTorsoSurfacePoint(long key, in CharacterTorsoCut cut, Vector3 point, int? component = null, Matrix4x4? placement = null, bool preferUpperBand = false, bool preferMiddle = false, Matrix4x4? boundsFrame = null)
     {
         if (!float.IsFinite(point.LengthSquared()) || !TorsoCutSurface.TryNormalize(cut, out var kept)
             || !states.TryGetValue(key, out var state) || state.Seen != updateStamp || !state.InWorld
@@ -24,13 +24,17 @@ internal sealed partial class CharacterRenderer
             if (!Matrix4x4.Invert(state.World, out var inverse)) return null;
             rebase = inverse * world;
         }
+        var reference = boundsFrame ?? placement ?? state.World;
+        var toBounds = Matrix4x4.Identity;
+        if (preferMiddle && !Matrix4x4.Invert(reference, out toBounds)) return null;
         Span<ContactPoint> polygon = stackalloc ContactPoint[8], clipped = stackalloc ContactPoint[8];
         Span<int> ids = stackalloc int[12];
         Span<float> votes = stackalloc float[12];
         Vector3? closest = null;
-        float distance = float.PositiveInfinity;
-        float bottom = float.PositiveInfinity, top = float.NegativeInfinity;
-        for (int pass = 0; pass < (preferUpperBand ? 2 : 1); pass++)
+        float distance = float.PositiveInfinity, armDistance = float.PositiveInfinity;
+        var minimum = new Vector3(float.PositiveInfinity); var maximum = new Vector3(float.NegativeInfinity);
+        bool measureBounds = preferUpperBand || preferMiddle;
+        for (int pass = 0; pass < (measureBounds ? 2 : 1); pass++)
         {
         for (int triangle = 0; triangle + 2 < source.Length; triangle += 3)
         {
@@ -92,31 +96,34 @@ internal sealed partial class CharacterRenderer
                 retained = ClipContact(polygon, clipped, retained, plane: 2);
                 face = clipped;
             }
-            if (preferUpperBand && pass == 0)
+            if (measureBounds && pass == 0)
             {
                 for (int i = 1; i + 1 < retained; i++)
                 {
                     if (Vector3.Cross(face[i].Position - face[0].Position, face[i + 1].Position - face[0].Position).LengthSquared() < 1e-10f) continue;
-                    bottom = MathF.Min(bottom, MathF.Min(face[0].Position.Y, MathF.Min(face[i].Position.Y, face[i + 1].Position.Y)));
-                    top = MathF.Max(top, MathF.Max(face[0].Position.Y, MathF.Max(face[i].Position.Y, face[i + 1].Position.Y)));
+                    var a = Vector3.Transform(face[0].Position, toBounds); var b = Vector3.Transform(face[i].Position, toBounds); var c = Vector3.Transform(face[i + 1].Position, toBounds);
+                    minimum = Vector3.Min(minimum, Vector3.Min(a, Vector3.Min(b, c)));
+                    maximum = Vector3.Max(maximum, Vector3.Max(a, Vector3.Max(b, c)));
                 }
                 continue;
             }
-            if (preferUpperBand)
+            if (preferUpperBand && !preferMiddle)
             {
                 Span<ContactPoint> upper = component is null ? clipped : polygon;
-                retained = ClipContact(face, upper, retained, plane: 3, floor: top - MathF.Max(0.6f, (top - bottom) * 0.12f));
+                retained = ClipContact(face, upper, retained, plane: 3, floor: maximum.Y - MathF.Max(0.6f, (maximum.Y - minimum.Y) * 0.12f));
                 face = upper;
             }
             for (int i = 1; i + 1 < retained; i++)
             {
                 if (Vector3.Cross(face[i].Position - face[0].Position, face[i + 1].Position - face[0].Position).LengthSquared() < 1e-10f) continue;
-                var candidate = ClosestContactTriangle(point, face[0].Position, face[i].Position, face[i + 1].Position);
-                float gap = Vector3.DistanceSquared(point, candidate);
-                if (float.IsFinite(gap) && gap < distance) { distance = gap; closest = candidate; }
+                var aim = preferMiddle ? Vector3.Transform((minimum + maximum) * 0.5f, reference) : point;
+                var candidate = ClosestContactTriangle(aim, face[0].Position, face[i].Position, face[i + 1].Position);
+                float gap = Vector3.DistanceSquared(aim, candidate), armGap = Vector3.DistanceSquared(point, candidate);
+                bool nearer = preferMiddle ? gap < distance - 1e-5f || MathF.Abs(gap - distance) <= 1e-5f && armGap < armDistance : gap < distance;
+                if (float.IsFinite(gap) && nearer) { distance = gap; armDistance = armGap; closest = candidate; }
             }
         }
-        if (preferUpperBand && pass == 0 && (!float.IsFinite(bottom) || !float.IsFinite(top))) return null;
+        if (measureBounds && pass == 0 && (!float.IsFinite(minimum.LengthSquared()) || !float.IsFinite(maximum.LengthSquared()))) return null;
         }
         return closest;
     }
@@ -144,7 +151,7 @@ internal sealed partial class CharacterRenderer
         return kept;
     }
 
-    static float ContactBand(ContactPoint point, int plane, float floor) => plane switch { 0 => point.Band, 1 => point.LimbBand, 2 => point.Influence - 0.5f, _ => point.Position.Y - floor };
+    static float ContactBand(ContactPoint point, int plane, float floor) => plane switch { 0 => point.Band, 1 => point.LimbBand, 2 => point.Influence - 0.5f, 3 => point.Position.Y - floor, _ => floor - point.Position.Y };
 
     static Vector3 ClosestContactTriangle(Vector3 point, Vector3 a, Vector3 b, Vector3 c)
     {

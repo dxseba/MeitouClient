@@ -140,13 +140,14 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
         Assert.True(lowest >= -1, $"Retained calf/foot skin goes {lowest:F3} below the physical floor");
         Assert.True(pose.AbsolutePositions, "The remnant must publish independently positioned physics bones");
     }
-    (SkeletonRig Rig, RagdollDefinition Definition, Model Model, CharacterPoseSetup Setup, CharacterRigs Rigs, CharacterAppearance Look) Installed()
+    (SkeletonRig Rig, RagdollDefinition Definition, Model Model, CharacterPoseSetup Setup, CharacterRigs Rigs, CharacterAppearance Look) Installed(bool female = false)
     {
         var install = GameInstall.Locate();
         Assert.SkipWhen(install is null, "Kenshi install not found");
-        var skeletonPath = GameFiles.Resolve(Path.Combine(install.DataDirectory, "character", "meshes", "male_skeleton", "male_skeleton.skeleton"));
-        var meshPath = GameFiles.Resolve(Path.Combine(install.DataDirectory, "character", "meshes", "human", "human_male.mesh"));
-        var ragdollPath = GameFiles.Resolve(Path.Combine(install.DataDirectory, "ragdoll", "hu_m_ragdoll_5.phs"));
+        string gender = female ? "female" : "male";
+        var skeletonPath = GameFiles.Resolve(Path.Combine(install.DataDirectory, "character", "meshes", gender + "_skeleton", gender + "_skeleton.skeleton"));
+        var meshPath = GameFiles.Resolve(Path.Combine(install.DataDirectory, "character", "meshes", "human", "human_" + gender + ".mesh"));
+        var ragdollPath = GameFiles.Resolve(Path.Combine(install.DataDirectory, "ragdoll", female ? "hu_f_ragdoll.phs" : "hu_m_ragdoll_5.phs"));
         Assert.SkipWhen(!File.Exists(skeletonPath) || !File.Exists(meshPath) || !File.Exists(ragdollPath), "Installed human mesh, skeleton or ragdoll not found");
         var rig = new SkeletonRig(OgreSkeletonReader.ReadFile(skeletonPath));
         var assets = new AssetLocator(install);
@@ -160,9 +161,10 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
         var records = new FcsFile();
         var race = new FcsRecord { StringId = "skin-test-race", RecordType = FcsRecordType.RACE, Name = "Skin test race", Flags = 0x10 };
         race.Filenames["male mesh"] = meshPath;
+        race.Filenames["female mesh"] = meshPath;
         records.Records.Add(race);
         database.Apply(records, "skin-test.mod");
-        var look = CharacterAppearance.Build(database, install.Root, "skin-test-race", new() { Female = false, Naked = true });
+        var look = CharacterAppearance.Build(database, install.Root, "skin-test-race", new() { Female = female, Naked = true });
         var rigs = new CharacterRigs(database, path => assets.Find(path), path => assets.Find(path));
         return (rig, definition, model, setup, rigs, look);
     }

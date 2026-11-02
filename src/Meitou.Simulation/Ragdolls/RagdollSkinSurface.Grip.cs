@@ -13,8 +13,10 @@ internal sealed partial class RagdollSkinSurface
     }
 
     internal Grip? FindGrip(CharacterAppearance look, SkeletonRig rig, Vector4 plane, int side, bool fullBody, int[] components, int root,
-        RagdollDefinition definition, Matrix4x4[] skin, Vector3 palm, float[]? limbCuts = null)
+        RagdollDefinition definition, Matrix4x4[] skin, Vector3 palm, float[]? limbCuts = null, Matrix4x4? boundsFrame = null)
     {
+        var frame = boundsFrame ?? Matrix4x4.Identity;
+        if (!Matrix4x4.Invert(frame, out var toBounds)) { frame = Matrix4x4.Identity; toBounds = Matrix4x4.Identity; }
         var deltas = new Dictionary<(ushort, uint), Vector3>();
         int morphTarget = morphs.Where(p => p.Target > 0).Select(p => (int)p.Target).DefaultIfEmpty(-1).First();
         bool cutHorns = look.Character?.GetBool("shaved") == true && morphs.Any(p => p.Name == "bone_horns_top_short");
@@ -26,7 +28,7 @@ internal sealed partial class RagdollSkinSurface
         Grip? best = null;
         float nearest = float.MaxValue;
         var surfaces = new List<(Point[] Points, Vector3[] Posed, Vector3[] Polygon)>();
-        float minimumY = float.MaxValue, maximumY = float.MinValue;
+        var minimum = new Vector3(float.MaxValue); var maximum = new Vector3(float.MinValue);
         foreach (var triangle in triangles)
         {
             Point[] original = [triangle.A, triangle.B, triangle.C];
@@ -77,8 +79,9 @@ internal sealed partial class RagdollSkinSurface
             surfaces.Add((shaped, posed, [.. polygon]));
             foreach (var bary in polygon)
             {
-                float y = posed[0].Y * bary.X + posed[1].Y * bary.Y + posed[2].Y * bary.Z;
-                minimumY = MathF.Min(minimumY, y); maximumY = MathF.Max(maximumY, y);
+                var point = posed[0] * bary.X + posed[1] * bary.Y + posed[2] * bary.Z;
+                var inFrame = Vector3.Transform(point, toBounds);
+                minimum = Vector3.Min(minimum, inFrame); maximum = Vector3.Max(maximum, inFrame);
             }
             void Clip(Func<Vector3, float> distance)
             {
@@ -102,28 +105,22 @@ internal sealed partial class RagdollSkinSurface
                 return side * (Vector3.Dot(new(plane.X, plane.Y, plane.Z), p.Position) + plane.W);
             }
         }
-        float upper = Carrying.CarryPose.UpperGripBand(minimumY, maximumY);
+        var centre = Vector3.Transform((minimum + maximum) * 0.5f, frame);
+        float armDistance = float.MaxValue;
         foreach (var surface in surfaces)
         {
             var posed = surface.Posed;
             Vector3 Posed(Vector3 bary) => posed[0] * bary.X + posed[1] * bary.Y + posed[2] * bary.Z;
-            var polygon = new List<Vector3>();
-            for (int i = 0; i < surface.Polygon.Length; i++)
-            {
-                var a = surface.Polygon[i]; var b = surface.Polygon[(i + 1) % surface.Polygon.Length];
-                float da = Posed(a).Y - upper, db = Posed(b).Y - upper;
-                if (da >= 0) polygon.Add(a);
-                if ((da < 0) != (db < 0)) polygon.Add(Vector3.Lerp(a, b, da / (da - db)));
-            }
-            for (int i = 1; i + 1 < polygon.Count; i++)
+            var polygon = surface.Polygon;
+            for (int i = 1; i + 1 < polygon.Length; i++)
             {
                 var a = Posed(polygon[0]); var b = Posed(polygon[i]); var c = Posed(polygon[i + 1]);
                 if (Vector3.Cross(b - a, c - a).LengthSquared() < 1e-10f) continue;
-                var bary = ClosestBarycentric(palm, a, b, c);
+                var bary = ClosestBarycentric(centre, a, b, c);
                 var point = a * bary.X + b * bary.Y + c * bary.Z;
-                float distance = Vector3.DistanceSquared(point, palm);
-                if (distance >= nearest) continue;
-                nearest = distance;
+                float distance = Vector3.DistanceSquared(point, centre), toArm = Vector3.DistanceSquared(point, palm);
+                if (distance > nearest + 1e-5f || MathF.Abs(distance - nearest) <= 1e-5f && toArm >= armDistance) continue;
+                nearest = distance; armDistance = toArm;
                 var originalBary = polygon[0] * bary.X + polygon[i] * bary.Y + polygon[i + 1] * bary.Z;
                 var rootWeights = surface.Points.Select(point =>
                 {

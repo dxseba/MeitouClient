@@ -29,10 +29,10 @@ sealed partial class GameHost
     {
         if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe) is not { } corpse) return null;
         return (corpse.Position + (corpse.TorsoPositivePosition ?? corpse.Position)) * 0.5f
-            + new Vector3(0, corpse.CarriedBy.IsNone && corpse.TorsoPositiveCarriedBy.IsNone ? 4 : 12, 0);
+            + new Vector3(0, 4, 0);
     }
 
-    // Measure the rendered hand against actual retained skin, after DrawWorld has posed both characters.
+    // Measure the rendered upper-arm support against retained skin, after both characters are posed.
     void ReportTorsoGripContact(int frame)
     {
         if (gpu.Characters is not { } renderer
@@ -42,12 +42,13 @@ sealed partial class GameHost
             var holder = side > 0 ? body.TorsoPositiveCarriedBy : body.CarriedBy;
             if (holder.IsNone) continue;
             long carrierKey = DrawKey(holder);
-            if (renderer.BonePosition(carrierKey, "Bip01 L Hand") is not { } hand) continue;
-            var finger = renderer.BonePosition(carrierKey, "Bip01 L Finger0") ?? renderer.BonePosition(carrierKey, "Bip01 L Finger1");
-            var palm = CarryPose.PalmPoint(hand, finger, renderer.BonePosition(carrierKey, "Bip01 L Forearm"));
-            var surface = renderer.ClosestTorsoSurfacePoint(TorsoDrawKey(body.Id, side), new(cut.Plane, side > 0 ? 1 : -1, cut.FullBody), palm);
+            if (renderer.BonePosition(carrierKey, "Bip01 L UpperArm") is not { } shoulder
+                || renderer.BonePosition(carrierKey, "Bip01 L Forearm") is not { } elbow) continue;
+            var support = CarryPose.BicepsSupport(shoulder, elbow);
+            long pieceKey = TorsoDrawKey(body.Id, side);
+            var surface = renderer.ClosestTorsoSurfacePoint(pieceKey, new(cut.Plane, side > 0 ? 1 : -1, cut.FullBody), support);
             if (surface is { } at)
-                Console.WriteLine($"carry grip   frame {frame} side {side}: palm-to-skin {Vector3.Distance(palm, at):F4}, palm {palm}, surface {at}");
+                Console.WriteLine($"carry grip   frame {frame} side {side}: biceps-to-skin {Vector3.Distance(support, at):F4}, support {support}, surface {at}; pelvis {renderer.BonePosition(pieceKey, "Bip01 Pelvis")}, L foot {renderer.BonePosition(pieceKey, "Bip01 L Foot")}, R foot {renderer.BonePosition(pieceKey, "Bip01 R Foot")}");
         }
     }
 
@@ -66,6 +67,12 @@ sealed partial class GameHost
             if (!player.ScenePickUpTorso(sandboxFoe, side, points))
                 throw new InvalidOperationException($"The rendered torso half {side} could not be picked through its real context verb.");
             AdvanceScene(120);
+            if (frame == 1)
+            {
+                var at = session.CurrentSnapshot.Characters.First(c => c.Id == sandboxHero).Position;
+                world.Commands.Enqueue(new MoveOrder([sandboxHero], at + new Vector3(12, 0, -10)) { Tick = world.Tick });
+                AdvanceScene(100);   // Keep the first holder from occluding the second rendered pickup.
+            }
             if (frame == 2)
             {
                 var at = session.CurrentSnapshot.Characters.First(c => c.Id == sandboxHero).Position;

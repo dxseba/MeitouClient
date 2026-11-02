@@ -17,7 +17,7 @@ public sealed partial class RagdollSystem
         }
         bool negativeCarried = !cold.CarriedBy.IsNone;
         UpdateTorsoPieceCarry(fragments.Negative, cold, negativeCarried, Placement(fragments.Negative, cold, hot),
-            ref fragments.NegativeCarried, ref fragments.NegativeCarriedBodies, fragments, -1, PalmOf(world.Characters, cold.CarriedBy));
+            ref fragments.NegativeCarried, ref fragments.NegativeCarriedBodies, fragments, -1, BicepsOf(world.Characters, cold.CarriedBy));
 
         var table = world.Characters;
         bool positiveCarried = table.TryResolveNext(cold.TorsoPositiveCarriedBy, out int holder);
@@ -36,7 +36,7 @@ public sealed partial class RagdollSystem
             cold.TorsoPositiveYaw = carrier.Yaw;
         }
         UpdateTorsoPieceCarry(fragments.Positive, cold, positiveCarried, placement,
-            ref fragments.PositiveCarried, ref fragments.PositiveCarriedBodies, fragments, 1, PalmOf(table, cold.TorsoPositiveCarriedBy),
+            ref fragments.PositiveCarried, ref fragments.PositiveCarriedBodies, fragments, 1, BicepsOf(table, cold.TorsoPositiveCarriedBy),
             release: cold.TorsoPositiveReleaseAt is not null, forceCarriedPose: true);
         if (!positiveCarried && cold.TorsoPositiveReleaseAt is { } released)
         {
@@ -88,7 +88,7 @@ public sealed partial class RagdollSystem
         }
         if (!carried) return;
         var target = forceCarriedPose ? AnimatedTorsoCarry(piece, cold, placement) : Animated(piece, cold, placement);
-        if (palm is { } hand) AlignTorsoGrip(fragments, piece, cold, side, target, carriedBodies!, hand);
+        if (palm is { } hand) AlignTorsoGrip(fragments, piece, cold, side, target, carriedBodies!, hand, placement);
         for (int b = 0; b < piece.Bodies.Length; b++)
         {
             if (!carriedBodies![b] || piece.Bodies[b] is not { } handle) continue;

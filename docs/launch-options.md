@@ -78,7 +78,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--battle-width <a>[,<b>]` | counts | rows as given | Fighters per row for each side (one value: both). |
 | `--battle-no-fear` | | off | Nobody in the battle runs away. |
 | `--scene <name>` | fight, turret, bed, acid, menu, bisect, weapon-blood, torso-carry, downed-attack | none | With `--screenshot`: stage a scene and save frames (`bisect` uses `--sandbox 2 --sandbox-bisect`; `weapon-blood` follows ordinary sandbox combat and logs hip/back item coverage; other scenes usually use `--load`). |
-| `--scene torso-carry` | with `--sandbox 3 --sandbox-bisect` | | Five frames exercise rendered half selection, positive pickup, both halves walking with separate carriers, and each put-down; logs include rendered palm-to-skin distance. Use `--scene-frames 5`. Add `--sandbox-sever --sandbox-part left-leg` (or right-leg/left-arm/right-arm) to remove that limb before the torso cut. |
+| `--scene torso-carry` | with `--sandbox 3 --sandbox-bisect` | | Five frames exercise rendered half selection, first-half pickup, both halves walking with separate carriers, and each put-down; logs include rendered biceps-to-skin distance and pelvis/foot positions. Use `--scene-frames 5`. Add `--sandbox-sever --sandbox-part left-leg` (or right-leg/left-arm/right-arm) to remove that limb before the torso cut. |
 | `--scene downed-attack` | with `--sandbox 2` | | Knocks out a living enemy, issues the real Attack body part submenu and captures its first real melee hit; excludes dummy wounds. |
 | `--ui-panel body-parts` | with a scene | off | Show the ordinary Alt body-part labels in native scene captures without keyboard input. |
 | `--scene-frames <n>` | 1 to 200 | 8 | Frames saved. |

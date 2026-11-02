@@ -19,7 +19,7 @@ public class RagdollTorsoGripTests
     [InlineData(0, -1)] [InlineData(0, 1)]
     [InlineData(1, -1)] [InlineData(1, 1)]
     [InlineData(2, -1)] [InlineData(2, 1)]
-    public void A_retained_half_contacts_the_palm_and_keeps_the_same_grip_while_its_carrier_moves_and_turns(int style, int side)
+    public void A_retained_half_rests_on_the_biceps_and_keeps_the_same_grip_while_its_carrier_moves_and_turns(int style, int side)
     {
         var plane = style switch { 0 => new Vector4(0, 1, 0, -10), 1 => new(1, 0, 0, 0.25f), _ => new(0.6f, 0.7f, 0.2f, -7.7f) };
         plane /= new Vector3(plane.X, plane.Y, plane.Z).Length();
@@ -42,11 +42,18 @@ public class RagdollTorsoGripTests
             scene.World.RunTick();
             var scratch = scene.Setup.Rig.Rent();
             Vector3 palm;
+            RigidTransform[] reference;
             try
             {
                 scratch.PoseDerived(scene.Setup.Shape, []);
-                palm = CarryPose.PalmPoint(scratch.DerivedPosition[3], null, scratch.DerivedPosition[2]);
+                palm = CarryPose.BicepsSupport(scratch.DerivedPosition[1], scratch.DerivedPosition[2]);
                 palm = Vector3.Transform(palm, CharacterRigs.Placement(scene.Setup, position, yaw, 1));
+                var attachment=side>0?scene.Snapshot.TorsoPositiveCarry:scene.Snapshot.Carry;
+                var heldPlacement=(attachment??CarryPose.Fallback).World(position,yaw);
+                var placement=CharacterRigs.Placement(scene.Setup,heldPlacement.Position,heldPlacement.Rotation,1);
+                var rotation=Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with{M41=0,M42=0,M43=0}));
+                reference=own.Bodies.Select(body=>body.BoneInBody.Inverse().Then(new RigidTransform(
+                    Vector3.Transform(scratch.DerivedPosition[body.Bone],placement),Quaternion.Normalize(rotation*scratch.DerivedRotation[body.Bone])))).ToArray();
             }
             finally { scene.Setup.Rig.Return(scratch); }
             var held = State(side);
@@ -59,9 +66,11 @@ public class RagdollTorsoGripTests
                 foreach (var joint in own.Joints)
                     if (connected.Contains(joint.A) != connected.Contains(joint.B)) changed |= connected.Add(joint.A) | connected.Add(joint.B);
             } while (changed);
-            float mass = connected.Sum(i => own.Bodies[i].Mass);
-            float centreY = connected.Sum(i => held.Pose[i].Position.Y * own.Bodies[i].Mass) / mass;
-            Assert.True(centreY < palm.Y, $"style={style},side={side}: mass centre {centreY} must hang below palm {palm.Y}");
+            foreach(int b in connected)
+            {
+                Assert.True(MathF.Abs(Quaternion.Dot(reference[b].Rotation,held.Pose[b].Rotation))>.99999f);
+                Assert.InRange(Vector3.Distance(reference[b].Position-reference[own.Root].Position,held.Pose[b].Position-held.Pose[own.Root].Position),0,.001f);
+            }
             Assert.True(distances.Min() < 0.001f, $"style={style},side={side}: nearest surface {distances.Min()}");
             if (heldBody < 0)
             {
@@ -92,8 +101,8 @@ public class RagdollTorsoGripTests
         var grip = Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance, scene.Setup.Rig, new(1,0,0,0), 1, true,
             [0,0,0,0], 0, scene.SourceDefinition, skin, new(-1,0,2)));
         var point = grip.Posed(skin);
-        Assert.InRange(MathF.Abs(point.X), 0, 0.0001f);
-        Assert.InRange(point.Y, 1.3999f, 1.4001f);
+        Assert.InRange(point.X, 0.9999f, 1.0001f);
+        Assert.InRange(MathF.Abs(point.Y),0,.0001f);
         Assert.InRange(point.Z, 0.9999f, 1.0001f);
         skin[0] = Matrix4x4.CreateScale(1.5f, 0.7f, 2) * Matrix4x4.CreateRotationY(0.8f) * Matrix4x4.CreateTranslation(7,4,-3);
         Assert.InRange(Vector3.Distance(grip.Posed(skin), Vector3.Transform(point, skin[0])), 0, 0.0001f);
@@ -119,7 +128,7 @@ public class RagdollTorsoGripTests
         var skin=Enumerable.Repeat(Matrix4x4.Identity,4).ToArray();
         var grip=Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance!,scene.Setup.Rig,new(0,1,0,100),1,true,
             [0,0,0,0],0,scene.SourceDefinition,skin,new(0,11,1),[13.8f,-1,-1,-1]));
-        Assert.InRange(grip.Posed(skin).Y,13.7999f,13.8001f);
+        Assert.InRange(grip.Posed(skin).Y,13.8999f,13.9001f);
     }
 
     [Fact]
@@ -181,9 +190,9 @@ public class RagdollTorsoGripTests
         var surface=RagdollSkinSurface.Read(Mesh([new(-1,14,0),new(1,14,0),new(0,18,0)],[1,1,1]));
         var grip=Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance!,rig,new(0,1,0,-17.8f),1,false,
             [0,0],0,definition,[Matrix4x4.Identity,Matrix4x4.Identity],new(0,15,1)));
-        Assert.InRange(grip.Posed([Matrix4x4.Identity,Matrix4x4.Identity]).Y,17.7999f,17.8001f);
+        Assert.InRange(grip.Posed([Matrix4x4.Identity,Matrix4x4.Identity]).Y,17.8999f,17.9001f);
     }
-    internal static void AssertPalmContact(Scene scene,int side,CharacterId carrier)
+    internal static void AssertBicepsContact(Scene scene,int side,CharacterId carrier)
     {
         var cut=scene.Cold.TorsoBisection!.Value;
         var definition=Assert.IsType<RagdollDefinition>(RagdollCut.Build(scene.SourceDefinition,cut.Plane,side,cut.FullBody));
@@ -201,13 +210,34 @@ public class RagdollTorsoGripTests
         try
         {
             scratch.PoseDerived(scene.Setup.Shape,[]);
-            var local=CarryPose.PalmPoint(scratch.DerivedPosition[3],null,scratch.DerivedPosition[2]);
+            var local=CarryPose.BicepsSupport(scratch.DerivedPosition[1],scratch.DerivedPosition[2]);
             var shown=Assert.Single(scene.World.Snapshot.Characters,c=>c.Id==carrier);
             var palm=Vector3.Transform(local,CharacterRigs.Placement(scene.Setup,shown.Position,shown.Yaw,1));
-            float gap=connected.SelectMany(b=>RagdollCut.Points(definition.Bodies[b]).Select(p=>Vector3.Distance(palm,held.Pose[b].Apply(p)))).Min();
+            float gap=connected.Min(b=>Distance(definition.Bodies[b],held.Pose[b].Inverse().Apply(palm)));
             Assert.InRange(gap,0,.001f);
         }
         finally{scene.Setup.Rig.Return(scratch);}
+    }
+    [Fact]
+    public void Middle_contact_uses_the_full_3D_extent_instead_of_grabbing_a_horizontal_endpoint()
+    {
+        using var scene=new Scene();
+        var surface=RagdollSkinSurface.Read(Mesh([new(1,-1,-10),new(1,1,-10),new(1,1,10),new(1,-1,-10),new(1,1,10),new(1,-1,10)],[0,0,0,0,0,0]));
+        var skin=Enumerable.Repeat(Matrix4x4.Identity,4).ToArray();
+        var grip=Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance!,scene.Setup.Rig,new(0,1,0,100),1,true,
+            [0,0,0,0],0,scene.SourceDefinition,skin,new(1,0,10)));
+        Assert.InRange(Vector3.Distance(grip.Posed(skin),new(1,0,0)),0,.0001f);
+    }
+    [Fact]
+    public void Middle_reference_rotates_with_the_original_carried_model_frame()
+    {
+        using var scene=new Scene();
+        var surface=RagdollSkinSurface.Read(Mesh([new(-2,-2,0),new(2,-2,0),new(0,2,0)],[0,0,0]));
+        var frame=Matrix4x4.CreateRotationZ(.7f)*Matrix4x4.CreateRotationY(.8f)*Matrix4x4.CreateTranslation(7,4,-3);
+        var skin=Enumerable.Repeat(frame,4).ToArray();
+        var grip=Assert.IsType<RagdollSkinSurface.Grip>(surface.FindGrip(scene.Cold.Appearance!,scene.Setup.Rig,new(0,1,0,100),1,true,
+            [0,0,0,0],0,scene.SourceDefinition,skin,new(20,4,-3),boundsFrame:frame));
+        Assert.InRange(Vector3.Distance(grip.Posed(skin),Vector3.Transform(Vector3.Zero,frame)),0,.0001f);
     }
     static OgreMesh Mesh(Vector3[] positions,int[] bones)
     {
@@ -222,6 +252,29 @@ public class RagdollTorsoGripTests
     {
         if(body.Type==PhysicsShapeType.Box){var q=Vector3.Abs(local)-body.Size*0.5f;return MathF.Abs(Vector3.Max(q,Vector3.Zero).Length()+MathF.Min(MathF.Max(q.X,MathF.Max(q.Y,q.Z)),0));}
         if(body.Type is PhysicsShapeType.Sphere or PhysicsShapeType.Capsule){float length=body.Type==PhysicsShapeType.Capsule?body.Size.Y*.5f:0;return MathF.Abs(Vector3.Distance(local,new(0,Math.Clamp(local.Y,-length,length),0))-body.Size.X);}
-        return RagdollCut.Points(body).Min(p=>Vector3.Distance(p,local));
+        var points=RagdollCut.Points(body);
+        var pool=new BepuUtilities.Memory.BufferPool();
+        try
+        {
+            BepuPhysics.Collidables.ConvexHullHelper.ComputeHull(points,pool,out var hull);
+            try
+            {
+                float nearest=float.MaxValue, outside=0;
+                var centre=points.Aggregate(Vector3.Zero,(sum,p)=>sum+p)/points.Length;
+                for(int f=0;f<hull.FaceStartIndices.Length;f++)
+                {
+                    hull.GetFace(f,out var face);
+                    if(face.VertexCount<3)continue;
+                    var a=points[face[0]];var b=points[face[1]];var c=points[face[2]];
+                    var normal=Vector3.Normalize(Vector3.Cross(b-a,c-a));
+                    if(Vector3.Dot(normal,a-centre)<0)normal=-normal;
+                    float distance=Vector3.Dot(normal,local-a);
+                    outside=MathF.Max(outside,distance);nearest=MathF.Min(nearest,MathF.Abs(distance));
+                }
+                return MathF.Max(nearest,outside);
+            }
+            finally{hull.Dispose(pool);}
+        }
+        finally{pool.Clear();}
     }
 }

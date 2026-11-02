@@ -37,7 +37,7 @@ public partial class RagdollInstalledSkinTests
     [InlineData(TorsoBisectionStyle.Transverse,2)]
     [InlineData(TorsoBisectionStyle.Vertical,1)]
     [InlineData(TorsoBisectionStyle.Oblique,2)]
-    public void Installed_cut_halves_keep_visible_skin_at_the_palm_through_walk_jog_and_turning(TorsoBisectionStyle style,int direction)
+    public void Installed_cut_halves_keep_their_original_carry_pose_while_translated_to_a_middle_biceps_contact_through_walk_jog_and_turning(TorsoBisectionStyle style,int direction)
     {
         var(rig,definition,model,setup,rigs,look)=Installed();
         var walk=rig.Skeleton.Animations.FirstOrDefault(a=>a.Name.StartsWith("walk",StringComparison.OrdinalIgnoreCase)&&!a.Name.Contains("carrying",StringComparison.OrdinalIgnoreCase));
@@ -82,9 +82,9 @@ public partial class RagdollInstalledSkinTests
                     var layers=animation.Publish(carrierAnimation,[]).Where(l=>rig.Layer(rigs.Database,l.Name)is not null).Select(l=>new ActiveLayer(rig.Layer(rigs.Database,l.Name)!,l.Time,l.Weight)).ToList();
                     foreach(var(def,time)in setup.Fixed)layers.Add(new(def,time,1));
                     scratch.PoseDerived(setup.Shape,layers.ToArray());
-                    int hand=Assert.IsType<int>(rig.Handle("Bip01 L Hand"));
-                    Vector3? Bone(string name)=>rig.Handle(name)is{}h?scratch.DerivedPosition[h]:null;
-                    var localPalm=CarryPose.PalmPoint(scratch.DerivedPosition[hand],Bone("Bip01 L Finger0")??Bone("Bip01 L Finger1"),Bone("Bip01 L Forearm"));
+                    int upperArm=Assert.IsType<int>(rig.Handle("Bip01 L UpperArm"));
+                    int forearm=Assert.IsType<int>(rig.Handle("Bip01 L Forearm"));
+                    var localPalm=CarryPose.BicepsSupport(scratch.DerivedPosition[upperArm],scratch.DerivedPosition[forearm]);
                     var shown=Assert.Single(world.Snapshot.Characters,c=>c.Id==id);
                     var halves=Assert.IsType<TorsoRagdollPose>(shown.TorsoRagdoll);
                     var held=(shown.Carry??CarryPose.Fallback).World(shown.Position,shown.Yaw);
@@ -97,15 +97,32 @@ public partial class RagdollInstalledSkinTests
                         var skin=new Matrix4x4[rig.BoneCount];
                         scratch.Pose(setup.Shape,[],skin,pose);
                         float gap=VisibleContactGap(source,groups,new(cut.Plane,side,cut.FullBody),skin,placement,palm,pose.Components!);
-                        Assert.True(gap<.005f,$"{style}/{side}/{gait.Name}/{phase}: palm/skin gap {gap:F6}");
+                        Assert.True(gap<.005f,$"{style}/{side}/{gait.Name}/{phase}: biceps/skin gap {gap:F6}");
                         var both=Assert.IsType<SavedTorsoRagdoll>(Assert.IsType<SavedRagdoll>(physics.SaveState(id)).Torso);
                         var piece=side>0?both.Positive:both.Negative;
                         var partial=definitions[side];
                         int component=pose.Components![partial.Bodies[partial.Root].Bone];
-                        var heldBodies=Enumerable.Range(0,partial.Bodies.Length).Where(b=>pose.Components[partial.Bodies[b].Bone]==component).ToArray();
-                        float mass=heldBodies.Sum(b=>partial.Bodies[b].Mass);
-                        float centreY=heldBodies.Sum(b=>piece.Pose[b].Position.Y*partial.Bodies[b].Mass)/mass;
-                        Assert.True(centreY<palm.Y,$"{style}/{side}/{gait.Name}/{phase}: held mass {centreY:F4} must hang below palm {palm.Y:F4}");
+                        var carryLayers=new List<ActiveLayer>();
+                        if(rig.Layer(rigs.Database,CarrySystem.CarriedClip)is{}carried)carryLayers.Add(new(carried,0,1));
+                        foreach(var(def,time)in setup.Fixed)carryLayers.Add(new(def,time,1));
+                        var referenceScratch=rig.Rent();
+                        try
+                        {
+                            referenceScratch.PoseDerived(setup.Shape,carryLayers.ToArray());
+                            var attach=(side>0?shown.TorsoPositiveCarry:shown.Carry)??CarryPose.Fallback;
+                            var referenceAt=attach.World(holder.Position,holder.Yaw);
+                            var referencePlacement=CharacterRigs.Placement(setup,referenceAt.Position,referenceAt.Rotation,1);
+                            var referenceTurn=Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(referencePlacement with{M41=0,M42=0,M43=0}));
+                            var reference=partial.Bodies.Select(body=>body.BoneInBody.Inverse().Then(new RigidTransform(
+                                Vector3.Transform(referenceScratch.DerivedPosition[body.Bone],referencePlacement),
+                                Quaternion.Normalize(referenceTurn*referenceScratch.DerivedRotation[body.Bone])))).ToArray();
+                            foreach(int b in Enumerable.Range(0,partial.Bodies.Length).Where(b=>pose.Components[partial.Bodies[b].Bone]==component))
+                            {
+                                Assert.True(MathF.Abs(Quaternion.Dot(reference[b].Rotation,piece.Pose[b].Rotation))>.99999f);
+                                Assert.InRange(Vector3.Distance(reference[b].Position-reference[partial.Root].Position,piece.Pose[b].Position-piece.Pose[partial.Root].Position),0,.001f);
+                            }
+                        }
+                        finally{rig.Return(referenceScratch);}
                     }
                 }
         }
@@ -115,20 +132,44 @@ public partial class RagdollInstalledSkinTests
     static float VisibleContactGap(Vertex[] source,uint[] groups,CharacterTorsoCut cut,Matrix4x4[] skin,Matrix4x4 placement,Vector3 palm,int[] components)
     {
         float nearest=float.MaxValue;
+        int root=components[0];
         for(int i=0;i+2<source.Length;i+=3)
         {
             var a=source[i];var b=source[i+1];var c=source[i+2];
+            var vertices=new[]{a,b,c};
+            var votes=new Dictionary<int,float>();
+            var shares=new float[3];
+            for(int v=0;v<3;v++)for(int k=0;k<4;k++)
+            {
+                int bone=(int)(vertices[v].Bones>>(k*8)&255);
+                if(bone>=components.Length||vertices[v].Weights[k]<=0)continue;
+                int component=components[bone];
+                votes[component]=votes.GetValueOrDefault(component)+vertices[v].Weights[k];
+                if(component==root)shares[v]+=vertices[v].Weights[k];
+            }
+            if(votes.Count==0||votes.MaxBy(v=>v.Value).Key!=root)continue;
             var p=new[]{Vector3.Transform(Skin(a,skin),placement),Vector3.Transform(Skin(b,skin),placement),Vector3.Transform(Skin(c,skin),placement)};
             var bands=new[]{TorsoCutSurface.Band(a.Position,TorsoCutSurface.Group(a,groups),cut),TorsoCutSurface.Band(b.Position,TorsoCutSurface.Group(b,groups),cut),TorsoCutSurface.Band(c.Position,TorsoCutSurface.Group(c,groups),cut)};
-            var polygon=new List<(Vector3 Position,float Band)>{(p[0],bands[0]),(p[1],bands[1]),(p[2],bands[2])};
-            var kept=new List<Vector3>();
-            for(int k=0;k<3;k++)
+            var polygon=new List<(Vector3 Position,float Band,float Root)>{(p[0],bands[0],shares[0]),(p[1],bands[1],shares[1]),(p[2],bands[2],shares[2])};
+            Clip(v=>v.Band);Clip(v=>v.Root-.5f);
+            var kept=polygon.Select(v=>v.Position).ToArray();
+            void Clip(Func<(Vector3 Position,float Band,float Root),float> band)
             {
-                var x=polygon[k];var y=polygon[(k+1)%3];
-                if(x.Band>=0)kept.Add(x.Position);
-                if((x.Band<0)!=(y.Band<0))kept.Add(Vector3.Lerp(x.Position,y.Position,x.Band/(x.Band-y.Band)));
+                var result=new List<(Vector3 Position,float Band,float Root)>();
+                for(int k=0;k<polygon.Count;k++)
+                {
+                    var x=polygon[k];var y=polygon[(k+1)%polygon.Count];
+                    float dx=band(x),dy=band(y);
+                    if(dx>=0)result.Add(x);
+                    if((dx<0)!=(dy<0))
+                    {
+                        float t=dx/(dx-dy);
+                        result.Add((Vector3.Lerp(x.Position,y.Position,t),x.Band+(y.Band-x.Band)*t,x.Root+(y.Root-x.Root)*t));
+                    }
+                }
+                polygon=result;
             }
-            for(int k=1;k+1<kept.Count;k++)nearest=MathF.Min(nearest,FoliageLodBuilder.DistanceSquared(palm,kept[0],kept[k],kept[k+1]));
+            for(int k=1;k+1<kept.Length;k++)nearest=MathF.Min(nearest,FoliageLodBuilder.DistanceSquared(palm,kept[0],kept[k],kept[k+1]));
         }
         return MathF.Sqrt(nearest);
     }

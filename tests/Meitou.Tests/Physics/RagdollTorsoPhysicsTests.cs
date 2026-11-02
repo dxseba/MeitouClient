@@ -204,7 +204,7 @@ public class RagdollTorsoPhysicsTests
         scene.Cold.CarriedBy = carrier;
         scene.World.RunTick();
         var carried = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
-        RagdollTorsoGripTests.AssertPalmContact(scene,-1,carrier);
+        RagdollTorsoGripTests.AssertBicepsContact(scene,-1,carrier);
         Assert.InRange(scene.BoneWorld(carried.Negative, 2).Y, 0.1f, 3.5f);
         carrierCold.Carrying = CharacterId.None;
         scene.Cold.CarriedBy = CharacterId.None;
@@ -228,7 +228,7 @@ public class RagdollTorsoPhysicsTests
         scene.World.RunTick();
         var held = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
         var lifted = scene.BoneWorld(held.Positive, 0);
-        RagdollTorsoGripTests.AssertPalmContact(scene,1,carrier);
+        RagdollTorsoGripTests.AssertBicepsContact(scene,1,carrier);
         Assert.True(lifted.X > 80);
         Assert.InRange(Vector3.Distance(ground, scene.BoneWorld(held.Negative, 0)), 0, 0.1f);
         Assert.Equal(carrier, scene.Snapshot.TorsoPositiveCarriedBy);
@@ -254,8 +254,8 @@ public class RagdollTorsoPhysicsTests
         var held = Assert.IsType<TorsoRagdollPose>(scene.Snapshot.TorsoRagdoll);
         var negativeAt = scene.BoneWorld(held.Negative, 0);
         var positiveAt = scene.BoneWorld(held.Positive, 0);
-        RagdollTorsoGripTests.AssertPalmContact(scene,-1,negativeCarrier);
-        RagdollTorsoGripTests.AssertPalmContact(scene,1,positiveCarrier);
+        RagdollTorsoGripTests.AssertBicepsContact(scene,-1,negativeCarrier);
+        RagdollTorsoGripTests.AssertBicepsContact(scene,1,positiveCarrier);
         Assert.True(Vector3.Distance(negativeAt, positiveAt) > 60);
         Assert.InRange(scene.BoneWorld(held.Negative, 2).Y, 0.1f, 3.5f);
         positiveCold.Carrying = CharacterId.None;

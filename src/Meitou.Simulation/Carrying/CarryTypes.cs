@@ -140,7 +140,11 @@ public static class CarryPose
         firstFinger is { } finger ? System.Numerics.Vector3.Lerp(hand, finger, 0.55f)
         : forearm is { } arm ? hand + (hand - arm) * 0.18f : hand;
 
-    /// <summary>A retained fragment is gripped near its top so its weight hangs below the raised palm.</summary>
+    /// <summary>The upper surface of the posed left biceps, between shoulder and elbow; its thickness follows the upper-arm length.</summary>
+    public static System.Numerics.Vector3 BicepsSupport(System.Numerics.Vector3 upperArm, System.Numerics.Vector3 forearm) =>
+        System.Numerics.Vector3.Lerp(upperArm, forearm, 0.5f) + System.Numerics.Vector3.UnitY * (System.Numerics.Vector3.Distance(upperArm, forearm) * 0.12f);
+
+    /// <summary>A retained fragment is supported near its top so its weight hangs below the upper arm.</summary>
     public static float UpperGripBand(float minimumY, float maximumY) => maximumY - MathF.Max(0.6f, (maximumY - minimumY) * 0.12f);
 
     // The offsets at height 0, 0.5 and 1 (units, the bone's frame).
