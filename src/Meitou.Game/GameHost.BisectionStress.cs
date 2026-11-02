@@ -88,6 +88,7 @@ sealed partial class GameHost
             + $"draw {F(draw)} ms, fill {F(fill)} ms, character update {F(renderer?.LastUpdateMs ?? 0)} ms, "
             + $"pose {F(renderer?.LastPoseMs ?? 0)} ms, allocated {allocated} bytes; "
             + $"discharges {robotDischarges.Count}, anchors {gpu.Particles?.RobotDischarges.Count ?? 0}, "
-            + $"electrical quads {gpu.Particles?.DrawnRobotDischargeQuads ?? 0}, smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}; {average}");
+            + $"electrical quads {gpu.Particles?.DrawnRobotDischargeQuads ?? 0}, smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}, "
+            + $"scrap bursts {robotScrapBursts}, scrap pieces {robotScrapPieces}; {average}");
     }
 }

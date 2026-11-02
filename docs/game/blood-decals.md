@@ -184,8 +184,11 @@ material hair-colour W (exact RGB24 integer; GPU layout unchanged).
 
 Humanoid robot cuts expose mechanical internals; organic anatomy, loose bowel and hit-born
 bone/flesh scraps and arterial neck sprays are omitted. Terrain marks keep the RACE fluid colour.
-One landed melee or execution Slash with positive finite delivered Cut emits `kenshi_sparks`
+One landed melee or execution Slash with positive finite delivered Cut starts bounded analytic sparks
 at the struck head, chest, stomach or limb bone (a part-height fallback before it is drawn).
+The robot-only spark batch uses the bundled 512×512 Kenney streak; it does not spawn the legacy
+`kenshi_sparks` burst. **Verified** (installed `Spark4X.png` PNG header and `kenshi_dustparticle2`
+material): that legacy burst magnifies a 4×4 texture. Ordinary parry sparks retain their game effect.
 Legacy unspecified slash events remain compatible; bolts, Thrust, Crush and secondary
 sever/death/bisection notifications emit none. Effects use display particles and change no
 damage, skill XP or simulation rolls. Restoring saved cuts does not replay impact sparks.
@@ -203,6 +206,11 @@ Sources without a cached contact use a
 bone/fallback point. The CC0 arc texture's source, author and hashes are in
 [Effects/CREDITS.md](../../src/Meitou.Rendering/Effects/CREDITS.md). These effects are transient;
 saved cut states do not replay or preserve their electrical lifetime.
+Severe robot destruction (torso bisection, head cut or limb severing) also throws 3–7 small metal
+fragments through the existing 400-piece debris pool: installed Iron Plates, Motor and Hinge
+meshes, shrunk and given deterministic visual-only velocities/spins. A bounded 64-marker history
+coalesces hit/sever notifications; pause, gravity, bounce and settling use the normal debris path.
+World changes clear the cached choices/history. Explicit `--no-particles` omits the extra burst; a Luckyren death with configured mechanical drops suppresses duplicate scrap.
 
 Flat sandbox/battle scenes load combat effects without weather/map placers; an explicit
 `--no-particles` still disables them.

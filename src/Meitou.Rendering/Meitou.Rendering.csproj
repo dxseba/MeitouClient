@@ -30,6 +30,8 @@
   <ItemGroup>
     <Content Include="Effects\robot-electric-arc.png" TargetPath="effects\robot-electric-arc.png"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Effects\robot-spark.png" TargetPath="effects\robot-spark.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Effects\CREDITS.md" TargetPath="effects\CREDITS.md"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

@@ -8,11 +8,12 @@ public sealed unsafe partial class ParticleRenderer
 {
     public List<RobotDischargeAnchor> RobotDischarges { get; } = [];
     public string RobotDischargeTexture { get; set; } = Path.Combine(AppContext.BaseDirectory, "effects", "robot-electric-arc.png");
+    public string RobotSparkTexture { get; set; } = Path.Combine(AppContext.BaseDirectory, "effects", "robot-spark.png");
     public int DrawnRobotDischargeQuads { get; private set; }
 
     readonly RobotDischargeStroke[] dischargeStrokes = new RobotDischargeStroke[RobotDischargeGeometry.QuadLimit];
     readonly UniformHandle dischargeMode;
-    ParticleMaterial? dischargeTextureMaterial;
+    ParticleMaterial? dischargeTextureMaterial, dischargeSparkMaterial;
     static readonly ParticleMaterial DischargeMaterial = new("robot electrical discharge", null, ParticleBlend.Add,
         DepthCheck: true, DepthWrite: false, Ambient: false, Vector4.One, Clamp: true);
 
@@ -23,9 +24,11 @@ public sealed unsafe partial class ParticleRenderer
         AddRobotSmoke(frame, eye, forward, nearPlane);
         if (scratch.Length < count) scratch = new ParticleInstance[Math.Max(count, scratch.Length * 2)];
         var arcTexture = RobotArcTexture();
+        var sparkTexture = RobotSparkImage();
         DrawnRobotDischargeQuads += AddRobotDischargeBatch(frame, eye, forward, nearPlane, count, true, arcTexture ?? tracerTexture,
             arcTexture is null ? 2 : 1);
-        DrawnRobotDischargeQuads += AddRobotDischargeBatch(frame, eye, forward, nearPlane, count, false, tracerTexture, 2);
+        DrawnRobotDischargeQuads += AddRobotDischargeBatch(frame, eye, forward, nearPlane, count, false,
+            sparkTexture ?? tracerTexture, sparkTexture is null ? 2 : 4);
     }
 
     int AddRobotDischargeBatch(IGpuFrame frame, Vector3 eye, Vector3 forward, float nearPlane, int count,
@@ -50,6 +53,14 @@ public sealed unsafe partial class ParticleRenderer
             Material = DischargeMaterial, Texture = texture, Divisor = 1, Tracer = true, Discharge = textureMode });
         drawnParticles += written;
         return written;
+    }
+
+    SampledImage? RobotSparkImage()
+    {
+        if (dischargeSparkMaterial?.Texture != RobotSparkTexture)
+            dischargeSparkMaterial = DischargeMaterial with { Texture = RobotSparkTexture };
+        var texture = TextureFor(dischargeSparkMaterial);
+        return ReferenceEquals(texture, white) ? null : texture;
     }
 
     SampledImage? RobotArcTexture()

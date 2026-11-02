@@ -19,17 +19,13 @@ sealed partial class GameHost
     void EmitRobotCutSparks(in CombatEvent hit, CharacterCold? victim)
     {
         if (!RobotCutEffects.EmitsSparks(hit, victim?.Race?.IsRobot == true)
-            || gpu?.Particles is not { } particles || victim?.Medical is not { } medical
+            || gpu?.Particles is null || victim?.Medical is not { } medical
             || hit.Part < 0 || hit.Part >= medical.Parts.Count) return;
         var part = medical.Parts[hit.Part].Template;
         var at = gpu.Characters?.BonePosition(DrawKey(hit.Victim), RobotCutEffects.ImpactBone(part, hit.LowStrike))
             ?? hit.Position + new Vector3(0, RobotCutEffects.FallbackHeight(part), 0);
         if (!robotDischarges.Observe(hit, true, RobotDischargeClock, at, session.World.Seed)) return;
-        float length = hit.Direction.LengthSquared();
-        var travel = float.IsFinite(length) && length > 1e-6f ? hit.Direction / MathF.Sqrt(length) : Vector2.UnitX;
-        var along = Vector3.Normalize(new Vector3(travel.X, 0.45f, travel.Y));
-        float force = Math.Clamp(hit.Damage.Cut / 70, 0, 1);
-        particles.Burst(SparksSystem, at, Turn(Vector3.UnitZ, along), 0.16f, 1.1f + force * 0.7f, 1.2f);
+        // The bounded analytic source supplies the impact sparks too; the legacy 4x4 burst is visibly pixelated.
         robotSparkBursts++;
     }
 
@@ -126,6 +122,7 @@ sealed partial class GameHost
             || session.World.Characters.Cold(sandboxFoe.Slot)?.Race?.IsRobot != true) return;
         Console.WriteLine($"robot cut frame {frame}: spark bursts {robotSparkBursts}, discharges {robotDischarges.Count}, "
             + $"anchors {gpu.Particles?.RobotDischarges.Count ?? 0}, electrical quads {gpu.Particles?.DrawnRobotDischargeQuads ?? 0}, "
-            + $"smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}, organic bowel props {gutFalls.Count}");
+            + $"smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}, scrap bursts {robotScrapBursts}, "
+            + $"scrap pieces {robotScrapPieces}, organic bowel props {gutFalls.Count}");
     }
 }

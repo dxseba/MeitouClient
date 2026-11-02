@@ -121,7 +121,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         in float vSoft;
         out vec4 fragColour;
         uniform sampler2D uTexture;
-        uniform int uDischarge;                     // 1 horizontal arc, 2 spark (premultiplied additive), 3 alpha-blended soot
+        uniform int uDischarge;                     // 1 arc, 2 fallback spark, 3 alpha soot, 4 high-resolution spark; 1/2/4 premultiplied additive
         uniform sampler2D uSoftDepth;               // the scene's depth at this target's size (the Meitou fog switch), as a colour
         uniform vec4 uSoft;                         // x: 0 hard (the game's), 1 fade the alpha, 2 the colour and alpha (additive), 3 towards white (modulate); y, z: the depth slice's near, far; w: 1 when depth is 0..1
         uniform float uCoverageMax, uCoverageGain;
@@ -144,10 +144,12 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         void main()
         {
             // basic.hlsl: texture * colour * vertex colour. A recoloured burst (negative vertex rgb, Burst's recolour) takes that colour instead of the texture's hue, keeping its brightness.
-            vec4 t = uDischarge == 3 ? soot(vUv) : texture(uTexture, uDischarge == 1 ? vUv.yx : vUv);
+            vec2 uv = uDischarge == 1 ? vUv.yx : vUv;
+            if (uDischarge == 4) uv.x = 0.34 + uv.x * 0.32;   // discard the source streak's unused side padding
+            vec4 t = uDischarge == 3 ? soot(vUv) : texture(uTexture, uv);
             if (min(vColour.r, min(vColour.g, vColour.b)) < 0.0) t.rgb = vec3(max(t.r, max(t.g, t.b)));
             vec4 c = t * abs(vColour);
-            if (uDischarge == 1 || uDischarge == 2) c.rgb *= c.a;
+            if (uDischarge == 1 || uDischarge == 2 || uDischarge == 4) c.rgb *= c.a;
             // Meitou fog: dust and smoke lit as the scene is (the game's sprites are flat, and not fogged): darker where the sun is shadowed, brighter seen
             // towards the sun, then seen through the haze in front of them like the land behind; an additive sprite (fire) only dimmed by the haze.
             if (uLitFragment.x > 0.5 && uLitFragment.z < 1.5)
@@ -873,7 +875,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
                 program.Bind(textureSlot, d.Texture.Sampled());
                 program.Set(dischargeMode, d.Discharge);
                 // The soft fade by blend: an alpha sprite fades its alpha, an additive or colour-blended one its colour, a modulating one towards white.
-                int fade = softDepth is null || d.Discharge is 1 or 2 ? 0 : m.Blend switch
+                int fade = softDepth is null || d.Discharge is 1 or 2 or 4 ? 0 : m.Blend switch
                 {
                     ParticleBlend.Alpha => 1, ParticleBlend.Add or ParticleBlend.ColourBlend => 2, ParticleBlend.Modulate => 3, _ => 0,
                 };

@@ -164,6 +164,7 @@ sealed partial class GameHost
             woundQueue.Clear();
             wounds.Clear();
             ClearRobotDischarges();
+            ClearRobotCutDebris();
             DisposeGuts();
             gutsSpilled.Clear();
             severeHeads.Clear();
@@ -198,6 +199,7 @@ sealed partial class GameHost
             var victimData = world.Characters.IsAlive(e.Victim) ? world.Characters.Cold(e.Victim.Slot) : null;
             bool robot = victimData?.Race?.IsRobot == true;
             EmitRobotCutSparks(e, victimData);
+            EmitRobotCutDebris(e, victimData);
             uint bloodColour = victimData?.Race?.BloodColour ?? DefaultBloodColour;
             // A hit throws real drops along the blow, out of the wound.
             if (!robot && !o.NoParticles && e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && gpu?.Particles is { } drops)
