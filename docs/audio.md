@@ -568,9 +568,13 @@ absorbed melee hits against equipped armour use `Deflection` with its `Armor_Wor
 Flesh keeps the normal light/heavy impact and pain voice. Delivered damage and simulation rolls
 are unchanged; the existing absorbed-damage result supplies the contact flag.
 Small debris uses `Item_Drop` with `Meat`, `Building_Material` or `Robotic_Component` on a
-bounded positional object pool. Only first/strong contacts (speed >=5, first two bounces)
+separate eight-object contact pool. These otherwise 2D inventory events use a Meitou-only
+200-unit spatial override, quadratic distance fade and speed-scaled gain; ordinary authored
+positioning is unchanged. Only first/strong contacts (speed >=5, first two bounces)
 within footstep range may sound, with four per-frame and 35ms global limits; resting/paused
 pieces do not retrigger. World reset clears the contact limiter.
 **Verified** (installed SFX_General_Bank, offline mixes): Metal impact and Meat,
 Armor_Plating/Robotic_Component drops produce audio. `Impacts=Bone` has no matching branch;
 bone fragments therefore use the dry Building_Material drop rather than that silent value.
+**Observed** (offline contact mixes): opposite emitters pan to matching channels; an emitter beyond
+200 units is silent. `audio render ... @contact=radius,gain` exercises the override.

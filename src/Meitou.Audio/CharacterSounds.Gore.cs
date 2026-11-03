@@ -4,7 +4,8 @@ namespace Meitou.Audio;
 
 public sealed partial class CharacterSounds
 {
-    int debrisSoundsThisFrame;
+    const ulong DebrisPoolBase = 910_000;
+    int debrisSoundsThisFrame, debrisPoolAt;
     long lastDebrisSound = long.MinValue;
     public int DebrisSounds { get; private set; }
     public int MaterialImpacts { get; private set; }
@@ -38,7 +39,8 @@ public sealed partial class CharacterSounds
         if (lastDebrisSound != long.MinValue && System.Diagnostics.Stopwatch.GetElapsedTime(lastDebrisSound, now).TotalSeconds < 0.035) return;
         lastDebrisSound = now;
         debrisSoundsThisFrame++;
-        ulong id = pool[poolAt++ % pool.Length];
+        ulong id = DebrisPoolBase + (ulong)(debrisPoolAt++ % 8);
+        player.SetContactSpatialization(id, 200, Math.Clamp(speed / 10, 0.5f, 1.5f) * 10);
         player.SetPosition(id, at);
         player.SetSwitch("Inventory_Items", material, id);
         player.Post("Item_Drop", id);

@@ -650,6 +650,11 @@ public sealed partial class WwisePlayer : IDisposable
                 if (positioning.AttenuationId != 0 && player.objects.TryGetValue(positioning.AttenuationId, out var a)) attenuation = a as WwiseAttenuation;
                 player.gameObjects.TryGetValue(GameObject, out objectState);
             }
+            if (player.gameObjects.TryGetValue(GameObject, out var contact) && contact.SpatialRadius > 0)
+            {
+                placed3D = true;
+                objectState = contact;
+            }
             // The sends: the nearest node that sets user-defined sends (bit 2 overrides, bit 3 lists the buses) decides; a node that overrides with no buses sends nowhere.
             var sender = chain.Select(n => NodeOf(n)!).FirstOrDefault(n => (n.AuxBits & 0x0C) != 0);
             if (sender is not null)
@@ -793,6 +798,16 @@ public sealed partial class WwisePlayer : IDisposable
                     dry *= coneGain;
                     send *= coneGain;
                     lowPass += coneLowPass;
+                }
+            }
+            if (objectState is { SpatialRadius: > 0 } contactState)
+            {
+                voiceGain *= contactState.SpatialGain;
+                if (objectState.TryGetPlace(out var at, out _))
+                {
+                    float fade = Math.Clamp(1 - Vector3.Distance(at, Player.CurrentListener().Position) / (contactState.SpatialRadius * Player.Reach), 0, 1);
+                    dry *= fade * fade;
+                    send *= fade * fade;
                 }
             }
             (panLeft, panRight) = Spatial.PanGains(pan);

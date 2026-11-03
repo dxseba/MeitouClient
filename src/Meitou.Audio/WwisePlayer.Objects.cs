@@ -26,6 +26,7 @@ public sealed partial class WwisePlayer
         bool placed;
 
         /// <summary>Per-object game parameter values (override the global ones) and switch values: the audio thread's.</summary>
+        public float SpatialRadius, SpatialGain = 1;
         public readonly Dictionary<uint, float> Parameters = [];
         public readonly Dictionary<uint, uint> Switches = [];
 
@@ -81,6 +82,14 @@ public sealed partial class WwisePlayer
     /// object faces for attenuation cones; zero (the game's choice) means it has none. Cheap: no command is queued.
     /// </summary>
     public void SetPosition(ulong id, Vector3 position, Vector3 front = default) => ObjectState(id).Place(position, front);
+
+    /// <summary>Meitou-only world contacts can spatialize an otherwise 2D inventory event. Zero radius restores authored positioning.</summary>
+    public void SetContactSpatialization(ulong id, float radius, float gain = 1)
+    {
+        if (!float.IsFinite(radius) || !float.IsFinite(gain) || radius < 0 || gain < 0) throw new ArgumentOutOfRangeException(nameof(radius));
+        var state = ObjectState(id);
+        commands.Enqueue(() => { state.SpatialRadius = radius; state.SpatialGain = gain; });
+    }
 
     /// <summary>
     /// The listener: where the ears are and the way they face (<paramref name="front"/>, <paramref name="up"/> in the same world as the objects).

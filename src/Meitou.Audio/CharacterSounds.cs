@@ -197,6 +197,7 @@ public sealed partial class CharacterSounds
     public void Clear()
     {
         foreach (var e in entries.Values) player.UnregisterObject(e.Object);
+        for (ulong i = 0; i < 8; i++) player.UnregisterObject(DebrisPoolBase + i);
         entries.Clear();
         lastDebrisSound = long.MinValue;
         debrisSoundsThisFrame = 0;

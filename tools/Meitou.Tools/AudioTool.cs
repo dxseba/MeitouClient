@@ -36,7 +36,7 @@ static class AudioTool
     {
         if (args.Length < 2 || !double.TryParse(args[0], System.Globalization.CultureInfo.InvariantCulture, out double seconds))
         {
-            Console.Error.WriteLine("audio render <seconds> <out.wav> [Bank.bnk ...] [Event[@x,y,z][~seconds] or 8-digit hex id ...] [Parameter=value ...] [Group:State ...] [@listener=x,y,z[,fx,fy,fz]]");
+            Console.Error.WriteLine("audio render <seconds> <out.wav> [Bank.bnk ...] [Event[@x,y,z][~seconds] or 8-digit hex id ...] [Parameter=value ...] [Group:State ...] [@listener=x,y,z[,fx,fy,fz]] [@contact=radius,gain]");
             return 2;
         }
         if (Library(install) is not { } library) return 1;
@@ -45,10 +45,17 @@ static class AudioTool
         var loads = new List<Task>();
         var events = new List<(double At, string Event, ulong Object)>();
         ulong nextObject = 2000;
+        float contactRadius = 0, contactGain = 1;
         var ci = System.Globalization.CultureInfo.InvariantCulture;
         foreach (var a in args[2..])
         {
             if (a.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase)) loads.Add(player.LoadBank(a[..^4]));
+            else if (a.StartsWith("@contact=", StringComparison.Ordinal))
+            {
+                var n = a["@contact=".Length..].Split(',').Select(x => float.Parse(x, ci)).ToArray();
+                contactRadius = n[0];
+                contactGain = n.Length > 1 ? n[1] : 1;
+            }
             else if (a.StartsWith("@listener=", StringComparison.Ordinal))
             {
                 var n = a["@listener=".Length..].Split(',').Select(x => float.Parse(x, ci)).ToArray();
@@ -88,6 +95,8 @@ static class AudioTool
         int nextEvent = 0;
         int total = (int)(seconds * rate);
         var all = new float[total * 2];
+        if (contactRadius > 0)
+            foreach (ulong obj in events.Select(e => e.Object).Distinct()) player.SetContactSpatialization(obj, contactRadius, contactGain);
         var block = new float[Meitou.Audio.AudioOutput.BlockFrames * 2];
         var watch = System.Diagnostics.Stopwatch.StartNew();
         for (int at = 0; at < total; at += Meitou.Audio.AudioOutput.BlockFrames)
