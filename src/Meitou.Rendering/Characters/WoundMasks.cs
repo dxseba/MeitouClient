@@ -60,8 +60,8 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             if (Paint(w, rig, points, out var cutUv) is { } at && count < spheres.Length)
             {
                 float angle = MathF.Atan2(w.Sine, w.Cosine), head = cutUv.Y < 0 ? 0.2f : 1;
-                cuts[count] = new Vector4(cutUv, angle, MathF.Floor((0.3f + 0.4f * w.Depth) * w.Size * head * 0.07f * 10000) + Math.Clamp(w.Depth, 0, 0.99f) * 0.99f);
-                spheres[count++] = new Vector4(at, Math.Min(SphereRadius * MathF.Max(1, w.Size * w.Depth), 9.5f) + 10 * BodyGroup(w.BoneA));
+                cuts[count] = new Vector4(cutUv, angle + Style(w) * 16f, MathF.Floor((0.3f + 0.4f * w.Depth) * w.Size * head * 0.07f * 10000) + Math.Clamp(w.Depth, 0, 0.99f) * 0.99f);
+                spheres[count++] = new Vector4(at, (w.Kind == 3 ? 0 : Math.Min(SphereRadius * MathF.Max(1, w.Size * w.Depth), 9.5f)) + 10 * BodyGroup(w.BoneA));
             }
         using (var batch = gpu.Uploads.Begin())
         {
@@ -133,6 +133,9 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
     /// <summary>The wound spheres of the character's mask.</summary>
     public Vector4[]? Spheres(long key) => masks.TryGetValue(key, out var mask) ? mask.Spheres : null;
 
+    static int Style(in CharacterWoundMark w) => w.Kind == 1 && w.WeaponCategory is 3 or 4 ? 4
+        : w.Kind == 1 && w.WeaponCategory == 0 ? 5 : Math.Clamp(w.Kind, 0, 3);
+
     Vector3? Paint(in CharacterWoundMark w, SkeletonRig rig, WoundPoint[] points, out Vector2 uv)
     {
         uv = default;
@@ -156,13 +159,13 @@ sealed class WoundMasks(IGpuContext gpu) : IDisposable
             for (int x = -reach; x <= reach; x++)
             {
                 var s = Sample!(x / (chart * Size), y * 2 / (chart * Size), w);
-                if (w.Depth < 0.3f) s = Vector3.Max(s, new Vector3(0, Scratch(x / (chart * Size), y * 2 / (chart * Size), w), 0));
+                if (w.Depth < 0.3f && w.Kind != 3) s = Vector3.Max(s, new Vector3(0, Scratch(x / (chart * Size), y * 2 / (chart * Size), w), 0));
                 if (s.Z <= 0) continue;
                 int i = ((((cy + y) % Size + Size) % Size) * Size + ((cx + x) % Size + Size) % Size) * 4;
                 pixels[i + 2] = Math.Max(pixels[i + 2], (byte)(s.Z * 255));
                 pixels[i + 3] = Math.Max(pixels[i + 3], (byte)(w.Depth * MathF.Min(1, s.Y * 1.3f) * 255));   // alpha: how deep the cut goes here
             }
-        if (w.Depth > 0.25f) Runs(cx, cy, w);
+        if (w.Depth > 0.25f && w.Kind != 3) Runs(cx, cy, w);
         return hit;
     }
 

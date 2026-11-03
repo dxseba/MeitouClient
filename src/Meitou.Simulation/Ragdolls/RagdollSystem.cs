@@ -123,6 +123,8 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
         public RigidTransform[] Pose = [];
         public bool Frozen;
         public float Age;
+        public long ElectricalBorn = -1;
+        public byte ElectricalPulses;
         /// <summary>Seconds of the get-up blend left (0: none), and the bones it blends from, in world space.</summary>
         public float BlendLeft;
         /// <summary>The published bones and the placement they were made in: a frozen ragdoll still in it hands over the same object (the renderer poses it again only for new bones).</summary>
@@ -289,6 +291,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
                 if (restored)
                 {
                     r.Age = restore!.Age;
+                    r.ElectricalPulses = 3; // Loaded corpses do not restart a severing discharge.
                     if (restore.Frozen) Freeze(r);
                 }
             }
@@ -299,6 +302,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             if (!r.Frozen) physics.Cover(r.Pose[r.Definition.Root].Position, 12 * r.Scale, env, tick);
         }
 
+        ApplyElectricalSpasms(world);
         CoverDetached(env, tick);
         world.Profile.Part("rag setup");   // F12: the masks, the builds, the pins and the ground tiles
         // 2. The step.
@@ -880,6 +884,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             hasher.Add(r.Frozen);
             hasher.Add(r.Age);
             hasher.Add(r.BlendLeft);
+            if (r.ElectricalBorn >= 0) { hasher.Add(r.ElectricalBorn); hasher.Add((int)r.ElectricalPulses); }
             foreach (var p in r.Pose)
             {
                 hasher.Add(p.Position);

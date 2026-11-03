@@ -118,6 +118,7 @@ sealed partial class GameHost
         double clock = session.ShownTick + session.SimulationAlpha;   // the shown tick: one run ahead is not on screen yet
         UpdateDebris(world, (float)Math.Clamp((clock - debrisClock) * tick, 0, 0.5));
         debrisClock = clock;
+        UpdateRobotCables(world, (float)(clock * tick));
     }
 
     /// <summary>One mark as the <c>bloodsurfaces</c> switch's decals (<see cref="TerrainDecalRenderer.Surfaces"/>); the same marks and sizes as the terrain's.</summary>
@@ -158,7 +159,7 @@ sealed partial class GameHost
     {
         Meitou.Rendering.Characters.WoundMasks.Sample ??= static (x, y, w) =>
         {
-            var p = Meitou.Simulation.Wounds.WoundPolicy.Sample(x, y, new Meitou.Simulation.Wounds.WoundShape(w.Cosine, w.Sine, w.Aspect, w.Depth));
+            var p = Meitou.Simulation.Wounds.WoundPolicy.Sample(x, y, new Meitou.Simulation.Wounds.WoundShape(w.Cosine, w.Sine, w.Aspect, w.Depth, (WoundKind)w.Kind, w.WeaponCategory));
             return new Vector3(p.Core, p.Area, p.Ring);
         };
         if (!ReferenceEquals(woundsFor, world) || !ReferenceEquals(world.CombatEvents, woundQueue))
@@ -354,7 +355,7 @@ sealed partial class GameHost
                 {
                 // Off the centre line: each wound keeps its own slant and height.
                 float off = w.Age * 37 % 7 / 3f - 1;
-                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born)));
+                marks.Add(new("Bip01 Pelvis", "Bip01 Neck", (i == 0 ? 0.7f : i == 1 ? 0.35f : 0.5f) + off * 0.13f, Vector3.Normalize(new Vector3(off * 0.95f, 0, i == 2 ? -1 : 1)), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born), (int)w.Shape.Kind, w.Shape.WeaponCategory));
             }
         // The newest first: past the shader's 64, the oldest give way, not the newest.
         var newest = body.Limbs.ToArray().Where(w => w is not null).OrderByDescending(w => w!.Value.Age).ToArray();
@@ -363,18 +364,18 @@ sealed partial class GameHost
             {
                 if (w.Segment == 9)
                 {
-                    marks.Add(new("Bip01 Pelvis", "Bip01 Neck", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born)));
+                    marks.Add(new("Bip01 Pelvis", "Bip01 Neck", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born), (int)w.Shape.Kind, w.Shape.WeaponCategory));
                     continue;
                 }
                 if (w.Segment == 8)
                 {
-                    marks.Add(new("Bip01 Neck", "Bip01 Head", 2.2f + w.T, new Vector3(w.Age % 2 == 0 ? 0.9f : -0.9f, 0.5f, 0.2f * w.Side.Z), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born)));
+                    marks.Add(new("Bip01 Neck", "Bip01 Head", 2.2f + w.T, new Vector3(w.Age % 2 == 0 ? 0.9f : -0.9f, 0.5f, 0.2f * w.Side.Z), Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born), (int)w.Shape.Kind, w.Shape.WeaponCategory));
                     continue;
                 }
                 string side = w.Segment < 2 || w.Segment is 4 or 5 ? "L" : "R";
                 bool lower = (w.Segment & 1) != 0;
                 var (a, b) = w.Segment < 4 ? (lower ? ("Forearm", "Hand") : ("UpperArm", "Forearm")) : (lower ? ("Calf", "Foot") : ("Thigh", "Calf"));
-                marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born)));
+                marks.Add(new($"Bip01 {side} {a}", $"Bip01 {side} {b}", w.T, w.Side, Turned(w.Shape, w.Age).X, Turned(w.Shape, w.Age).Y, w.Shape.Aspect, w.Shape.Depth, w.Size, Flowed(w.Born), (int)w.Shape.Kind, w.Shape.WeaponCategory));
             }
         // A thin race's limbs and trunk take a smaller cut.
         if (session.World.Characters.Cold(id.Slot)?.Race?.Name is { } race && (race.Contains("Hive", StringComparison.OrdinalIgnoreCase) || race.Contains("Drone", StringComparison.OrdinalIgnoreCase)))

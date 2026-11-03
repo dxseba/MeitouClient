@@ -206,6 +206,11 @@ Sources without a cached contact use a
 bone/fallback point. The CC0 arc texture's source, author and hashes are in
 [Effects/CREDITS.md](../../src/Meitou.Rendering/Effects/CREDITS.md). These effects are transient;
 saved cut states do not replay or preserve their electrical lifetime.
+Cached cut contacts also anchor dark hanging cables on advanced head/limb and torso fragments:
+at most 32 seven-node chains, Verlet gravity, bounded constraints and ground contact. Pause stops
+motion; world changes clear them. Meshes share one upload batch and unchanged geometry is not
+uploaded again. Cables are cosmetic, not saved and omitted by `--no-particles`. **Observed**
+(native seven-robot bisection fixture): cables and scraps settle without retaining moving ragdolls.
 Severe robot destruction (torso bisection, head cut or limb severing) also throws 3–7 small metal
 fragments through the existing 400-piece debris pool: installed Iron Plates, Motor and Hinge
 meshes, shrunk and given deterministic visual-only velocities/spins. A bounded 64-marker history

@@ -225,6 +225,7 @@ public sealed partial class RagdollSystem
                 at.Y = world.Walkability.GroundHeight(at.X, at.Z, ownerPosition.Y) + 1.35f;
                 Shift(piece, at - piece.Pose[definition.Root].Position);
                 piece.Age = FreezeLatest;
+                piece.ElectricalPulses = 3;
                 Freeze(piece);
             }
             string bone = part < 0 ? "" : medical.PartSpan.ToArray().First(p => p.Template.LimbSlot == part).Template.BoneName2;
@@ -370,6 +371,7 @@ public sealed partial class RagdollSystem
                 hasher.Add(part.GroundItemId);
                 hasher.Add(part.Body.Frozen);
                 hasher.Add(part.Body.Age);
+                if (part.Body.ElectricalBorn >= 0) { hasher.Add(part.Body.ElectricalBorn); hasher.Add((int)part.Body.ElectricalPulses); }
                 foreach (var pose in part.Body.Pose)
                 {
                     hasher.Add(pose.Position);

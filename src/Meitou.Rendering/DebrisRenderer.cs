@@ -13,7 +13,7 @@ namespace Meitou.Rendering;
 /// it along its own z (a bolt in flight).
 /// </summary>
 public readonly record struct DebrisPiece(string Mesh, float Scale, Quaternion Rotation, Vector3 Position, float Stretch = 1,
-    LimbLook? Limb = null, bool Bloody = false, uint BloodColour = 0x800000, BowelPose? Bowel = null);
+    LimbLook? Limb = null, bool Bloody = false, uint BloodColour = 0x800000, BowelPose? Bowel = null, RobotCablePose? Cable = null);
 
 /// <summary>
 /// How a severed limb is drawn (the original's <c>SeveredLimb</c> material, docs/game/blood-decals.md "On the body and on severed limbs"): the item's MATERIAL record's texture map and
@@ -106,7 +106,8 @@ public sealed unsafe partial class DebrisRenderer : IDisposable
             bool hasNormal = limb && (uTextured & 4) != 0;
             float cut = limb ? 0.0 : uAlphaThreshold;
             vec4 base = (uTextured & 255) != 0 ? texture(uDiffuse, vUv) : vec4(0.78, 0.72, 0.62, 0.3);
-            if (uAlphaThreshold < -2.5) { float wet = 0.8 + 0.2 * sin(vLocal.x * 1.7 + vLocal.y * 1.1) * sin(vLocal.z * 2.3); base = vec4(mix(base.rgb * 0.45, vec3(0.13, 0.008, 0.01), clamp(wet, 0.0, 1.0)), 0.85); }   // torn out: wet with blood
+            if (uAlphaThreshold < -3.5) base = vec4(0.035, 0.043, 0.047, 0.45);
+            else if (uAlphaThreshold < -2.5) { float wet = 0.8 + 0.2 * sin(vLocal.x * 1.7 + vLocal.y * 1.1) * sin(vLocal.z * 2.3); base = vec4(mix(base.rgb * 0.45, vec3(0.13, 0.008, 0.01), clamp(wet, 0.0, 1.0)), 0.85); }   // torn out: wet with blood
             else if (uAlphaThreshold < 0.0) base = vec4(0.46, 0.2, 0.2, 0.8);   // wet bowel
             if (uAlphaThreshold < 0.0 && uLimbBlood != 0x800000u)
             {
@@ -362,15 +363,16 @@ public sealed unsafe partial class DebrisRenderer : IDisposable
         {
             // Only meshes loaded before (Extent): nothing is uploaded inside the pass.
             Mesh? mesh;
-            if (piece.Bowel is { } bowel) mesh = BowelMesh(bowel);
+            if (piece.Cable is { } cable) mesh = RobotCableMesh(cable);
+            else if (piece.Bowel is { } bowel) mesh = BowelMesh(bowel);
             else meshes.TryGetValue(Key(piece.Mesh, piece.Limb), out mesh);
             if (mesh is null) continue;
             // Tissue vertices already follow the physical nodes in a centre-relative frame.
-            var middle = piece.Bowel?.Centre ?? (mesh.Limb
+            var middle = piece.Cable?.Centre ?? piece.Bowel?.Centre ?? (mesh.Limb
                 ? piece.Position + Vector3.Transform(mesh.Centre * piece.Scale, piece.Rotation) : piece.Position);
-            float scale = piece.Bowel is null ? piece.Scale * MathF.Max(piece.Stretch, 1) : 1;
+            float scale = piece.Bowel is null && piece.Cable is null ? piece.Scale * MathF.Max(piece.Stretch, 1) : 1;
             if (!FrustumTests.SphereVisible(frustum, middle, mesh.Extent.Length() * scale)) continue;
-            var m = piece.Bowel is not null ? Matrix4x4.CreateTranslation(middle - eye)
+            var m = piece.Bowel is not null || piece.Cable is not null ? Matrix4x4.CreateTranslation(middle - eye)
                 : Matrix4x4.CreateScale(piece.Scale, piece.Scale, piece.Scale * piece.Stretch)
                     * Matrix4x4.CreateFromQuaternion(piece.Rotation) * Matrix4x4.CreateTranslation(piece.Position - eye);
             for (int k = 0; k < 5; k++) bindings[k] = mesh.Vertices.Binding(gpu.Frame, (ulong)(k switch { 0 => 0, 1 => 12, 2 => 20, 3 => 36, _ => 28 }));
@@ -409,6 +411,7 @@ public sealed unsafe partial class DebrisRenderer : IDisposable
         try
         {
             if (file == Bowel) mesh = BuildBowel();
+            else if (file == RobotCable) mesh = BuildRobotCable();
             else if (find(Path.GetFileName(file.Replace('\\', '/'))) is { } path) {
                 var ogre = OgreMeshReader.ReadFile(path);
                 if (MeshWeld.Enabled) OgreMeshWeld.Apply(ogre);
@@ -512,6 +515,7 @@ public sealed unsafe partial class DebrisRenderer : IDisposable
     public void Dispose()
     {
         DisposeBowels();
+        DisposeRobotCables();
         foreach (var mesh in meshes.Values)
         {
             mesh?.Vertices.Dispose();

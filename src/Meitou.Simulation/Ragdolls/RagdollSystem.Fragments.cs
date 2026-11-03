@@ -154,6 +154,7 @@ public sealed partial class RagdollSystem
         void Restore(Ragdoll piece, SavedRagdoll stored)
         {
             piece.Age = stored.Age;
+            piece.ElectricalPulses = 3;
             if (stored.Frozen) Freeze(piece);
         }
     }
@@ -436,6 +437,7 @@ public sealed partial class RagdollSystem
         static void HashPiece(Ragdoll piece, ref StateHasher hash)
         {
             hash.Add(piece.Frozen); hash.Add(piece.Age);
+            if (piece.ElectricalBorn >= 0) { hash.Add(piece.ElectricalBorn); hash.Add((int)piece.ElectricalPulses); }
             foreach (var pose in piece.Pose)
             {
                 hash.Add(pose.Position);

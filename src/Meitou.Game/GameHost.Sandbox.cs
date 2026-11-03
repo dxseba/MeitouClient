@@ -327,7 +327,7 @@ sealed partial class GameHost
         }
         woundQueue.Enqueue(new Meitou.Simulation.Combat.CombatEvent(Meitou.Simulation.Combat.CombatEventKind.Hit, world.Tick, Meitou.Simulation.Combat.CombatHitSource.Melee, sandboxHero, sandboxFoe,
             part, medical.Parts[part].Template.LimbSlot, position, direction, damage, yaw, cut, Mechanism: mechanism,
-            AttackerBrutality: world.Characters.Cold(sandboxHero.Slot)?.Brutality.Level ?? 0));
+            AttackerBrutality: world.Characters.Cold(sandboxHero.Slot)?.Brutality.Level ?? 0, WeaponCategory: g.SandboxHitWeaponCategory ?? -1));
     }
 
     void SandboxBare()

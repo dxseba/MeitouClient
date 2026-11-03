@@ -9,12 +9,12 @@ public enum WoundAttack { None = 0, Front = 1, Back = 2, Left = 4, Right = 8, To
 public enum WoundLayer { Bone, Muscle, Tendon, Fat, Organ, Skin, Fascia }
 
 /// <summary>A cut's footprint: axis, width and depth 0 to 1.</summary>
-public readonly record struct WoundShape(float Cosine = 1, float Sine = 0, float Aspect = 0.20f, float Depth = 0);
+public readonly record struct WoundShape(float Cosine = 1, float Sine = 0, float Aspect = 0.20f, float Depth = 0, WoundKind Kind = WoundKind.None, int WeaponCategory = -1);
 
 /// <summary>A sample of a cut: core within area within ring, each 0 to 1.</summary>
 public readonly record struct WoundProfile(float Core, float Area, float Ring);
 
-public readonly record struct WoundInput(int CutDirection, WoundAttack Attack, bool Harpoon, bool FrontTorso, float Cutting, float Blunt, float Pierce, float Maximum, float LocalDose = 0, int LocalHits = 0, float Size = 1);
+public readonly record struct WoundInput(int CutDirection, WoundAttack Attack, bool Harpoon, bool FrontTorso, float Cutting, float Blunt, float Pierce, float Maximum, float LocalDose = 0, int LocalHits = 0, float Size = 1, int WeaponCategory = -1);
 
 public readonly record struct WoundResult(bool Accepted, WoundKind Kind, WoundShape Shape, float AcceptedDamage, float Dose, int Hits);
 
@@ -66,6 +66,9 @@ public static class WoundPolicy
         float prior = float.IsFinite(input.LocalDose) ? Clamp(input.LocalDose, 0, MaxDose) : 0;
         float dose = Clamp(prior + Clamp(accepted / input.Maximum, 0, 1.75f), 0, MaxDose);
         var shape = ShapeForDirection(input.CutDirection, Clamp(dose / 1.2f, 0, 1));
+        shape = shape with { Kind = kind, WeaponCategory = input.WeaponCategory };
+        if (kind == WoundKind.Slash && input.WeaponCategory is 3 or 4) shape = shape with { Aspect = 0.38f };
+        else if (kind == WoundKind.Slash && input.WeaponCategory == 0) shape = shape with { Aspect = 0.12f };
         if (kind == WoundKind.Crush) shape = shape with { Aspect = 0.85f };
         return new WoundResult(true, kind, shape, accepted, dose, Math.Min(input.LocalHits + 1, MaxHits));
     }
@@ -101,9 +104,14 @@ public static class WoundPolicy
         float x = (qx * cs + qy * sn) / (1.25f * size) * (1 - tear * 0.18f), y = (-qx * sn + qy * cs) / (Clamp(shape.Aspect, 0.08f, 1) * size);
         if (MathF.Abs(x) >= 1) return default;
         float lens = MathF.Max(1 - MathF.Pow(MathF.Abs(x), 2.4f), 0.025f);
-        float d = MathF.Abs(y) / lens + tear * 0.48f, growth = Clamp((Clamp(shape.Depth, 0, 1) - 0.25f) * 0.1f, 0, 0.075f);
+        if (shape.Kind == WoundKind.Crush) lens = MathF.Max(MathF.Sqrt(MathF.Max(0, 1 - x * x)), 0.025f);
+        else if (shape.Kind == WoundKind.Thrust) lens *= MathF.Pow(MathF.Max(1 - MathF.Abs(x), 0), 0.5f);
+        float d = MathF.Abs(y) / lens + tear * (shape.Kind == WoundKind.Crush ? 0.85f : 0.48f), growth = Clamp((Clamp(shape.Depth, 0, 1) - 0.25f) * 0.1f, 0, 0.075f);
         float ends = Smooth((1 - MathF.Abs(x)) / 0.08f);
-        return new WoundProfile(Clamp((0.42f + growth - d) / 0.15f, 0, 1) * ends, Clamp((0.82f + growth - d) / 0.15f, 0, 1) * ends, Clamp((1.25f + growth - d) / 0.40f, 0, 1) * ends);
+        float core = Clamp((0.42f + growth - d) / 0.15f, 0, 1) * ends;
+        float area = Clamp((0.82f + growth - d) / 0.15f, 0, 1) * ends;
+        float ring = Clamp((1.25f + growth - d) / 0.40f, 0, 1) * ends;
+        return shape.Kind == WoundKind.Crush ? new WoundProfile(0, 0, ring) : new WoundProfile(core, area, ring);
     }
 
     public static bool RemovesLayer(WoundLayer layer, in WoundProfile p, float depth, int hits)

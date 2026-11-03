@@ -170,6 +170,22 @@ static class CharacterShaders
             vec3 local = aPosition;
             uint slot = floatBitsToUint(aColour.x);
             if (aInstanceData.w != 0u && slot != 0u && slot < 0x1000000u) local += morphs.deltas[aInstanceData.w + slot].xyz;
+            if ((aInstanceData.z & 8u) != 0u)
+            {
+                // A plate dents only near a wound belonging to its own body region; all passes use this vertex deformation.
+                uint bone = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
+                mat4 words = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
+                uint own = (floatBitsToUint(words[1 + bone / 32u][bone / 8u % 4u]) >> (bone % 8u * 4u)) & 15u;
+                float dent = 0.0;
+                for (uint i = 0u; i < 64u; i++)
+                {
+                    vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
+                    if (c.w <= 0.0 || abs(floor(c.w / 10.0) - float(own)) > 0.5) continue;
+                    float near = 1.0 - smoothstep(0.0, 1.6, distance(local, c.xyz));
+                    dent = max(dent, near * near * 0.12);
+                }
+                local -= aNormal * dent;
+            }
             if ((aInstanceData.z & 0xC0000000u) == 0x80000000u)
             {
                 // Flesh gone: skin near a heavy wound of its own body group sinks towards the bone.
@@ -181,7 +197,7 @@ static class CharacterShaders
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
                     if (c.w <= 0.0 || abs(floor(c.w / 10.0) - float(own)) > 0.5) continue;
-                    float radius = mod(c.w, 10.0), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
+                    float radius = max(mod(c.w, 10.0), 0.001), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
                     dent = max(dent, near * near * (3.0 - 2.0 * near) * max(radius - 1.0, 0.0) * 0.28);
                 }
                 if (aPosition.y > 16.0) dent = 0.0;   // the head counts as torso by group: a chest wound must not sink the face
@@ -261,7 +277,7 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
-                    if (c.w > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.1) * 0.75 - distance(aPosition, c.xyz));
+                    if (c.w > 0.0 && mod(c.w, 10.0) > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.1) * 0.75 - distance(aPosition, c.xyz));
                 }
             }
             if (mechanicalInterior)
@@ -421,8 +437,9 @@ static class CharacterShaders
         layout(std430, set = 0, binding = {{BonesBinding}}) readonly buffer CutMats { mat4 m[]; } cutMats;
 
         // The cuts as blade shapes in UV, smooth at any distance: x core, y open area, z ring, w depth.
-        vec4 woundField(vec2 uv)
+        vec4 woundField(vec2 uv, out float bruise)
         {
+            bruise = 0.0;
             vec4 best = vec4(0.0);
             float aa = max(fwidth(uv.x) + fwidth(uv.y), 1e-5);
             for (uint i = 0u; i < 64u; i++)
@@ -438,14 +455,25 @@ static class CharacterShaders
                     if (hitAt.x * vSkinPos.x < 0.0 && abs(vSkinPos.x) > 0.08) continue;
                     if (abs(vSkinPos.y - {{EyeHeight}}) < 0.45 && vSkinPos.z > 0.5) continue;
                 }
-                vec2 d = uv - c.xy, axis = vec2(cos(c.z), sin(c.z));
+                uint woundKind = uint(max(floor((c.z + 3.2) / 16.0), 0.0));
+                float woundAngle = c.z - float(woundKind) * 16.0;
+                vec2 d = uv - c.xy, axis = vec2(cos(woundAngle), sin(woundAngle));
                 float x = dot(d, axis) / len, y = abs(dot(d, vec2(-axis.y, axis.x)));
                 if (abs(x) >= 1.0) continue;
                 float wobble = sin(x * 9.0 + c.x * 80.0) * 0.06 + sin(x * 23.0 + c.y * 90.0) * 0.03;
                 float half_ = min(len, 0.06) * (0.1 + 0.2 * depth) * (1.0 + len * 12.0) * pow(1.0 - x * x, 0.8) * (1.0 + wobble);
+                if (woundKind == 4u) half_ *= 2.4 * (1.0 + 0.18 * sin(x * 41.0));
+                if (woundKind == 5u) half_ *= 0.62;
+                if (woundKind == 2u) half_ *= 1.8 * pow(max(1.0 - abs(x), 0.0), 0.5);
+                if (woundKind == 3u) half_ = len * 0.48 * sqrt(max(1.0 - x * x, 0.0)) * (1.0 + wobble * 2.0);
                 float sd = y - half_;
                 vec4 here = vec4(1.0 - smoothstep(-half_ * 0.55 - aa, -half_ * 0.55 + aa, sd), 1.0 - smoothstep(-aa, aa, sd), 1.0 - smoothstep(0.0, len * 0.06 + aa, sd), depth);
                 here.w *= here.y;
+                if (woundKind == 3u)
+                {
+                    bruise = max(bruise, 1.0 - smoothstep(-half_ * 0.4, half_ * 0.85 + aa, sd));
+                    continue;
+                }
                 // Crossing cuts join: a smooth maximum, so no sharp cross where they meet.
                 best = max(best, here) + here * best * vec4(0.0, 0.35, 0.35, 0.0) * (1.0 - best);
             }
@@ -470,7 +498,9 @@ static class CharacterShaders
         // Open flesh over the albedo, from the character's wound mask.
         void woundSurface(inout vec3 albedo, inout float gloss, CharMaterial m, inout vec3 bend)
         {
-            vec4 field = woundField(vUv);
+            float bruise;
+            vec4 field = woundField(vUv, bruise);
+            albedo = mix(albedo, albedo * vec3(0.58, 0.43, 0.62), bruise * 0.75);
             // The lips: the ring's slope tips the normal, so light finds a raised, parted edge.
             float rise = field.b - field.g;
             vec3 dx = dFdx(vWorld), dy = dFdy(vWorld), across = cross(dy, normalize(vNormal)), down = cross(normalize(vNormal), dx);
@@ -739,8 +769,24 @@ static class CharacterShaders
             if (vPlated > 0.0 && vClip > -0.5)
             {
                 float smear = smoothstep(-0.5, 0.2, vClip + 0.25 * sin(vBlood.y * 23.0 + vBlood.x * 5.0));
-                albedo = mix(albedo, goreColour(vec3(0.16, 0.01, 0.012), m), smear * 0.9);
-                gloss = mix(gloss, 0.7, smear);
+                float score = smoothstep(-0.45, 0.05, vClip);
+                float grain = 0.5 + 0.5 * sin(vBindPos.y * 97.0 + vBindPos.x * 39.0 + vBindPos.z * 71.0);
+                float edge = (1.0 - smoothstep(0.0, 0.18, abs(vClip))) * score;
+                albedo = mix(albedo, vec3(0.12, 0.135, 0.14), score * 0.5);
+                albedo = mix(albedo, mix(vec3(0.26, 0.28, 0.29), vec3(0.53, 0.55, 0.54), grain), edge * 0.8);
+                albedo = mix(albedo, goreColour(vec3(0.16, 0.01, 0.012), m), smear * 0.35);
+                gloss = mix(gloss, 0.65, score);
+                metal = max(metal, score * 0.75);
+            }
+            else if (flag(f, 16384u) && vClip > -0.35)
+            {
+                float fray = 0.11 * sin(vBindPos.x * 67.0 + vBindPos.y * 31.0) * sin(vBindPos.z * 53.0 - vBindPos.y * 41.0);
+                if (vClip + fray > 0.04) discard;
+                float edge = 1.0 - smoothstep(0.015, 0.26, abs(vClip + fray));
+                albedo = mix(albedo, albedo * 0.42 + vec3(0.065, 0.052, 0.035), edge * 0.8);
+                float fibre = smoothstep(0.8, 0.98, sin(vBindPos.y * 310.0 + vBindPos.x * 73.0));
+                albedo += vec3(0.12, 0.095, 0.065) * fibre * edge;
+                gloss = mix(gloss, 0.12, edge);
             }
             else if (!torsoExposed && vClip > 0.0 && (vAnatomy != 0u || vClip + 0.18 * (sin(vBlood.y * 19.0 + vBlood.x * 3.1) + sin(vBlood.x * 7.3 - vBlood.y * 31.0)) > 0.0)) discard;   // a tear's edge is ragged
             if (vAnatomy == 3u) discard;   // the lower teeth left with the jaw
@@ -889,6 +935,8 @@ static class CharacterShaders
         flat in mat4 vHeadFrame;
         flat in uint vHeadProfile;
         in vec3 vSkinPos;
+        in vec3 vBindPos;
+        flat in float vPlated;
         in float vTorsoBand;
         in float vClip;
         in float vCutBand;
@@ -903,6 +951,11 @@ static class CharacterShaders
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
+            if (vPlated <= 0.0 && (f & 16384u) != 0u && vClip > -0.35)
+            {
+                float fray = 0.11 * sin(vBindPos.x * 67.0 + vBindPos.y * 31.0) * sin(vBindPos.z * 53.0 - vBindPos.y * 41.0);
+                if (vClip + fray > 0.04) discard;
+            }
             bool mechanicalExposed = fullBodyExposed || (vCutBand >= 0.0 && vCutBand < 0.75);
             if (vAnatomy == 6u && !mechanicalExposed && vClip > 0.0) discard;
             if ((f & 8388608u) != 0u && vCutBand < 1000.0
@@ -938,6 +991,8 @@ static class CharacterShaders
         flat in mat4 vHeadFrame;
         flat in uint vHeadProfile;
         in vec3 vSkinPos;
+        in vec3 vBindPos;
+        flat in float vPlated;
         in float vTorsoBand;
         in float vClip;
         in float vCutBand;
@@ -954,6 +1009,11 @@ static class CharacterShaders
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
+            if (vPlated <= 0.0 && (f & 16384u) != 0u && vClip > -0.35)
+            {
+                float fray = 0.11 * sin(vBindPos.x * 67.0 + vBindPos.y * 31.0) * sin(vBindPos.z * 53.0 - vBindPos.y * 41.0);
+                if (vClip + fray > 0.04) discard;
+            }
             bool mechanicalExposed = fullBodyExposed || (vCutBand >= 0.0 && vCutBand < 0.75);
             if (vAnatomy == 6u && !mechanicalExposed && vClip > 0.0) discard;
             if ((f & 8388608u) != 0u && vCutBand < 1000.0

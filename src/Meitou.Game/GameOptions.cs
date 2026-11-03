@@ -35,7 +35,7 @@ sealed class GameOptions
     public float? SandboxStats;
     public float? SandboxBrutality;
     public string? SandboxHeadCut;
-    public int? SandboxHeadWound, SandboxCutDirection;
+    public int? SandboxHeadWound, SandboxCutDirection, SandboxHitWeaponCategory;
     public ulong? SandboxBisectVariant;
     public Meitou.Simulation.Wounds.TorsoBisectionStyle SandboxBisectStyle;
     public float SandboxHitDamage = 30;
@@ -119,6 +119,7 @@ sealed class GameOptions
           --sandbox-head-cut <form>  force one lethal head cut: auto, neck, transverse, oblique, vertical, split
           --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
           --sandbox-cut-direction <n> with --sandbox-dummy: fixed blade axis 1 down, 2 left, 3 right
+          --sandbox-hit-weapon-category <0..8> with --sandbox-dummy: actual FCS weapon skill category for visual comparison
           --sandbox-hit-mechanism <kind> with --sandbox-dummy: slash (default), thrust, or crush for visual comparison
           --sandbox-hit-angle <deg> with --sandbox 2: attacker approach around the victim (0 front, 90 right, 180 back); also fixes dummy impact direction
           --sandbox-hit-side <side>  with --sandbox-dummy: fixed victim-local incoming side front, left, right, or back
@@ -204,6 +205,10 @@ sealed class GameOptions
                 case "--sandbox-cut-direction":
                     g.SandboxCutDirection = int.Parse(Next());
                     if (g.SandboxCutDirection is < 1 or > 3) throw new ArgumentException("--sandbox-cut-direction must be 1 (down), 2 (left), or 3 (right)");
+                    break;
+                case "--sandbox-hit-weapon-category":
+                    g.SandboxHitWeaponCategory = int.Parse(Next(), CultureInfo.InvariantCulture);
+                    if (g.SandboxHitWeaponCategory is < 0 or > 8) throw new ArgumentException("--sandbox-hit-weapon-category must be 0..8");
                     break;
                 case "--sandbox-hit-mechanism":
                     g.SandboxHitMechanism = Next().ToLowerInvariant();

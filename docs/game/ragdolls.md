@@ -316,6 +316,15 @@ human frozen after 61 ticks): save → load gives the same 13 body poses (offset
 
 Torso fragments extend the same character key with `T2 nx ny nz offset fullBody | positive | negative`; each side uses the existing `frozen age n` and body transforms. The cut identifies the clipped collider topology; poses and ages survive loading, velocities do not. The saved cut is hydrated before ordinary ragdoll restoration, even before the host reads wound sidecars. Optional companion string `meitou torso anchors` uses `A1 | positive | negative`; each side is `-` or a rig-bone count followed by actor index and local position/quaternion per bone. It preserves carried nonphysical child locals after release. Missing/invalid side metadata retains legacy reconstruction; actor indices, finite transforms and rig-length/topology are validated before hydration. Legacy whole-body and T2 physical rows remain unchanged. **Verified** (`RagdollFragmentSaveTests`, `RagdollFragmentAnchorSaveTests`, `RagdollTorsoPhysicsTests`): invariant FCS round trips, malformed optional-side isolation, composed descendant-world placement, exact settled reconstruction and restoration before sidecar state arrives.
 
+## Mechanical severing spasms (Meitou)
+
+With advanced ragdolls enabled, newly severed robot pieces receive at most three small impulses
+near 0.65, 2.1 and 4.4 simulation seconds. A six-pulse per-tick budget bounds simultaneous cuts;
+carried/frozen bodies are skipped and six seconds ends the opportunity. Pulses use existing dynamic
+bodies and no combat RNG. Restored corpse poses do not restart pulses. Timing contributes to the
+live state hash; it is transient rather than an extra save payload. **Observed** (native split-head
+fixture): fragment poses move with bounded spasms and then settle.
+
 ## Unknowns
 
 - Meaning of groups 0, 1, 2, 7, 28–31 and the terrain's group.

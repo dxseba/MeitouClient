@@ -134,6 +134,14 @@ Up to 64 cuts are drawn as blade shapes in UV in the fragment shader (`woundFiel
 
 `WoundMasks` keeps a 512 x 512 mask per wounded character in the body's UVs, the head (v below 0) in its lower half (red core, green open area, blue ring, alpha depth: above 0.55 muscle goes, showing bone and organs), repainted on the CPU when the wounds change, at most 4 a frame and 64 masks. A wound lands at the nearest body vertex facing its side. A wounded palette reserves 35 entries before the bones (the first holds the mask's bindless index; head layout below); instance flag bit 31 turns the fragment term on, off in portraits. Cuts draw on the body mesh only and are clipped at UV island edges. Metal does not draw them. Worn items are cut away near a wound; metal plate takes a smear of blood instead. A stump keeps its Ecorche bone and muscle at the cut. A deep belly wound drops the Ecorche bowel as one loose debris body; until then the bowel shows inside the body. A cut's open area discards the skin, showing the body's dark inside (body back faces, drawn only on wounded bodies) and the `Ecorche.anatomy` of the install's `Gauntlet of Crowns` mod, rigidly following each authored batch bone and coloured by layer, when that file exists. Nearest skin from the same body group supplies fitting and wound UVs; missing groups use no unrelated limb. Imported triangles keep their authored rigid batch bone, while each cavity-wall quad follows one axial bone, so free ragdoll chains cannot pull their corners apart (**Verified**, installed oblique/vertical anatomy deformation tests). Each anatomy vertex is moved 0.2 units under its nearest skin vertex, and anatomy draws with its depth pushed one unit back, so the skin always wins and only a hole, cut per pixel, shows it. Meitou ships none of it.
 
+Weapon style travels with each wound: katana slashes are narrow, heavy/hacker slashes wider and ragged,
+thrusts tapered, and Crush bruises broad without skin/anatomy removal, cloth holes or wet runs.
+Legacy unspecified marks retain their shape. Worn cloth has matte frayed edges and matching
+shadow/motion cut-outs; plate stays closed with shallow local dents, scoring and smaller fluid smears.
+The wound sidecar appends kind and weapon category to its original 17 values; legacy 17-value and
+intermediate 18-value rows remain readable. **Observed** (native human dummy chest captures):
+katana/heavy/crush silhouettes differ; a clothed Dust Bandit opens locally around the chest wound.
+
 ### Head wound relief
 
 `HeadWoundSurface` projects tapered blade strips onto original head triangles, adds barycentrically interpolated face morph offsets once, and skins them to the head bone. Uneven lips descend to partly blood-covered bone; the broken variant opens a cleft through both relief and internal skull. CPU frames/dimensions emit the matching GLSL skin field.

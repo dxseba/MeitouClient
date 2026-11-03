@@ -7,7 +7,7 @@ namespace Meitou.Rendering;
 public readonly record struct CharacterPose(string Animation, float Time, float Weight);
 
 /// <summary>A wound placed on the bone from <paramref name="BoneA"/> to <paramref name="BoneB"/>, <paramref name="T"/> along it, on the <paramref name="Side"/> of the bind pose; the rest is its cut shape.</summary>
-public readonly record struct CharacterWoundMark(string BoneA, string BoneB, float T, Vector3 Side, float Cosine, float Sine, float Aspect, float Depth, float Size = 1, float Flow = 1);
+public readonly record struct CharacterWoundMark(string BoneA, string BoneB, float T, Vector3 Side, float Cosine, float Sine, float Aspect, float Depth, float Size = 1, float Flow = 1, int Kind = 0, int WeaponCategory = -1);
 
 /// <summary>An estimated surface anchor in the original body bind space; not a measured blade collision.</summary>
 public readonly record struct CharacterHeadWoundPlacement(Vector3 Point, Vector3 Normal, Vector3 Tangent, float LengthScale = 1, float WidthScale = 1);
