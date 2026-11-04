@@ -212,7 +212,7 @@ public class RobotGoreCombatTests
 
         public Scene(BodyPartTemplate targetPart, float level = 0, float power = 1, int direction = 2)
         {
-            var options = BodyOptions.Default;
+            var options = BodyOptions.Default with { Gore = true };
             options.ForcedHitPart = (targetPart.StringId, targetPart.Name);
             Combat = new([Cut("cut left", direction: direction)], Constants, BaseGame, options, DuelFixture.Lengths,
                 new CombatOptions { RecordLog = true, TickMedical = false });

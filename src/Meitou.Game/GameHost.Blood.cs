@@ -36,7 +36,7 @@ sealed partial class GameHost
     /// <summary>Makes the store and the renderer when the install's <c>Blood</c> setting is on (missing: on).</summary>
     void SetUpBlood(IGpuContext context)
     {
-        gpu.AfterCharacterPose = UpdatePosedCutEffects;
+        gpu.AfterCharacterPose = GoreEnabled ? UpdatePosedCutEffects : null;
         // Flat arenas have no object renderer; debris still needs the ITEM records' materials before its first mesh load.
         gpu.Debris ??= new DebrisRenderer(context, gpu.Objects?.Resolver ?? new MaterialResolver(scene.Database, assets.Materials, assets), assets.Find)
         {
@@ -156,7 +156,7 @@ sealed partial class GameHost
 
     void UpdateWounds(World world)
     {
-        Meitou.Rendering.Characters.WoundMasks.Sample ??= static (x, y, w) =>
+        if (GoreEnabled) Meitou.Rendering.Characters.WoundMasks.Sample ??= static (x, y, w) =>
         {
             var p = Meitou.Simulation.Wounds.WoundPolicy.Sample(x, y, new Meitou.Simulation.Wounds.WoundShape(w.Cosine, w.Sine, w.Aspect, w.Depth, (WoundKind)w.Kind, w.WeaponCategory));
             return new Vector3(p.Core, p.Area, p.Ring);
@@ -200,6 +200,8 @@ sealed partial class GameHost
         while (woundQueue.TryDequeue(out var e))
         {
             if (e.Kind == CombatEventKind.BodyBisected) BeginTorsoCut(e, world);
+            // Saved wound state remains loaded and saveable; optional presentation never creates new wounds or effects while off.
+            if (!GoreEnabled) continue;
             var victimData = world.Characters.IsAlive(e.Victim) ? world.Characters.Cold(e.Victim.Slot) : null;
             bool robot = victimData?.Race?.IsRobot == true;
             EmitRobotCutSparks(e, victimData);
@@ -347,6 +349,7 @@ sealed partial class GameHost
     /// <summary>The character's open wounds as the renderer places them (segments as <see cref="Meitou.Simulation.Wounds.Wound"/>).</summary>
     IReadOnlyList<Meitou.Rendering.CharacterWoundMark> WoundMarks(CharacterId id)
     {
+        if (!GoreEnabled) return [];
         if (IsSandbox && g.SandboxDummy && g.SandboxSevereOnly) return [];
         var marks = new List<Meitou.Rendering.CharacterWoundMark>();
         var body = wounds.Of(id) ?? NoWounds;

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.Gameplay.Combat;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -23,9 +24,9 @@ public class IncapacitatedAttackTests
         public CharacterId Target { get; }
         public CharacterCold Victim => World.Characters.Cold(Target.Slot)!;
         public ConcurrentQueue<CombatEvent> Events { get; } = new();
-        public Scene(float distance = 14, bool fatal = false, int extraHits = 1)
+        public Scene(float distance = 14, bool fatal = false, int extraHits = 1, bool gore = true)
         {
-            var bodies = BodyOptions.Default;
+            var bodies = BodyOptions.Default with { Gore = gore };
             if (fatal) bodies.ForcedHitPart = (Head.StringId, Head.Name);
             Combat = new([Cut("down", direction: 1) with { MaxSimultaneousHits = extraHits }, Cut("side", chance: 1000, direction: 2)], Constants, BaseGame, bodies,
                 new AnimationLengths().Add("down", 0.9f).Add("side", 0.9f), new CombatOptions { TickMedical = false, RecordLog = true });
@@ -45,6 +46,31 @@ public class IncapacitatedAttackTests
             Assert.Contains(Combat.Log, hit => hit.Outcome == BlowOutcome.Hit && hit.Defender == Target.Slot);
         }
         public void Dispose() => World.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false, OrderVerdict.Run)]
+    [InlineData(true, OrderVerdict.Gone)]
+    public void Native_order_admission_is_not_tightened_by_the_disabled_helpless_target_extension(bool gore, OrderVerdict expected)
+    {
+        using var scene = new Scene(gore: gore);
+        scene.Victim.InSomething = HeldState.Imprisoned;
+        var order = new OrderEntry(TaskType.FOCUSED_MELEE_ATTACK, scene.Combat) { Target = scene.Target };
+        // Native admission considers consciousness here; Act applies the furniture gate later.
+        Assert.Equal(expected, ((IOrderOwner)scene.Combat).CanRun(scene.World, scene.Attacker.Slot, order).Verdict);
+    }
+
+    [Fact]
+    public void Disabled_gore_rejects_an_explicit_attack_on_a_living_unconscious_enemy()
+    {
+        using var scene = new Scene(gore: false);
+        scene.Victim.Medical!.KnockOut(10000);
+        scene.Order();
+        scene.World.RunTicks(300);
+        Assert.Empty(scene.Combat.Log);
+        Assert.Empty(scene.Events);
+        Assert.True(scene.Victim.Medical.Incapacitated);
+        Assert.False(scene.Victim.Medical.Dead);
     }
 
     [Theory]

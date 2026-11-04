@@ -21,7 +21,7 @@ public partial class RagdollInstalledSkinTests
     public void Installed_cut_skin_and_sections_keep_shape_when_carriers_move_halves_apart(TorsoBisectionStyle style, int direction, bool missingLeg)
     {
         var (rig, definition, model, setup, rigs, look) = Installed();
-        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
+        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 41 }, new OpenGroundWalkability((_, _) => 0), [physics]);
         const float yaw = -MathF.PI / 2;
         var cut = TorsoBisectionPolicy.StateForDirection(direction, 1, Vector2.UnitX, yaw, style);

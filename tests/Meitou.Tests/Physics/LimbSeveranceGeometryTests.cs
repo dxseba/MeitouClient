@@ -199,7 +199,7 @@ public class LimbSeveranceGeometryTests
             LimbSeverances = [new(0, .506f, new(slant, -.293f))], Blow = (new(35, 7, 0), new(35, 7, 0)) };
         cold.Medical.Sever(LArm, Context());
         cold.Medical.KnockOut(10000);
-        using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { AdvancedRagdolls = true },
+        using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true },
             _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings(), new OpenGroundWalkability((_, _) => 0), [physics]);
         var id = world.Characters.Spawn(new() { Position = new(20, 25, 20) }, cold, 0);
@@ -250,7 +250,7 @@ public class LimbSeveranceGeometryTests
         cold.Medical.KillFromBisection();
         foreach (int limb in new[] { firstLimb, firstLimb + 1 })
             cold.Medical.Sever(cold.Medical.Parts.ToList().FindIndex(part => part.Template.LimbSlot == limb), Context());
-        using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { AdvancedRagdolls = true },
+        using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true },
             _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 13 }, new OpenGroundWalkability((_, _) => 0), [physics]);
         var id = world.Characters.Spawn(new() { Position = new(20, 25, 20) }, cold, 0);

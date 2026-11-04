@@ -62,7 +62,7 @@ public partial class RagdollHitReactionTests
             file.Records.Add(new() { StringId = "hit-race", Name = "Hit race", RecordType = FcsRecordType.RACE, Flags = 0x10 });
             file.Records[0].Bools["is robot"] = robot;
             database.Apply(file, "hit-tests.mod");
-            Options = BodyOptions.Default with { AdvancedRagdolls = advanced };
+            Options = BodyOptions.Default with { Gore = true, AdvancedRagdolls = advanced };
             Options.ForcedHitPart = fatal ? (Head.StringId, Head.Name) : (Chest.StringId, Chest.Name);
             Physics = new(new(database, _ => null, _ => null), new Flat(), Options, _ => Setup, (_, _, _) => definition);
             Combat = new([Cut("down", direction: 1)], Constants, BaseGame, Options,

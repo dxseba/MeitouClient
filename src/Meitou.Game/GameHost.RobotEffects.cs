@@ -18,6 +18,7 @@ sealed partial class GameHost
 
     void EmitRobotCutSparks(in CombatEvent hit, CharacterCold? victim)
     {
+        if (!GoreEnabled) return;
         // A follow-through has one gameplay Hit, but each newly broken limb needs its own electrical source.
         var contact = hit;
         if (hit.Kind == CombatEventKind.PartSevered && !robotDischarges.Contains(hit.Victim, hit.Part))
@@ -35,6 +36,7 @@ sealed partial class GameHost
 
     void UpdateRobotDischarges(World world)
     {
+        if (!GoreEnabled) return;
         robotDischarges.Prune(RobotDischargeClock, world.Characters.IsAlive);
         orderedDischarges.Clear();
         dischargeOwnerIds.Clear();

@@ -45,7 +45,7 @@ public partial class RagdollInstalledSkinTests
         Assert.NotNull(walk);Assert.NotNull(jog);
         var carrierAnimation=new CharacterAnimation();
         var animation=new GripAnimations(carrierAnimation){Gait=walk.Name};
-        using var physics=new RagdollSystem(rigs,new Flat(),BodyOptions.Default with{AdvancedRagdolls=true},_=>setup,(_,_,_)=>definition);
+        using var physics=new RagdollSystem(rigs,new Flat(),BodyOptions.Default with { Gore = true, AdvancedRagdolls =true},_=>setup,(_,_,_)=>definition);
         using var world=new SimWorld(new WorldSettings{Seed=41},new OpenGroundWalkability((_,_)=>0),[animation,physics]);
         var cut=TorsoBisectionPolicy.StateForDirection(direction,1,Vector2.UnitX,-MathF.PI/2,style);
         var cold=new CharacterCold{Name="Grip skin corpse",Race=Human,Medical=Healthy(),Appearance=look,TorsoBisection=cut};

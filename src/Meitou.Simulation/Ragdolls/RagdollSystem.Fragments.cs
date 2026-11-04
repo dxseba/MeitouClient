@@ -37,7 +37,7 @@ public sealed partial class RagdollSystem
     void PruneTorsoRagdolls(World world)
     {
         foreach (var id in torsoOrder.ToArray())
-            if (!world.Characters.TryResolveNext(id, out int slot) || options is not { AdvancedRagdolls: true }
+            if (!world.Characters.TryResolveNext(id, out int slot) || options is not { Gore: true, AdvancedRagdolls: true }
                 || world.Characters.Cold(slot)?.TorsoBisection is not { IsValid: true }) RemoveTorsoRagdoll(id);
     }
 

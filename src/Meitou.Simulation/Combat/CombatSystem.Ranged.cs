@@ -735,7 +735,7 @@ public sealed partial class CombatSystem : IProjectileSource
         int now = (int)world.Tick;
         ref var D = ref write[v];
         var packet = new DamagePacket(0, 0, p.Damage, 0, RangedFormulas.BoltBleed, 0);
-        var ctx = MakeContext(world, v, dc) with { AllowDecapitation = false };
+        var ctx = MakeContext(world, v, dc) with { AllowDecapitation = !options.Gore };
         var events = hitEvents;
         events.Clear();
         float toughness = dc.Stats is { } ds ? ds[StatsEnumerated.Toughness] * dc.Medical.StatMultiplier(StatsEnumerated.Toughness) : 0;

@@ -61,4 +61,38 @@ public class UserConfigTests : IDisposable
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""{"a": [1, 2]}"""), saved["brandNewKey"]));
         Assert.Empty(backups);
     }
+    [Fact]
+    public void A_config_from_before_gore_mode_keeps_extended_gore_off()
+    {
+        var (config, saved, backups) = RoundTrip("""{"version": 2, "decapitation": true, "advancedRagdolls": true}""");
+        Assert.False(config.GoreMode);
+        Assert.False((bool)saved["goreMode"]!);
+        Assert.True(config.Decapitation);
+        Assert.True(config.AdvancedRagdolls);
+        Assert.Empty(backups);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Gore_mode_round_trips_as_an_explicit_boolean(bool enabled)
+    {
+        var (config, saved, backups) = RoundTrip("{\"goreMode\":" + (enabled ? "true" : "false") + "}");
+        Assert.Equal(enabled, config.GoreMode);
+        Assert.Equal(enabled, (bool)saved["goreMode"]!);
+        Assert.Equal(enabled, UserConfig.Load(File).GoreMode);
+        Assert.Empty(backups);
+    }
+
+    [Fact]
+    public void Invalid_gore_mode_keeps_it_off_and_preserves_the_original_config()
+    {
+        const string json = """{"goreMode": "enabled", "fpsLimit": 90}""";
+        var (config, saved, backups) = RoundTrip(json);
+        Assert.False(config.GoreMode);
+        Assert.False((bool)saved["goreMode"]!);
+        Assert.Equal(90, config.FpsLimit);
+        Assert.Equal(json, System.IO.File.ReadAllText(Assert.Single(backups)));
+    }
+
 }

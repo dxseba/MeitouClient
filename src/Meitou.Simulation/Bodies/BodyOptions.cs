@@ -33,6 +33,8 @@ public sealed record BodyOptions
     /// (<see cref="MedicalState.Decapitated"/>). Settable, as <see cref="Dismemberment"/>.
     /// </summary>
     public bool Decapitation { get; set; } = true;
+    /// <summary>Optional extended gore and Brutality progression. Captured at application startup; changing it requires a restart.</summary>
+    public bool Gore { get; init; }
     /// <summary>
     /// Meitou (on; Faithful off, the original starts a ragdoll at rest with hard joint limits): a new whole-body ragdoll goes on with the character's motion and the downing blow's push
     /// (its arms and legs spun by it), its joints get soft limits and a limp body a relaxed pull (docs/game/ragdolls.md "Advanced ragdolls (Meitou)"), and a cut-off

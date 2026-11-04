@@ -81,6 +81,7 @@ sealed partial class GameHost
     void ApplyGameplay()
     {
         var gameplay = Gameplay;
+        // GoreMode is deliberately sampled only at host construction: its settings row requires a restart.
         if (popData is { } data) (data.BodyOptions.Dismemberment, data.BodyOptions.Decapitation, data.BodyOptions.AdvancedRagdolls) = (gameplay.Dismemberment, config.Decapitation, config.AdvancedRagdolls);
         foreach (var population in session.World.Systems.OfType<Meitou.Simulation.PopulationSystem>())
             (population.Settings.SquadSizeMultiplier, population.Settings.PopulationMultiplier, population.Settings.RaidSizeMult, population.Settings.RaidFrequencyMult) =

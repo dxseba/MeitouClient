@@ -12,6 +12,7 @@ sealed partial class GameHost
     // Current posed contacts are available only after character preparation; bowel uploads share that frame's batch.
     void UpdatePosedGuts()
     {
+        if (!GoreEnabled) return;
         var geometry = config.AdvancedRagdolls ? gpu.Debris?.BowelRig() : null;
         foreach (var (id, fall) in gutFalls)
         {

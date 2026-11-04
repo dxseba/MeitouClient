@@ -217,7 +217,7 @@ sealed class CharacterAssembly(PopulationData data)
         FitRolledLimbs(cold.Appearance?.Loadout, cold.Inventory, medical);
         Dye(cold, cold.Inventory);
         cold.Fighter = FighterOf(record, cold.Inventory, cold.Medical, cold.Race?.StringId);
-        if (!cold.IsPlayer && (data.PlayerFaction < 0 || cold.Faction != data.PlayerFaction) && !cold.Fighter.IsAnimal)
+        if (data.BodyOptions.Gore && !cold.IsPlayer && (data.PlayerFaction < 0 || cold.Faction != data.PlayerFaction) && !cold.Fighter.IsAnimal)
             cold.Brutality = BrutalityProgress.FromCombat(stats);
         cold.WaterFactor = raceData.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
         cold.RoadPreference = data.RoadPreferenceOf(cold.Faction);

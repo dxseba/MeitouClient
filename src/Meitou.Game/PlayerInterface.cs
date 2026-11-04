@@ -19,6 +19,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public Matrix4x4 ViewProjection = Matrix4x4.Identity;
     public Vector3 Eye;
     public int Width = 1, Height = 1;
+    /// <summary>The gore mode captured when the application started; pending settings do not change the current session.</summary>
+    public bool GoreEnabled { get; init; }
     /// <summary>How far from the camera a box select still takes characters.</summary>
     public const float BoxSelectRange = 7500;
     /// <summary>A person's height (the renderer's sphere takes 20) for the box select's aim point and the pick capsule of a character the renderer does not draw.</summary>
@@ -184,7 +186,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         long tick = world.Tick;
         bool give = selection.Count > 0;
         Action? Do(Action a) => give ? a : null;
-        if (c.TorsoBisection is { IsValid: true })
+        if (GoreEnabled && c.TorsoBisection is { IsValid: true })
         {
             var holder = FragmentCarrier(c, torsoSide);
             if (!holder.IsNone)

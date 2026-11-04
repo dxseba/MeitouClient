@@ -23,12 +23,12 @@ sealed partial class GameHost
         ? owner ^ (1L << 54) ^ (fragment == 2 ? 1L << 51 : 0)
         : owner ^ (1L << 53) ^ ((long)part << 48);
 
-    static CharacterTorsoCut? AttachedHeadClip(CharacterSnapshot character) =>
-        character.HeadCut is { IsValid: true, Mode: HeadCutMode.AttachedSplit } cut
+    CharacterTorsoCut? AttachedHeadClip(CharacterSnapshot character) =>
+        GoreEnabled && character.HeadCut is { IsValid: true, Mode: HeadCutMode.AttachedSplit } cut
             ? new(cut.Plane, -1, FullBody: true, HeadOnly: true) : null;
 
-    static CharacterTorsoCut? DetachedHeadClip(CharacterSnapshot character, int fragment) =>
-        character.HeadCut is { IsValid: true } cut
+    CharacterTorsoCut? DetachedHeadClip(CharacterSnapshot character, int fragment) =>
+        GoreEnabled && character.HeadCut is { IsValid: true } cut
             ? new(cut.Plane, fragment == 2 ? -1 : 1, FullBody: true, HeadOnly: true) : null;
 
     CharacterAppearance DetachedHeadLook(long source, CharacterAppearance current, CharacterSnapshot? previous)
@@ -40,6 +40,7 @@ sealed partial class GameHost
 
     void AddDetachedRagdolls(CharacterDrawList list)
     {
+        if (!GoreEnabled) return;
         if (detachedPartsEpoch != worldEpoch) { detachedPartDraws.Clear(); detachedPartsEpoch = worldEpoch; }
         liveDetachedKeys.Clear();
         IndexPrevious();

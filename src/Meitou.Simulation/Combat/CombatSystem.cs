@@ -245,7 +245,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
         if (!table.TryResolveNext(attacker, out int a) || !table.TryResolveNext(target, out int t) || a == t) return false;
         var cold = table.Cold(a)!;
         var tc = table.Cold(t)!;
-        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || cold.Medical.Incapacitated || !MayKeepAttackTarget(world, a, t, order.Picked, order.AllowIncapacitated)) return false;
+        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || cold.Medical.Incapacitated
+            || (options.Gore ? !MayKeepAttackTarget(world, a, t, order.Picked, order.AllowIncapacitated) : tc.Medical is not { Incapacitated: false })) return false;
         if (!ValidBodyPartTarget(world, a, t, order.Picked, order.AllowIncapacitated, order.TargetBodyPart)) return false;
         if (!cold.CarriedBy.IsNone) return false;   // a carried mate does not fight (a prisoner neither: rows 5, 13 and 16 are not registered for the imprisoned; it may still be attacked, engine choice)
         // A fighter turns on no one it found no path to lately unless the player picked it (isPathImpossible in every finder's score, docs/game/combat.md "Target score"): a mate
@@ -291,7 +292,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
     {
         var table = world.Characters;
         bool allow = order.Detail is PickedAttack { Order.AllowIncapacitated: true };
-        if (!table.TryResolveNext(order.Target, out int t) || t == slot || !MayKeepAttackTarget(world, slot, t, true, allow) || !ValidBodyPartTarget(world, slot, t, true, allow, (order.Detail as PickedAttack)?.Order.TargetBodyPart)) return OrderCheck.Gone;
+        if (!table.TryResolveNext(order.Target, out int t) || t == slot
+            || (options.Gore ? !MayKeepAttackTarget(world, slot, t, true, allow) : table.Cold(t)!.Medical is not { Incapacitated: false })
+            || !ValidBodyPartTarget(world, slot, t, true, allow, (order.Detail as PickedAttack)?.Order.TargetBodyPart)) return OrderCheck.Gone;
         var cold = table.Cold(slot)!;
         return cold is { Fighter: not null, Stats: not null, Race: not null, Medical.Incapacitated: false } && cold.CarriedBy.IsNone ? OrderCheck.Run : OrderCheck.Blocked();
     }

@@ -29,7 +29,7 @@ public sealed class TorsoFragmentInteractionTests
         public int HitSide;
         public Vector2 Pixel { get; }
 
-        public Scene(int side)
+        public Scene(int side, bool gore = true)
         {
             var install = GameInstall.Locate();
             Assert.SkipWhen(install is null, "Kenshi install not found");
@@ -45,7 +45,7 @@ public sealed class TorsoFragmentInteractionTests
             Session.World.Player.Faction = 0;
             Select(First, Second);
             var resources = OgreScriptResources.ForInstall(install, LoadOrder.FromInstall(install));
-            Ui = new PlayerInterface(Session, (_, _) => 0, c => c.Position) { Width = 1600, Height = 900 };
+            Ui = new PlayerInterface(Session, (_, _) => 0, c => c.Position) { Width = 1600, Height = 900, GoreEnabled = gore };
             Ui.LoadUi(UiMode.Faithful, name => resources.Find(name));
             Ui.ConfigureFrontend(SyntheticTown.Database(), () => [], "");
             Ui.Eye = new Vector3(0, 6, -14);
@@ -180,4 +180,36 @@ public sealed class TorsoFragmentInteractionTests
         Assert.Equal(scene.Body, command.Target);
         Assert.Equal(side, command.TorsoSide);
     }
+    [Theory, Slow]
+    [InlineData("quick")]
+    [InlineData("ctrl")]
+    [InlineData("alt")]
+    public void Gore_off_uses_whole_corpse_orders_even_when_the_mesh_reports_a_positive_half(string gesture)
+    {
+        using var scene = new Scene(1, gore: false);
+        scene.Ui.MouseDown(MouseButton.Right, scene.Pixel, false, ctrl: gesture == "ctrl", alt: gesture == "alt");
+        if (gesture == "quick") scene.Ui.MouseUp(MouseButton.Right, scene.Pixel, false);
+        var command = Assert.Single(scene.Commands());
+        if (gesture == "quick")
+        {
+            var loot = Assert.IsType<OpenLootOrder>(command);
+            Assert.Equal(scene.Body, loot.Target);
+            Assert.Equal(0, loot.TorsoSide);
+        }
+        else if (gesture == "ctrl")
+        {
+            var pick = Assert.IsType<PickUpOrder>(command);
+            Assert.Equal(scene.Body, pick.Target);
+            Assert.Equal(0, pick.TorsoSide);
+        }
+        else
+        {
+            var loot = Assert.IsType<LootOrder>(command);
+            Assert.Equal(scene.Body, loot.Target);
+            Assert.Equal(0, loot.TorsoSide);
+        }
+        Assert.False(scene.Ui.ScenePickUpTorso(scene.Body, 1, [new(3, 1, 0)]));
+        Assert.Empty(scene.Commands());
+    }
+
 }

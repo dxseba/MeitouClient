@@ -52,7 +52,7 @@ sealed partial class PlayerInterface
             float y = panel.Bounds.Y;
             for (int i = 0; i < StatPanels[column].Length; i++)
             {
-                if (column == 2 && i == 4)
+                if (GoreEnabled && column == 2 && i == 4)
                 {
                     const string brutalityAction = "stat:brutality", brutalityFont = "Kenshi_StandardFont_Medium";
                     Text($"{name}-label-brutality", Loc.Tr("Brutality"), brutalityFont, statInk, "Left VCenter", brutalityAction);
@@ -99,7 +99,7 @@ sealed partial class PlayerInterface
 
     void AddStatDescription(List<UiControl> controls)
     {
-        if (selectedStat == "brutality")
+        if (GoreEnabled && selectedStat == "brutality")
         {
             AddBrutalityDescription(controls);
             return;

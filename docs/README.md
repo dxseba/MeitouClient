@@ -86,6 +86,7 @@ used as a naming reference for our 1.0.68 analysis; they are **Observed** until 
 - [ai-tasks](game/ai-tasks.md)
 - [ai](game/ai.md)
 - [blood-decals](game/blood-decals.md): blood pools, smears and splashes on the terrain
+- [optional Brutality gore](game/gore.md): off by default, restart boundary, saved-state preservation
 - [luckyren](game/luckyren.md): Meitou luckyren Mode, characters bursting on a fatal hit (gear, blood, flying bones)
 - [animals](game/animals.md)
 - [buildings-production](game/buildings-production.md)

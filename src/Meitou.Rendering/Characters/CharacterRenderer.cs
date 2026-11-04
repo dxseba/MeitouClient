@@ -152,7 +152,11 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     /// <summary>Whether the skin shading applies to the race <paramref name="race"/> (RACE string id): the Skin page's choice, else <paramref name="byDefault"/>.</summary>
     public bool SkinOn(string? race, bool byDefault) => race is not null && skinRaces is not null && skinRaces.TryGetValue(race, out bool chosen) ? chosen : byDefault;
     readonly SkinScattering skinScattering;
-    readonly WoundMasks woundMasks;
+    WoundMasks? allocatedWoundMasks;
+    WoundMasks woundMasks => allocatedWoundMasks ??= new(Gpu);
+
+    /// <summary>Optional anatomical wounds and cut geometry. Fixed before asset loading; a different mode requires a restart.</summary>
+    public bool GoreEnabled { get => content.GoreEnabled; init => content.GoreEnabled = value; }
 
     /// <summary>
     /// The skin per race, chosen against its default (RACE string id to on or off; the settings' Skin page): a race not in it takes <see cref="SkinByDefault"/>.
@@ -481,7 +485,6 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         motionProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.MotionVertex(), CharacterShaders.MotionFragment(), "characters motion", CharacterShaders.InstanceLocation);
         content = new CharacterContent(gpu, install, db, assetLocator, rigs);
         skinScattering = new SkinScattering(gpu);
-        woundMasks = new WoundMasks(gpu);
         colourTimer = new PassTimer(gpu);
         depthTimer = new PassTimer(gpu);
     }
@@ -590,7 +593,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         textureBias = Gpu.LodBias;
         textureStandIn = Gpu.StandIn2D;
         updateStamp++;
-        woundMasks.BeginFrame();
+        if (GoreEnabled) woundMasks.BeginFrame();
         poseSeconds = PoseClock?.Invoke() ?? Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
 
         // 1. Assets and the characters in range, with their layers resolved (the rig's caches are filled here, on this thread), and which to pose.
@@ -710,7 +713,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         (l.Key, l.PortraitOnly) = (inst.Key, far);
         l.World = world;
         (l.WeaponDrawn, l.RangedDrawn, l.BackDrawn, l.Shots, l.Bolts) = (inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, inst.Shots, inst.Bolts);
-        (l.HipWeaponBlood, l.BackWeaponBlood) = (inst.HipWeaponBlood, inst.BackWeaponBlood);
+        (l.HipWeaponBlood, l.BackWeaponBlood) = GoreEnabled ? (inst.HipWeaponBlood, inst.BackWeaponBlood) : default;
         l.Centre = centre;
         l.Radius = radius;
         ConfigureWounds(ref l, in inst);
@@ -729,6 +732,19 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     void ConfigureWounds(ref Live l, in CharacterInstance inst)
     {
         var asset = l.Asset;
+        if (!GoreEnabled)
+        {
+            l.WoundMask = l.LostGroups = l.LimbCuts = l.PartOnly = 0;
+            l.WoundSpheres = null;
+            l.WoundCuts = null;
+            l.LimbPlanes = default;
+            l.TorsoCut = null;
+            l.TorsoFrame = default;
+            l.HeadFrame = default;
+            l.HasWounds = l.HeadReliefReady = false;
+            l.DrawParts = asset.Parts;
+            return;
+        }
         l.WoundMask = woundMasks.Update(inst.Key, asset.Rig, asset.WoundPoints, inst.Wounds);
         l.WoundSpheres = l.WoundMask != 0 ? woundMasks.Spheres(inst.Key) : null;
         l.WoundCuts = l.WoundMask != 0 ? woundMasks.Cuts(inst.Key) : null;
@@ -1246,7 +1262,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         nativeFrame.Dispose();
         content.Dispose();
         skinScattering.Dispose();
-        woundMasks.Dispose();
+        allocatedWoundMasks?.Dispose();
         DisposePortraits();
         DisposeStage();
         DisposeHover();

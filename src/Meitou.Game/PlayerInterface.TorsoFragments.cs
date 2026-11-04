@@ -11,6 +11,7 @@ sealed partial class PlayerInterface
 
     int PickTorsoSide(CharacterId id, Vector2 pixel)
     {
+        if (!GoreEnabled) return 0;
         if (BodyFragmentLabelAt(pixel) is { Interactive: true } label && label.Owner == id) return label.TorsoSide;
         return Ray(pixel) is { } ray && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id)?.TorsoBisection is { IsValid: true }
             ? TorsoSideHit?.Invoke(id, ray.Origin, ray.Direction) == 1 ? 1 : 0 : 0;
@@ -24,6 +25,7 @@ sealed partial class PlayerInterface
     /// <summary>Picking either half keeps a single corpse inventory, with a separate carry link for each half.</summary>
     List<(string Caption, Action Give)> TorsoFragmentVerbs(CharacterSnapshot target, int side)
     {
+        if (!GoreEnabled) return [];
         var verbs = new List<(string, Action)>();
         if (target.CanOpenInventory) verbs.Add(InventoryVerb(target, side));
         var holders = Selected().Where(c => CarriesFragment(c, target.Id, side)).Select(c => c.Id).ToArray();
@@ -37,7 +39,7 @@ sealed partial class PlayerInterface
     /// <summary>A native screenshot scene exercises the rendered pick and the same Pick Up verb as the user.</summary>
     internal bool ScenePickUpTorso(CharacterId id, int side, IReadOnlyList<Vector3> points)
     {
-        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } target) return false;
+        if (!GoreEnabled || session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } target) return false;
         foreach (var point in points)
         {
             if (Project(point) is not { } pixel || PickWhereAt(pixel, _ => true)?.Id != id || PickTorsoSide(id, pixel) != side) continue;

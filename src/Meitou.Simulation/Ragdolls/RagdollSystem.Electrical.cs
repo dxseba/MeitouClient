@@ -9,7 +9,7 @@ public sealed partial class RagdollSystem
     // Three finite jolts shortly after a mechanical severing; never keep a settled corpse alive indefinitely.
     void ApplyElectricalSpasms(World world)
     {
-        if (options is not { AdvancedRagdolls: true }) return;
+        if (options is not { Gore: true, AdvancedRagdolls: true }) return;
         int budget = 6;
         foreach (var id in torsoOrder)
         {

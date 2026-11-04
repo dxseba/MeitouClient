@@ -57,7 +57,7 @@ public partial class RagdollInstalledSkinTests
         var carrierSetup = new CharacterPoseSetup { Rig = rig, Shape = carrierReshape.Value.Shape,
             GroundOffset = carrierReshape.Value.GroundOffset, Fixed = setup.Fixed, Idle = setup.Idle };
         Assert.NotNull(carrierSetup.Shape);
-        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
+        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 41 }, new OpenGroundWalkability((_, _) => 0), [animation, physics]);
         var cut = style == TorsoBisectionStyle.Transverse ? new TorsoBisectionState(new(0, 1, 0, -12))
             : TorsoBisectionPolicy.StateForDirection(direction, 1, Vector2.UnitX, -MathF.PI / 2, style);

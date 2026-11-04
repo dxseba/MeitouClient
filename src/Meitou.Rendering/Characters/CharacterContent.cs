@@ -214,9 +214,14 @@ internal sealed class CharacterContent : IDisposable
 {
     const string AllocationName = "character meshes";
     readonly IGpuContext gpu;
-    readonly CharacterHeadWoundPool headWoundPool;
-    readonly CharacterTorsoCutPool torsoCutPool;
-    readonly CharacterLimbCutPool limbCutPool;
+    CharacterHeadWoundPool? allocatedHeadWoundPool;
+    CharacterTorsoCutPool? allocatedTorsoCutPool;
+    CharacterLimbCutPool? allocatedLimbCutPool;
+    CharacterHeadWoundPool headWoundPool => allocatedHeadWoundPool ??= new(gpu);
+    CharacterTorsoCutPool torsoCutPool => allocatedTorsoCutPool ??= new(gpu);
+    CharacterLimbCutPool limbCutPool => allocatedLimbCutPool ??= new(gpu);
+    // Fixed by the renderer before any assets are prefetched; changing mode requires a restart.
+    public bool GoreEnabled { get; set; }
     readonly AssetLocator assets;
     readonly GameDatabase db;
     readonly MaterialResolver resolver;
@@ -239,9 +244,6 @@ internal sealed class CharacterContent : IDisposable
     public CharacterContent(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)
     {
         this.gpu = gpu;
-        headWoundPool = new CharacterHeadWoundPool(gpu);
-        torsoCutPool = new CharacterTorsoCutPool(gpu);
-        limbCutPool = new CharacterLimbCutPool(gpu);
         this.assets = assets;
         this.db = db;
         modsDirectory = install.ModsDirectory;
@@ -274,9 +276,9 @@ internal sealed class CharacterContent : IDisposable
         meshes.Clear();
         prepared.Clear();
         MeshBytes = 0;
-        headWoundPool.Dispose();
-        torsoCutPool.Dispose();
-        limbCutPool.Dispose();
+        allocatedHeadWoundPool?.Dispose();
+        allocatedTorsoCutPool?.Dispose();
+        allocatedLimbCutPool?.Dispose();
         Textures.Dispose();
         Morphs.Dispose();
         Materials.Dispose();
@@ -309,7 +311,7 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>The preparation of a mesh, made once (any thread; the first caller's level settings stand).</summary>
     Lazy<Prepared> Prepare(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs = null, bool close = false, bool icon = false, string? partMap = null) =>
-        prepared.GetOrAdd((path.ToLowerInvariant(), icon ? IconBones : boneCount ?? -1, close, partMap?.ToLowerInvariant()), _ => new Lazy<Prepared>(() => PrepareMesh(path, boneCount, lodScale, shadowLevels, pixelsPerRadian, limbs, close, icon, partMap)));
+        prepared.GetOrAdd((path.ToLowerInvariant(), icon ? IconBones : boneCount ?? -1, close, partMap?.ToLowerInvariant()), _ => new Lazy<Prepared>(() => PrepareMesh(path, boneCount, lodScale, shadowLevels, pixelsPerRadian, limbs, close, icon, partMap, GoreEnabled)));
 
     /// <summary>The bone count an icon's mesh is kept under (<see cref="prepared"/>, <see cref="meshes"/>): its tangents are built the icon shader's way (<see cref="Model.Build"/>).</summary>
     const int IconBones = -2;
@@ -322,7 +324,7 @@ internal sealed class CharacterContent : IDisposable
     static readonly ConcurrentDictionary<string, Vertex[]> HeadSurfaces = new();
     static readonly ConcurrentDictionary<string, Vertex[]> BodySurfaces = new();
 
-    static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs, bool close, bool icon = false, string? partMap = null)
+    static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs, bool close, bool icon = false, string? partMap = null, bool gore = false)
     {
         var messages = new List<string>();
         try
@@ -331,10 +333,10 @@ internal sealed class CharacterContent : IDisposable
             if (MeshWeld.Enabled) OgreMeshWeld.Apply(mesh);
             var model = Model.Build(mesh, boneCount, gameBinormals: !icon, tangentSign: icon);
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
-            if (limbs is not null || partMap is not null)
+            if (gore && (limbs is not null || partMap is not null))
                 WoundPoints[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Vertices).Where((_, i) => i % 2 == 0).Select(v => new WoundPoint(v.Position, v.Normal, v.Uv, (int)(v.Bones & 255), v.Bones, v.Weights))];
-            if (limbs is not null || partMap is not null) HeadSurfaces[path.ToLowerInvariant()] = HeadWoundSurface.Source(model);
-            if (limbs is not null || partMap is not null) BodySurfaces[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Indices.Select(i => p.Vertices[i]))];
+            if (gore && (limbs is not null || partMap is not null)) HeadSurfaces[path.ToLowerInvariant()] = HeadWoundSurface.Source(model);
+            if (gore && (limbs is not null || partMap is not null)) BodySurfaces[path.ToLowerInvariant()] = [.. model.Parts.SelectMany(p => p.Indices.Select(i => p.Vertices[i]))];
             if (limbs is not null || partMap is not null) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
             // Not an icon's: its colour is the mesh's own vertex colour (CharacterShaders.VertexColoured), and icons take no skin.
             if (!icon) MarkCurvature(model);
@@ -864,15 +866,15 @@ internal sealed class CharacterContent : IDisposable
         var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true, limbs: LimbHideOf(c, rig), close: close, partMap: PartMapPath(c));
         if (body is null) return null;
 
-        var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null, WoundPoints = WoundPoints.GetValueOrDefault(bodyPath.ToLowerInvariant()) };
+        var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null, WoundPoints = GoreEnabled ? WoundPoints.GetValueOrDefault(bodyPath.ToLowerInvariant()) : null };
         if (asset.Animal)
         {
             // An animal's sphere from its body's bounds (a leviathan is 190 units tall): centred above the feet, grown by the bounds' offset across the ground so any heading fits.
             asset.Height = Math.Max(2 * body.Centre.Y, 1);
             asset.Radius = body.Radius + new Vector2(body.Centre.X, body.Centre.Z).Length();
         }
-        asset.HeadSource = HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant());
-        asset.BodySource = BodySurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant());
+        asset.HeadSource = GoreEnabled ? HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) : null;
+        asset.BodySource = GoreEnabled ? BodySurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) : null;
         var setup = Rigs.For(c);
         asset.Shape = setup?.Shape;
         asset.GroundOffset = setup?.GroundOffset ?? 0;
@@ -917,7 +919,7 @@ internal sealed class CharacterContent : IDisposable
                 BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, ShownShots = part.ShownShots, Muzzle = part is { Field: "live ammo", ShownShots: 1, Shown: WeaponShown.RangedDrawn }, HideSide = part.HideSide, PickBoxes = loaded.PickBoxes ?? [],
                 FileDistances = loaded.FileDistances, FileFirst = loaded.FileFirst, FileRadius = loaded.FileRadius,
             };
-            SetupWeaponBlood(ap, part, loaded);
+            if (GoreEnabled) SetupWeaponBlood(ap, part, loaded);
             if (!shared)
             {
                 // Mode 0: attachObjectToBone at the attachment point; a bone the skeleton lacks falls back to the root.
@@ -941,7 +943,7 @@ internal sealed class CharacterContent : IDisposable
 
         // Ecorche is fitted under each humanoid, with the actual race's soft-tissue palette.
         uint bloodColour = unchecked((uint)c.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
-        if (!asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin
+        if (GoreEnabled && !asset.Animal && !c.Race.GetBool("is robot") && asset.WoundPoints is { } skin
             && AnatomyMesh(rig, bodyPath, skin, c.Female, body.Morphs, c.Headless, c.HeadOnly, bloodColour) is { } anatomy)
         {
             asset.BrainSource = anatomy.BrainSource;
@@ -953,7 +955,7 @@ internal sealed class CharacterContent : IDisposable
             });
         }
 
-        if (!asset.Animal && c.Race.GetBool("is robot") && MechanicalAnatomyMesh(rig, bodyPath, c) is { } mechanical)
+        if (GoreEnabled && !asset.Animal && c.Race.GetBool("is robot") && MechanicalAnatomyMesh(rig, bodyPath, c) is { } mechanical)
             asset.Parts.Add(new AssetPart
             {
                 Label = "mechanical anatomy", Mesh = mechanical.Gpu, Shared = true, Anatomy = true,
@@ -963,7 +965,7 @@ internal sealed class CharacterContent : IDisposable
             });
 
         // Face relief is small and per morph; keep the much larger internal anatomy shared between faces.
-        if (!c.Headless && !asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase, bloodColour) is { } relief)
+        if (GoreEnabled && !c.Headless && !asset.Animal && !c.Race.GetBool("is robot") && HeadReliefMesh(rig, bodyPath, shapeDeltas, asset.MorphBase, bloodColour) is { } relief)
         {
             asset.Parts.First(p => p.IsBody).HeadReliefProfiles = relief.HeadReliefProfiles;
             asset.Parts.Add(new AssetPart

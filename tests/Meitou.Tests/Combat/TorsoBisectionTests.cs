@@ -342,7 +342,7 @@ public class TorsoBisectionTests
     [InlineData(1)]
     public void An_actual_melee_hit_uses_its_own_visual_hash_and_preserves_the_existing_chance_roll(int direction)
     {
-        using var world = NewWorld(7, 1, out var combat, techniques: [CombatFixtures.Cut("cut left", direction: direction)]);
+        using var world = NewWorld(7, 1, out var combat, techniques: [CombatFixtures.Cut("cut left", direction: direction)], gore: true);
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;
         var (attacker, defender) = Pair(world,
@@ -414,7 +414,7 @@ public class TorsoBisectionTests
     [Fact]
     public void Bisection_is_published_after_native_death_once_with_the_original_hit_metadata()
     {
-        using var world = NewWorld(11, 1, out var combat);
+        using var world = NewWorld(11, 1, out var combat, gore: true);
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;
         var (attacker, defender) = Pair(world, new Combatant(), new Combatant());
@@ -447,7 +447,7 @@ public class TorsoBisectionTests
     [Fact]
     public void The_debug_command_runs_at_its_tick_and_publishes_the_actual_direction_only_once()
     {
-        using var world = NewWorld(11, 1, out _);
+        using var world = NewWorld(11, 1, out _, gore: true);
         world.AddSystem(new PlayerSystem());
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;
@@ -536,7 +536,7 @@ public class TorsoBisectionTests
     [InlineData(false, false, 5, TorsoBisectionStyle.Oblique)]
     public void The_debug_command_rejects_ineligible_targets_and_style_axis_mismatches_before_applying_damage(bool robot, bool animal, int direction, TorsoBisectionStyle style)
     {
-        using var world = NewWorld(11, 1, out _);
+        using var world = NewWorld(11, 1, out _, gore: true);
         world.AddSystem(new PlayerSystem());
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;
@@ -558,7 +558,7 @@ public class TorsoBisectionTests
 
     static Vector4 DebugPlane(ulong worldSeed, ulong? visualSeed, int direction = 2, TorsoBisectionStyle style = TorsoBisectionStyle.Auto)
     {
-        using var world = NewWorld(worldSeed, 1, out _);
+        using var world = NewWorld(worldSeed, 1, out _, gore: true);
         world.AddSystem(new PlayerSystem());
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;

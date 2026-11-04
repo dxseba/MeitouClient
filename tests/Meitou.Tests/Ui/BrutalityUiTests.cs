@@ -15,11 +15,13 @@ namespace Meitou.Tests.Ui;
 public sealed class BrutalityUiTests
 {
     [Theory, Slow]
-    [InlineData(UiMode.Faithful, 1280, 720)]
-    [InlineData(UiMode.Faithful, 1600, 900)]
-    [InlineData(UiMode.Meitou, 1280, 720)]
-    [InlineData(UiMode.Meitou, 1600, 900)]
-    public void Custom_skill_is_selectable_reports_progress_and_updates_at_mastery(UiMode mode, int width, int height)
+    [InlineData(UiMode.Faithful, 1280, 720, true)]
+    [InlineData(UiMode.Faithful, 1600, 900, true)]
+    [InlineData(UiMode.Meitou, 1280, 720, true)]
+    [InlineData(UiMode.Meitou, 1600, 900, true)]
+    [InlineData(UiMode.Faithful, 1280, 720, false)]
+    [InlineData(UiMode.Meitou, 1600, 900, false)]
+    public void Custom_skill_requires_gore_and_reports_progress_and_mastery_when_enabled(UiMode mode, int width, int height, bool gore)
     {
         var install = GameInstall.Locate();
         Assert.SkipWhen(install is null, "Kenshi install not found");
@@ -29,12 +31,18 @@ public sealed class BrutalityUiTests
         session.World.Player.Selection.Add(id);
         session.World.RunTick();
         var resources = OgreScriptResources.ForInstall(install, LoadOrder.FromInstall(install));
-        var ui = new PlayerInterface(session, (_, _) => 0, c => c.Position) { Width = width, Height = height };
+        var ui = new PlayerInterface(session, (_, _) => 0, c => c.Position) { Width = width, Height = height, GoreEnabled = gore };
         ui.LoadUi(mode, name => resources.Find(name));
         ui.ConfigureFrontend(SyntheticTown.Database(), () => [], "");
         try
         {
             ui.ShowUiPanel("stats");
+            if (!gore)
+            {
+                Assert.DoesNotContain(ui.UiFrame, c => c.Name.Contains("brutality", StringComparison.OrdinalIgnoreCase));
+                Assert.DoesNotContain(ui.UiFrame, c => c.Caption == "Brutality");
+                return;
+            }
             var row = ui.UiFrame.Single(c => c.Name == "Skills2Panel-label-brutality");
             var panel = ui.UiFrame.Single(c => c.Name == "Skills2Panel");
             Assert.Equal("Brutality", row.Caption);

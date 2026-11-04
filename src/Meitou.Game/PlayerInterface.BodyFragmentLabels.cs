@@ -23,7 +23,7 @@ sealed partial class PlayerInterface
 
     BodyFragmentLabel? BodyFragmentLabelAt(Vector2 pixel)
     {
-        if (HighlightFocus is null) return null;
+        if (!GoreEnabled || HighlightFocus is null) return null;
         foreach (var (label, rect) in bodyFragmentLabels)
             if (rect.Contains(pixel.X, pixel.Y)) return label;
         return null;
@@ -33,7 +33,7 @@ sealed partial class PlayerInterface
     internal void LayoutBodyFragmentLabels(Func<string, float> measure)
     {
         bodyFragmentLabels.Clear();
-        if (HighlightFocus is not { } focus || BodyFragmentLabels is null || EditorOpen) return;
+        if (!GoreEnabled || HighlightFocus is not { } focus || BodyFragmentLabels is null || EditorOpen) return;
         float scale = Height / 1080f, height = Height * 0.0259259f;
         var near = new List<(BodyFragmentLabel Label, float Distance, Vector2 At)>();
         foreach (var label in BodyFragmentLabels())

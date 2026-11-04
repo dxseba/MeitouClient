@@ -229,6 +229,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         var bc = world.Characters.Cold(body)!;
         bool kidnap = lift.Row == TaskType.KIDNAP_ORDER;
         int side = lift.Detail == PositiveTorso ? 1 : 0;
+        if (side > 0 && world.SystemOf<CarrySystem>() is not { bodyOptions.Gore: true }) return false;
         return CanBeLifted(world, bc, side) || side == 0 && kidnap && CanBeKidnapped(world.Characters, body) || !kidnap && Snatchable(bc, side);
     }
 

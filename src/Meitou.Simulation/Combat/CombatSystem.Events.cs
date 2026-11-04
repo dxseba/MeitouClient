@@ -31,7 +31,7 @@ public sealed partial class CombatSystem
         float yaw = world.Characters.Previous[victim].Yaw;
         ulong cutSeed = limbCutSeed ?? Rng.Mix(world.Seed ^ Rng.Key(id) ^ Rng.Key(attacker) ^ (ulong)world.Tick * 0x9E3779B97F4A7C15UL);
         foreach (var ev in events)
-            if (ev.Kind == MedicalEventKind.PartSevered && medical.Parts[ev.Part].Template.LimbSlot is >= 0 and <= 3 and var limb)
+            if (options.Gore && ev.Kind == MedicalEventKind.PartSevered && medical.Parts[ev.Part].Template.LimbSlot is >= 0 and <= 3 and var limb)
             {
                 if (cutDirection >= 0) Wounds.SeveredLevels.Note(id, limb, cutDirection, lowStrike);
                 if (options.AdvancedRagdolls && Wounds.SeveredLevels.Forced is null && owner is not null)

@@ -11,7 +11,7 @@ public sealed partial class CombatSystem
     internal bool DebugHeadCut(World world, CharacterId victimId, CharacterId attackerId, string style, int direction = 1, ulong? visualSeed = null)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(victimId, out int slot)
+        if (!options.Gore || !table.TryResolveNext(victimId, out int slot)
             || table.Cold(slot) is not { Medical: { Dead: false } medical, Race: not null, Fighter: { IsAnimal: false }, Stats: not null } victim
             || victim.HeadCut is not null) return false;
         int head = -1;

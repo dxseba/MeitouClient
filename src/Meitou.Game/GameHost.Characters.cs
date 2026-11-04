@@ -147,9 +147,9 @@ sealed partial class GameHost
             AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses)
             {
                 TorsoCut = AttachedHeadClip(c),
-                Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id), LimbSeverances = c.LimbSeverances,
-                HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
-                HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Scale = c.Scale, Hidden = hiddenIndoors.Contains(c.Id), FullRateAnimation = c.IsPlayer, Rotation = rotation, Build = c.Build, Blood = c.BloodAmounts,
+                Wounds = GoreEnabled ? WoundMarks(c.Id) : [], LostGroups = GoreEnabled ? LostGroups(c.Id) : 0, LimbCuts = GoreEnabled ? LimbCuts(c.Id) : 0, LimbSeverances = GoreEnabled ? c.LimbSeverances : [],
+                HeadWoundPlacement = GoreEnabled && severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
+                HipWeaponBlood = GoreEnabled ? c.HipWeaponBlood : default, BackWeaponBlood = GoreEnabled ? c.BackWeaponBlood : default, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Scale = c.Scale, Hidden = hiddenIndoors.Contains(c.Id), FullRateAnimation = c.IsPlayer, Rotation = rotation, Build = c.Build, Blood = c.BloodAmounts,
                 Bones = Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),
             });
         }
@@ -158,7 +158,7 @@ sealed partial class GameHost
 
 
     /// <summary>A bisected owner's portrait uses its visible head on the upper half.</summary>
-    long PortraitKey(CharacterId id) => torsoCuts.Of(id) is null ? DrawKey(id) : DrawKey(id) ^ (1L << 52);
+    long PortraitKey(CharacterId id) => !GoreEnabled || torsoCuts.Of(id) is null ? DrawKey(id) : DrawKey(id) ^ (1L << 52);
 
     /// <summary>A character's key in the draw list: stable while it exists, new for every world (the renderer keeps its poses by it).</summary>
     long DrawKey(CharacterId id) => (((long)id.Slot << 32 | (uint)id.Generation) + 1) | (long)worldEpoch << 56;
@@ -269,7 +269,7 @@ sealed partial class GameHost
             var inBar = editing is { } shown ? EditorBarPlace(c.Id, shown) : null;
             if (c.Appearance is null || editing is { } edited && c.Id != edited && inBar is null) continue;
             // The snapshot's place: a tick's motion is well inside InReach's margin.
-            if (reachOf is not null && c.TorsoBisection is null && c.TorsoRagdoll is null && c.DetachedRagdolls.Count == 0
+            if (reachOf is not null && (!GoreEnabled || c.TorsoBisection is null && c.TorsoRagdoll is null && c.DetachedRagdolls.Count == 0)
                 && !reachOf.InReach(c.Position, eye) && !portraitKeys.Contains(DrawKey(c.Id)) && c.Id != sandboxHero)
             {
                 if (distant) AddDistant(list, c);
@@ -328,9 +328,9 @@ sealed partial class GameHost
             AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), look, position, yaw, poses)
             {
                 TorsoCut = AttachedHeadClip(c),
-                Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id), LimbSeverances = c.LimbSeverances,
-                HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
-                HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Bolts = BoltsOf(c), Scale = c.Scale, Hidden = inBar is null && hiddenIndoors.Contains(c.Id), FullRateAnimation = editing is not null || fullRate.Contains(c.Id) || c.Id == sandboxHero && sandboxPicker?.Current is not null,
+                Wounds = GoreEnabled ? WoundMarks(c.Id) : [], LostGroups = GoreEnabled ? LostGroups(c.Id) : 0, LimbCuts = GoreEnabled ? LimbCuts(c.Id) : 0, LimbSeverances = GoreEnabled ? c.LimbSeverances : [],
+                HeadWoundPlacement = GoreEnabled && severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
+                HipWeaponBlood = GoreEnabled ? c.HipWeaponBlood : default, BackWeaponBlood = GoreEnabled ? c.BackWeaponBlood : default, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Bolts = BoltsOf(c), Scale = c.Scale, Hidden = inBar is null && hiddenIndoors.Contains(c.Id), FullRateAnimation = editing is not null || fullRate.Contains(c.Id) || c.Id == sandboxHero && sandboxPicker?.Current is not null,
                 Bones = !posed ? null : Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),
                 BlendFrom = glide?.From, Blend = glide?.Blend ?? 0, Build = c.Build, Rotation = rotation, Blood = c.BloodAmounts,
             });

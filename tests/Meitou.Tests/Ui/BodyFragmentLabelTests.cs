@@ -117,4 +117,19 @@ public sealed class BodyFragmentLabelTests
         var cut = new TorsoBisectionState(new(Vector3.Normalize(new(x, y, z)), 0), FullBody: true);
         Assert.Equal(expected, BodyFragmentNames.Torso(cut, side, leftPositive));
     }
+    [Fact, Slow]
+    public void Gore_off_hides_extra_fragment_labels_and_keeps_normal_severed_limb_names()
+    {
+        using var scene = new TorsoFragmentInteractionTests.Scene(1, gore: false);
+        bool readProvider = false;
+        scene.Ui.HighlightFocus = Vector3.Zero;
+        scene.Ui.BodyFragmentLabels = () => { readProvider = true; return [Half(scene, 1)]; };
+        scene.Ui.LayoutBodyFragmentLabels(_ => 220);
+        Assert.Empty(scene.Ui.BodyFragmentLabelsDrawn);
+        Assert.False(readProvider);
+        var item = new GroundItemSnapshot(1, "left-arm", "Left Arm", Vector3.Zero, Quaternion.Identity, true,
+            Fall: new(scene.Body, "Bip01 L UpperArm", 0));
+        Assert.Equal("Cut body — Left Arm", scene.Ui.GroundLabelName(item));
+    }
+
 }

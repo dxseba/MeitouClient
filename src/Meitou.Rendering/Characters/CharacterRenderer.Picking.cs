@@ -177,7 +177,7 @@ internal sealed partial class CharacterRenderer
             if (!part.ShowsWith(s.WeaponDrawn, s.RangedDrawn, back: s.BackDrawn) || part.PickBoxes.Length == 0) continue;
             if (s.PartOnly != 0 && !part.Shared) continue;
             if (!part.Shared && (part.AttachIndex < 0 || part.AttachIndex >= s.Attach.Length)) continue;
-            if (!part.Shared && part.Bone >= 0 && s.LimbPlanes.Band(asset.Rig.BindPosition[part.Bone],
+            if (GoreEnabled && !part.Shared && part.Bone >= 0 && s.LimbPlanes.Band(asset.Rig.BindPosition[part.Bone],
                 woundMasks.GroupOfBone(asset.Rig, part.Bone), s.LimbCuts, s.PartOnly) < 0) continue;
             if (!part.Shared && s.TorsoCut is { } rigidCut && part.Bone >= 0 && TorsoCutSurface.Band(asset.Rig.BindPosition[part.Bone], rigidCut.HeadOnly ? HeadCutSurface.Group(asset, part.Bone) : woundMasks.GroupOfBone(asset.Rig, part.Bone), rigidCut) < 0) continue;
             var model = part.Shared ? s.World : s.Attach[part.AttachIndex] * s.World;
@@ -188,9 +188,9 @@ internal sealed partial class CharacterRenderer
                 var localOrigin = Vector3.Transform(origin, inverse);
                 var localDirection = Vector3.TransformNormal(direction, inverse);
                 var min = box.Min - new Vector3(PickPadding); var max = box.Max + new Vector3(PickPadding);
-                int group = box.Bone >= 0 ? woundMasks.GroupOfBone(asset.Rig, box.Bone) : 0;
+                int group = GoreEnabled && box.Bone >= 0 ? woundMasks.GroupOfBone(asset.Rig, box.Bone) : 0;
                 int torsoGroup = s.TorsoCut is { HeadOnly: true } && box.Bone >= 0 ? HeadCutSurface.Group(asset, box.Bone) : group;
-                float? hit = part.Shared
+                float? hit = GoreEnabled && part.Shared
                     ? s.LimbPlanes.RayBox(localOrigin, localDirection, min, max, group, s.LimbCuts, s.PartOnly, s.TorsoCut, torsoGroup)
                     : Slab(localOrigin, localDirection, min, max);
                 if (hit is { } t && t < best)

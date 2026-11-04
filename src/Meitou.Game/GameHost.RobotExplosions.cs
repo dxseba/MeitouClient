@@ -12,6 +12,7 @@ sealed partial class GameHost
 
     void EmitRobotBreakExplosion(in CombatEvent hit, CharacterCold? victim)
     {
+        if (!GoreEnabled) return;
         if (!RobotExplosionsEnabled || gpu?.Particles is null || RobotBreakExplosionTracker.Kind(hit, victim) < 0) return;
         var part = victim!.Medical!.Parts[hit.Part].Template;
         var fallback = hit.Position + Vector3.UnitY * RobotCutEffects.FallbackHeight(part);
@@ -20,6 +21,7 @@ sealed partial class GameHost
 
     void UpdateRobotBreakExplosions(World world)
     {
+        if (!GoreEnabled) return;
         if (gpu.Particles is not { } particles) return;
         particles.RobotBreakExplosions.Clear();
         if (!RobotExplosionsEnabled) { robotExplosions.Clear(); return; }

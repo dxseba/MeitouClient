@@ -9,6 +9,7 @@ sealed partial class PlayerInterface
 {
     void AddBrutalityDescription(List<UiControl> controls)
     {
+        if (!GoreEnabled) return;
         if (controls.FirstOrDefault(c => c.Name == "Description1Panel") is not { } left
             || controls.FirstOrDefault(c => c.Name == "Description2Panel") is not { } right) return;
 

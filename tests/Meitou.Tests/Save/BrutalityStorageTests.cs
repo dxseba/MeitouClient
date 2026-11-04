@@ -89,13 +89,13 @@ public class BrutalityStorageTests
         Assert.Equal(0, replacement.Brutality.Experience);
     }
 
-    static PopulationData Data()
+    static PopulationData Data(bool gore = true)
     {
         var db = SyntheticTown.Database(anatomy: true);
         var record = new FcsRecord { StringId = "2-t", RecordType = FcsRecordType.CHARACTER, Name = "Veteran", Flags = 0x11 };
         record.Ints["combat stats"] = 80; record.Ints["stats randomise"] = 0;
         var patch = new FcsFile(); patch.Records.Add(record); db.Apply(patch, "brutality-veteran.mod");
-        return SyntheticTown.Data(db);
+        return SyntheticTown.Data(db).WithBodyOptions(BodyOptions.Default with { Gore = gore });
     }
 
     static CharacterCold Assemble(PopulationData data, bool player, int? faction = null)
@@ -105,6 +105,14 @@ public class BrutalityStorageTests
         var hot = new CharacterHot();
         new CharacterAssembly(data).Attach(new(1, 1), cold, ref hot, data.Db.Find("2-t"), data.Db.Find("1-t"), 1);
         return cold;
+    }
+
+    [Fact]
+    public void Disabled_gore_does_not_seed_new_npc_experience()
+    {
+        var cold = Assemble(Data(gore: false), false);
+        Assert.Equal(80, cold.Stats![StatsEnumerated.MeleeAttack]);
+        Assert.Equal(0, cold.Brutality.Experience);
     }
 
     [Fact]

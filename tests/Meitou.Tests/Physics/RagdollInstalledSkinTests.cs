@@ -34,7 +34,7 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
     public void Installed_cut_skin_does_not_stretch_into_straps_between_free_components(TorsoBisectionStyle style, int direction)
     {
         var (rig, definition, model, setup, rigs, look) = Installed();
-        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
+        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 41 }, new OpenGroundWalkability((_, _) => 0), [physics]);
         const float yaw = -MathF.PI / 2;
         var cut = TorsoBisectionPolicy.StateForDirection(direction, 1, Vector2.UnitX, yaw, style);
@@ -80,7 +80,7 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
         Assert.NotNull(ragdollPath);
         Vector3[]? Hull(string name) => assets.Find(name) is { } path ? CookedMeshReader.ReadConvex(File.ReadAllBytes(path)).Vertices : null;
         var definition = Assert.IsType<RagdollDefinition>(RagdollDefinition.Build(PhysicsFile.ReadFile(ragdollPath), rig, 1, Hull));
-        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
+        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 1 }, new OpenGroundWalkability((_, _) => 0), [physics]);
         const float yaw = -MathF.PI / 2;
         var cut = TorsoBisectionPolicy.StateForDirection(1, 1, -Vector2.UnitY, yaw, TorsoBisectionStyle.Vertical);
@@ -107,7 +107,7 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
     public void An_installed_amputees_retained_calves_and_feet_follow_their_physics_positions_above_the_floor()
     {
         var (rig, definition, model, setup, rigs, look) = Installed();
-        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
+        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 41 }, new OpenGroundWalkability((_, _) => 0), [physics]);
         var cold = new CharacterCold
         {

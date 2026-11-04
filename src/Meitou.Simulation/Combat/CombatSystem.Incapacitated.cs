@@ -8,7 +8,7 @@ public sealed partial class CombatSystem
     bool AllowsIncapacitatedTarget(World world, int attacker, int target, bool picked, bool allow)
     {
         var table = world.Characters;
-        return picked && allow && attacker != target && table.Cold(attacker) is { } source
+        return options.Gore && picked && allow && attacker != target && table.Cold(attacker) is { } source
             && table.Cold(target) is { Medical.Dead: false, CarriedBy.IsNone: true, IsImprisoned: false } victim
             && CharacterFacts.RegardsEnemy(Relations, source.Faction, victim.Faction);
     }

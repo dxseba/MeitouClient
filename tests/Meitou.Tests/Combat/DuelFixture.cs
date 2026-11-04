@@ -61,9 +61,9 @@ static class DuelFixture
         .Add("cut left", 0.9f).Add("combo", 1.3f).Add("block up", 0.7f).Add("block left", 0.7f).Add("block right", 0.7f).Add("block thrust", 0.7f).Add("dodge back", 0.8f);
 
     /// <summary><paramref name="minPartition"/> is the fewest slots in a partition: 1 puts even two fighters in different partitions, so more than one thread really runs them side by side.</summary>
-    public static SimWorld NewWorld(ulong seed, int threads, out CombatSystem combat, CombatOptions? options = null, IEnumerable<CombatTechnique>? techniques = null, int minPartition = 1)
+    public static SimWorld NewWorld(ulong seed, int threads, out CombatSystem combat, CombatOptions? options = null, IEnumerable<CombatTechnique>? techniques = null, int minPartition = 1, bool gore = false)
     {
-        combat = new CombatSystem(techniques ?? KatanaTechniques(), Constants, BaseGame, BodyOptions.Default, Lengths, options ?? new CombatOptions { RecordLog = true });
+        combat = new CombatSystem(techniques ?? KatanaTechniques(), Constants, BaseGame, BodyOptions.Default with { Gore = gore }, Lengths, options ?? new CombatOptions { RecordLog = true });
         return new SimWorld(new WorldSettings { Seed = seed, Threads = threads, PublishSnapshots = false, MinPartitionSize = minPartition }, new OpenGroundWalkability((_, _) => 150), [combat, CombatFixtures.Senses(combat)]);
     }
 

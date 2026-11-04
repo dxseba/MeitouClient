@@ -24,6 +24,7 @@ sealed partial class GameHost
     /// <summary>A severe mechanical break throws a few small installed metal parts through the existing bounded debris pool.</summary>
     void EmitRobotCutDebris(in CombatEvent hit, CharacterCold? victim)
     {
+        if (!GoreEnabled) return;
         bool particlesEnabled = !o.NoParticles || IsFlat && g.FlatCombatParticles;
         if (!particlesEnabled || victim is not { Race.IsRobot: true, Fighter.IsAnimal: false, Medical: { } medical }
             || (uint)hit.Part >= (uint)medical.Parts.Count || gpu?.Debris is not { } debris) return;

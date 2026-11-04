@@ -52,7 +52,7 @@ public sealed partial class RagdollSystem
 
     BonePose? BuildRemaining(Ragdoll body, CharacterCold cold, Matrix4x4 placement)
     {
-        if (options is not { AdvancedRagdolls: true } || (body.Mask & RagdollPart.Whole) == 0 || (body.Mask & RagdollPart.CarryMode) != 0
+        if (options is not { Gore: true, AdvancedRagdolls: true } || (body.Mask & RagdollPart.Whole) == 0 || (body.Mask & RagdollPart.CarryMode) != 0
             || body.BlendLeft > 0 || !detachedOwners.TryGetValue(body.Id, out var owner)
             || owner.Missing == 0 && owner.HeadCut is null) return null;
         if (!ReferenceEquals(owner.RemainingBody, body))
@@ -70,7 +70,7 @@ public sealed partial class RagdollSystem
         detachedSeen.RemoveWhere(id => !world.Characters.TryResolveNext(id, out _));
         foreach (var id in detachedOrder.ToArray())
         {
-            if (!world.Characters.TryResolveNext(id, out _) || options is not { AdvancedRagdolls: true }) { RemoveDetachedOwner(id); continue; }
+            if (!world.Characters.TryResolveNext(id, out _) || options is not { Gore: true, AdvancedRagdolls: true }) { RemoveDetachedOwner(id); continue; }
             var owner = detachedOwners[id];
             foreach (var retired in owner.Retired.ToArray())
                 if (!ragdolls.TryGetValue(id, out var body) || !ReferenceEquals(body.Definition, retired))
@@ -84,7 +84,7 @@ public sealed partial class RagdollSystem
     void PrepareDetached(World world, CharacterId id, CharacterCold cold, ref CharacterHot hot,
         (Vector3 Velocity, Vector3 Push) start, bool advanced)
     {
-        if (!advanced || cold.Fighter is { IsAnimal: true } || cold.Race is null
+        if (options is not { Gore: true } || !advanced || cold.Fighter is { IsAnimal: true } || cold.Race is null
             || cold.Medical is not { } medical || cold.Appearance is not { } look) return;
         int missing = medical.Decapitated ? 1 : 0, robotic = 0;
         foreach (var part in medical.PartSpan)

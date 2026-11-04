@@ -19,10 +19,11 @@ sealed partial class GameHost
     ];
     static readonly string[] TorsoLabelBones = ["Bip01 Pelvis", "Bip01 Spine1", "Bip01 Spine2", "Bip01 Neck", "Bip01 Head", "Bip01 L Thigh", "Bip01 R Thigh"];
 
-    IReadOnlyList<BodyFragmentLabel> BodyFragmentLabels() => gpu.Characters is { } renderer ? BodyFragmentLabels(renderer) : [];
+    IReadOnlyList<BodyFragmentLabel> BodyFragmentLabels() => GoreEnabled && gpu.Characters is { } renderer ? BodyFragmentLabels(renderer) : [];
 
     IReadOnlyList<BodyFragmentLabel> BodyFragmentLabels(CharacterRenderer renderer)
     {
+        if (!GoreEnabled) return [];
         var result = new List<BodyFragmentLabel>();
         var snapshot = session.CurrentSnapshot;
         var loot = snapshot.GroundItems.Select(g => g.Id).ToHashSet();

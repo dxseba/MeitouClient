@@ -14,7 +14,7 @@ public class PairedLimbCombatTests
 
     sealed class Blow
     {
-        public BodyOptions Options { get; } = BodyOptions.Default;
+        public BodyOptions Options { get; } = BodyOptions.Default with { Gore = true };
         public CharacterCold Victim { get; }
         public MedicalContext Context { get; set; }
         public CombatSystem Combat { get; }

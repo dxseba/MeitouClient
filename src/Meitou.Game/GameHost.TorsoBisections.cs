@@ -69,7 +69,7 @@ sealed partial class GameHost
     /// <summary>Lists two separately placed halves, preserving the original lower-half key for picking and portraits.</summary>
     void AddTorsoHalves(CharacterDrawList list, CharacterSnapshot c, in CharacterInstance instance)
     {
-        if (torsoCuts.Of(c.Id) is not { } cut || gpu.Characters is not { } renderer)
+        if (!GoreEnabled || torsoCuts.Of(c.Id) is not { } cut || gpu.Characters is not { } renderer)
         {
             list.Add(instance);
             return;
@@ -220,7 +220,7 @@ sealed partial class GameHost
 
     int TorsoSideHit(Meitou.Rendering.Characters.CharacterRenderer? renderer, CharacterId id, Vector3 origin, Vector3 direction)
     {
-        if (renderer is null || torsoCuts.Of(id) is null) return 0;
+        if (!GoreEnabled || renderer is null || torsoCuts.Of(id) is null) return 0;
         float negative = hiddenIndoors.Contains(id) ? float.PositiveInfinity : renderer.RayHit(TorsoDrawKey(id, 0), origin, direction) ?? float.PositiveInfinity;
         float positive = hiddenTorsoPositive.Contains(id) ? float.PositiveInfinity : renderer.RayHit(TorsoDrawKey(id, 1), origin, direction) ?? float.PositiveInfinity;
         return positive < negative ? 1 : 0;
@@ -231,7 +231,7 @@ sealed partial class GameHost
         if (renderer is null) return null;
         long lower = DrawKey(id);
         float? hit = hiddenIndoors.Contains(id) ? float.PositiveInfinity : renderer.RayHit(lower, origin, direction);
-        if (torsoCuts.Of(id) is null) return hit;
+        if (!GoreEnabled || torsoCuts.Of(id) is null) return hit;
         float? upper = hiddenTorsoPositive.Contains(id) ? float.PositiveInfinity : renderer.RayHit(lower ^ (1L << 52), origin, direction);
         return MathF.Min(hit ?? float.PositiveInfinity, upper ?? float.PositiveInfinity);
     }
@@ -258,6 +258,7 @@ sealed partial class GameHost
 
     void SpillTorsoGuts(CharacterId id, Vector3 cutAt, Vector3 along, float age)
     {
+        if (!GoreEnabled) return;
         if (session.World.Characters.Cold(id.Slot)?.Race?.IsRobot == true
             || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) return;
         var gut = new GutFall

@@ -35,7 +35,7 @@ public class RagdollTorsoPhysicsTests
         public CharacterPoseSetup Setup { get; }
         public BodyOptions Options { get; }
         public RagdollDefinition SourceDefinition { get; }
-        public Scene(bool advanced = true, SavedRagdoll? restore = null, bool torso = true, TorsoBisectionState? cut = null, bool robot = false)
+        public Scene(bool advanced = true, SavedRagdoll? restore = null, bool torso = true, TorsoBisectionState? cut = null, bool robot = false, bool gore = true)
         {
             var skeleton = new OgreSkeleton();
             skeleton.Bones.Add(new() { Handle = 0, Name = "Bip01", Position = new(0, 11, 0) });
@@ -59,7 +59,7 @@ public class RagdollTorsoPhysicsTests
             file.Records[0].Bools["is robot"] = robot;
             database.Apply(file, "fragment-tests.mod");
             var rigs = new CharacterRigs(database, _ => null, _ => null);
-            Options = BodyOptions.Default with { AdvancedRagdolls = advanced };
+            Options = BodyOptions.Default with { Gore = gore, AdvancedRagdolls = advanced };
             Physics = new(rigs, new Flat(), Options, _ => Setup, (_, _, _) => definition);
             World = new(new WorldSettings { Seed = 41, TickSeconds = 1f / 30 }, new OpenGroundWalkability((_, _) => 0), [Physics]);
             var race = new RaceData { IsRobot = robot, Anatomy = [.. Human.Anatomy.Select(entry => entry.Part.LimbSlot == 0 ? entry with { Part = entry.Part with { BoneName2 = "Bip01 L UpperArm" } } : entry)] };
@@ -90,6 +90,38 @@ public class RagdollTorsoPhysicsTests
             return Vector3.Transform(pose.Position[bone], placement);
         }
         public void Dispose() { World.Dispose(); Physics.Dispose(); }
+    }
+
+    [Fact]
+    public void Disabled_gore_uses_a_plain_whole_body_pose_and_keeps_loaded_cut_data()
+    {
+        using var source = new Scene();
+        source.World.RunTick();
+        var saved = Assert.IsType<SavedRagdoll>(source.Physics.SaveState(source.Id));
+        Assert.NotNull(saved.Torso);
+        using var off = new Scene(restore: saved, gore: false);
+        var cut = off.Cold.TorsoBisection;
+        off.World.RunTicks(5);
+        Assert.Null(off.Snapshot.TorsoRagdoll);
+        Assert.Empty(off.Snapshot.DetachedRagdolls);
+        Assert.NotNull(off.Snapshot.Ragdoll);
+        Assert.Equal(1, off.Physics.Count);
+        Assert.Equal(cut, off.Cold.TorsoBisection);
+        Assert.Same(saved, off.Cold.Save!.Ragdoll);
+    }
+
+    [Fact]
+    public void Disabled_gore_does_not_apply_the_extra_robot_mass_or_split_the_corpse()
+    {
+        using var human = new Scene(gore: false);
+        using var robot = new Scene(robot: true, gore: false);
+        human.Cold.Blow = (new(10, 0, 0), new(10, 0, 0));
+        robot.Cold.Blow = human.Cold.Blow;
+        human.World.RunTick();
+        robot.World.RunTick();
+        Assert.Null(robot.Snapshot.TorsoRagdoll);
+        Assert.Equal(human.Snapshot.Position, robot.Snapshot.Position);
+        Assert.Equal(0, robot.Physics.ElectricalSpasms);
     }
 
     [Fact]

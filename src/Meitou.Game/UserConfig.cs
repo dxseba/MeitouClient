@@ -97,6 +97,8 @@ sealed class UserConfig
     public bool UnloadedProduction { get; set; } = true;
     /// <summary>Doors a walker opened close behind it after 5 s (Advanced settings; Faithful off: they stay open, as in the game; docs/simulation.md "Cages, beds and locks").</summary>
     public bool DoorsCloseBehind { get; set; } = true;
+    /// <summary>Enables Brutality and the extended gore features at application startup. Off by default; changes require a restart.</summary>
+    public bool GoreMode { get; set; }
     /// <summary>A blow that destroys the head cuts it off, under the limbs' rule (Advanced settings; Faithful off: the game never does; docs/game/character-stats.md "Decapitation").</summary>
     public bool Decapitation { get; set; } = true;
     /// <summary>A new ragdoll keeps the character's motion and the downing blow's push, its joints have soft limits and a relaxed pull, and a cut-off head is thrown with it (Advanced settings; Faithful off: the game starts a ragdoll at rest; docs/game/ragdolls.md "Initial state").</summary>

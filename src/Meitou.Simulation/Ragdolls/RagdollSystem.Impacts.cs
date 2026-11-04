@@ -11,7 +11,7 @@ public sealed partial class RagdollSystem
     /// <summary>A landed hit on an existing unconscious body, consumed once before any newly severed parts inherit its motion.</summary>
     internal bool QueueHit(World world, CharacterId id, BodyPartTemplate part, Vector3 push)
     {
-        if (options is not { AdvancedRagdolls: true } || !float.IsFinite(push.LengthSquared()) || push.LengthSquared() < 1e-6f
+        if (options is not { Gore: true, AdvancedRagdolls: true } || !float.IsFinite(push.LengthSquared()) || push.LengthSquared() < 1e-6f
             || !world.Characters.TryResolveNext(id, out int slot) || world.Characters.Cold(slot) is not { Medical.Incapacitated: true } cold
             || Wanted(cold) != RagdollPart.Whole || !ragdolls.TryGetValue(id, out var r) || r.Mask != RagdollPart.Whole || !r.InScene) return false;
         if (!ImpactSite(r, part, out int actor, out var localOffset)) return false;
@@ -62,7 +62,7 @@ public sealed partial class RagdollSystem
     {
         foreach (var hit in hitImpacts)
         {
-            if (options is not { AdvancedRagdolls: true } || !world.Characters.TryResolveNext(hit.Id, out int slot)
+            if (options is not { Gore: true, AdvancedRagdolls: true } || !world.Characters.TryResolveNext(hit.Id, out int slot)
                 || world.Characters.Cold(slot) is not { Medical.Incapacitated: true } cold || Wanted(cold) != RagdollPart.Whole
                 || !ragdolls.TryGetValue(hit.Id, out var r) || r.Mask != RagdollPart.Whole
                 || hit.Actor >= r.Bodies.Length || r.Bodies[hit.Actor] is null) continue;

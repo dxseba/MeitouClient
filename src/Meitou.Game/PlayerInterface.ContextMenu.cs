@@ -91,7 +91,7 @@ sealed partial class PlayerInterface
         var verbs = new List<(string, Action)>();
         var selection = SelectedIds();
         if (selection.Count == 0) return verbs;
-        if (target.TorsoBisection is { IsValid: true }) return TorsoFragmentVerbs(target, torsoSide);
+        if (GoreEnabled && target.TorsoBisection is { IsValid: true }) return TorsoFragmentVerbs(target, torsoSide);
         var id = target.Id;
         bool down = target.Down;   // vfunc 0x30, FUN_1405c9e10, from the snapshot
         var carriers = Selected().Where(c => c.Carrying == id).Select(c => c.Id).ToArray();

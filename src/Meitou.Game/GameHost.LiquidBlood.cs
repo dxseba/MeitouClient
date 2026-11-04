@@ -10,10 +10,11 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     readonly LiquidBloodSimulation liquidBlood = new(new Random());
-    bool LiquidBloodEnabled => o.MeitouBlood && (!o.NoParticles || IsFlat && g.FlatCombatParticles);
+    bool LiquidBloodEnabled => GoreEnabled && o.MeitouBlood && (!o.NoParticles || IsFlat && g.FlatCombatParticles);
 
     void UpdatePosedCutEffects()
     {
+        if (!GoreEnabled) return;
         var world = session.World;
         double clock = (session.ShownTick + session.SimulationAlpha) * world.TickSeconds;
         UpdateRobotDischarges(world);

@@ -6,7 +6,7 @@ namespace Meitou.Game;
 
 sealed partial class PlayerInterface
 {
-    bool CanChooseAttackPart(CharacterSnapshot target) => !target.IsPlayer && Hostile(target)
+    bool CanChooseAttackPart(CharacterSnapshot target) => GoreEnabled && !target.IsPlayer && Hostile(target)
         && target.Body is { Dead: false } && (target.Down || target.Asleep)
         && target.CarriedBy.IsNone && target.Prison is null;
 

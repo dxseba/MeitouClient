@@ -164,8 +164,8 @@ public sealed partial class MedicalState
             // Meitou (Decapitation): the blow's rule cuts the head off too; the original returns here for every vital part (the head's record has severance set).
             if (inHitPath && ctx.Options.Decapitation && blowSevers && p.Template.Type == BodyPartType.Head)
             {
-                if (ctx.HeadCutCandidate is { IsValid: true }) events?.Add(new MedicalEvent(MedicalEventKind.HeadCut, index));
-                if (ctx.AllowDecapitation && ctx.HeadCutCandidate is not { Mode: global::Meitou.Simulation.Wounds.HeadCutMode.AttachedSplit }) Decapitate(events);
+                if (ctx.Options.Gore && ctx.HeadCutCandidate is { IsValid: true }) events?.Add(new MedicalEvent(MedicalEventKind.HeadCut, index));
+                if (!ctx.Options.Gore || ctx.AllowDecapitation && ctx.HeadCutCandidate is not { Mode: global::Meitou.Simulation.Wounds.HeadCutMode.AttachedSplit }) Decapitate(events);
             }
             return;
         }

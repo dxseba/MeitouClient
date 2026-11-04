@@ -9,7 +9,7 @@ public sealed partial class CombatSystem
         in MedicalContext ctx, TCover cover, float toughness, bool aliveBeforeHit, float brutality,
         int direction, CombatWoundMechanism mechanism, float roll, List<MedicalEvent> events) where TCover : struct, ICoverRoll
     {
-        if (!aliveBeforeHit || !ctx.Options.AdvancedRagdolls || ctx.Options.Dismemberment < Dismemberment.Rare || !ctx.HasStats || ctx.ExemptFromWear
+        if (!ctx.Options.Gore || !aliveBeforeHit || !ctx.Options.AdvancedRagdolls || ctx.Options.Dismemberment < Dismemberment.Rare || !ctx.HasStats || ctx.ExemptFromWear
             || victim is not { Medical: { Dead: false, HasStatsObject: true } medical, Fighter: { IsAnimal: false } fighter }
             || (uint)part >= (uint)medical.Parts.Count || medical.Parts[part].Template.LimbSlot is not (>= 0 and <= 3 and var slot)
             || !events.Any(e => e.Kind == MedicalEventKind.PartSevered && e.Part == part)) return false;

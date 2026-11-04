@@ -73,7 +73,7 @@ public class RagdollSimultaneousCutTests
             return new CharacterPoseSetup { Rig = setup.Rig, Shape = setup.Shape, GroundOffset = setup.GroundOffset,
                 Idle = setup.Idle, Animal = setup.Animal, Fixed = idle is null ? setup.Fixed : [.. setup.Fixed, (idle, 0.5f)] };
         });
-        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true },
+        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true },
             appearance => setups[appearance], null!);
         using var world = new SimWorld(new WorldSettings { Seed = 0, Threads = 4, TickSeconds = 1f / 30 },
             new OpenGroundWalkability((_, _) => 500), [physics]);

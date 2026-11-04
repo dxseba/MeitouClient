@@ -31,7 +31,7 @@ public partial class RagdollInstalledSkinTests
         var anatomy = Assert.IsType<List<Vertex>>(CharacterAnatomy.Build(rig, skin, HeadWoundSurface.Source(model), false, null, false, false, anatomyPath));
         Assert.True(anatomy.Count(vertex => vertex.Tangent.W == 1) > 1000, "The real imported muscle geometry must be present");
         Assert.Contains(anatomy, vertex => vertex.Tangent.W == 7);
-        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
+        using var physics = new RagdollSystem(rigs, new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true }, _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 41 }, new OpenGroundWalkability((_, _) => 0), [physics]);
         const float yaw = -MathF.PI / 2;
         var cut = TorsoBisectionPolicy.StateForDirection(direction, 1, Vector2.UnitX, yaw, style);

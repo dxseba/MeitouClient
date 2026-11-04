@@ -24,7 +24,7 @@ public sealed partial class CombatSystem
 
     internal Vector3 TargetPoint(World world, in CombatSlot state, Vector3 fallback)
     {
-        if (state.TargetBodyPart is not { } id || world.Characters.Cold(state.TargetSlot) is not { } victim) return fallback;
+        if (!options.Gore || state.TargetBodyPart is not { } id || world.Characters.Cold(state.TargetSlot) is not { } victim) return fallback;
         int part = BodyPartIndex(victim, id);
         return part >= 0 && world.SystemOf<Ragdolls.RagdollSystem>() is { } ragdolls
             && ragdolls.TryPartPosition(new(state.TargetSlot, state.TargetGeneration), victim.Medical!.Parts[part].Template, out var position) ? position : fallback;

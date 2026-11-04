@@ -58,21 +58,21 @@ sealed partial class GameHost
     /// <summary>A headless character listed this frame: its head falls if the renderer drew it with one in its last update.</summary>
     void CutHead(CharacterSnapshot c, CharacterAppearance look)
     {
-        if (c.DetachedRagdolls.Any(p => p.Part == -1)) return;
-        if (!look.Headless && c.HeadCut is not { IsValid: true, Mode: HeadCutMode.AttachedSplit }) return;
+        if (GoreEnabled && c.DetachedRagdolls.Any(p => p.Part == -1)) return;
+        if (!look.Headless && !(GoreEnabled && c.HeadCut is { IsValid: true, Mode: HeadCutMode.AttachedSplit })) return;
         if (gpu.Characters is not { } characters || !headsSeen.Add(c.Id)) return;
         long from = DrawKey(c.Id);
         if (characters.LastDrawn(from, "Bip01 Head") is not ({ } world, { Headless: false } before, var start)) return;
         ulong roll = unchecked((ulong)from * 0x9E3779B97F4A7C15UL ^ (ulong)session.ShownTick * 0xBF58476D1CE4E5B9UL);   // a look, not the simulation's: no world roll
         roll ^= roll >> 31;
         float angle = (roll & 0xFFFF) / 65536f * MathF.Tau, reach = 3 + ((roll >> 16) & 0xFFFF) / 65536f * 4;
-        float response = Meitou.Simulation.Ragdolls.RobotRagdollWeight.Response(c.Appearance?.Race.GetBool("is robot") == true);
+        float response = Meitou.Simulation.Ragdolls.RobotRagdollWeight.Response(GoreEnabled && c.Appearance?.Race.GetBool("is robot") == true);
         reach *= response;
         var thrown = c.Knockdown * response;
         // Thrown: it tumbles over the way it flies, faster the faster it goes.
         var flat = new Vector2(thrown.X, thrown.Z);
         if (flat.LengthSquared() > 1) angle = MathF.Atan2(flat.Y, flat.X);
-        int[] fragments = c.HeadCut is { IsValid: true } cut
+        int[] fragments = GoreEnabled && c.HeadCut is { IsValid: true } cut
             ? cut.Mode == HeadCutMode.DetachedSplit ? [1, 2] : cut.Mode == HeadCutMode.AttachedSplit ? [1] : [0]
             : [0];
         foreach (int fragment in fragments)
@@ -103,6 +103,7 @@ sealed partial class GameHost
     /// <summary>Every newly lost limb cut below the top: the part below the cut falls, the body's own mesh in the pose of the moment.</summary>
     void CutLimbs(CharacterSnapshot c)
     {
+        if (!GoreEnabled) return;
         if (gpu.Characters is not { } characters || session.World.Characters.Cold(c.Id.Slot)?.Medical is not { } medical) return;
         if (!(IsSandbox && g.SandboxDummy && g.SandboxSevereOnly) && severeHeads.Of(c.Id)?.Kind == Meitou.Simulation.Wounds.SevereHeadWoundKind.JawLost && !restoredJaws.Contains(c.Id) && limbsCut.Add((c.Id, 7)))
         {
@@ -115,7 +116,7 @@ sealed partial class GameHost
                     PartOnly = (uint)Meitou.Rendering.Characters.WoundMasks.JawGroup << 8 | 255,
                 });
         }
-        float response = Meitou.Simulation.Ragdolls.RobotRagdollWeight.Response(c.Appearance?.Race.GetBool("is robot") == true);
+        float response = Meitou.Simulation.Ragdolls.RobotRagdollWeight.Response(GoreEnabled && c.Appearance?.Race.GetBool("is robot") == true);
         foreach (var part in medical.Parts)
         {
             if (part.Limb != Meitou.Simulation.Bodies.LimbState.Stump || part.Template.LimbSlot is not (>= 0 and <= 3 and var limb) || !limbsCut.Add((c.Id, limb))) continue;

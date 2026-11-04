@@ -12,7 +12,7 @@ public sealed partial class CombatSystem
         TorsoBisectionStyle style = TorsoBisectionStyle.Auto, string targetBodyPart = ArmourData.ChestPartId)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(victimId, out int victimSlot)
+        if (!options.Gore || !table.TryResolveNext(victimId, out int victimSlot)
             || table.Cold(victimSlot) is not { Medical: { Dead: false } medical, Race: { } race, Fighter: { } fighter, Stats: not null } victim
             || victim.TorsoBisection is not null) return false;
         int struckPart = -1;

@@ -174,6 +174,18 @@ public class WeaponBloodCombatTests
         Record = record ?? Katana.StringId, Name = "same weapon", Type = FcsRecordType.WEAPON, Section = section, Level = 50,
     };
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Only_an_enabled_gore_world_stains_the_real_weapon_after_a_wound(bool enabled)
+    {
+        using var fight = new Delivery(gore: enabled);
+        Assert.Equal(BlowOutcome.Hit, fight.FirstOutcome().Outcome);
+        Assert.True(fight.Target.Medical!.Parts[0].Flesh < 100);
+        Assert.Equal(enabled, fight.Used.WeaponBlood.W > 0);
+        Assert.Equal(Vector4.Zero, fight.Other.WeaponBlood);
+    }
+
     sealed class Delivery : IDisposable
     {
         public SimWorld World { get; }
@@ -187,7 +199,7 @@ public class WeaponBloodCombatTests
 
         public Delivery(ulong seed = 11, int limb = 4, bool unarmed = false, bool armour = false, bool multiple = false,
             bool robot = false, bool bloodless = false, BodyPartTemplate? part = null, bool strong = false, bool prosthetic = false,
-            Defence defence = Defence.None)
+            Defence defence = Defence.None, bool gore = true)
         {
             var weapon = unarmed ? Katana with { StringId = "fists-test", SkillCategory = 5, AnimationCategory = 5 } : Katana;
             if (strong) weapon = weapon with { CutDamageMultiplier = 25 };
@@ -200,7 +212,7 @@ public class WeaponBloodCombatTests
             var techniques = new List<CombatTechnique> { cut };
             if (defence == Defence.Block) techniques.Add(Block("block left", 2));
             if (defence == Defence.Dodge) techniques.Add(Dodge("dodge back"));
-            World = NewWorld(seed, 1, out var combat, techniques: techniques);
+            World = NewWorld(seed, 1, out var combat, techniques: techniques, gore: gore);
             Combat = combat;
             World.CombatEvents = Events;
             (Attacker, Defender) = Pair(World,

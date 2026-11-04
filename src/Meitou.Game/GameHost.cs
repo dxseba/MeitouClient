@@ -31,6 +31,9 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     /// <summary>Reads the world in the interactive run, on a worker behind the loading screen (the host owns the scene then); null: the scene was given.</summary>
     public Func<WorldScene?>? LoadScene { get; init; }
     WorldScene? ownedScene;
+    // Gore changes are applied by a fresh host, never while an existing world owns cut geometry/physics.
+    readonly bool goreAtStartup = config.GoreMode;
+    bool GoreEnabled => popData?.BodyOptions.Gore ?? goreAtStartup;
     /// <summary>The native splash shown since the program started; closed when the game window first shows.</summary>
     public IDisposable? Splash { get; init; }
     WorldSession session = null!;   // disposed with the host (Run)
@@ -198,7 +201,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                     $"{buildings.Values.Sum(l => l.Sum(b => b.Spots.Count - b.Beds))} nodes in {buildings.Count} towns ({watch.ElapsedMilliseconds} ms)");
             }
             var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root),
-                bodyOptions: Meitou.Simulation.Bodies.BodyOptions.Default with { Dismemberment = Gameplay.Dismemberment, Decapitation = config.Decapitation, AdvancedRagdolls = config.AdvancedRagdolls }, biomes: biomes, buildings: buildings, roads: levels?.Roads(), townZones: levels?.TownZones(), level: levels?.Level);
+                bodyOptions: Meitou.Simulation.Bodies.BodyOptions.Default with { Dismemberment = Gameplay.Dismemberment, Decapitation = config.Decapitation, AdvancedRagdolls = config.AdvancedRagdolls, Gore = goreAtStartup }, biomes: biomes, buildings: buildings, roads: levels?.Roads(), townZones: levels?.TownZones(), level: levels?.Level);
             if (levels is not null)
             {
                 data.Layouts = scene.Objects?.Layouts ?? new Meitou.Data.World.BuildingLayouts(gameDb, levels.Interiors);
@@ -344,7 +347,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (session.Bindings.Get(InputAction.ToggleSettings).SequenceEqual([Binding.Of(EngineKey.Tab)])) session.Bindings.Set(InputAction.ToggleSettings);
         LoadingStep("interface");
         // Picks against the drawn terrain (the streamed fine window): the boot window's heights fall back to a 144-unit grid away from the start.
-        player = new PlayerInterface(session, gpu.Terrain.HeightAt, DrawnPosition);
+        player = new PlayerInterface(session, gpu.Terrain.HeightAt, DrawnPosition) { GoreEnabled = GoreEnabled };
         player.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
         player.SpeedUnit = config.SpeedUnit;
         player.Floaters = config.Floaters;
@@ -404,7 +407,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (!IsSandbox && crowd > 0 && population is not null) SpawnCrowd(target, crowd);
         LoadingStep("characters");
         if (scene.Database is { } characterDb && !g.NoPopulation && gpu.Characters is null)
-            gpu.Characters = new CharacterRenderer(context, install, characterDb, assets, characterRigs) { Source = FillDrawList, Guard = gpu.Guard, GeneratedLod = o.CharacterLod, SkinShading = o.SkinShading, SkinRaces = config.SkinRaces, EnhancedIcons = o.MeitouIcons,
+            gpu.Characters = new CharacterRenderer(context, install, characterDb, assets, characterRigs) { Source = FillDrawList, Guard = gpu.Guard, GeneratedLod = o.CharacterLod, SkinShading = o.SkinShading, SkinRaces = config.SkinRaces, EnhancedIcons = o.MeitouIcons, GoreEnabled = GoreEnabled,
                 PoseClock = () => animClock ? animSeconds : realTime.Elapsed.TotalSeconds };   // the frame clock DrawWorld gives the foliage sway: a recorded flight poses the same every take
         var rig = session.Camera;
         rig.Place(new Vector2(target.X, target.Z), (o.Yaw ?? 30) * MathF.PI / 180,

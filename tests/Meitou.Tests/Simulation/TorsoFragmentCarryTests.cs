@@ -16,7 +16,7 @@ public sealed class TorsoCarryFixture : IDisposable
 {
     public PopulationData Data { get; }
     public SimWorld World { get; }
-    public TorsoCarryFixture()
+    public TorsoCarryFixture(bool gore = true)
     {
         var db = SyntheticTown.Database(anatomy: true, items: true);
         var patch = new FcsFile();
@@ -24,7 +24,7 @@ public sealed class TorsoCarryFixture : IDisposable
         race.Bools["carriable"] = true;
         patch.Records.Add(race);
         db.Apply(patch, "torso-carry-tests.mod");
-        Data = SyntheticTown.Data(db);
+        Data = SyntheticTown.Data(db).WithBodyOptions(BodyOptions.Default with { Gore = gore });
         var walk = new OpenGroundWalkability(SyntheticTown.Ground);
         var systems = SyntheticTown.Standard(Data, walk, StandardParts.Player | StandardParts.Movement | StandardParts.Body | StandardParts.Carry);
         World = new(new WorldSettings { Seed = 31 }, walk, systems.Systems);

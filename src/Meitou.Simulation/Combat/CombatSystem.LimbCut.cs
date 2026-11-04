@@ -8,7 +8,7 @@ public sealed partial class CombatSystem
     internal bool DebugLimbCut(World world, CharacterId victimId, CharacterId attackerId, string limbs, int direction = 2, ulong? seed = null, bool prewounded = false)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(victimId, out int slot)
+        if (!options.Gore || !table.TryResolveNext(victimId, out int slot)
             || table.Cold(slot) is not { Medical: { Dead: false } medical, Race: not null, Fighter.IsAnimal: false, Stats: not null } victim) return false;
         int[] selected = limbs switch { "left-arm" => [0], "right-arm" => [1], "left-leg" => [2], "right-leg" => [3], "arms" => [0, 1], "legs" => [2, 3], _ => [] };
         if (selected.Length == 0) return false;

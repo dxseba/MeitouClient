@@ -22,6 +22,7 @@ sealed partial class GameHost
 
     void UpdateRobotCables(World world, float clock)
     {
+        if (!GoreEnabled) return;
         if (o.NoParticles && !(IsFlat && g.FlatCombatParticles) || gpu?.Characters is not { } renderer || gpu.Debris is not { } debris) return;
         activeRobotCableKeys.Clear();
         foreach (var owner in session.CurrentSnapshot.Characters)

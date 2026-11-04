@@ -33,6 +33,7 @@ sealed partial class GameHost
     /// <summary>Loose tissue uses its own display-thread Bepu scene; world simulation is never mutated from rendering.</summary>
     void UpdateGuts(World world, float dt)
     {
+        if (!GoreEnabled) return;
         if (gpu?.Debris is not { } debris) return;
         debris.AnatomyFile ??= Meitou.Content.GameInstall.Locate() is { } game
             ? Path.Combine(game.ModsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy") : null;
@@ -46,6 +47,7 @@ sealed partial class GameHost
 
     void DrawGuts()
     {
+        if (!GoreEnabled) return;
         foreach (var fall in gutFalls.Values)
         {
             if (fall.Section && !fall.Positioned) continue;

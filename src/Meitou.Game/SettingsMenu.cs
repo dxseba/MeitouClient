@@ -340,6 +340,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
             result.Add(new("Dismemberment", "When a destroyed limb is cut off: Rare only by a single heavy blow, Frequent also when a wound worsens (the game: Rare).",
                 Choice: new(() => GameplaySettings.DismembermentLabels, () => (int)(config.Gameplay ??= new()).Dismemberment,
                     i => SetGameplay((config.Gameplay ?? new()) with { Dismemberment = (global::Meitou.Simulation.Bodies.Dismemberment)i }))));
+            result.Add(new("Brutality gore (restart required)", "Enables Brutality progression, advanced wounds, varied head and limb cuts, body cleaves, exposed organs, and extra blood and robot damage effects. Changes take effect after restarting the application.",
+                Toggle: new("Brutality gore (restart required)", () => config.GoreMode, v => config.GoreMode = v, OnOff: true)));
             result.Add(new("Auto save", "Saves the game on its own every few minutes of unpaused play, into three slots in turn (autosave0 to autosave2).",
                 Toggle: new("Auto save", () => (config.Gameplay ??= new()).AutoSave, v => SetGameplay((config.Gameplay ?? new()) with { AutoSave = v }), OnOff: true)));
             result.Add(new(AutoSaveSlider.Label, "Minutes of unpaused play between autosaves (the game: 10).", Slider: AutoSaveSlider));
@@ -664,6 +666,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         LateDefencesChanged?.Invoke(false);
         config.KeepRoamers = config.OffscreenFights = config.OffscreenHealing = config.CampaignAncestorsOnce = config.KeepWild = config.ResidentSchedule = config.UnloadedProduction = true;
         config.DoorsCloseBehind = true;
+        config.GoreMode = false;
         config.Decapitation = true;
         config.AdvancedRagdolls = true;
         DoorsCloseChanged?.Invoke(true);

@@ -691,6 +691,7 @@ internal sealed unsafe partial class CharacterRenderer
 
     bool TorsoPartVisible(in Live live, AssetPart part)
     {
+        if (!live.HasWounds) return true;
         var rig = live.Asset.Rig;
         if (part.Shared || part.Bone < 0 || part.Bone >= rig.BindPosition.Length) return true;
         // The tag's offset is part of its mount; its bone origin can lie in a different cut half.

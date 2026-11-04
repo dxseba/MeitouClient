@@ -13,7 +13,7 @@ public sealed partial class CarrySystem
 
     void SeedTorsoFallbackPositions(World world)
     {
-        if (bodyOptions.AdvancedRagdolls) return;
+        if (!bodyOptions.Gore || bodyOptions.AdvancedRagdolls) return;
         var table = world.Characters;
         for (int i = 0; i < table.HighWater; i++)
             if (table.Next[i].Alive && table.Cold(i) is { TorsoBisection.IsValid: true, TorsoPositivePosition: null } body)
@@ -25,7 +25,7 @@ public sealed partial class CarrySystem
 
     static bool OpensInventory(object? detail) => detail == OpenInventory || detail == PositiveInventory;
     static int LootSide(object? detail) => detail == PositiveLoot || detail == PositiveInventory ? 1 : 0;
-    static bool ValidLootSide(CharacterCold body, int side) => side <= 0 || HasPositiveTorso(body);
+    bool ValidLootSide(CharacterCold body, int side) => side <= 0 || bodyOptions.Gore && HasPositiveTorso(body);
 
     static CharacterId Holder(CharacterCold body, int torsoSide) => torsoSide > 0 ? body.TorsoPositiveCarriedBy : body.CarriedBy;
 
@@ -33,7 +33,8 @@ public sealed partial class CarrySystem
     public static bool CanBeLifted(CharacterCold cold, int torsoSide) => torsoSide <= 0 ? CanBeLifted(cold)
         : HasPositiveTorso(cold) && cold is { Medical.Dead: true, Race.Carriable: true, IsImprisoned: false } && cold.TorsoPositiveCarriedBy.IsNone;
 
-    public static bool CanBeLifted(World world, CharacterCold cold, int torsoSide) => torsoSide <= 0 ? CanBeLifted(world, cold) : CanBeLifted(cold, torsoSide);
+    public static bool CanBeLifted(World world, CharacterCold cold, int torsoSide) => torsoSide <= 0 ? CanBeLifted(world, cold)
+        : world.SystemOf<CarrySystem>() is { bodyOptions.Gore: true } && CanBeLifted(cold, torsoSide);
 
     static bool Snatchable(CharacterCold cold, int torsoSide) => torsoSide <= 0 ? Snatchable(cold)
         : HasPositiveTorso(cold) && cold is { Medical.Dead: true, Race.Carriable: true, IsImprisoned: false } && !cold.TorsoPositiveCarriedBy.IsNone;

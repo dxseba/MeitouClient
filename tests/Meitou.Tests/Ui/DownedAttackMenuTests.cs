@@ -27,7 +27,7 @@ public sealed class DownedAttackMenuTests
         public CharacterId Target { get; }
         public Vector2 Pixel { get; }
 
-        public Scene(string state, bool hostile = true)
+        public Scene(string state, bool hostile = true, bool gore = true)
         {
             var install = GameInstall.Locate();
             Assert.SkipWhen(install is null, "Kenshi install not found");
@@ -69,7 +69,7 @@ public sealed class DownedAttackMenuTests
             // Hostility is a published relation result. Keep this UI test independent of town/faction generation.
             Session.CurrentSnapshot.Characters.Single(c => c.Id == Target).HostileToPlayer = hostile;
             var resources = OgreScriptResources.ForInstall(install, LoadOrder.FromInstall(install));
-            Ui = new PlayerInterface(Session, (_, _) => 0, c => c.Position) { Width = 1600, Height = 900 };
+            Ui = new PlayerInterface(Session, (_, _) => 0, c => c.Position) { Width = 1600, Height = 900, GoreEnabled = gore };
             Ui.LoadUi(UiMode.Faithful, name => resources.Find(name));
             Ui.ConfigureFrontend(SyntheticTown.Database(), () => [], "");
             Ui.Eye = new Vector3(0, 6, -14);
@@ -213,4 +213,16 @@ public sealed class DownedAttackMenuTests
         Assert.False(scene.Ui.ContextMenuOpen);
         Assert.Equal(0, scene.Session.World.Commands.Count);
     }
+    [Fact, Slow]
+    public void Gore_off_keeps_the_normal_downed_menu_without_body_part_attacks()
+    {
+        using var scene = new Scene("ko", gore: false);
+        var rows = scene.Menu();
+        Assert.DoesNotContain(rows, c => c.Caption is "Attack body part" or "Attack Target");
+        Assert.Contains(rows, c => c.Caption == "Loot");
+        Assert.Contains(rows, c => c.Caption == "Pick Up");
+        Assert.False(scene.Ui.SceneAttackDowned(scene.Target));
+        Assert.Empty(scene.Session.World.Commands.TakeDue(long.MaxValue));
+    }
+
 }

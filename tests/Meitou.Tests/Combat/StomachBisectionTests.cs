@@ -74,7 +74,7 @@ public class StomachBisectionTests
     [Fact]
     public void A_real_melee_stomach_hit_publishes_its_actual_part_and_stomach_cut_after_native_death()
     {
-        using var world = NewWorld(7, 1, out var combat, techniques: [CombatFixtures.Cut("cut left", direction: 2)]);
+        using var world = NewWorld(7, 1, out var combat, techniques: [CombatFixtures.Cut("cut left", direction: 2)], gore: true);
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;
         var (attacker, defender) = Pair(world,
@@ -148,7 +148,7 @@ public class StomachBisectionTests
     [Fact]
     public void The_debug_command_can_target_the_stomach_without_damaging_the_chest()
     {
-        using var world = NewWorld(11, 1, out _);
+        using var world = NewWorld(11, 1, out _, gore: true);
         world.AddSystem(new PlayerSystem());
         var queue = new ConcurrentQueue<CombatEvent>();
         world.CombatEvents = queue;

@@ -393,7 +393,7 @@ sealed partial class GameHost
         if (characters is not null) Console.WriteLine($"metal     crowd ready ({characters.Assets} appearances)");
         else if (scene.Database is { } characterDb && !g.NoPopulation)
         {
-            characters = new CharacterRenderer(ctx, install, characterDb, assets, characterRigs) { Source = FillWorldDrawList, SettleFirst = true, LoadBudget = 0, GeneratedLod = o.CharacterLod, SkinShading = o.SkinShading, SkinRaces = config.SkinRaces, EnhancedIcons = o.MeitouIcons, PoseClock = () => realTime.Elapsed.TotalSeconds };
+            characters = new CharacterRenderer(ctx, install, characterDb, assets, characterRigs) { Source = FillWorldDrawList, SettleFirst = true, LoadBudget = 0, GeneratedLod = o.CharacterLod, SkinShading = o.SkinShading, SkinRaces = config.SkinRaces, EnhancedIcons = o.MeitouIcons, GoreEnabled = GoreEnabled, PoseClock = () => realTime.Elapsed.TotalSeconds };
             worldGpu.Characters = characters;
             Console.WriteLine("metal     characters ready (population draw list)");
         }
@@ -425,7 +425,7 @@ sealed partial class GameHost
         NavmeshOverlayRenderer? navOverlay = null;
         if (overlay is not null)
         {
-            hud = new PlayerInterface(session, heights.HeightAt, DrawnPosition) { SpeedUnit = config.SpeedUnit, Floaters = config.Floaters, FeedbackButtonInPlay = config.FeedbackButton };
+            hud = new PlayerInterface(session, heights.HeightAt, DrawnPosition) { GoreEnabled = GoreEnabled, SpeedUnit = config.SpeedUnit, Floaters = config.Floaters, FeedbackButtonInPlay = config.FeedbackButton };
             player = hud;
             hud.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
             hud.CreateUiPainter(overlay, assets.Find);

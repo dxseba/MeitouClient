@@ -13,6 +13,11 @@ public sealed partial class CombatSystem
     /// </summary>
     void HitRagdoll(World world, int victim, CharacterCold vc, int part, Vector2 direction, float damage, bool wasIncapacitated, bool downed, Vector3? sourcePoint = null)
     {
+        if (!options.Gore)
+        {
+            if (downed) Knockdown(world, victim, vc, direction, damage);
+            return;
+        }
         if (!wasIncapacitated && !downed) return;
         if (wasIncapacitated && damage > 0 && (uint)part < (uint)vc.Medical!.Parts.Count && options.AdvancedRagdolls
             && world.SystemOf<Ragdolls.RagdollSystem>() is { } ragdolls)

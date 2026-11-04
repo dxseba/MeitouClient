@@ -104,7 +104,7 @@ public class CutWeaponDropTests
         cold.Medical.KnockOut(10000);
         var weapon = new ItemInstance { Record = "dropped-weapon", Type = type, Section = "hip" };
         cold.Inventory.Items.Add(weapon);
-        using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { AdvancedRagdolls = true },
+        using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { Gore = true, AdvancedRagdolls = true },
             _ => setup, (_, _, _) => definition);
         using var world = new Meitou.Simulation.World(new WorldSettings(), new OpenGroundWalkability((_, _) => 0), [physics]);
         var id = world.Characters.Spawn(new() { Position = new(20, 25, 20) }, cold, 0);

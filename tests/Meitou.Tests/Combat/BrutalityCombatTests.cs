@@ -261,6 +261,67 @@ public partial class BrutalityCombatTests
         Assert.Contains(scene.Events, e => e.Kind == CombatEventKind.PartSevered);
     }
 
+    [Fact]
+    public void Gore_is_disabled_by_default_without_disabling_native_body_options()
+    {
+        var options = BodyOptions.Default;
+        Assert.False(options.Gore);
+        Assert.True(options.Decapitation);
+        Assert.True(options.AdvancedRagdolls);
+        Assert.Equal(Dismemberment.Rare, options.Dismemberment);
+    }
+
+    [Fact]
+    public void Disabled_gore_does_not_train_stain_bisect_or_create_extra_cut_variants()
+    {
+        using var scene = new Scene(level: 100, power: 100, targetPart: Chest with { StringId = ArmourData.ChestPartId }, gore: false);
+        Assert.False(scene.Combat.DebugBisect(scene.World, scene.Target, scene.Attacker));
+        float before = scene.Source.Brutality.Experience;
+        scene.Hit();
+        Assert.True(scene.Victim.Medical!.Dead);
+        Assert.Equal(before, scene.Source.Brutality.Experience);
+        Assert.Null(scene.Victim.TorsoBisection);
+        Assert.Null(scene.Victim.HeadCut);
+        Assert.Empty(scene.Victim.LimbSeverances);
+        Assert.DoesNotContain(scene.Events, e => e.Kind == CombatEventKind.BodyBisected);
+    }
+
+    [Fact]
+    public void Disabled_gore_preserves_native_head_removal_without_a_Brutality_unlock()
+    {
+        using var scene = new Scene(level: 0, power: 100, targetPart: Head, gore: false);
+        Assert.False(scene.Combat.DebugHeadCut(scene.World, scene.Target, scene.Attacker, "split"));
+        Assert.False(scene.Victim.Medical!.Dead);
+        scene.Hit();
+        Assert.True(scene.Victim.Medical!.Decapitated);
+        Assert.Null(scene.Victim.HeadCut);
+    }
+
+    [Fact]
+    public void Disabled_gore_preserves_native_amputation_and_does_not_cut_the_opposite_limb()
+    {
+        using var scene = new Scene(level: 100, power: 100, targetPart: LeftArm, paired: true, gore: false);
+        float before = scene.Victim.Medical!.LimbPart(0)!.Flesh;
+        Assert.False(scene.Combat.DebugLimbCut(scene.World, scene.Target, scene.Attacker, "arms"));
+        Assert.Equal(before, scene.Victim.Medical.LimbPart(0)!.Flesh);
+        scene.Hit();
+        Assert.Equal(LimbState.Stump, scene.Victim.Medical!.LimbPart(0)!.Limb);
+        Assert.Equal(LimbState.Original, scene.Victim.Medical.LimbPart(1)!.Limb);
+        Assert.Empty(scene.Victim.LimbSeverances);
+    }
+
+    [Fact]
+    public void Disabled_gore_does_not_relaunch_a_surviving_unconscious_execution_target()
+    {
+        using var scene = new Scene(gore: false);
+        scene.Victim.Medical!.KnockOut(600);
+        var before = scene.Victim.Blow;
+        Assert.False(scene.Combat.Execute(scene.World, scene.Attacker.Slot, scene.Target.Slot, 0));
+        Assert.False(scene.Victim.Medical.Dead);
+        Assert.Contains(scene.Events, hit => hit.Kind == CombatEventKind.Hit && hit.Source == CombatHitSource.Execution);
+        Assert.Equal(before, scene.Victim.Blow);
+    }
+
     sealed class Scene : IDisposable
     {
         public SimWorld World { get; }
@@ -272,10 +333,10 @@ public partial class BrutalityCombatTests
         public ConcurrentQueue<CombatEvent> Events { get; } = new();
 
         public Scene(float level = 0, float power = 1, int direction = 2, BodyPartTemplate? targetPart = null, bool armour = false,
-            bool paired = false, ulong seed = 41)
+            bool paired = false, ulong seed = 41, bool gore = true)
         {
             targetPart ??= Chest;
-            var options = BodyOptions.Default;
+            var options = BodyOptions.Default with { Gore = gore };
             options.ForcedHitPart = (targetPart.StringId, targetPart.Name);
             Combat = new([Cut("cut left", direction: direction)], Constants, paired ? BaseGame with { ImmediateBloodLoss = 0 } : BaseGame, options, DuelFixture.Lengths,
                 new CombatOptions { RecordLog = true, TickMedical = false });

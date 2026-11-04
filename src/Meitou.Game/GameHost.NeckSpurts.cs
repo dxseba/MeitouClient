@@ -36,6 +36,7 @@ sealed partial class GameHost
     /// <summary>Starts the neck's spurts for the character drawn as <paramref name="from"/>, whose head was at <paramref name="head"/>.</summary>
     void Spurt(long from, CharacterAppearance look, Vector3 head)
     {
+        if (!GoreEnabled) return;
         if (decalStore is null || scene.Database is not { } db) return;
         if (!bloodRaces.TryGetValue(look.Race.StringId, out var race)) bloodRaces[look.Race.StringId] = race = RaceData.From(look.Race, db);
         if (race.IsRobot || race.BleedRate <= 0) return;
@@ -47,6 +48,7 @@ sealed partial class GameHost
     /// <summary>Fires the pulses that are due.</summary>
     void UpdateSpurts()
     {
+        if (!GoreEnabled) return;
         if (spurts.Count == 0) return;
         double clock = session.ShownTick + session.SimulationAlpha;
         float tick = session.World.TickSeconds;

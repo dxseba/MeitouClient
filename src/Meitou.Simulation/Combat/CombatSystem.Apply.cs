@@ -105,16 +105,17 @@ public sealed partial class CombatSystem
         float challenge = CanTrainBrutality(world, a, d, D)
             ? Math.Clamp(xp.SkillDifferenceFactor(Eff(ac, fighter.Unarmed ? StatsEnumerated.MartialArts : StatsEnumerated.MeleeAttack),
                 Eff(dc, StatsEnumerated.MeleeDefence)), 0, 6) : 0;
-        Span<float> usefulBeforeHit = dc.Medical.Parts.Count <= 64 ? stackalloc float[dc.Medical.Parts.Count] : new float[dc.Medical.Parts.Count];
+        int usefulPartCount = options.Gore ? dc.Medical.Parts.Count : 0;
+        Span<float> usefulBeforeHit = usefulPartCount <= 64 ? stackalloc float[usefulPartCount] : new float[usefulPartCount];
         for (int i = 0; i < usefulBeforeHit.Length; i++)
             usefulBeforeHit[i] = MathF.Max(0, dc.Medical.Parts[i].Flesh + dc.Medical.Parts[i].MaxHp - dc.Medical.Parts[i].Stun);
         var headTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
         ulong headSeed = Wounds.HeadCutPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), CombatRolls.BlowCounter(a, seq, blow, 0));
-        var headCut = !target.IsAnimal
+        var headCut = options.Gore && !target.IsAnimal
             ? Wounds.HeadCutPolicy.Candidate(brutality, mechanism, direction, packet.Cut, headSeed, headTravel, prev[d].Yaw) : null;
         var ctx = MakeContext(world, d, dc) with
         {
-            AllowDecapitation = !target.IsAnimal && BrutalityPolicy.CanDecapitate(brutality, mechanism)
+            AllowDecapitation = !options.Gore || !target.IsAnimal && BrutalityPolicy.CanDecapitate(brutality, mechanism)
                 && headCut is not { Mode: Wounds.HeadCutMode.AttachedSplit },
             HeadCutCandidate = headCut,
         };
@@ -122,7 +123,7 @@ public sealed partial class CombatSystem
         events.Clear();
         bool aliveBeforeHit = !dc.Medical.Dead;
         bool wasIncapacitated = dc.Medical.Incapacitated;
-        int partCount = CanDepositWeaponBlood(strikingItem, dc.Race, aliveBeforeHit) ? dc.Medical.Parts.Count : 0;
+        int partCount = options.Gore && CanDepositWeaponBlood(strikingItem, dc.Race, aliveBeforeHit) ? dc.Medical.Parts.Count : 0;
         Span<bool> organicBeforeHit = partCount <= 64 ? stackalloc bool[partCount] : new bool[partCount];
         for (int i = 0; i < partCount; i++) organicBeforeHit[i] = !dc.Medical.Parts[i].IsRobotic(dc.Race);
         var cover = new CoverRoll(world.Seed, Rng.Key(table.IdOf(d)), a, seq, blow);
@@ -130,12 +131,12 @@ public sealed partial class CombatSystem
         var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events, aimedPart);
         if ((uint)part < (uint)organicBeforeHit.Length)
             DepositWeaponBlood(strikingItem, dc.Race, damage, aliveBeforeHit, organicBeforeHit[part], mechanism);
-        TrySeverCounterpart(dc, part, packet, damage, ctx, cover, toughness, aliveBeforeHit, brutality,
+        if (options.Gore) TrySeverCounterpart(dc, part, packet, damage, ctx, cover, toughness, aliveBeforeHit, brutality,
             direction, mechanism, CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.PairedLimb,
                 CombatRolls.BlowCounter(a, seq, blow, 0)), events);
         var cutTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
         ulong visualSeed = Wounds.TorsoBisectionPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), CombatRolls.BlowCounter(a, seq, blow, 0));
-        bool bisected = TryBisect(dc, part, damage, mechanism, aliveBeforeHit,
+        bool bisected = options.Gore && TryBisect(dc, part, damage, mechanism, aliveBeforeHit,
             CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.BodyBisection, CombatRolls.BlowCounter(a, seq, blow, 0)), direction, events,
             visualSeed, cutTravel, prev[d].Yaw, brutality: brutality);
         if ((uint)part < (uint)usefulBeforeHit.Length && challenge > 0)
@@ -311,7 +312,7 @@ public sealed partial class CombatSystem
     internal bool CanTrainBrutality(World world, int attacker, int defender, in CombatSlot target)
     {
         var table = world.Characters;
-        if (attacker == defender || table.Cold(attacker) is not { Medical: { Dead: false, Incapacitated: false }, Stats: not null } source
+        if (!options.Gore || attacker == defender || table.Cold(attacker) is not { Medical: { Dead: false, Incapacitated: false }, Stats: not null } source
             || table.Cold(defender) is not { Medical: { Dead: false, Incapacitated: false, PlayingDead: false }, Fighter.CanAttack: true, CarriedBy.IsNone: true } victim
             || victim.InSomething != global::Meitou.Simulation.Locks.HeldState.None || victim.IsImprisoned || CharacterFacts.GettingUp(victim, world.Tick)
             || Carrying.CarrySystem.Asleep(table, defender) || target.Down

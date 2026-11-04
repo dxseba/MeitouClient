@@ -33,11 +33,11 @@ public sealed partial class CombatSystem
         float brutality = ac.Brutality.Level;
         var travel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);
         ulong headSeed = Wounds.HeadCutPolicy.VisualSeedFor(world.Seed, table.IdOf(d), table.IdOf(a), (ulong)(uint)blow);
-        var headCut = dc.Fighter is not { IsAnimal: true }
+        var headCut = options.Gore && dc.Fighter is not { IsAnimal: true }
             ? Wounds.HeadCutPolicy.Candidate(brutality, mechanism, -1, packet.Cut, headSeed, travel, prev[d].Yaw) : null;
         var ctx = MakeContext(world, d, dc) with
         {
-            AllowDecapitation = dc.Fighter is not { IsAnimal: true } && BrutalityPolicy.CanDecapitate(brutality, mechanism)
+            AllowDecapitation = !options.Gore || dc.Fighter is not { IsAnimal: true } && BrutalityPolicy.CanDecapitate(brutality, mechanism)
                 && headCut is not { Mode: Wounds.HeadCutMode.AttachedSplit },
             HeadCutCandidate = headCut,
         };
@@ -45,7 +45,7 @@ public sealed partial class CombatSystem
         events.Clear();
         bool aliveBeforeHit = !medical.Dead;
         bool wasIncapacitated = medical.Incapacitated;
-        int partCount = CanDepositWeaponBlood(strikingItem, race, aliveBeforeHit) ? medical.Parts.Count : 0;
+        int partCount = options.Gore && CanDepositWeaponBlood(strikingItem, race, aliveBeforeHit) ? medical.Parts.Count : 0;
         Span<bool> organicBeforeHit = partCount <= 64 ? stackalloc bool[partCount] : new bool[partCount];
         for (int i = 0; i < partCount; i++) organicBeforeHit[i] = !medical.Parts[i].IsRobotic(race);
         ReadOnlySpan<ArmourPiece> armour = dc.Fighter is { } df ? df.Armour : default;

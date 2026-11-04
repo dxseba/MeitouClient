@@ -197,7 +197,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             int key = (int)MathF.Round(scale * 100);
             source = definitions.GetOrAdd((file.Path, rig, key), _ => new(() => RagdollDefinition.Build(file.File, rig, key / 100f, Hull))).Value;
         }
-        return source is not null && options is { AdvancedRagdolls: true } && look.Race.GetBool("is robot")
+        return source is not null && options is { Gore: true, AdvancedRagdolls: true } && look.Race.GetBool("is robot")
             ? robotDefinitions.GetOrAdd(source, RobotRagdollWeight.Weight) : source;
     }
 
@@ -274,16 +274,17 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             // The physical save embeds its cut so the simulation can restore before the host's wound sidecar is read.
             if (cold.TorsoBisection is null && cold.Medical is { Dead: true }
                 && cold.Save?.Ragdoll?.Torso is { Cut: { IsValid: true } savedCut }) cold.TorsoBisection = savedCut;
-            DropUnsupportedCutWeapons(world, id, cold);
+            if (options is { Gore: true }) DropUnsupportedCutWeapons(world, id, cold);
             // Compute the launch before spawning detached pieces; keep the blow until a budgeted whole-body start can use it.
             bool advanced = options is { AdvancedRagdolls: true };
             var (launch, push) = !advanced ? default
-                : RobotRagdollWeight.Launch(cold.Race is { IsRobot: true }, cold.Blow ?? (table.Previous[i].Velocity, Vector3.Zero));
+                : options is { Gore: true } ? RobotRagdollWeight.Launch(cold.Race is { IsRobot: true }, cold.Blow ?? (table.Previous[i].Velocity, Vector3.Zero))
+                : cold.Blow ?? (table.Previous[i].Velocity, Vector3.Zero);
             cold.CarryAttach = cold.CarriedBy.IsNone ? null : AttachOf(table, cold, cold.CarriedBy);
             cold.TorsoPositiveCarryAttach = cold.TorsoPositiveCarriedBy.IsNone ? null : AttachOf(table, cold, cold.TorsoPositiveCarriedBy);
             PrepareDetached(world, id, cold, ref next[i], (launch, push), advanced);
             ragdolls.TryGetValue(id, out var r);
-            if (advanced && cold.TorsoBisection is { IsValid: true } cut && cold.Medical is { Dead: true })
+            if (options is { Gore: true } && advanced && cold.TorsoBisection is { IsValid: true } cut && cold.Medical is { Dead: true })
             {
                 if (PrepareTorsoRagdoll(world, id, cold, ref next[i], cut, (launch, push), env))
                 {
@@ -325,7 +326,8 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             cold.Blow = null;
             // A ragdoll a save holds (Saving.RagdollSave): taken the first time the character is seen, used when it starts as a whole body.
             SavedRagdoll? restore = null;
-            if (cold.Save is { Ragdoll: { } saved })
+            if (cold.Save is { Ragdoll: { } saved }
+                && (options is { Gore: true } || !HasCustomCutState(cold, saved)))
             {
                 cold.Save.Ragdoll = null;
                 if (r is null && (wanted & RagdollPart.Whole) != 0) restore = saved;
@@ -485,10 +487,14 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
     }
 
     BodyShapeData? ShapeForLimbCuts(CharacterPoseSetup setup, CharacterCold cold, BodyBuild? build = null) =>
-        LimbShapeMask(cold) is var mask && mask != 0 && cold.Appearance is { } look
+        options is { Gore: true } && LimbShapeMask(cold) is var mask && mask != 0 && cold.Appearance is { } look
             ? rigs.ShapeForLimbCuts(look, setup.Rig, mask, build) ?? setup.Shape : setup.Shape;
 
-    /// <summary>Whether a saved ragdoll belongs to this one: a pose for each body, its root where the character stands (a platoon that travelled since moves its characters).</summary>
+    /// <summary>Saved clipped topology is retained while gore is disabled, but never applied to a plain whole-body collider.</summary>
+    internal static bool HasCustomCutState(CharacterCold cold, SavedRagdoll saved) =>
+        saved.Torso is not null || cold.TorsoBisection is not null || cold.HeadCut is not null || cold.LimbSeverances.Count > 0;
+
+    /// <summary>Whether a saved ragdoll matches this collider and its current placement.</summary>
     static bool Fits(Ragdoll r, SavedRagdoll saved, Vector3 at)
     {
         if (saved.Pose.Length != r.Definition.Bodies.Length) return false;
