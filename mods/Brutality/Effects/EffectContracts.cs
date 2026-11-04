@@ -54,7 +54,7 @@ internal sealed class GoreEffectsSimulation(Random random)
         var key = (cut.Owner, cut.Part);
         bool duplicate = cut.Discharge && robots.TryGetValue(key, out var previous) && previous.Cut.Seed == cut.Seed;
         if (duplicate) return false;
-        double lifetime = MinimumDischargeSeconds + (MaximumDischargeSeconds - MinimumDischargeSeconds) * (uint)Rng.Mix(cut.Seed) / uint.MaxValue;
+        double lifetime = MinimumDischargeSeconds + (MaximumDischargeSeconds - MinimumDischargeSeconds) * (uint)RobotVisualRandom.Mix(cut.Seed) / uint.MaxValue;
         var source = new RobotCutSource(cut, born, born + lifetime, ++serial);
         if (cut.Discharge)
         {
@@ -90,14 +90,21 @@ internal sealed class GoreEffectsSimulation(Random random)
                 if (point is null && half == 0 && age > .15f) point = new(source.Cut.Fallback, Vector3.UnitY);
                 if (point is not { } contact) continue;
                 anchors.Add(new(contact.Position, age, (float)(source.Expires - source.Born),
-                    (uint)(source.Cut.Seed ^ source.Cut.Seed >> 32) ^ (uint)half * 0x9E3779B9u, Math.Clamp(source.Cut.Cut / 70, 0, 1)));
+                    (uint)(source.Cut.Seed ^ source.Cut.Seed >> 32) ^ (uint)half * 0x9E3779B9u, .9f + Math.Clamp(source.Cut.Cut / 70, 0, 1) * .7f));
             }
         }
         foreach (var source in explosions)
         {
-            var current = robotContact(source.Cut, 1) ?? robotContact(source.Cut, 0);
-            if (current is { } contact) { source.Flash ??= contact.Position; source.Smoke = contact.Position; }
-            if (source.Flash is null && now - source.Born > .15f) source.Flash = source.Smoke = source.Cut.Fallback;
+            var retained = robotContact(source.Cut, 0);
+            var detached = source.Cut.Kind is 0 or 1 ? robotContact(source.Cut, 1) : null;
+            // Torso/head flashes begin on the retained wound; only a severed limb starts on its loose piece.
+            var initial = source.Cut.Kind == 0 ? detached ?? retained : retained;
+            if (initial is { } contact) { source.Flash ??= contact.Position; source.Smoke ??= contact.Position; }
+            if (source.Flash is null && now - source.Born > .15f)
+            { source.Flash = source.Cut.Fallback; source.Smoke ??= source.Cut.Fallback; }
+            // Soot follows detached heads/limbs, while a torso rupture keeps emerging from retained half0.
+            var following = source.Cut.Kind == 2 ? retained : detached ?? retained;
+            if (following is { } smoke) source.Smoke = smoke.Position;
             if (source.Flash is not { } flash) continue;
             bursts.Add(new(flash, (float)(now - source.Born), source.Cut.ExplosionSeed,
                 source.Cut.Kind == 2 ? 1.4f : source.Cut.Kind == 1 ? 1 : .8f) { SmokePosition = source.Smoke });

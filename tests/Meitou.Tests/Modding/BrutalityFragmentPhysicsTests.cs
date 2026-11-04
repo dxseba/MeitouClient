@@ -379,4 +379,116 @@ public sealed class BrutalityFragmentPhysicsTests
         Assert.True(piece.Frozen);
     }
 
+    static int TotalSceneBodies(AdvancedFragmentScene scene)
+    {
+        var physics = (RagdollPhysics)AccessTools.Field(typeof(AdvancedFragmentScene), "physics").GetValue(scene)!;
+        int count = 0;
+        for (int i = 0; i < physics.Simulation.Bodies.Sets.Length; i++)
+            if (physics.Simulation.Bodies.Sets[i].Allocated) count += physics.Simulation.Bodies.Sets[i].Count;
+        return count;
+    }
+
+    [Fact]
+    public void A_later_fragment_lands_on_a_frozen_translated_piece_and_falls_to_ground_only_after_that_piece_is_removed()
+    {
+        using var scene = new AdvancedFragmentScene();
+        var support = Definition([BoxBody("Bip01", 0, new(0, 1, 0), new(8, 2, 8))]);
+        var piece = scene.Create(support, _ => support.Bodies[0].Bind, Vector3.Zero, Vector3.Zero, 0);
+        scene.Freeze(piece); scene.Translate(piece, new(0, 3, 0));
+        Assert.Equal(0, scene.AwakeBodies); Assert.Equal(1, TotalSceneBodies(scene));
+        scene.Step(1f / 30, new Flat(), 0); Assert.Equal(0, scene.SolverSteps);
+        var falling = Definition([BoxBody("Bip01", 0, new(0, 10, 0), new(2))]);
+        var upper = scene.Create(falling, _ => falling.Bodies[0].Bind, Vector3.Zero, Vector3.Zero, 0);
+        for (int tick = 1; tick <= 75; tick++) scene.Step(1f / 30, new Flat(), tick);
+        Assert.InRange(upper.Pose[0].Position.Y, 5.8f, 6.2f);
+        Assert.Equal(2, TotalSceneBodies(scene));
+        scene.Remove(piece); Assert.Equal(1, TotalSceneBodies(scene));
+        scene.Impulse(upper, -1, Vector3.Zero);
+        for (int tick = 76; tick <= 150; tick++) scene.Step(1f / 30, new Flat(), tick);
+        Assert.InRange(upper.Pose[0].Position.Y, .8f, 1.2f);
+        scene.Remove(upper); Assert.Equal(0, TotalSceneBodies(scene)); Assert.Equal(0, scene.Count);
+    }
+
+    [Fact]
+    public void Repeated_freeze_hit_and_carry_reactivation_reuses_one_set_of_actors_without_duplicate_colliders()
+    {
+        using var scene = new AdvancedFragmentScene();
+        var definition = Definition([BoxBody("Bip01", 0, new(0, 5, 0), new(2))]);
+        var piece = scene.Create(definition, _ => definition.Bodies[0].Bind, Vector3.Zero, Vector3.Zero, 0);
+        var original = piece.Bodies.ToArray();
+        for (int cycle = 0; cycle < 8; cycle++)
+        {
+            scene.Freeze(piece); Assert.Equal(0, scene.AwakeBodies);
+            scene.Impact(piece, 0, Vector3.Zero, Vector3.UnitX);
+            Assert.False(piece.Frozen); Assert.Equal(original, piece.Bodies); Assert.Equal(1, TotalSceneBodies(scene));
+            Assert.Equal(Vector3.UnitX, Assert.Single(scene.CaptureMotion(piece)).Linear);
+            scene.Freeze(piece);
+            scene.SetCarried(piece, piece.Pose.ToArray(), [true], [true], entering: true);
+            Assert.False(piece.Frozen); Assert.True(piece.Carried);
+            Assert.Equal(original, piece.Bodies); Assert.Equal(1, TotalSceneBodies(scene));
+            scene.ReleaseCarried(piece); Assert.False(piece.Carried);
+        }
+        scene.Freeze(piece); Assert.Equal(0, scene.AwakeBodies);
+        scene.Remove(piece); Assert.Equal(0, TotalSceneBodies(scene));
+    }
+
+    [Fact]
+    public void Frozen_fragments_do_not_step_the_solver_or_accumulate_time_for_a_later_new_fragment()
+    {
+        var definition = Definition([BoxBody("Bip01", 0, new(0, 100, 0), new(2))]);
+        using var scene = new AdvancedFragmentScene();
+        var frozen = scene.Create(definition, _ => definition.Bodies[0].Bind, Vector3.Zero, Vector3.Zero, 0);
+        scene.Freeze(frozen);
+        for (int tick = 0; tick < 100; tick++) scene.Step(1f / 30, new Flat(), tick);
+        Assert.Equal(0, scene.SolverSteps); Assert.Equal(0, scene.AwakeBodies);
+        // Settled fragments retain their collision hulls. Keep both comparison actors away from that obstacle
+        // so this test isolates elapsed-time debt rather than comparing different contact scenes.
+        var spawn = definition.Bodies[0].Bind with { Position = definition.Bodies[0].Bind.Position + new Vector3(10, 0, 0) };
+        var started = scene.Create(definition, _ => spawn, Vector3.Zero, Vector3.Zero, 0);
+        scene.Step(1f / 30, new Flat(), 100);
+        Assert.Equal(1, scene.SolverSteps);
+        using var fresh = new AdvancedFragmentScene();
+        var reference = fresh.Create(definition, _ => spawn, Vector3.Zero, Vector3.Zero, 0);
+        fresh.Step(1f / 30, new Flat(), 0);
+        Assert.Equal(reference.Pose, started.Pose);
+        Assert.Equal(scene.CaptureMotion(started)[0].Linear, fresh.CaptureMotion(reference)[0].Linear);
+    }
+
+    [Fact]
+    public void Accelerated_game_ticks_accumulate_one_normal_real_physics_step_and_advance_game_sleep_timers()
+    {
+        const float game = 1f / 30;
+        var definition = Definition([BoxBody("Bip01", 0, new(0, 100, 0), new(2))]);
+        using var fast = new AdvancedFragmentScene(); using var normal = new AdvancedFragmentScene();
+        var accelerated = fast.Create(definition, _ => definition.Bodies[0].Bind, Vector3.Zero, Vector3.Zero, 0);
+        var reference = normal.Create(definition, _ => definition.Bodies[0].Bind, Vector3.Zero, Vector3.Zero, 0);
+        for (int tick = 0; tick < 4; tick++) fast.Step(game / 5, new Flat(), tick, game);
+        Assert.Equal(0, fast.SolverSteps); Assert.Equal(definition.Bodies[0].Bind.Position, accelerated.Pose[0].Position);
+        fast.Step(game / 5, new Flat(), 4, game); normal.Step(game, new Flat(), 0);
+        Assert.Equal(1, fast.SolverSteps);
+        Assert.InRange(Vector3.Distance(reference.Pose[0].Position, accelerated.Pose[0].Position), 0, .00001f);
+        Assert.Equal(game * 5, accelerated.Age, .00001f); Assert.Equal(game, reference.Age, .00001f);
+        // At accelerated speed the native seven-game-second cap must not keep the corpse active for 35 game seconds.
+        for (int tick = 5; tick < 215; tick++) fast.Step(game / 5, new Flat(), tick, game);
+        Assert.True(accelerated.Frozen);
+    }
+
+    [Fact]
+    public void Unchanged_immutable_topology_reuses_stamps_across_xp_wounds_and_sleep_state_changes()
+    {
+        var limbs = Array.AsReadOnly(new[] { new LimbCutState(0, .4f, new(.2f, -.1f)) });
+        var state = new BrutalityActorView(new(2, 0), 0, 0, 0, new(0), null, new(new(0, 1, 0, -10)), limbs);
+        var cache = new FragmentTopologyCache(); var first = cache.Get(state);
+        var anotherView = state with { Experience = 100, Level = 99, SevereHead = new(3), Wounds = BodyWoundState.Empty with { BellyHits = 5 } };
+        Assert.Same(first, cache.Get(anotherView));
+        Assert.Equal(first.Retained + true, first.WithBody); Assert.Equal(first.Retained + false, first.WithoutBody);
+        using var stream = new MemoryStream();
+        BrutalityStateCodec.Write(stream, [new("stable/topology", 0, state.SevereHead, state.Head, state.Torso, limbs.ToArray())]); stream.Position = 0;
+        var saved = Assert.Single(BrutalityStateCodec.Read(stream));
+        var restored = cache.Get(state with { Limbs = saved.Limbs, Torso = saved.Torso, Head = saved.Head });
+        Assert.Equal(first.Cut, restored.Cut); Assert.Equal(first.Retained, restored.Retained); Assert.Equal(first.WithBody, restored.WithBody);
+        var changed = cache.Get(state with { Limbs = [new(0, .7f, Vector2.Zero)] });
+        Assert.NotEqual(first.Cut, changed.Cut); Assert.NotEqual(first.Retained, changed.Retained);
+    }
+
 }

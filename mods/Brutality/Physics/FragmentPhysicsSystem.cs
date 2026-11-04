@@ -35,6 +35,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         public required FragmentAppearanceCache Presentation;
         public readonly Dictionary<int, (string Stamp, AdvancedFragmentScene.Piece Piece)> Pieces = [];
         public string StateStamp = "";
+        public readonly FragmentTopologyCache Topology = new();
         public Matrix4x4 Placement;
         public readonly Dictionary<int, CarryState> Carries = [];
         public bool NegativePoseRestored;
@@ -128,7 +129,8 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             }
             ref var hot = ref world.Characters.Next[slot];
             bool ownBody = state.Torso is not null || cold.Medical is { Dead: true } or { Incapacitated: true };
-            string stamp = Stamp(state) + ownBody;
+            var topology = owner.Topology.Get(state);
+            string stamp = ownBody ? topology.WithBody : topology.WithoutBody;
             var placement = PlacementFor(owner, cold, hot);
             if (owner.StateStamp != stamp)
             {
@@ -145,7 +147,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                 }
                 var posed = BoneWorld(world, state.Character, cold, owner, placement, handoff);
                 var previousMotion = owner.Pieces.TryGetValue(0, out var priorBody) ? scene.CaptureMotion(priorBody.Piece)
-                    : handoff?.Bodies.Select(body => new FragmentBodyMotion(body.Bone, new(body.Body.Position, body.Body.Rotation), body.Linear, body.Angular)).ToArray() ?? [];
+                    : RobotRagdollWeight.CaptureMotion(cold.Race?.IsRobot == true, handoff);
                 var pending = handoff?.PendingLaunch;
                 var launch = pending is { } initial ? (initial.Velocity, initial.Push) : cold.Blow ?? (hot.Velocity, Vector3.Zero);
                 var start = RobotRagdollWeight.Launch(cold.Race?.IsRobot == true, launch);
@@ -199,7 +201,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             scene.Impact(retained.Piece, actor, offset, push);
         }
         UpdateCarries(world);
-        scene.Step(RagdollPhysics.StepOf(world.TickSeconds, world.PhysicsSpeed), ground, world.Tick);
+        scene.Step(RagdollPhysics.StepOf(world.TickSeconds, world.PhysicsSpeed), ground, world.Tick, world.TickSeconds, world.Settings.Threads);
         var publish = new Dictionary<CharacterId, GoreCharacterFrame>();
         foreach (var state in gameplay.ActorViews)
         {
@@ -261,7 +263,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
     }
 
     sealed record Spec(int Key, string Stamp, RagdollDefinition Definition);
-    static string Stamp(BrutalityActorView s) => s.Torso + "/" + s.Head + "/" + string.Join(';', s.Limbs);
+    internal static string Stamp(BrutalityActorView s) => s.Torso + "/" + s.Head + "/" + string.Join(';', s.Limbs);
     static List<Spec> Definitions(Owner owner, BrutalityActorView state, bool ownBody)
     {
         var result = new List<Spec>(); var remaining = owner.Source;
@@ -287,7 +289,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             if (negative is not null) result.Add(new(1, cut.ToString(), negative));
             if (positive is not null) remaining = positive;
         }
-        if (ownBody) result.Add(new(0, Stamp(state), remaining));
+        if (ownBody) result.Add(new(0, owner.Topology.Get(state).Retained, remaining));
         return result;
     }
 
@@ -403,5 +405,23 @@ internal sealed class FragmentAppearanceCache
         if (ReferenceEquals(native, current) && restored == control && presented is not null) return presented;
         native = current; restored = control;
         return presented = NaturalAppearance.Make(data, current, parts, state);
+    }
+}
+
+internal sealed record FragmentTopologyKeys(string Cut, string Retained, string WithBody, string WithoutBody);
+
+/// <summary>Actor views may change for XP or ordinary wounds while immutable cut topology remains identical.</summary>
+internal sealed class FragmentTopologyCache
+{
+    HeadCutState? head;
+    TorsoBisectionState? torso;
+    IReadOnlyList<LimbCutState>? limbs;
+    FragmentTopologyKeys? keys;
+    public FragmentTopologyKeys Get(BrutalityActorView state)
+    {
+        if (keys is not null && head == state.Head && torso == state.Torso && ReferenceEquals(limbs, state.Limbs)) return keys;
+        head = state.Head; torso = state.Torso; limbs = state.Limbs;
+        string retained = FragmentPhysicsSystem.Stamp(state);
+        return keys = new(FragmentPhysicsSystem.CutKey(state), retained, retained + true, retained + false);
     }
 }

@@ -84,8 +84,8 @@ internal static class NativeSurfaceShaders
             float alphaThreshold;
             uint tex[{{TextureSlotCount}}];
             vec4 shirtColour;    // w: hair's attachment specular, or an item's gloss multiplier
-            vec4 skinTone;       // w: body muscle blend, hair mipmap bias, or weapon axis length
-            vec4 hairColour;     // rgb hair; w exact 24-bit race blood RGB
+            vec4 skinTone;       // w: host body muscle blend
+            vec4 hairColour;     // rgb hair; w host hair mipmap bias (race RGB lives in the mod palette)
             vec4 hairAlpha;
             vec4 hairMult;
             vec4 beardAlpha;
@@ -95,6 +95,13 @@ internal static class NativeSurfaceShaders
             vec4 colour2;
         };
         layout(std430, set = 0, binding = {{MaterialsBinding}}) readonly buffer Materials { CharMaterial items[]; } materials;
+        CharMaterial surfaceMaterial(uint index, uint anatomy)
+        {
+            CharMaterial m = materials.items[index];
+            // The host treats SharedSkeleton parts as worn clothes; the reference's generated anatomy is an untextured item material.
+            if (anatomy != 0u) m.flags &= ~(16384u | 1048576u | 2097152u);
+            return m;
+        }
         """;
 
     static string Head(string stage) => "#version 450\n" + RuntimeCharacterShaderSources.Prelude(PushMembers) + Structs + stage;
@@ -127,6 +134,7 @@ internal static class NativeSurfaceShaders
         out vec4 vTangent;
         out vec2 vUv;
         flat out uint vMaterial;
+        flat out uint vRaceRgb;
         flat out uint vInterior;
         out float vHidden;
         //MOTION_OUT
@@ -236,6 +244,7 @@ internal static class NativeSurfaceShaders
             vSkinPos = aPosition;
             vClipLayer = aTangent.w;
             vWounds = wounded ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][0]) : 0u;
+            vRaceRgb = (aInstanceData.z & 0x8000002Cu) != 0u ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][3][1]) : 0x800000u;
             vClip = -1.0;
             vCutBand = 1000.0;
             vJawCut = 0.0;
@@ -421,7 +430,7 @@ internal static class NativeSurfaceShaders
     // derivatives of the quad are fine. The cut-outs discard after every lookup (no derivatives after an OpKill).
     const string Lookup = """
         vec4 tex(uint i, vec2 uv) { return texture(textures2D[nonuniformEXT(i)], uv); }
-        vec4 hairTex(CharMaterial m, vec2 uv) { return texture(textures2D[nonuniformEXT(m.tex[0])], uv, m.skinTone.w); }
+        vec4 hairTex(CharMaterial m, vec2 uv) { return texture(textures2D[nonuniformEXT(m.tex[0])], uv, m.hairColour.w); }
         """;
 
     /// <summary>
@@ -445,6 +454,7 @@ internal static class NativeSurfaceShaders
         in vec4 vTangent;
         in vec2 vUv;
         flat in uint vMaterial;
+        flat in uint vRaceRgb;
         flat in uint vInterior;
         in float vHidden;
         in vec4 vColour;
@@ -518,14 +528,14 @@ internal static class NativeSurfaceShaders
         // Wound fluids are independent of clothing dyes. Every RGB24 value is exact in the spare float.
         vec3 raceBlood(CharMaterial m)
         {
-            uint rgb = uint(m.hairColour.w);
+            uint rgb = vRaceRgb;
             return vec3(float((rgb >> 16u) & 255u), float((rgb >> 8u) & 255u), float(rgb & 255u)) / 255.0;
         }
 
         // Same palette transform as GorePalette: neutral highlights remain, red chroma follows the race.
         vec3 goreColour(vec3 source, CharMaterial m)
         {
-            if (uint(m.hairColour.w) == 0x800000u) return source;
+            if (vRaceRgb == 0x800000u) return source;
             float chroma = max(source.r - min(source.g, source.b), 0.0);
             return clamp(source + (raceBlood(m) * (255.0 / 128.0) - vec3(1.0, 0.0, 0.0)) * chroma, 0.0, 1.0);
         }
@@ -631,7 +641,7 @@ internal static class NativeSurfaceShaders
             if ((vHeadRelief & 2u) != 0u && !fullBodyExposed) discard;
             if (vClipLayer > 5.5 && vClipLayer < 6.5 && !fullBodyExposed && !headBrainVisible(vSkinPos, vHeadProfile, vHeadFrame, vHeadOpen)) discard;
             if (pc.depthIndex != 0u) { fragColour = vec4(pc.flatColour, 1.0); return; }
-            CharMaterial m = materials.items[vMaterial];
+            CharMaterial m = surfaceMaterial(vMaterial, vAnatomy);
             uint f = m.flags;
             if (flag(f, 32768u)) discard;   // its cut-out is still streaming in: a solid card would show
             vec3 n = geometric;
@@ -964,6 +974,7 @@ internal static class NativeSurfaceShaders
         return stock.Replace(stockMain, "") + Structs + Lookup + NativeHeadSurface.ShaderField + NativeTorsoSurface.ShaderField + """
         in vec2 vUv;
         flat in uint vMaterial;
+        flat in uint vRaceRgb;
         in float vHidden;
         flat in uint vAnatomy;
         flat in float vClipLayer;
@@ -986,7 +997,7 @@ internal static class NativeSurfaceShaders
             bool fullBodyExposed = (vHeadRelief & 1u) != 0u && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
             if ((vHeadRelief & 2u) != 0u && !fullBodyExposed) discard;
             if (vClipLayer > 5.5 && vClipLayer < 6.5 && !fullBodyExposed && !headBrainVisible(vSkinPos, vHeadProfile, vHeadFrame, vHeadOpen)) discard;
-            CharMaterial m = materials.items[vMaterial];
+            CharMaterial m = surfaceMaterial(vMaterial, vAnatomy);
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
             if (vPlated <= 0.0 && (f & 16384u) != 0u && vClip > -0.35)
@@ -1020,6 +1031,7 @@ internal static class NativeSurfaceShaders
         in vec4 vNow;
         in vec4 vPrevious;
         flat in uint vMaterial;
+        flat in uint vRaceRgb;
         in float vHidden;
         flat in uint vAnatomy;
         flat in float vClipLayer;
@@ -1044,7 +1056,7 @@ internal static class NativeSurfaceShaders
             bool fullBodyExposed = (vHeadRelief & 1u) != 0u && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
             if ((vHeadRelief & 2u) != 0u && !fullBodyExposed) discard;
             if (vClipLayer > 5.5 && vClipLayer < 6.5 && !fullBodyExposed && !headBrainVisible(vSkinPos, vHeadProfile, vHeadFrame, vHeadOpen)) discard;
-            CharMaterial m = materials.items[vMaterial];
+            CharMaterial m = surfaceMaterial(vMaterial, vAnatomy);
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
             if (vPlated <= 0.0 && (f & 16384u) != 0u && vClip > -0.35)

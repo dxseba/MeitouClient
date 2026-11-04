@@ -67,7 +67,7 @@ internal static class RenderBridge
     sealed class RenderState
     {
         public readonly Dictionary<(CharacterId, int), long> Keys = [];
-        public readonly Dictionary<(CharacterId, int), BonePose> Mix = [];
+        public readonly Dictionary<(CharacterId, int), FragmentPoseBlend> Mix = [];
         public readonly Dictionary<long, RuntimeCharacterGeometry> WeaponVariants = [];
         public readonly Dictionary<CharacterId, (CharacterAppearance Look, CharacterGeometryResult Geometry)> Cuts = [];
         public readonly ConcurrentDictionary<RuntimeCharacterGeometry, byte> Generated = new(ReferenceEqualityComparer.Instance);
@@ -83,6 +83,7 @@ internal static class RenderBridge
             foreach (var geometry in state.Generated.Keys) geometry.Retire();
             states.Remove(__instance);
         }
+        GeometryPreparations.ReleaseWorld(__instance);
         BodyWoundRenderBridge.ReleaseWorld(__instance);
     }
 
@@ -102,6 +103,7 @@ internal static class RenderBridge
     static void FillPostfix(object __instance, CharacterDrawList list)
     {
         if (resources is null || drawKey is null || sessionField?.GetValue(__instance) is not WorldSession session) return;
+        GeometryPreparations.Capture(__instance, list, session, resources);
         var physics = session.World.Systems.OfType<FragmentPhysicsSystem>().FirstOrDefault();
         var proxyFrame = BodyFragmentProxySystem.ForWorld(session.World)?.FrameAt(session.ShownTick);
         if (physics?.FrameAt(session.ShownTick) is not { } frame || frame.Characters.Count == 0)
@@ -175,8 +177,9 @@ internal static class RenderBridge
                 if (fragment is null || pose is null) { pendingProxies.Add(instance.Key); continue; }
                 var old = before?.Detached.FirstOrDefault(piece => piece.StableKey == stableKey);
                 var mixedPose = Mixed(render, (current.Character, stableKey), old?.Bones, pose.Bones, session.SimulationAlpha);
-                var placement = Placement(before, current, session.SimulationAlpha);
-                list.Items[i] = instance with
+                var framed = WithPhysicalPlacement(instance, before, current, session.SimulationAlpha, detached: true);
+                var placement = framed.World!.Value;
+                list.Items[i] = framed with
                 {
                     Appearance = current.Appearance, Geometry = fragment.Geometry,
                     Bones = mixedPose,
@@ -188,10 +191,11 @@ internal static class RenderBridge
                 continue;
             }
             var retained = current.Retained is null ? instance.Bones : Mixed(render, (current.Character, 0), before?.Retained, current.Retained, session.SimulationAlpha);
-            var retainedWorld = instance.World ?? (instance.Rotation is { } retainedRotation
+            var retainedInstance = WithPhysicalPlacement(instance, before, current, session.SimulationAlpha);
+            var retainedWorld = retainedInstance.World ?? (instance.Rotation is { } retainedRotation
                 ? CharacterRigs.Placement(setup, instance.Position, retainedRotation, instance.Scale)
                 : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
-            list.Items[i] = instance with
+            list.Items[i] = retainedInstance with
             {
                 Appearance = current.Appearance, Geometry = retainedGeometry, Bones = retained,
                 WorldBounds = FragmentWorldBounds.For(retainedGeometry, current.Appearance, setup.Rig, body, retained, retainedWorld,
@@ -205,12 +209,11 @@ internal static class RenderBridge
                 var old = before?.Detached.FirstOrDefault(p => p.StableKey == fragment.StableKey);
                 var key = (current.Character, fragment.StableKey);
                 if (!render.Keys.TryGetValue(key, out long shown)) render.Keys.Add(key, shown = Interlocked.Decrement(ref serial));
-                var world = instance.World ?? (instance.Rotation is { } rotation
-                    ? CharacterRigs.Placement(setup, instance.Position, rotation, instance.Scale)
-                    : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
+                var framed = WithPhysicalPlacement(instance, before, current, session.SimulationAlpha, detached: true);
+                var world = framed.World!.Value;
                 var position = old is null ? pose.Position : Vector3.Lerp(old.Position, pose.Position, session.SimulationAlpha);
                 var mixedPose = Mixed(render, key, old?.Bones, pose.Bones, session.SimulationAlpha);
-                list.Add(instance with
+                list.Add(framed with
                 {
                     Key = shown, Appearance = current.Appearance, Geometry = fragment.Geometry, Position = position, World = world,
                     Bones = mixedPose, FreezeFrom = null,
@@ -256,6 +259,11 @@ internal static class RenderBridge
         foreach (var geometry in render.Generated.Keys) if (geometry.IsRetired) render.Generated.TryRemove(geometry, out _);
     }
 
+    /// <summary>Published physical bones are relative to this frame, even if the native hot root moved or returned to animation.</summary>
+    internal static CharacterInstance WithPhysicalPlacement(in CharacterInstance instance, GoreCharacterFrame? before,
+        GoreCharacterFrame current, float alpha, bool detached = false) => current.Retained is not null || detached
+            ? instance with { World = Placement(before, current, alpha) } : instance;
+
     static Matrix4x4 Placement(GoreCharacterFrame? before, GoreCharacterFrame current, float alpha)
     {
         if (before is null || !Matrix4x4.Decompose(before.Placement, out var size0, out var turn0, out var at0)
@@ -284,17 +292,7 @@ internal static class RenderBridge
 
     static BonePose Mixed(RenderState state, (CharacterId, int) key, BonePose? before, BonePose after, float alpha)
     {
-        if (before is null || ReferenceEquals(before, after) || before.Set.Length != after.Set.Length
-            || before.AbsolutePositions != after.AbsolutePositions || !ReferenceEquals(before.Components, after.Components)) return after;
-        if (!state.Mix.TryGetValue(key, out var result) || result.Set.Length != after.Set.Length)
-            state.Mix[key] = result = new(after.Set.Length);
-        result.Weight = before.Weight + (after.Weight - before.Weight) * alpha; result.AbsolutePositions = after.AbsolutePositions; result.Components = after.Components;
-        for (int h = 0; h < result.Set.Length; h++)
-        {
-            result.Set[h] = after.Set[h];
-            result.Position[h] = before.Set[h] && after.Set[h] ? Vector3.Lerp(before.Position[h], after.Position[h], alpha) : after.Position[h];
-            result.Rotation[h] = before.Set[h] && after.Set[h] ? Quaternion.Slerp(before.Rotation[h], after.Rotation[h], alpha) : after.Rotation[h];
-        }
-        return result;
+        if (!state.Mix.TryGetValue(key, out var blend)) state.Mix[key] = blend = new();
+        return blend.Between(before, after, alpha);
     }
 }

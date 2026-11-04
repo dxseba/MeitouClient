@@ -24,6 +24,7 @@ internal static partial class NativeSurfaceBridge
     static readonly HashSet<long> used = [];
     static readonly List<long> stalePayloads = [];
     static readonly int[] pieceKeys = [1, 2, 3, 10, 11, 12, 13];
+    internal const int BloodColourWord = 29;
 
     public static void Install(ModContext context, RenderResources source)
     {
@@ -76,11 +77,12 @@ internal static partial class NativeSurfaceBridge
             var marks=ordinary ? Marks(owner.State.Wounds,item.Appearance,session.ShownTick,session.World.TickSeconds) : Array.Empty<NativeWoundMark>();
             uint index=ordinary ? masks.Update(item.Key,setup.Rig,info.Skin,marks) : 0;
             Pack(setup.Rig,owner.State,owner.Piece,index,ordinary ? masks.Spheres(item.Key) : null,ordinary ? masks.Cuts(item.Key) : null,info.HeadFrame?.Packed ?? default,prefix);
+            SetBloodColour(prefix, unchecked((uint)item.Appearance.Race.GetInt("blood colour", 0x800000)));
             var words=MemoryMarshal.Cast<Matrix4x4,uint>(prefix);
             words[17]|=((uint)item.Appearance.HiddenLimbs&15u)<<1;
             if(AppliesHeadPlane(owner.State, owner.Piece) && owner.State.Head is { } headCut && resources.Mesh(item.Appearance.BodyMesh) is { } body)
             {
-                var plane=CharacterGeometryAdapter.ResolveHeadPlane(body,setup.Rig,item.Appearance,headCut.Plane);
+                var plane=headPlanes.For(body,setup.Rig,item.Appearance,headCut.Plane);
                 prefix[3]=TorsoFrame(plane,owner.Piece==2 ? 1 : -1,2);
                 var packedRig=PackedRig(setup.Rig);
                 words[3*16+8]|=packedRig.HeadLow;
@@ -144,6 +146,7 @@ internal static partial class NativeSurfaceBridge
         prefix.Clear();
         var words=MemoryMarshal.Cast<Matrix4x4,uint>(prefix);
         words[16]=mask;
+        words[BloodColourWord]=0x800000u;
         words[17]=state.SevereHead.RendererFlags;
         if(state.Torso is not null || state.Wounds.BellyHits>=10) words[17]|=1u<<5;
         if(piece is >=10 and <=13) words[19]=(uint)((piece-9)<<8)|255u;
@@ -165,6 +168,9 @@ internal static partial class NativeSurfaceBridge
         if(spheres is not null) spheres.AsSpan(0,Math.Min(64,spheres.Length)).CopyTo(MemoryMarshal.Cast<Matrix4x4,Vector4>(prefix.Slice(4,16)));
         if(cuts is not null) cuts.AsSpan(0,Math.Min(64,cuts.Length)).CopyTo(MemoryMarshal.Cast<Matrix4x4,Vector4>(prefix.Slice(20,16)));
     }
+
+    internal static void SetBloodColour(Span<Matrix4x4> prefix, uint colour) =>
+        MemoryMarshal.Cast<Matrix4x4,uint>(prefix)[BloodColourWord] = colour & 0xFFFFFF;
 
     internal static bool HasOrdinaryMarks(int piece) => piece is 0 or 1;
 

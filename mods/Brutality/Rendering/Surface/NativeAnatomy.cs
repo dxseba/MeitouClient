@@ -31,7 +31,7 @@ static class NativeAnatomy
     /// <summary>The bowel's group: with the torso's until it spills, then gone (<see cref="DebrisRenderer.Bowel"/>).</summary>
     const int LooseBowelGroup = 5;
     public static List<Vertex>? Build(SkeletonRig rig, WoundPoint[] skin, Vertex[] headSource, bool female, NativeMeshMorphs? morphs,
-        bool headless, bool headOnly, string path, uint bloodColour = NativeFluidPalette.DefaultBlood)
+        bool headless, bool headOnly, string path, uint bloodColour = NativeFluidPalette.DefaultBlood, Vertex[]? bodySource = null)
     {
         path = GameFiles.Resolve(path);
         if (skin.Length == 0 || !File.Exists(path) || rig.Handle("Bip01 Pelvis") is not { } pelvis || rig.Handle("Bip01 Neck") is not { } neck || Math.Max(pelvis, neck) >= rig.BindPosition.Length) return null;
@@ -125,36 +125,19 @@ static class NativeAnatomy
             }
         }
         // The body's back wall (Gore Lab's cavity lining): what a line of sight through the torso ends on. Layer 7, the torso's group.
-        // Fit the lining from the installed body's posterior skin at run time. No game-derived coordinate table ships in the mod.
-        const int wallRows = 20, wallColumns = 17;
-        var posterior = skin.Where(v => NativeWoundMasks.BodyGroup(rig.Skeleton.Bones.FirstOrDefault(b => b.Handle == v.Bone)?.Name ?? "") == 0
-            && v.Normal.Z < -.15f && v.Position.Y >= hip.Y - scale && v.Position.Y <= rig.BindPosition[neck].Y).ToArray();
-        var wall = new Vector3[wallRows, wallColumns];
-        for (int row = 0; row < wallRows; row++)
-        {
-            float y = hip.Y - .4f * scale + (rig.BindPosition[neck].Y - hip.Y - .6f * scale) * row / (wallRows - 1);
-            var band = posterior.Where(v => MathF.Abs(v.Position.Y - y) < scale * .65f).ToArray();
-            if (band.Length == 0) band = posterior;
-            float left = band.Length > 0 ? band.Min(v => v.Position.X) * .88f : hip.X - scale;
-            float right = band.Length > 0 ? band.Max(v => v.Position.X) * .88f : hip.X + scale;
-            for (int column = 0; column < wallColumns; column++)
-            {
-                float x = left + (right - left) * column / (wallColumns - 1);
-                var sample = band.Length > 0 ? band.MinBy(v => (v.Position.X-x)*(v.Position.X-x)+(v.Position.Y-y)*(v.Position.Y-y)) : default;
-                wall[row,column] = new(x,y,band.Length > 0 ? sample.Position.Z + .12f * scale : hip.Z - scale * .5f);
-            }
-        }
+        // Reconstruct the reference's rear wall and flank returns from actual installed body triangles.
+        var wall = RuntimeCavityLining.Build(bodySource ?? [], rig, hip, scale);
         Vertex Wall(int row, int column)
         {
-            var p = wall[row,column];
+            var p = wall![row,column];
             var over = Nearest(p, 0);
-            return new Vertex { Position = p, Normal = Vector3.Normalize(new Vector3(-p.X, 0, 0.5f - p.Z)), Uv = over.Uv, Tangent = new Vector4(0, 0, 0, 7), Colour = NativeFluidPalette.Recolour(new Vector4(0.2f, 0.03f, 0.035f, 0), bloodColour), Bones = over.Bones, Weights = over.Weights };
+            return new Vertex { Position = p, Normal = Vector3.Normalize(new Vector3(-(p.X - hip.X), 0, hip.Z + 0.5f * scale - p.Z)), Uv = over.Uv, Tangent = new Vector4(0, 0, 0, 7), Colour = NativeFluidPalette.Recolour(new Vector4(0.2f, 0.03f, 0.035f, 0), bloodColour), Bones = over.Bones, Weights = over.Weights };
         }
         var axial = new[] { "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2", "Bip01 Neck" }
             .Select(name => rig.Handle(name)).Where(handle => handle.HasValue).Select(handle => (int)handle!.Value).ToArray();
-        if (!headOnly)
-            for (int row = 0; row + 1 < wallRows; row++)
-                for (int column = 0; column + 1 < wallColumns; column++)
+        if (!headOnly && wall is not null)
+            for (int row = 0; row + 1 < RuntimeCavityLining.Rows; row++)
+                for (int column = 0; column + 1 < RuntimeCavityLining.Columns; column++)
                 {
                     Vertex a = Wall(row, column), b = Wall(row, column + 1), c = Wall(row + 1, column), d = Wall(row + 1, column + 1);
                     var centre = (a.Position + b.Position + c.Position + d.Position) * 0.25f;

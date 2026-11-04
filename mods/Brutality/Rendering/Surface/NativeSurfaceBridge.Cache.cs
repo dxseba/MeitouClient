@@ -8,7 +8,8 @@ internal static partial class NativeSurfaceBridge
 {
     static readonly ConditionalWeakTable<BodyWoundState,MarkProjection> markCache=new();
     static readonly ConditionalWeakTable<SkeletonRig,RigPacking> rigCache=new();
-    static void ClearCaches() { markCache.Clear(); rigCache.Clear(); }
+    static readonly ResolvedHeadPlaneCache headPlanes = new(CharacterGeometryAdapter.ResolveHeadPlane);
+    static void ClearCaches() { markCache.Clear(); rigCache.Clear(); headPlanes.Clear(); }
     static RigPacking PackedRig(SkeletonRig rig)=>rigCache.GetValue(rig,static rig=>new RigPacking(rig));
 
     sealed class RigPacking

@@ -38,12 +38,31 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
     readonly List<Piece> pieces = [];
     readonly Dictionary<RagdollDefinition, (TypedIndex Shape, BodyInertia Inertia)[]> shapes = new(ReferenceEqualityComparer.Instance);
     int serial;
-    public int AwakeBodies => physics.Simulation.Bodies.ActiveSet.Count;
+    const int ThreadedBodies = 256;
+    float physicsDue;
+    BepuUtilities.ThreadDispatcher? threads;
+    internal long SolverSteps { get; private set; }
+    // Frozen actors remain kinematic collision obstacles. They no longer consume the moving-body budget,
+    // even if Bepu has not slept them yet (there need not be another solver step after the last piece freezes).
+    public int AwakeBodies
+    {
+        get
+        {
+            int count = 0;
+            foreach (var piece in pieces)
+            {
+                if (piece.Frozen) continue;
+                foreach (var handle in piece.Bodies)
+                    if (handle is { } body && physics.Simulation.Bodies.GetBodyReference(body).Awake) count++;
+            }
+            return count;
+        }
+    }
     public int Count => pieces.Count;
 
     public Piece Create(RagdollDefinition definition, Func<int, RigidTransform> boneWorld, Vector3 velocity, Vector3 push, ulong seed, RigidTransform[]? initialBones = null)
     {
-        while (AwakeBodies + definition.Bodies.Length > AwakeBudget && pieces.FirstOrDefault(p => !p.Frozen && !p.Carried) is { } oldest) Freeze(oldest);
+        MakeRoom(definition.Bodies.Length);
         var piece = new Piece { Number = ++serial, Definition = definition, Bodies = new BodyHandle?[definition.Bodies.Length],
             Dynamic = Enumerable.Repeat(true, definition.Bodies.Length).ToArray(), Pose = new RigidTransform[definition.Bodies.Length] };
         var made = Shapes(definition);
@@ -69,20 +88,36 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
         return piece;
     }
 
-    public void Step(float dt, IRagdollEnvironment environment, long tick)
+    public void Step(float dt, IRagdollEnvironment environment, long tick, float? gameSeconds = null, int threadCount = 1)
     {
+        float gameDt = gameSeconds ?? dt;
+        bool moving = false;
         foreach (var piece in pieces)
         {
             if (piece.Frozen) continue;
+            moving = true;
             foreach (var body in piece.Pose) physics.Cover(body.Position, 4, environment, tick);
         }
-        float left = Math.Clamp(dt, 0, .1f);
-        while (left > 1e-6f) { float step = MathF.Min(left, RagdollPhysics.MaxStep); physics.Step(step); left -= step; }
+        // The pin accumulates real time until a normal 1x step is owed. Accelerated game ticks must not
+        // repeat narrow-phase/solver setup for every tiny interval, while sleep timers remain in game seconds.
+        physicsDue = moving ? physicsDue + Math.Clamp(dt, 0, .1f) : 0;
+        if (moving && physicsDue >= RagdollPhysics.StepOf(gameDt, 1) - 1e-5f)
+        {
+            if (threads is null && threadCount > 1) threads = new BepuUtilities.ThreadDispatcher(threadCount);
+            var workers = threadCount > 1 && AwakeBodies >= ThreadedBodies ? threads : null;
+            float left = physicsDue;
+            while (left > 1e-6f)
+            {
+                float step = MathF.Min(left, RagdollPhysics.MaxStep);
+                physics.Step(step, workers); SolverSteps++; left -= step;
+            }
+            physicsDue = 0;
+        }
         foreach (var piece in pieces)
         {
             if (piece.Frozen) continue;
             Surface(piece, environment);
-            Read(piece); piece.Age += dt;
+            Read(piece); piece.Age += gameDt;
             int still = 0, count = 0;
             foreach (var handle in piece.Bodies)
             {
@@ -121,19 +156,29 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
         foreach (var joint in piece.Joints) physics.Simulation.Solver.Remove(joint);
         piece.Joints.Clear();
         for (int b = 0; b < piece.Bodies.Length; b++)
-            if (piece.Bodies[b] is { } handle) { physics.Simulation.Bodies.Remove(handle); piece.Bodies[b] = null; }
+            if (piece.Bodies[b] is { } handle)
+            {
+                var body = physics.Simulation.Bodies.GetBodyReference(handle);
+                body.Velocity = default;
+                if (!body.Kinematic) body.BecomeKinematic();
+            }
         piece.Frozen = true;
     }
     public void Impulse(Piece piece, int bone, Vector3 velocity)
     {
         if (piece.Frozen)
         {
-            var saved = piece.Pose.ToArray(); var definition = piece.Definition;
-            var byBone = definition.Bodies.Select((body, index) => (body.Bone, index)).ToDictionary(p => p.Bone, p => p.index);
-            var replacement = Create(definition, h => definition.Bodies[byBone[h]].BoneInBody.Then(saved[byBone[h]]), Vector3.Zero, velocity, (ulong)piece.Number);
-            pieces.Remove(replacement);
-            piece.Number = replacement.Number; piece.Bodies = replacement.Bodies; piece.Dynamic = replacement.Dynamic;
-            piece.Pose = replacement.Pose; piece.Joints = replacement.Joints; piece.Frozen = false;
+            MakeRoom(piece.Bodies.Count(handle => handle is not null));
+            var kinds = Shapes(piece.Definition);
+            for (int b = 0; b < piece.Bodies.Length; b++)
+                if (piece.Bodies[b] is { } handle)
+                {
+                    var body = physics.Simulation.Bodies.GetBodyReference(handle);
+                    body.SetLocalInertia(kinds[b].Inertia); body.Velocity = default;
+                    piece.Dynamic[b] = true;
+                }
+            piece.Frozen = false;
+            RebuildCarryJoints(piece);
         }
         piece.Age = 0;
         int struck = bone >= 0 && bone < piece.Definition.BodyOfBone.Length ? piece.Definition.BodyOfBone[bone] : -1;
@@ -147,7 +192,17 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
             }
     }
 
-    public void Remove(Piece piece) { Freeze(piece); pieces.Remove(piece); }
+    void MakeRoom(int count)
+    {
+        while (AwakeBodies + count > AwakeBudget && pieces.FirstOrDefault(piece => !piece.Frozen && !piece.Carried) is { } oldest) Freeze(oldest);
+    }
+    public void Remove(Piece piece)
+    {
+        Freeze(piece);
+        for (int b = 0; b < piece.Bodies.Length; b++)
+            if (piece.Bodies[b] is { } handle) { physics.Simulation.Bodies.Remove(handle); piece.Bodies[b] = null; }
+        pieces.Remove(piece);
+    }
     void Read(Piece piece)
     {
         for (int b = 0; b < piece.Pose.Length; b++)
@@ -189,7 +244,9 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
             if (piece.Bodies[b] is { } handle)
             {
                 var body = physics.Simulation.Bodies.GetBodyReference(handle);
-                body.Pose.Position += by; body.Awake = true;
+                body.Pose.Position += by;
+                body.UpdateBounds();
+                if (!piece.Frozen) body.Awake = true;
             }
         }
     }
@@ -298,5 +355,5 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
             hash.Add(body.Velocity.Linear); hash.Add(body.Velocity.Angular);
         }
     }
-    public void Dispose() { physics.Dispose(); pieces.Clear(); shapes.Clear(); }
+    public void Dispose() { physics.Dispose(); threads?.Dispose(); pieces.Clear(); shapes.Clear(); }
 }

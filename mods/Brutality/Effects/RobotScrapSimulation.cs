@@ -32,9 +32,8 @@ internal sealed class RobotScrapSimulation
         if (!cut.Robot || choices.Count == 0 || !float.IsFinite(at.LengthSquared()) || !float.IsFinite(floor)) return false;
         var marker = (cut.Owner, cut.Part, cut.Kind);
         if (seen.Contains(marker)) return false;
-        ulong random = Rng.Mix(worldSeed ^ ((ulong)(uint)cut.Owner.Slot << 32 | (uint)cut.Owner.Generation) ^ Rng.Mix((ulong)cut.Tick)
-            ^ Rng.Mix((uint)cut.Part + 0x53435241504D4554UL) ^ (uint)cut.Kind);
-        int count = 3 + (int)(Rng.Mix(random) % 5);
+        ulong random = RobotVisualRandom.ScrapSeed(cut, worldSeed);
+        int count = 3 + (int)(RobotVisualRandom.Mix(random) % 5);
         var travel = cut.Travel.LengthSquared() > 1e-6f ? Vector2.Normalize(cut.Travel) : Vector2.UnitX;
         for (int i = 0; i < count; i++)
         {
@@ -84,6 +83,6 @@ internal sealed class RobotScrapSimulation
                 else { p.Velocity = new(p.Velocity.X * .6f, MathF.Abs(p.Velocity.Y) * .35f, p.Velocity.Z * .6f); p.Spin *= .6f; }
             }
     }
-    static float Next(ref ulong value) { value = Rng.Mix(unchecked(value + 0x9E3779B97F4A7C15UL)); return (value >> 40) / 16777216f; }
+    static float Next(ref ulong value) => RobotVisualRandom.Next(ref value);
     public void Clear() { pieces.Clear(); seen.Clear(); history.Clear(); clockSet = false; }
 }

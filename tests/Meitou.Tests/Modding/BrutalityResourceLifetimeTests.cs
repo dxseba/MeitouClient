@@ -45,6 +45,33 @@ public sealed class BrutalityResourceLifetimeTests
     }
 
     [Fact]
+    public void A_preparation_only_upload_stays_resident_without_visible_items_and_retires_after_its_request_and_fences_end()
+    {
+        using var fixture = new SyntheticContent();
+        var mesh = Triangle(0); var geometry = new RuntimeCharacterGeometry(mesh);
+        var upload = Upload(fixture.Content, mesh);
+        int[] buffers = Buffers(upload);
+        var list = new CharacterDrawList();
+        list.Preparations.Add(new(1, null!, Vector3.Zero, 0, []) { Geometry = geometry });
+        var resident = new HashSet<RuntimeCharacterGeometry>(ReferenceEqualityComparer.Instance);
+        list.CollectRuntimeGeometry(resident);
+        fixture.Content.SweepRuntime(resident, new HashSet<uint>());
+        Assert.Empty(list.Items); Assert.Empty(list.Distant);
+        Assert.Equal(1, fixture.Content.MeshCount);
+        Assert.Same(upload, Upload(fixture.Content, mesh));
+        geometry.Retire();
+        fixture.Content.SweepRuntime(resident, new HashSet<uint>());
+        Assert.All(buffers, id => Assert.True(fixture.Gpu.Memory.ContainsKey(id)));
+        list.Clear(); resident.Clear(); list.CollectRuntimeGeometry(resident);
+        fixture.Content.SweepRuntime(resident, new HashSet<uint>());
+        Assert.Equal(0, fixture.Content.MeshCount);
+        fixture.Gpu.Advance(fixture.Gpu.FramesInFlight - 1);
+        Assert.All(buffers, id => Assert.True(fixture.Gpu.Memory.ContainsKey(id)));
+        fixture.Gpu.Advance(1);
+        Assert.All(buffers, id => Assert.False(fixture.Gpu.Memory.ContainsKey(id)));
+    }
+
+    [Fact]
     public void A_hundred_generated_wound_variants_keep_gpu_uploads_bounded_when_the_producer_retires_old_geometry()
     {
         using var fixture = new SyntheticContent();

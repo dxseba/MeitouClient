@@ -181,20 +181,23 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         (RuntimeCharacterGeometry Geometry, CutMeshResult Skin) Piece(IReadOnlyList<CutHalfspace> rules, int stableKey)
         {
             var physicalComponents = componentMaps.For(stableKey);
-            var cutBody = MeshCut.Clip(body, rig, rules, appearance.PoseWeights, shaved, flesh, components: physicalComponents, buildCaps: false);
+            var cutBody = GeneratedExteriorLod.Clip(body, rig, rules, appearance.PoseWeights, shaved, flesh, components: physicalComponents);
             var parts = new List<RuntimeCharacterPart>();
             bool headOnly = stableKey is 2 or 3;
             var pieceInside = inside is null ? null : headOnly ? NativeAnatomyRegions.Select(inside, rig, true)
                 : detachedHead ? NativeAnatomyRegions.Select(inside, rig, false) : inside;
             // The pin's 180-pixel budget is measured on the whole actor. A head's actual culling sphere is smaller.
             float detailScale = Math.Clamp(Vector3.Distance(cutBody.Min, cutBody.Max) * .5f / originalRadius, .01f, 1);
-            var detailThresholds = Array.AsReadOnly(AnatomyDetail.ScreenThresholds.Select(value => value * detailScale).ToArray());
+            float anatomyLodScale = pieceInside is null || inside is null || ReferenceEquals(pieceInside, inside) ? 1
+                : Math.Clamp((pieceInside.Bounds?.Radius ?? 1) / MathF.Max(.001f, inside.Bounds?.Radius ?? 1), .001f, 1);
+            var detailThresholds = Array.AsReadOnly(AnatomyDetail.ScreenThresholds.Select(value => value * anatomyLodScale).ToArray());
             void AddInside(OgreMesh? mesh, string label)
             {
                 if (mesh is null || mesh.SubMeshes.All(s => s.Indices.Indices.Length == 0)) return;
                 parts.Add(new(new CharacterPart { Record = appearance.Race, Mesh = "brutality-" + label, Field = label,
                     Mode = AttachMode.SharedSkeleton }, mesh, true)
                 {
+                    CastsShadows = mechanical || label is "wound-section" or "mechanical-section",
                     DrawFlags = NativeSurfaceShaders.WoundFlag | NativeSurfaceShaders.AnatomyFlag,
                     MaterialFlags = mechanical ? NativeSurfaceShaders.Mechanical : 0, PreserveRawVertexChannels = true, ShowInPortrait = false, MinimumScreenPixels = 180 * detailScale, DoubleSided = true,
                     ScreenLodThresholds = mesh.Lod is { Levels.Count: > 0 } ? detailThresholds : null,
@@ -211,7 +214,8 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
                 }
                 if (Source(part.Mesh) is not { } source) { gaps |= GeometryFidelityGap.MissingPartMesh; continue; }
                 bool hair = part.Slot is AttachSlot.Hair or AttachSlot.Beard;
-                var cut = MeshCut.Clip(source, rig, rules, capColour: flesh, components: physicalComponents, buildCaps: false);
+                float partLodScale = part.Record.Type == Meitou.Data.Fcs.FcsRecordType.ATTACHMENT && appearance.Animal is null ? 4 : 1;
+                var cut = GeneratedExteriorLod.Clip(source, rig, rules, capColour: flesh, components: physicalComponents, lodScale: partLodScale);
                 if (cut.HasTriangles) parts.Add(new(part, rules.Count == 0 ? null : cut.Skin)
                 { DrawFlags = (part.Record.GetInt("material type") == 3 ? NativeSurfaceShaders.PlateFlag : NativeSurfaceShaders.TearFlag)
                     | (hair ? NativeSurfaceShaders.HairWoundFlag : 0) });
@@ -222,7 +226,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
             if (pieceInside is not null && !AnatomyExposure.Hidden) AddInside(pieceInside, "anatomy");
             if (nativeRelief is not null && (!detachedHead || headOnly)) AddInside(nativeRelief, "head-relief");
             uint bodyFlags = NativeSurfaceShaders.WoundFlag | (surface.HeadReliefReady ? NativeSurfaceShaders.HeadReliefFlag : 0);
-            return (new(rules.Count == 0 ? null : cutBody.Skin, parts, NativeSurfaceShaders.CreateSet(), bodyFlags: bodyFlags, bodyDoubleSided: true), cutBody);
+            return (new(rules.Count == 0 ? null : cutBody.Skin, parts, NativeSurfaceShaders.CreateSet(), bodyFlags: bodyFlags, bodyMaterialFlags: mechanical ? NativeSurfaceShaders.Mechanical : 0, bodyDoubleSided: true), cutBody);
         }
         var retained = Piece(retainedRules, 0);
         var detached = new List<GeometryFragment>();

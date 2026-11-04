@@ -55,7 +55,16 @@ public sealed partial class BrutalityGameplaySystem
 
 internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
 {
-    bool applied, carryRequested, putDownRequested;
+    bool applied, carryRequested, putDownRequested, nativeInputs;
+    public void Inputs(World world, IReadOnlyList<SimCommand> commands)
+    {
+        var fields = profile.Split(':', StringSplitOptions.RemoveEmptyEntries);
+        if (fields.FirstOrDefault()?.Equals("head", StringComparison.OrdinalIgnoreCase) != true
+            || !fields.Any(field => field.Equals("native", StringComparison.OrdinalIgnoreCase))) return;
+        nativeInputs = true;
+        try { SlowWorld(world); }
+        finally { nativeInputs = false; }
+    }
     CharacterId carrier = CharacterId.None, owner = CharacterId.None, carryTarget = CharacterId.None;
     long appliedTick, heldSince = -1;
     public void SlowWorld(World world)
@@ -63,9 +72,15 @@ internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
         var fields = profile.Split(':', StringSplitOptions.RemoveEmptyEntries);
         bool negative = fields.Any(field => field.Equals("carry-negative", StringComparison.OrdinalIgnoreCase));
         bool carry = negative || fields.Any(field => field.Equals("carry", StringComparison.OrdinalIgnoreCase));
+        bool nativeHead = fields.FirstOrDefault()?.Equals("head", StringComparison.OrdinalIgnoreCase) == true
+            && fields.Any(field => field.Equals("native", StringComparison.OrdinalIgnoreCase));
         if (!applied)
         {
-            if (world.Tick < 3 || BrutalityRuntime.For(world) is not { } gameplay) return;
+            if (nativeHead && !nativeInputs) return;
+            int firstTick = nativeHead ? 120 : 3;
+            string? after = fields.FirstOrDefault(field => field.StartsWith("after=", StringComparison.OrdinalIgnoreCase));
+            if (after is not null && int.TryParse(after.AsSpan(6), out int delayed)) firstTick = Math.Max(firstTick, delayed);
+            if (world.Tick < firstTick || BrutalityRuntime.For(world) is not { } gameplay) return;
             var targets = Enumerable.Range(0, world.Characters.HighWater).Where(slot => world.Characters.Next[slot].Alive
                 && world.Characters.Cold(slot) is { Appearance: not null, Medical: not null }).ToArray();
             if (targets.Length < 2) return;
@@ -78,7 +93,18 @@ internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
             owner = world.Characters.IdOf(targets[1]);
             carrier = world.Characters.IdOf(targets.FirstOrDefault(slot => world.Characters.Cold(slot)?.IsPlayer == true, targets[0]));
             if (carry && owner == carrier) owner = world.Characters.IdOf(targets.First(slot => slot != carrier.Slot));
-            applied = gameplay.ApplyDebugCut(world, owner, kind, variant); appliedTick = world.Tick;
+            if (fields.Any(field => field.Equals("all", StringComparison.OrdinalIgnoreCase)))
+            {
+                int changed = 0;
+                foreach (int slot in targets)
+                    if (nativeHead ? gameplay.ApplyMatchedNativeHeadCut(world, world.Characters.IdOf(slot), carrier, variant)
+                        : gameplay.ApplyDebugCut(world, world.Characters.IdOf(slot), kind, variant)) changed++;
+                applied = true;
+                Console.WriteLine($"Brutality visual crowd: {kind}/{variant}, targets={changed}");
+            }
+            else applied = nativeHead ? gameplay.ApplyMatchedNativeHeadCut(world, owner, carrier, variant)
+                : gameplay.ApplyDebugCut(world, owner, kind, variant);
+            appliedTick = world.Tick;
             Console.WriteLine($"Brutality visual check: {kind}/{variant}, target {owner}, applied={applied}");
             return;
         }

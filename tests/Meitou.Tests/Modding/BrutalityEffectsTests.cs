@@ -78,12 +78,64 @@ public sealed class BrutalityEffectsTests
         scene.Advance(.2, (_, _) => null, Contact, _ => true, _ => 0);
         var after = Assert.Single(scene.Explosions);
         Assert.Equal(first.Position, after.Position);
-        Assert.Equal(moving + Vector3.UnitX, after.SmokePosition);
+        Assert.Equal(moving, after.SmokePosition);
         // The owner validity callback includes medically dead entities; time/slot removal alone ends this effect.
         scene.Advance(source.Expires - .01, (_, _) => null, Contact, _ => true, _ => 0);
         Assert.NotEmpty(scene.Anchors);
         scene.Advance(source.Expires + .001, (_, _) => null, Contact, _ => true, _ => 0);
         Assert.Empty(scene.RobotSources); Assert.Empty(scene.Anchors); Assert.Empty(scene.Explosions);
+    }
+
+    [Theory]
+    [InlineData(0, 1, 1)]
+    [InlineData(1, 0, 1)]
+    [InlineData(2, 0, 0)]
+    public void Break_flashes_keep_the_reference_wound_side_and_only_detached_heads_and_limbs_trail_soot(int kind, int flashHalf, int smokeHalf)
+    {
+        var scene = new GoreEffectsSimulation(new Random(1));
+        var cut = Cut(new(1, 2), robot: true) with { Kind = kind };
+        Assert.True(scene.Begin(cut, 0));
+        var retained = new Vector3(2, 15, 3); var detached = new Vector3(9, 25, 6);
+        CutFluidContact? Contact(GoreEffectCut _, int half) => new(half == 0 ? retained : detached, Vector3.UnitY);
+        scene.Advance(.1, (_, _) => null, Contact, _ => true, _ => 0);
+        var first = Assert.Single(scene.Explosions);
+        Assert.Equal(flashHalf == 0 ? retained : detached, first.Position);
+        retained += new Vector3(1, -2, 3); detached += new Vector3(12, 4, -3);
+        scene.Advance(.2, (_, _) => null, Contact, _ => true, _ => 0);
+        var next = Assert.Single(scene.Explosions);
+        Assert.Equal(first.Position, next.Position);
+        Assert.Equal(smokeHalf == 0 ? retained : detached, next.SmokePosition);
+    }
+
+    [Fact]
+    public void A_head_with_only_its_detached_piece_visible_keeps_the_delayed_impact_fallback_and_follows_that_piece_with_soot()
+    {
+        var scene = new GoreEffectsSimulation(new Random(1));
+        var cut = Cut(new(1, 2), robot: true) with { Kind = 1 };
+        Assert.True(scene.Begin(cut, 0));
+        var detached = new Vector3(9, 25, 6);
+        CutFluidContact? Contact(GoreEffectCut _, int half) => half == 1 ? new(detached, Vector3.UnitY) : null;
+        scene.Advance(.1, (_, _) => null, Contact, _ => true, _ => 0); Assert.Empty(scene.Explosions);
+        scene.Advance(.2, (_, _) => null, Contact, _ => true, _ => 0);
+        var burst = Assert.Single(scene.Explosions);
+        Assert.Equal(cut.Fallback, burst.Position); Assert.Equal(detached, burst.SmokePosition);
+    }
+
+    [Fact]
+    public void Identical_contacts_keep_the_pinned_electrical_lifetime_and_scrap_random_sequence()
+    {
+        var hit = new Meitou.Simulation.Combat.CombatHit(120, Meitou.Simulation.Combat.CombatHitSource.Melee,
+            new(8, 5), new(17, 3), 0, 0, 2, new(70, 0, 0), default, Vector3.Zero, Vector3.UnitX, 0, 2, false, true, true, false);
+        ulong discharge = RobotVisualRandom.DischargeSeed(hit, 42);
+        Assert.Equal(0x30FEFF8C3C5E71D3UL, discharge);
+        var cut = Cut(hit.Victim, robot: true) with { Part = 2, Tick = 120, Kind = 2, Seed = discharge };
+        var scene = new GoreEffectsSimulation(new Random(1)); scene.Begin(cut, 0);
+        Assert.Equal(24.248177296074147, Assert.Single(scene.RobotSources).Expires, 10);
+        ulong scrap = RobotVisualRandom.ScrapSeed(cut, 42);
+        Assert.Equal(0x220CF3B7605F8B53UL, scrap);
+        Assert.Equal(7UL, 3 + RobotVisualRandom.Mix(scrap) % 5);
+        Assert.Equal(.922137975692749f, RobotVisualRandom.Next(ref scrap));
+        Assert.Equal(0xEC113C85E3BF045FUL, scrap);
     }
 
     [Fact]
@@ -99,6 +151,27 @@ public sealed class BrutalityEffectsTests
         Assert.Equal(0, scene.ExplosionHistoryCount); Assert.Equal(0, scene.Blood.SourceCount);
         scene.Advance(source.Expires - .001, (_, _) => null, Contact, _ => true, _ => 0); Assert.Single(scene.Anchors);
         scene.Advance(source.Expires + .001, (_, _) => null, Contact, _ => true, _ => 0); Assert.Empty(scene.Anchors);
+    }
+
+    [Theory]
+    [InlineData(0, .9f)]
+    [InlineData(7, .97f)]
+    [InlineData(35, 1.25f)]
+    [InlineData(70, 1.6f)]
+    [InlineData(700, 1.6f)]
+    public void Electrical_sources_keep_the_reference_minimum_brightness_and_full_strength_for_a_severe_cut(float cutDamage, float expected)
+    {
+        var scene = new GoreEffectsSimulation(new Random(3));
+        var hit = Cut(new(21, 3), robot: true) with { Kind = 3, StableKey = -1, Cut = cutDamage, Rupture = false };
+        Assert.True(scene.Begin(hit, 2));
+        CutFluidContact? Contact(GoreEffectCut _, int half) => half == 0 ? new(new(4, 9, 2), Vector3.UnitZ) : null;
+        scene.Advance(2.1, (_, _) => null, Contact, _ => true, _ => 0);
+        var anchor = Assert.Single(scene.Anchors);
+        Assert.Equal(expected, anchor.Intensity, 5);
+        var strokes = new RobotDischargeStroke[RobotDischargeGeometry.QuadLimit];
+        int count = RobotDischargeGeometry.Build([anchor], strokes);
+        Assert.InRange(count, 1, RobotDischargeGeometry.QuadLimit);
+        Assert.Contains(strokes.AsSpan(0, count).ToArray(), stroke => stroke.Colour.W > 0);
     }
 
     [Fact]

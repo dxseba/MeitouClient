@@ -33,7 +33,7 @@ internal sealed class CutAnchorGeometry
             foreach (var part in Model.Build(body, rig.BoneCount).Parts)
             {
                 var morph = Rendering.MeshCut.MorphDeltas(body, part.SubMeshIndex, part.Vertices.Length, appearance.PoseWeights, appearance.Character?.GetBool("shaved") == true);
-                for (int i = 0; i < part.Vertices.Length; i++)
+                foreach (uint i in part.Indices)
                 {
                     var vertex = part.Vertices[i] with { Position = part.Vertices[i].Position + morph[i], Normal = normal };
                     if (MathF.Abs(Vector4.Dot(plane, new(vertex.Position, 1))) < .025f) candidates.Add(vertex);

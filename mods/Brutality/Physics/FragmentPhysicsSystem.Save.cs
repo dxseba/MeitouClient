@@ -130,7 +130,7 @@ public sealed partial class FragmentPhysicsSystem : IModSaveData
         bool newOwner = !ReferenceEquals(track.Owner, owner);
         if (newOwner) owner.NegativePoseRestored = false;
         track.Owner = owner; track.Anchor = anchor; track.Key = gameplay.SaveKeyOf(owner.Cold);
-        string cut = CutKey(state);
+        string cut = owner.Topology.Get(state).Cut;
         if (!newOwner && track.RestoredRevision == saveRevision && track.Attempt == cut) return;
         track.RestoredRevision = saveRevision; track.Attempt = cut;
         if (track.Key is not { } key) return;
@@ -183,12 +183,12 @@ public sealed partial class FragmentPhysicsSystem : IModSaveData
     SavedFragmentOwner? Snapshot(Owner owner, BrutalityActorView? state, Vector3 anchor, string key)
     {
         if (state is null || owner.Pieces.Count == 0) return null;
-        string cut = CutKey(state);
+        string cut = owner.Topology.Get(state).Cut;
         return new(key, owner.Appearance.BodyMesh, cut, anchor, owner.Pieces.OrderBy(pair => pair.Key)
             .Select(pair => scene.Capture(pair.Value.Piece, pair.Key, PieceKey(cut, pair.Key), owner.Setup.Rig)).ToArray());
     }
     static string PieceKey(string cut, int piece) => cut + ":" + piece.ToString(CultureInfo.InvariantCulture);
-    static string CutKey(BrutalityActorView state)
+    internal static string CutKey(BrutalityActorView state)
     {
         var hash = new StateHasher();
         void Plane(Vector4 plane) { hash.Add(plane.X); hash.Add(plane.Y); hash.Add(plane.Z); hash.Add(plane.W); }

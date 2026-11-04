@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
@@ -35,6 +36,23 @@ internal static class MeshCut
 {
     const float Epsilon = .00001f;
     const int VertexLimit = 1_000_000;
+    sealed class SourceModels { public readonly Dictionary<int, Lazy<Model>> Values = []; }
+    static readonly ConditionalWeakTable<OgreMesh, SourceModels> sourceModels = new();
+
+    // Sources are immutable after publication. Consumers must not alter this model's vertices or indices.
+    internal static Model SourceModel(OgreMesh source, int boneCount)
+    {
+        var cache = sourceModels.GetValue(source, static _ => new());
+        Lazy<Model> model;
+        lock (cache)
+        {
+            if (!cache.Values.TryGetValue(boneCount, out model!))
+                cache.Values.Add(boneCount, model = DecodeSource(source, boneCount));
+        }
+        return model.Value;
+    }
+    static Lazy<Model> DecodeSource(OgreMesh source, int boneCount) => new(() => Model.Build(source, boneCount, gameBinormals: true));
+
     internal readonly record struct Trace(uint A, uint B, uint C, Vector3 Bary);
     readonly record struct Sample(Vertex Vertex, Vector3 Morph, Trace Trace, uint CutMask = 0);
     sealed class Surface(int source)
@@ -46,10 +64,13 @@ internal static class MeshCut
 
     public static CutMeshResult Clip(OgreMesh source, SkeletonRig rig, IReadOnlyList<CutHalfspace> cuts,
         IReadOnlyDictionary<string, float>? poseWeights = null, bool cutHorns = false, Vector4? capColour = null,
-        IReadOnlyList<CutVolume>? removeVolumes = null, int[]? components = null, bool ownedSurface = false, bool rawCaps = false, bool buildCaps = true)
+        IReadOnlyList<CutVolume>? removeVolumes = null, int[]? components = null, bool ownedSurface = false, bool rawCaps = false, bool buildCaps = true,
+        Model? preparedModel = null, IReadOnlyList<uint[]?>? indexOverrides = null)
     {
         if (cuts.Count > 31) throw new ArgumentOutOfRangeException(nameof(cuts));
-        var model = Model.Build(source, rig.BoneCount, gameBinormals: true);
+        if (indexOverrides is not null && indexOverrides.Count != source.SubMeshes.Count)
+            throw new ArgumentException("Index overrides must have one entry per source submesh.", nameof(indexOverrides));
+        var model = preparedModel ?? SourceModel(source, rig.BoneCount);
         var surfaces = Enumerable.Range(0, source.SubMeshes.Count).Select(i => new Surface(i)).ToArray();
         var edges = cuts.Select(_ => new List<Edge>()).ToArray();
         var groups = BoneGroups(rig);
@@ -60,9 +81,10 @@ internal static class MeshCut
         {
             var morphs = MorphDeltas(source, part.SubMeshIndex, part.Vertices.Length, poseWeights, cutHorns);
             var target = surfaces[part.SubMeshIndex];
-            for (int triangle = 0; triangle + 2 < part.Indices.Length; triangle += 3)
+            var indices = indexOverrides?[part.SubMeshIndex] ?? part.Indices;
+            for (int triangle = 0; triangle + 2 < indices.Length; triangle += 3)
             {
-                uint ia = part.Indices[triangle], ib = part.Indices[triangle + 1], ic = part.Indices[triangle + 2];
+                uint ia = indices[triangle], ib = indices[triangle + 1], ic = indices[triangle + 2];
                 if (ia >= part.Vertices.Length || ib >= part.Vertices.Length || ic >= part.Vertices.Length) continue;
                 var a = part.Vertices[ia]; var b = part.Vertices[ib]; var c = part.Vertices[ic];
                 if (ownedSurface && components is not null)

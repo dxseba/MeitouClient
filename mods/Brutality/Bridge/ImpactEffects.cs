@@ -92,8 +92,6 @@ public sealed class ImpactEffects : ICombatHitObserver
         ? part.StringId == GorePartIds.Stomach ? 11 : 14 : part.LimbSlot is 2 or 3 ? 6 : 12;
     static ulong VisualSeed(in CombatHit hit, ulong worldSeed)
     {
-        static ulong Identity(CharacterId id) => ((ulong)(uint)id.Slot << 32) | (uint)id.Generation;
-        return Rng.Mix(worldSeed ^ Rng.Mix(Identity(hit.Victim)) ^ Rng.Mix(Identity(hit.Attacker)) ^ Rng.Mix((ulong)hit.Tick)
-            ^ Rng.Mix((uint)hit.Part + 0x524F424F5453504BUL) ^ Rng.Mix(BitConverter.SingleToUInt32Bits(hit.Damage.Cut)) ^ Rng.Mix((uint)hit.CutDirection));
+        return Effects.RobotVisualRandom.DischargeSeed(hit, worldSeed);
     }
 }

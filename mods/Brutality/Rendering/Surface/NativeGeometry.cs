@@ -8,7 +8,11 @@ using Meitou.Rendering;
 namespace Meitou.Brutality.Rendering.Surface;
 
 /// <summary>The same original-skin samples and fitted frame are used for both geometry and the shader header.</summary>
-internal sealed record NativeGeometryInfo(WoundPoint[] Skin, Vertex[] HeadSource, HeadWoundFrame? HeadFrame, bool HeadReliefReady);
+internal sealed record NativeGeometryInfo(WoundPoint[] Skin, Vertex[] HeadSource, HeadWoundFrame? HeadFrame, bool HeadReliefReady)
+{
+    // Compact head/body views copy their triangles. Keep their immutable full-fit identity alive while an actual geometry uses them.
+    public OgreMesh? FittedAnatomy { get; init; }
+}
 
 internal static class NativeGeometry
 {
@@ -21,6 +25,10 @@ internal static class NativeGeometry
     static readonly ConditionalWeakTable<OgreMesh, Sources> sources = new();
     static readonly ConditionalWeakTable<AnatomyLibrary, AnatomyFitCache<FitKey>> fits = new();
     static readonly ConditionalWeakTable<OgreMesh, Vertex[]> brainSources = new();
+
+    /// <summary>Configure a library's bounded fit storage before any fit is requested.</summary>
+    internal static void ConfigureFitBudget(AnatomyLibrary library, long byteBudget) => fits.Add(library, new(byteBudget));
+    internal static long CachedFitBytes(AnatomyLibrary library) => fits.TryGetValue(library, out var cache) ? cache.Bytes : 0;
 
     static Source Original(OgreMesh body, SkeletonRig rig)
     {
@@ -46,30 +54,8 @@ internal static class NativeGeometry
         uint blood = unchecked((uint)appearance.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
         bool robot = appearance.Race.GetBool("is robot");
         var key = new FitKey(body, rig, appearance.Female, blood, robot, appearance.Headless, appearance.HeadOnly);
-        var anatomy = fits.GetValue(library, static _ => new()).GetOrCreate(key, () =>
-        {
-            List<Vertex>? vertices;
-            if (robot)
-            {
-                vertices = MechanicalAnatomy.Build(rig, source.Body, source.Head, appearance.Headless, appearance.HeadOnly);
-                if (vertices is not null)
-                    for (int i = 0; i < vertices.Count; i++)
-                    {
-                        var v = vertices[i];
-                        int bone = (int)(v.Bones & 255);
-                        int group = NativeWoundMasks.BodyGroup(rig.ByHandle[bone]?.Name ?? "");
-                        vertices[i] = v with { Tangent = new(v.Position, 34), Colour = v.Colour with { W = group } };
-                    }
-            }
-            else if (library.PathFor(AnatomyKind.Body) is { } path)
-                vertices = NativeAnatomy.Build(rig, source.Skin, source.Head, appearance.Female, source.Morphs,
-                    appearance.Headless, appearance.HeadOnly, path, blood);
-            else vertices = null;
-            if (vertices is not { Count: > 0 }) return null;
-            var mesh = MeshCut.FromTriangles(vertices, body.SkeletonName, preserveRawVertexChannels: true);
-            // As in the reference, anatomy levels are shared independently of active wounds and never mutate after publication.
-            return AnatomyDetail.WithLevels(mesh, rig, [], preserveRawVertexChannels: true);
-        });
+        var anatomy = Fit(library, rig, body, key, source);
+        fits.GetValue(library, static _ => new()).SharePublished(key, anatomy);
         OgreMesh? relief = null;
         HeadWoundFrame? fitted = null;
         bool reliefReady = false;
@@ -96,10 +82,52 @@ internal static class NativeGeometry
             }
             if (placed is { Length: > 0 }) relief = MeshCut.FromTriangles(placed, body.SkeletonName, preserveRawVertexChannels: true);
         }
-        return (anatomy, relief, new(source.Skin, source.Head, fitted, reliefReady));
+        return (anatomy, relief, new(source.Skin, source.Head, fitted, reliefReady) { FittedAnatomy = anatomy });
 
         Vertex[] SetFrame(Vertex[] vertices, HeadWoundFrame frame)
         { fitted = frame; reliefReady = true; return vertices; }
+    }
+
+    /// <summary>Immutable fit inputs only: worker preparation never reads a mutable actor or appearance.</summary>
+    internal static (OgreMesh? Anatomy, NativeGeometryInfo Info) Prepare(AnatomyLibrary library, SkeletonRig rig,
+        OgreMesh body, bool female, uint blood, bool robot)
+    {
+        var source = Original(body, rig);
+        var key = new FitKey(body, rig, female, blood & 0xFFFFFF, robot, false, false);
+        var anatomy = Fit(library, rig, body, key, source);
+        fits.GetValue(library, static _ => new()).SharePublished(key, anatomy);
+        return (anatomy, new(source.Skin, source.Head, null, false) { FittedAnatomy = anatomy });
+    }
+
+    static OgreMesh? Fit(AnatomyLibrary library, SkeletonRig rig, OgreMesh body, FitKey key, Source source)
+    {
+        return fits.GetValue(library, static _ => new()).GetOrCreate(key, () =>
+        {
+            List<Vertex>? vertices;
+            if (key.Robot)
+            {
+                vertices = MechanicalAnatomy.Build(rig, source.Body, source.Head, key.Headless, key.HeadOnly);
+                if (vertices is not null)
+                    for (int i = 0; i < vertices.Count; i++)
+                    {
+                        var v = vertices[i];
+                        int bone = (int)(v.Bones & 255);
+                        int group = NativeWoundMasks.BodyGroup(rig.ByHandle[bone]?.Name ?? "");
+                        vertices[i] = v with { Tangent = new(v.Position, 34), Colour = v.Colour with { W = group } };
+                    }
+            }
+            else if (library.PathFor(AnatomyKind.Body) is { } path)
+                vertices = NativeAnatomy.Build(rig, source.Skin, source.Head, key.Female, source.Morphs,
+                    key.Headless, key.HeadOnly, path, key.Blood, source.Body);
+            else vertices = null;
+            if (vertices is not { Count: > 0 }) return null;
+            var mesh = MeshCut.FromTriangles(vertices, body.SkeletonName, preserveRawVertexChannels: true);
+            // As in the reference, anatomy levels are shared independently of active wounds and never mutate after publication.
+            var fitted = AnatomyDetail.WithLevels(mesh, rig, [], preserveRawVertexChannels: true);
+            if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null)
+                Console.WriteLine($"Brutality fit: body={RuntimeHelpers.GetHashCode(body)}, rig={RuntimeHelpers.GetHashCode(rig)}, female={key.Female}, robot={key.Robot}, bytes={AnatomyFitCache<FitKey>.EstimateBytes(fitted)}");
+            return fitted;
+        });
     }
 
     public static OgreMesh? SectionCaps(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,

@@ -114,7 +114,9 @@ internal static class GoreEffectShaders
             vec2 uv = uDischarge == 1 ? vUv.yx : vUv;
             if (uDischarge == 4) uv.x = 0.34 + uv.x * 0.32;
             vec4 t = uDischarge == 7 ? robotBreakFlash(vUv) : uDischarge == 6 ? liquidStream(vUv) : uDischarge == 5 ? liquidDrop(vUv) : uDischarge == 3 ? soot(vUv) : texture(uTexture, uv);
-            vec4 c = t * vColour;
+            // Negative vertex RGB is the pinned particle ABI's recolour marker, not negative emitted light.
+            if (min(vColour.r, min(vColour.g, vColour.b)) < 0.0) t.rgb = vec3(max(t.r, max(t.g, t.b)));
+            vec4 c = t * abs(vColour);
             if (uDischarge == 8 || uDischarge == 9) {
                 vec3 n = normalize(vNormal);
                 float diffuse = max(dot(n, uSunDirection), 0.0);

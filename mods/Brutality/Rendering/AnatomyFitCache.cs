@@ -13,6 +13,8 @@ internal sealed class AnatomyFitCache<TKey> where TKey : notnull
     readonly int capacity;
     readonly Dictionary<TKey, LinkedListNode<Entry>> entries = [];
     readonly LinkedList<Entry> order = [];
+    readonly Dictionary<TKey, Lazy<OgreMesh?>> pending = [];
+    readonly Dictionary<TKey, WeakReference<OgreMesh>> published = [];
     long bytes;
     public AnatomyFitCache(long byteBudget = DefaultBudgetBytes, int entryLimit = 32)
     {
@@ -25,23 +27,54 @@ internal sealed class AnatomyFitCache<TKey> where TKey : notnull
 
     public OgreMesh? GetOrCreate(TKey key, Func<OgreMesh?> create, long keyBytes = 0)
     {
+        Lazy<OgreMesh?> work;
         lock (gate)
         {
             if (entries.TryGetValue(key, out var existing))
-            {
-                order.Remove(existing); order.AddFirst(existing); return existing.Value.Mesh;
-            }
-            var mesh = create();
-            long size = EstimateBytes(mesh) + Math.Max(0, keyBytes) + 256;
-            // A valid oversized fit still renders at full quality; it is released after this CPU cut instead of displacing the whole working set.
-            if (size > budget) return mesh;
-            while (entries.Count >= capacity || bytes > budget - size)
-            {
-                var oldest = order.Last!; order.RemoveLast(); entries.Remove(oldest.Value.Key); bytes -= oldest.Value.Bytes;
-            }
-            var node = order.AddFirst(new Entry(key, mesh, size)); entries.Add(key, node); bytes += size;
-            return mesh;
+            { order.Remove(existing); order.AddFirst(existing); return existing.Value.Mesh; }
+            if (published.TryGetValue(key, out var weak) && weak.TryGetTarget(out var shared))
+            { Store(key, shared, keyBytes); return shared; }
+            if (!pending.TryGetValue(key, out work!)) pending.Add(key, work = new(create, LazyThreadSafetyMode.ExecutionAndPublication));
         }
+        OgreMesh? mesh;
+        try { mesh = work.Value; }
+        catch
+        {
+            lock (gate) if (pending.TryGetValue(key, out var failed) && ReferenceEquals(failed, work)) pending.Remove(key);
+            throw;
+        }
+        lock (gate)
+        {
+            if (pending.TryGetValue(key, out var completed) && ReferenceEquals(completed, work)) pending.Remove(key);
+            if (!entries.ContainsKey(key)) Store(key, mesh, keyBytes);
+        }
+        return mesh;
+    }
+
+    /// <summary>Published preparation geometry owns this fit. A weak lookup permits reuse after LRU eviction without retaining extra full meshes.</summary>
+    public void SharePublished(TKey key, OgreMesh? mesh)
+    {
+        if (mesh is null) return;
+        lock (gate)
+        {
+            if (published.Count >= 32 && !published.ContainsKey(key))
+            {
+                foreach (var dead in published.Where(pair => !pair.Value.TryGetTarget(out _)).Select(pair => pair.Key).ToArray()) published.Remove(dead);
+                if (published.Count >= 32) published.Remove(published.Keys.First());
+            }
+            published[key] = new(mesh);
+        }
+    }
+
+    void Store(TKey key, OgreMesh? mesh, long keyBytes)
+    {
+        long size = EstimateBytes(mesh) + Math.Max(0, keyBytes) + 256;
+        if (size > budget) return;
+        while (entries.Count >= capacity || bytes > budget - size)
+        {
+            var oldest = order.Last!; order.RemoveLast(); entries.Remove(oldest.Value.Key); bytes -= oldest.Value.Bytes;
+        }
+        var node = order.AddFirst(new Entry(key, mesh, size)); entries.Add(key, node); bytes += size;
     }
 
     /// <summary>Conservative retained footprint: actual encoded buffers and list capacities, counting shared buffers only once.</summary>

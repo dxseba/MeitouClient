@@ -359,9 +359,7 @@ internal static partial class EffectsBridge
     static ulong VisualSeed(in GoreCutRequest request, ulong worldSeed)
     {
         if (request.Hit is not { } hit) return Rng.Mix(worldSeed ^ Rng.Key(request.Victim) ^ (ulong)request.Sequence);
-        static ulong Identity(CharacterId id) => ((ulong)(uint)id.Slot << 32) | (uint)id.Generation;
-        return Rng.Mix(worldSeed ^ Rng.Mix(Identity(hit.Victim)) ^ Rng.Mix(Identity(hit.Attacker)) ^ Rng.Mix((ulong)hit.Tick)
-            ^ Rng.Mix((uint)hit.Part + 0x524F424F5453504BUL) ^ Rng.Mix(BitConverter.SingleToUInt32Bits(hit.Damage.Cut)) ^ Rng.Mix((uint)hit.CutDirection));
+        return RobotVisualRandom.DischargeSeed(hit, worldSeed);
     }
     static bool Enabled(object host) => !ReadBool(Member(host, "o"), "NoParticles")
         || ReadBool(host, "IsFlat") && ReadBool(Member(host, "g"), "FlatCombatParticles");
