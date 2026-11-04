@@ -81,11 +81,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     /// the arrival or a kept point. Every loaded character is in the draw list; built all, they loaded the textures of the whole loaded world.</summary>
     bool WantsAsset(in CharacterInstance c, Vector3 eye, float reach)
     {
-        if (Vector3.Distance(eye, c.Position) <= reach + BuildMargin) return true;
-        var at = new Vector2(c.Position.X, c.Position.Z);
-        if (Ahead is { } a && Vector2.Distance(new Vector2(a.X, a.Z), at) <= KeptReach) return true;
+        var (centre, radius) = LoadingBounds(in c);
+        if (Vector3.Distance(eye, centre) <= reach + BuildMargin + radius) return true;
+        var at = new Vector2(centre.X, centre.Z);
+        if (Ahead is { } a && Vector2.Distance(new Vector2(a.X, a.Z), at) <= KeptReach + radius) return true;
         var kept = Kept;
-        for (int k = 0; k < kept.Count; k++) if (Vector2.Distance(new Vector2(kept[k].X, kept[k].Z), at) <= KeptReach) return true;
+        for (int k = 0; k < kept.Count; k++) if (Vector2.Distance(new Vector2(kept[k].X, kept[k].Z), at) <= KeptReach + radius) return true;
         return false;
     }
     /// <summary>A presentation fill light (linear colour, 0 in play): added ambient, three times as strong at the silhouette, so a backlit figure reads.</summary>
@@ -232,10 +233,11 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public Vector3 Centre;
         public float Radius;
         public int BoneBase, AttachBase, LayerStart, LayerCount;
+        public RuntimeCharacterShaderSet? Shaders;
         /// <summary>Its parts' first entry in <see cref="partFrames"/> (one per asset part).</summary>
         public int PartBase;
         public CharState State;
-        public bool Repose, WeaponDrawn, RangedDrawn, BackDrawn;
+        public bool Repose, WeaponDrawn, RangedDrawn, BackDrawn, CustomBounds;
         /// <summary>The blood of its first 8 body parts, a byte each (<see cref="CharacterInstance.Blood"/>).</summary>
         public ulong Blood;
         /// <summary>Posed this frame whatever the thinning (the player's, a ragdoll, a new asset or a first pose).</summary>
@@ -265,6 +267,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public Matrix4x4[] Bones = [], Previous = [], Attach = [], PreviousAttach = [];
         public Matrix4x4 World, PreviousWorld;
         public bool HasWorld;
+        public readonly RuntimeCharacterPalette ShaderData = new();
         public long Posed = -1, Seen;
         /// <summary>The pose-rate period the character was last seen in (<see cref="PosePixelSteps"/>).</summary>
         public long PoseBucket = long.MinValue;
@@ -274,7 +277,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         /// <summary>Each stuck bolt's transform in its bone's frame, fixed the first time it was drawn (by bolt id).</summary>
         public readonly Dictionary<int, Matrix4x4> BoltLocal = [];
         public Vector3 Centre;
-        public float Radius;
+        public float Radius, Pixels;
         /// <summary>Its last indoors answer (<see cref="Live.Interior"/>), asked again once it has moved.</summary>
         public WorldObjectRenderer.InteriorMemo Interior;
         /// <summary>Its bones were taken from another character (<see cref="Freeze"/>) and are never posed.</summary>
@@ -410,6 +413,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     public CharacterRenderer(IGpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assetLocator, CharacterRigs? rigs = null)
     {
         Gpu = gpu;
+        Draws.Context = gpu;
         nativeFrame = new NativeFrame(gpu, extraStorage: 4);
         var colourFragment = CharacterShaders.Fragment(gpu.Shaders.DiscardNeedsLateDepth);
         colourProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.Vertex(),
@@ -530,6 +534,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         // 1. Assets and the characters in range, with their layers resolved (the rig's caches are filled here, on this thread), and which to pose.
         var (boneTotal, partTotal) = GatherLive(eye);
         EvictRetiredRuntimeAssets();
+        SweepRuntimePrograms();
         ChooseReposes();
         Posed = 0;
         for (int i = 0; i < liveCount; i++) if (live[i].Repose) Posed++;
@@ -591,17 +596,16 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             else RestoreBlend(asset);
 
             float scale = inst.Scale > 0 ? inst.Scale : 1;
-            var centre = inst.Position + new Vector3(0, asset.Height * 0.5f * scale, 0);
-            bool far = inst.Hidden || Vector3.Distance(eye, centre) - asset.Radius * scale > reach;
+            var (centre, radius) = BoundsOf(in inst, asset.Height, asset.Radius, scale);
+            bool far = inst.Hidden || Vector3.Distance(eye, centre) - radius > reach;
             if (far && !portraitKeys.Contains(inst.Key))
             {
                 if (!inst.Hidden && Kept.Count > 0 && NearKept(centre) is var dk && dk <= KeptReach) keptLooks.Add((asset, dk));
                 continue;
             }
 
-            ref var l = ref AddLive(in inst, asset, centre, scale, far, eye);
-            l.BoneBase = boneTotal;
-            boneTotal += asset.Rig.BoneCount;
+            ref var l = ref AddLive(in inst, asset, centre, radius, scale, far, eye);
+            l.BoneBase = RuntimeCharacterPalette.Reserve(ref boneTotal, asset.Rig.BoneCount, l.State.ShaderData.Count);
             l.PartBase = partTotal;
             partTotal += asset.Parts.Count;
             if (l.OffScreen && !l.MustPose) continue;   // not posed this frame: its clips need not be looked up
@@ -626,6 +630,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         var liveGeometry = runtimeAssets.Keys.Select(key => key.Geometry).Concat(current).Distinct().ToArray();
         var morphs = runtimeAssets.Values.Concat(assets.Values).Where(asset => asset is not null).Select(asset => asset!.MorphBase).ToHashSet();
         content.SweepRuntime(liveGeometry, morphs);
+        SweepRuntimeMeshLayouts();
     }
 
     /// <summary>The character's asset, built when missing and wanted within the frame's load budget.</summary>
@@ -654,7 +659,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     }
 
     /// <summary>A new live entry for the character (<paramref name="far"/>: drawn for its portrait only), its state brought up to date.</summary>
-    ref Live AddLive(in CharacterInstance inst, CharacterAsset asset, Vector3 centre, float scale, bool far, Vector3 eye)
+    ref Live AddLive(in CharacterInstance inst, CharacterAsset asset, Vector3 centre, float radius, float scale, bool far, Vector3 eye)
     {
         if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
         ref var l = ref live[liveCount++];
@@ -663,10 +668,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         l.World = WorldOf(in inst, asset, scale);
         (l.WeaponDrawn, l.RangedDrawn, l.BackDrawn, l.Shots, l.Bolts) = (inst.WeaponDrawn, inst.RangedDrawn, inst.BackDrawn, inst.Shots, inst.Bolts);
         l.Centre = centre;
-        l.Radius = asset.Radius * scale;
+        l.Radius = radius;
+        l.CustomBounds = inst.WorldBounds is { IsValid: true };
         l.AttachBase = attachCount;
         attachCount += asset.AttachCount;
         l.Bones = inst.Bones;
+        l.Shaders = inst.RuntimeShaderData is not null ? inst.Geometry?.Shaders : null;
         l.Blood = inst.Blood;
         l.Pixels = 2 * l.Radius * viewPixelsPerRadian / MathF.Max(1, Vector3.Distance(eye, centre));
         l.LayerStart = layerCount;
@@ -693,8 +700,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     void Track(ref Live l, in CharacterInstance inst, CharacterAsset asset, bool far)
     {
         if (!states.TryGetValue(inst.Key, out var state)) states[inst.Key] = state = new CharState();
+        long lastSeen = state.Seen;
         state.Seen = updateStamp;
         l.State = state;
+        state.Pixels = l.Pixels;
         l.Interior = !far && InteriorObjects?.InteriorAt(l.Centre, ref state.Interior) is not null;
 
         bool newAsset = !ReferenceEquals(state.Asset, asset);
@@ -716,6 +725,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         if (l.OffScreen) l.MustPose = state.Posed < 0 || newAsset;
         else if (l.Snap) l.MustPose = !l.Frozen;
         state.OffScreen = l.OffScreen;
+        state.ShaderData.Update(inst.RuntimeShaderData, l.Shaders, newAsset || l.Snap || lastSeen != updateStamp - 1);
     }
 
     /// <summary>The animation layers the character plays (its poses' clips on its rig), then its asset's fixed ones.</summary>
@@ -795,6 +805,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         var state = l.State;
         if (l.Repose) Repose(ref l, state);
 
+        int prefix = state.ShaderData.Count;
+        if (prefix > 0)
+            state.ShaderData.Write(new Span<Matrix4x4>((byte*)bonePointer + (long)(l.BoneBase - prefix) * 64, prefix),
+                motion ? new Span<Matrix4x4>((byte*)previousPointer + (long)(l.BoneBase - prefix) * 64, prefix) : Span<Matrix4x4>.Empty);
         state.Bones.CopyTo(new Span<Matrix4x4>((byte*)bonePointer + (long)l.BoneBase * 64, rig.BoneCount));
         state.Attach.CopyTo(attach, l.AttachBase);
         if (motion)
@@ -883,7 +897,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             float distance = Vector3.Distance(eye, l.Centre);
             foreach (var part in l.Asset.Parts)
             {
-                if (!part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn)) continue;
+                if (!part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn)
+                    || !(part.ShownAt(l.Pixels) || portraitKeys.Contains(l.Key) && part.ShownAt(l.Pixels, portrait: true))) continue;
                 if (part.MaterialFrame != updateStamp)
                 {
                     part.MaterialFrame = updateStamp;
@@ -959,7 +974,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 if (asset is null) continue;
                 if (d.Build is { } build) ApplyBuild(asset, build);
                 float scale = d.Scale > 0 ? d.Scale : 1;
-                if (!d.Hidden && Kept.Count > 0 && NearKept(d.Position + new Vector3(0, asset.Height * 0.5f * scale, 0)) is var dk && dk <= KeptReach) distantKept.Add((asset, dk));
+                var (centre, _) = BoundsOf(in d, asset.Height, asset.Radius, scale);
+                if (!d.Hidden && Kept.Count > 0 && NearKept(centre) is var dk && dk <= KeptReach) distantKept.Add((asset, dk));
             }
         }
         for (int i = 0; i < distantBuilds.Count; i++)
@@ -1075,7 +1091,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (m.VestColoured[i] && has[s + 2]) flags |= CharacterShaders.Vest0Coloured << i;
         }
         r.Shading = m.Shading;
-        r.Flags = flags;
+        r.Flags = flags | m.AdditionalFlags;
         r.VestCount = vests;
         r.AlphaThreshold = m.AlphaThreshold;
         r.ShirtColour = new Vector4(m.ShirtColour, m.GlossMult);
@@ -1111,7 +1127,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
 
     public void Dispose()
     {
+        Draws.DisposeResources();
         if (updateCount > 0) Console.WriteLine($"characters {Statistics()}");
+        runtimePrograms?.Clear();
+        runtimeNatives.Clear();
         colourProg.Dispose();
         depthProg.Dispose();
         motionProg.Dispose();

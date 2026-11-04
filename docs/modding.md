@@ -164,6 +164,62 @@ code, so `trustedCodeMods` is not consulted.
 - Harmony patches non-public members; compile-time references need public types or a publicizer. Open: which simulation types to make
   public, or ship publicized reference assemblies; ship reference assemblies per release so modders build without a game install.
 
+## Runtime character presentation
+
+`CharacterDrawList.Context` exposes the live renderer context during render-thread fills, independent
+of particle/weather systems. It is null on a headless or unattached list; do not retain or use it on
+simulation/background threads.
+`Disposing` notifies resource owners once on the render thread before the context is released,
+including worlds without particle effects. Cleanup handlers are isolated and subscriptions cleared.
+
+`CharacterInstance.WorldBounds` optionally supplies a validated `CharacterWorldBounds` sphere for
+posed/deformed geometry. Centre and radius are already world-space: the host adds no bind height or
+scale. Loading/reach, view/fog culling, picking and projected LOD use it consistently. Null or the
+invalid default struct preserves ordinary character bounds; explicit nonfinite/nonpositive values
+are rejected by the bounds constructor.
+
+`CharacterInstance.Geometry` accepts immutable `RuntimeCharacterGeometry` variants; call `Retire()`
+once a variant is no longer published. Generated GPU meshes and shader programs retire after frames
+using them finish. Reuse `RuntimeCharacterShaderSet` identities across variants: it supplies complete
+colour/depth/motion GLSL stages, compiled on the render thread. `RuntimeCharacterShaderSources`
+exposes the current host prelude, atmosphere/depth helpers, scattering constants and default stages.
+These programs use the host's character instance/descriptor ABI; colour receives the host GI wrapper.
+
+`CharacterInstance.RuntimeShaderData` copies an opaque matrix prefix and additional instance flags.
+The prefix sits immediately before that actor's `BoneBase` in current and previous palettes, independent
+of other actors; new/changed layouts and motion snaps use current values as previous. A custom program
+is active only with supplied shader data (an empty prefix is valid). Native actors retain their layout.
+Instance bits 0 and 12–29 are host-owned; `BodyFlags`/part `DrawFlags` cannot overwrite them. Part
+`MaterialFlags`/`BodyMaterialFlags` add raw material bits without clearing ordinary material flags.
+Nullable part `DoubleSided` and geometry `BodyDoubleSided` override material culling; null inherits it.
+`PreserveRawVertexChannels` (or `PreserveRawBodyVertexChannels`) opts a supplied mesh into full-float
+tangent/colour channels without native curvature/visibility rewriting; the producer owns that metadata.
+Portraits use the standard shader without producer flags; set a generated part's `ShowInPortrait=false`
+when it needs the custom program. Existing parts default to visible. `MinimumScreenPixels` (finite,
+nonnegative; default 0) hides a generated part below the actor's projected diameter in world, shadow,
+motion and picking passes; actual portraits use `ShowInPortrait` independently. Hover masks and
+editor stages retain the world shader and visibility rules.
+
+## Native ragdoll handoffs
+
+`BonePose.AbsolutePositions` lets every set bone supply its model-space position. Optional
+`Components` is an immutable array indexed by bone handle, of the same length as `Set`; equal
+ids identify a connected piece within that pose. Interpolation keeps the destination topology.
+
+`RagdollSystem.TryCapture(world, id, out handoff)` copies native body/bone world transforms,
+velocities, a model-space pose and its placement without changing ownership. Pending and
+already-applied launches are distinguished; do not apply an already-consumed velocity twice.
+`TryClaim(world, id, owner, out handoff)` atomically captures/removes native actors and suppresses
+native re-creation. Owner identity is by reference: another owner is refused, while a repeated
+claim by the same owner returns its original handoff. `ReleaseClaim(id, owner)` resumes native
+rules on the next tick; `ReturnClaim(world, id, owner, pose, placement)` copies a complete external
+pose into the native get-up blend before resuming those rules.
+
+Call these APIs in serial phases on the owning World's simulation thread, never from rendering
+or parallel jobs. Handoffs contain copied data, not live physics buffers; treat snapshots as
+immutable. When the handoff API is unused, the ordinary ragdoll hash is unchanged; active claims contribute
+their character identities. Mods remain responsible for their own physics state and persistence.
+
 ## Platforms
 
 - Managed DLLs run unchanged on the Windows, Linux and macOS builds. Harmony's detours come from MonoMod.Core, whose support for .NET Core

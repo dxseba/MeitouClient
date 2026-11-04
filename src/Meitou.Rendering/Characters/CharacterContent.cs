@@ -76,6 +76,11 @@ internal sealed class AssetPart
     public float Near;
     /// <summary>The draw batches of its mesh's parts by part, level and sidedness (<see cref="CharacterRenderer"/>'s gather), so the views do not look them up per instance.</summary>
     public int[]? Batches;
+    public RuntimeCharacterShaderSet? Shaders;
+    public uint DrawFlags;
+    public bool ShowInPortrait = true;
+    public float MinimumScreenPixels;
+    public bool ShownAt(float pixels, bool portrait = false) => portrait ? ShowInPortrait : MinimumScreenPixels <= 0 || pixels >= MinimumScreenPixels;
     float uvScale;
     /// <summary>World length of a texture-coordinate unit on the part (the largest of the mesh's parts; infinity: unknown, every mip kept).</summary>
     public float UvScale
@@ -99,6 +104,7 @@ internal sealed class AssetPart
 internal sealed class PartMaterial
 {
     public uint Shading;
+    public uint AdditionalFlags;
     public string Description = "";
     public readonly WorldTexture?[] Tex = new WorldTexture?[CharacterShaders.Slots];
     public bool Swizzled;
@@ -200,7 +206,7 @@ internal sealed class CharacterContent : IDisposable
     readonly MaterialResolver resolver;
     public WorldTextureCache Textures { get; }
     readonly Dictionary<(string Path, int Bones, bool Close, string? PartMap), LoadedMesh?> meshes = [];
-    readonly Dictionary<(OgreMesh Mesh, int Bones, string? PartMap, bool VertexColours, LimbHide? Limbs, bool Close), LoadedMesh?> runtimeMeshes = [];
+    readonly Dictionary<(OgreMesh Mesh, int Bones, string? PartMap, bool VertexColours, LimbHide? Limbs, bool Close, bool RawChannels), LoadedMesh?> runtimeMeshes = [];
     readonly Dictionary<OgreMesh, int> runtimeMeshIds = new(ReferenceEqualityComparer.Instance);
     int runtimeMeshSerial;
 
@@ -302,7 +308,7 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>What a worker makes of a mesh file (<see cref="PrepareMesh"/>): everything but the GPU buffers.</summary>
     sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst, PickBox[] PickBoxes,
-        float[]? FileDistances, int FileFirst, float FileRadius, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null);
+        float[]? FileDistances, int FileFirst, float FileRadius, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null, bool RawChannels = false);
     /// <summary>A prepared mesh (null: it could not be read) and the messages its reading left.</summary>
     sealed record Prepared(PreparedMesh? Mesh, List<string> Messages);
     static readonly Prepared Uploaded = new(null, []);
@@ -321,18 +327,22 @@ internal sealed class CharacterContent : IDisposable
     /// bones (null: unskinned); its generated levels start <paramref name="lodScale"/> times farther than the rule gives. A <paramref name="close"/> mesh (the character editor's
     /// close-up) keeps only its full level: generating the others is nearly all of the time a mesh takes (a hair 1 to 2 s), and the editor shows one character up close.</summary>
     static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs, bool close, bool icon = false, string? partMap = null,
-        OgreMesh? runtime = null, bool vertexColours = false)
+        OgreMesh? runtime = null, bool vertexColours = false, bool rawChannels = false)
     {
         var messages = new List<string>();
         try
         {
             var mesh = runtime ?? OgreMeshReader.ReadFile(path);
             if (runtime is null && MeshWeld.Enabled) OgreMeshWeld.Apply(mesh);
-            var model = Model.Build(mesh, boneCount, gameBinormals: !icon, tangentSign: icon);
+            var model = Model.Build(mesh, boneCount, gameBinormals: !icon, tangentSign: icon, preserveRawVertexChannels: rawChannels);
+            var originalColours = rawChannels ? model.Parts.Select(part => part.Vertices.Select(vertex => vertex.Colour).ToArray()).ToArray() : null;
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
-            if (limbs is not null || partMap is not null) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
+            if (originalColours is not null)
+                for (int p = 0; p < model.Parts.Count; p++)
+                    for (int v = 0; v < model.Parts[p].Vertices.Length; v++) model.Parts[p].Vertices[v].Colour = originalColours[p][v];
+            if (!rawChannels && (limbs is not null || partMap is not null)) MarkBody(model, limbs, partMap is null ? null : PartMapImage(partMap, messages));
             // Not an icon's: its colour is the mesh's own vertex colour (CharacterShaders.VertexColoured), and icons take no skin.
-            if (!icon && !vertexColours) MarkCurvature(model);
+            if (!icon && !vertexColours && !rawChannels) MarkCurvature(model);
             foreach (var w in model.Warnings) messages.Add($"{Path.GetFileName(path)}: {w}");
             var centre = mesh.Bounds is { } b ? (b.Min + b.Max) / 2 : model.Center;
             float radius = mesh.Bounds is { } bb ? bb.Radius : model.Radius, fileRadius = radius;
@@ -364,7 +374,7 @@ internal sealed class CharacterContent : IDisposable
             var parts = model.Parts.Select(part => ObjectMeshCache.PreparePart(decoded, part, keepLevels: false)).ToArray();
             return new(new PreparedMesh(parts, [.. levels.Select(l => l.Distance)], mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst,
                 PickBox.From(model), fileDistances, fileFirst, fileRadius,
-                limbs is not null && !close && !icon ? CapMesh(model, head: false) : null, limbs is not null && !close && !icon ? CapMesh(model, head: true) : null), messages);
+                limbs is not null && !close && !icon ? CapMesh(model, head: false) : null, limbs is not null && !close && !icon ? CapMesh(model, head: true) : null, RawChannels: rawChannels), messages);
         }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException)
         {
@@ -375,15 +385,15 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>A mesh by file, uploaded the first time: prepared here unless a worker has done it (<see cref="Fetched"/>), or after waiting for the worker preparing it.</summary>
     LoadedMesh? Mesh(string path, int? boneCount, float lodScale = 1, bool shadowLevels = false, LimbHide? limbs = null, bool close = false, bool icon = false, string? partMap = null,
-        OgreMesh? runtime = null, bool vertexColours = false)
+        OgreMesh? runtime = null, bool vertexColours = false, bool rawChannels = false)
     {
         if (runtime is not null)
         {
-            var runtimeKey = (runtime, boneCount ?? -1, partMap?.ToLowerInvariant(), vertexColours, limbs, close);
+            var runtimeKey = (runtime, boneCount ?? -1, partMap?.ToLowerInvariant(), vertexColours, limbs, close, rawChannels);
             if (runtimeMeshes.TryGetValue(runtimeKey, out var known)) return known;
             RuntimeMeshId(runtime);
             var made = PrepareMesh(path, boneCount, lodScale, false, LodPixelsPerRadian, limbs, close, partMap: partMap,
-                runtime: runtime, vertexColours: vertexColours);
+                runtime: runtime, vertexColours: vertexColours, rawChannels: rawChannels);
             Messages.AddRange(made.Messages);
             return runtimeMeshes[runtimeKey] = made.Mesh is null ? null : Upload(made.Mesh);
         }
@@ -403,7 +413,7 @@ internal sealed class CharacterContent : IDisposable
         foreach (var made in ready.Parts)
         {
             var part = made.Part;
-            var packed = GpuVertex.PackCharacter(part.Vertices);
+            var packed = GpuVertex.PackCharacter(part.Vertices, ready.RawChannels);
             int vertexBytes = packed.Length, indexBytes = made.All.Length * 4;
             // One vertex of slack: each attribute is bound at its own offset, and AMD reads the last vertex of an exactly sized buffer as zeros, a spike from its bind pose (VlcekM/MeitouClient#168).
             var vertices = DeviceBuffer.Create(gpu, (ulong)(vertexBytes + Vertex.Size), BufferUse.Vertex, AllocationName);
@@ -414,7 +424,7 @@ internal sealed class CharacterContent : IDisposable
             {
                 SubMeshIndex = part.SubMeshIndex, MaterialName = part.MaterialName, HasTangents = part.HasTangents, HasColours = part.HasColours,
                 Vertices = vertices, Indices = indices, Offset = made.Offset, Count = made.Count, UvScale = made.UvScale,
-                Attributes = GpuVertex.CharacterAttributes(vertices), Stride = GpuVertex.CharacterSize,
+                Attributes = GpuVertex.CharacterAttributes(vertices, ready.RawChannels), Stride = ready.RawChannels ? Vertex.Size : GpuVertex.CharacterSize,
             };
             gpuMesh.Parts.Add(gp);
             gpuMesh.Bytes += vertexBytes + indexBytes;
@@ -781,7 +791,7 @@ internal sealed class CharacterContent : IDisposable
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException) { Messages.Add($"{c.BodyMesh}: {e.Message}"); return null; }
         var rig = skeletonName is null ? null : Rigs.Rig(skeletonName, c);   // with the animation files it links (docs/animation.md)
         if (rig is null) { Messages.Add($"{c.BodyMesh} has no skeleton ({skeletonName})"); return null; }
-        var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true, limbs: LimbHideOf(c, rig), close: close, partMap: PartMapPath(c), runtime: geometry?.BodyMesh);
+        var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true, limbs: LimbHideOf(c, rig), close: close, partMap: PartMapPath(c), runtime: geometry?.BodyMesh, rawChannels: geometry?.PreserveRawBodyVertexChannels == true);
         if (body is null) return null;
 
         var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null };
@@ -806,9 +816,13 @@ internal sealed class CharacterContent : IDisposable
                 if (geometry?.BodyMesh is not null && asset.MorphBase != 0) runtimeMorphBases.Add(asset.MorphBase);
             }
         }
+        var bodyMaterial = BodyMaterial(c);
+        bodyMaterial.AdditionalFlags = geometry?.BodyMaterialFlags ?? 0;
+        if (geometry?.BodyDoubleSided is { } bodyDoubleSided) bodyMaterial.DoubleSided = bodyDoubleSided;
         asset.Parts.Add(new AssetPart
         {
-            Label = $"body {Path.GetFileName(bodyPath)}", Mesh = body.Gpu, Shared = true, Material = BodyMaterial(c),
+            DrawFlags = geometry?.BodyFlags ?? 0,
+            Label = $"body {Path.GetFileName(bodyPath)}", Mesh = body.Gpu, Shared = true, Material = bodyMaterial,
             BoundsCentre = body.Centre, BoundsRadius = body.Radius, PickBoxes = body.PickBoxes ?? [],
             Morphed = asset.MorphBase != 0, ShadowDistances = body.ShadowDistances, ShadowFirst = body.ShadowFirst, IsBody = true,
             FileDistances = body.FileDistances, FileFirst = body.FileFirst, FileRadius = body.FileRadius,
@@ -830,7 +844,7 @@ internal sealed class CharacterContent : IDisposable
             bool shared = part.Mode == AttachMode.SharedSkeleton;
             // An animal's fur is a shell over the whole body (5.5k triangles on the bonedog, more than its body), not a few hair cards: it takes the rule's own distances.
             var loaded = Mesh(path, shared ? rig.BoneCount : null, PartLodScale(c, part), close: close,
-                runtime: supplied?.Mesh, vertexColours: supplied?.VertexColours == true);
+                runtime: supplied?.Mesh, vertexColours: supplied?.VertexColours == true, rawChannels: supplied?.PreserveRawVertexChannels == true);
             if (loaded is null || loaded.Gpu.Parts.Count == 0) continue;
             var ap = new AssetPart
             {
@@ -839,6 +853,11 @@ internal sealed class CharacterContent : IDisposable
                 FileDistances = loaded.FileDistances, FileFirst = loaded.FileFirst, FileRadius = loaded.FileRadius,
             };
             if (supplied is { Mesh: not null, VertexColours: true }) ap.Material.VertexColoured = true;
+            ap.DrawFlags = supplied?.DrawFlags ?? 0;
+            ap.ShowInPortrait = supplied?.ShowInPortrait ?? true;
+            ap.MinimumScreenPixels = supplied?.MinimumScreenPixels ?? 0;
+            ap.Material.AdditionalFlags = supplied?.MaterialFlags ?? 0;
+            if (supplied?.DoubleSided is { } doubleSided) ap.Material.DoubleSided = doubleSided;
             if (supplied?.ScreenLodThresholds is { } thresholds && thresholds.Count == loaded.Gpu.Distances.Length - 1
                 && thresholds.Count > 0 && thresholds.All(value => float.IsFinite(value) && value > 0)
                 && Enumerable.Range(1, thresholds.Count - 1).All(index => thresholds[index] < thresholds[index - 1]))
@@ -869,6 +888,7 @@ internal sealed class CharacterContent : IDisposable
             asset.Idle = setup.Idle;
             asset.Fixed.AddRange(setup.Fixed);
         }
+        foreach (var part in asset.Parts) part.Shaders = geometry?.Shaders;
         return asset;
     }
 

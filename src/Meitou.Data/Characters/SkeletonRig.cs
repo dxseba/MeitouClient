@@ -55,6 +55,9 @@ public sealed class BonePose(int boneCount)
     public float Weight = 1;
     /// <summary>Every set bone takes its model-space position, allowing independently simulated joint chains.</summary>
     public bool AbsolutePositions;
+    /// <summary>Optional per-bone connected-component ids, indexed by handle. Equal ids identify one connected physical piece; ids are local to this pose.
+    /// The producer publishes an immutable array of <see cref="Set"/> length; interpolation keeps the destination pose's topology rather than blending ids. Null means no component information.</summary>
+    public int[]? Components;
 }
 
 /// <summary>Kenshi's two extra per-bone vectors and the movement scale that the body-shape sliders set (<see cref="CharacterShape"/>).</summary>

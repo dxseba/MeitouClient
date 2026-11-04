@@ -15,6 +15,7 @@ using Meitou.Rendering.Gpu.Shaders;
 
 namespace Meitou.Tests.Modding;
 
+[Collection("StageClock")] // Native effect recording shares the host pass clocks and GPU test lifecycle.
 public sealed class BrutalityResourceLifetimeTests
 {
     static readonly MethodInfo Load = typeof(CharacterContent).GetMethod("Mesh", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -155,7 +156,7 @@ public sealed class BrutalityResourceLifetimeTests
         .Slice((int)start + 1, count).ToArray();
     static GpuObjectMesh Upload(CharacterContent content, OgreMesh mesh)
     {
-        var loaded = Load.Invoke(content, ["synthetic.mesh", 1, 1f, false, null, false, false, null, mesh, false])!;
+        var loaded = Load.Invoke(content, ["synthetic.mesh", 1, 1f, false, null, false, false, null, mesh, false, false])!;
         return (GpuObjectMesh)loaded.GetType().GetProperty("Gpu")!.GetValue(loaded)!;
     }
     static int[] Buffers(GpuObjectMesh mesh) => mesh.Parts.SelectMany(p => new[] { p.Vertices.Handle.Index, p.Indices.Handle.Index }).ToArray();

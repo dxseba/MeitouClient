@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Characters;
+using Meitou.Rendering.Gpu;
 
 namespace Meitou.Rendering;
 
@@ -15,6 +16,10 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
 {
     /// <summary>Optional generated body/part geometry, cached by its stable identity; null uses the appearance's files.</summary>
     public RuntimeCharacterGeometry? Geometry { get; init; }
+    /// <summary>Optional posed world-space culling/LOD sphere; null or default-invalid retains the ordinary appearance bounds.</summary>
+    public CharacterWorldBounds? WorldBounds { get; init; }
+    /// <summary>Opaque matrices immediately before this actor's bone palette and additional instance bits; null retains the native layout.</summary>
+    public RuntimeCharacterShaderData? RuntimeShaderData { get; init; }
 
     /// <summary>Show the weapon in hand (the parts tagged <see cref="WeaponShown.Drawn"/>) instead of sheathed.</summary>
     public bool WeaponDrawn { get; init; }
@@ -44,7 +49,7 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public Meitou.Data.Characters.BodyBuild? Build { get; init; }
     /// <summary>The blood each of the first 8 body parts shows, a byte each (<c>CharacterSnapshot.BloodAmounts</c>).</summary>
     public ulong Blood { get; init; }
-    /// <summary>The whole placement, in place of <see cref="Position"/>, <see cref="Yaw"/> and <see cref="Rotation"/> (a falling head's); <see cref="Position"/> still places it for culling.</summary>
+    /// <summary>The whole placement, in place of <see cref="Position"/>, <see cref="Yaw"/> and <see cref="Rotation"/> (a falling head's); <see cref="Position"/> places it for culling unless <see cref="WorldBounds"/> is supplied.</summary>
     public Matrix4x4? World { get; init; }
     /// <summary>
     /// Holds the bones of the character with this key as it was last posed, taken the first time this one is drawn and never posed again (a cut-off head keeps the pose of the
@@ -59,6 +64,27 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
 /// </summary>
 public sealed class CharacterDrawList
 {
+    /// <summary>The live renderer context, valid only on its render thread; null for a headless or unattached list.</summary>
+    public IGpuContext? Context { get; internal set; }
+    /// <summary>Render-thread cleanup before the live context is released. Subscriptions are cleared after the one disposal notification.</summary>
+    public event Action? Disposing;
+    bool resourcesDisposed;
+    internal void DisposeResources()
+    {
+        if (resourcesDisposed) return;
+        resourcesDisposed = true;
+        var handlers = Disposing;
+        Disposing = null;
+        try
+        {
+            if (handlers is not null)
+                foreach (Action release in handlers.GetInvocationList())
+                    try { release(); }
+                    catch (Exception error) { Console.Error.WriteLine($"warning   character resource cleanup: {error}"); }
+        }
+        finally { Disposing = null; Context = null; }
+    }
+
     /// <summary>The characters that may be drawn or posed this frame: emptied by the renderer (<see cref="Clear"/>) and filled again each frame.</summary>
     public List<CharacterInstance> Items { get; } = [];
     /// <summary>
