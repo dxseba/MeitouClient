@@ -348,7 +348,7 @@ sealed partial class GameHost
         }
         session = new WorldSession(scene.Focus, (scene.X0, scene.Z0, scene.X1, scene.Z1), heights.HeightAt, o.Hour, config.TickRate,
             clock: GameClockFor(constants ??= scene.Database is { } clockDb ? Meitou.Data.Gameplay.GameConstants.FromDatabase(clockDb) : null, o.Hour, o.Day ?? GameClock.DefaultStartDay),
-            simulation: worldSettings = new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)) },
+            simulation: worldSettings = new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)), FarTickPeriod = FarTickPeriod },
             systems: systems, walkability: walkability);
         session.World.BenchFacingFix = config.FixBenchFacing;
         render.Grid = IsSandbox;
@@ -425,7 +425,7 @@ sealed partial class GameHost
         NavmeshOverlayRenderer? navOverlay = null;
         if (overlay is not null)
         {
-            hud = new PlayerInterface(session, heights.HeightAt, DrawnPosition) { SpeedUnit = config.SpeedUnit, Floaters = config.Floaters, FeedbackButtonInPlay = config.FeedbackButton, PortraitMenu = config.PortraitMenu };
+            hud = new PlayerInterface(session, heights.HeightAt, DrawnPosition) { SpeedUnit = config.SpeedUnit, Floaters = config.Floaters, FeedbackButtonInPlay = config.FeedbackButton };
             player = hud;
             hud.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
             hud.CreateUiPainter(overlay, assets.Find);

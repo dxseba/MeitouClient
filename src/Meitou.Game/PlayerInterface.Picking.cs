@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Rendering;
 using Meitou.Simulation;
 
 namespace Meitou.Game;
@@ -33,8 +34,8 @@ sealed partial class PlayerInterface
             var p = Vector4.Transform(new Vector4(pixel.X / Width * 2 - 1, 1 - pixel.Y / Height * 2, z, 1), inverse);
             return new Vector3(p.X, p.Y, p.Z) / p.W;
         }
-        var near = At(0);
-        var far = At(1);
+        var near = At(DepthConvention.NearZ);
+        var far = At(DepthConvention.FarZ);
         return (near, Vector3.Normalize(far - near));
     }
 

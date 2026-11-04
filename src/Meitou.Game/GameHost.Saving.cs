@@ -119,6 +119,7 @@ sealed partial class GameHost
             AnimationBlendRate = popData!.Bodies.Constants.AnimationBlendRate,
             Ragdolls = characterRigs,
             RagdollEnvironment = ragdollGeometry,
+            Extensions = mods?.Simulation,
         });
 
     /// <summary>Once per frame, between ticks: the notices of the write worker, the requests of the keys, the autosave, a finished read. <paramref name="realDt"/>: the frame's real seconds.</summary>
@@ -194,6 +195,7 @@ sealed partial class GameHost
             WriteWeather(game, (int)clock.Day, clock.HourOfDay);
             WriteDecals(game);
             player.WriteBiome(game.Camera);
+            CaptureModData(world, game);
         }
         catch (Exception e)
         {
@@ -362,6 +364,7 @@ sealed partial class GameHost
             session.ReplaceWorld(built.Systems, world =>
             {
                 loaded = SaveLoader.Load(world, read.Result, data, loadOptions ?? new SaveLoadOptions { Appearances = data.Appearances });
+                RestoreModData(world, read.Result);
                 if (world.Squads.Find(world.Player.Squad) is { Members.Count: > 0 } squad)
                 {
                     world.Player.Selection.Clear();

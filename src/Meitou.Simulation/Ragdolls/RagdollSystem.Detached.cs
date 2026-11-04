@@ -243,7 +243,7 @@ public sealed partial class RagdollSystem
         Ragdoll Make(RagdollDefinition definition, CharacterPoseSetup? poseSetup = null) => new()
         {
             Id = id, Definition = definition, Setup = poseSetup ?? setup, Scale = 1,
-            CarryBone = string.IsNullOrEmpty(look.Race.GetString("carry bone")) ? "Bip01" : look.Race.GetString("carry bone"),
+            CarryBone = CarryBoneOf(look, (poseSetup ?? setup).Rig),
             Pose = new RigidTransform[definition.Bodies.Length],
         };
         RigidTransform[] FromOriginal(RagdollDefinition definition) => [.. definition.Bodies.Select(body =>
@@ -296,7 +296,8 @@ public sealed partial class RagdollSystem
                     changed = true;
                     continue;
                 }
-                if (part.GroundItemId == 0 && part.ItemBone.Length > 0 && world.GroundItems.All.LastOrDefault(item => item.Fall is { } fall && fall.Character == id && fall.Bone == part.ItemBone) is { } linked)
+                if (part.GroundItemId == 0 && part.ItemBone.Length > 0 && world.GroundItems.All.LastOrDefault(item => item.Item.Type is not (Meitou.Data.Fcs.FcsRecordType.WEAPON or Meitou.Data.Fcs.FcsRecordType.CROSSBOW)
+                    && item.Fall is { } fall && fall.Character == id && fall.Bone == part.ItemBone) is { } linked)
                 {
                     part.GroundItemId = linked.Id;
                     changed = true;

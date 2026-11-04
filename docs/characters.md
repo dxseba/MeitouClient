@@ -27,7 +27,8 @@ that bucket's run): human bodies draw group 1 before group 0. Sliders and colour
 (mesh name))` when its mesh is made, so draws after the appearance (money, bounty, name) follow a reseeded or uncached sequence. **Unknown**: the
 Character constructor's own draws (it runs before the race pick), where equipment is rolled, the faction field skipping the skin re-roll and morph,
 the morph mesh name. Meitou (`CharacterGenerator`, `MsvcRandom`): the same generator and appearance order, one sequence per character from its
-seed (scrambled, as neighbouring `srand` seeds start alike), equipment after the morph index, the poses from FNV-1a of race/gender/index; money,
+seed (scrambled, as neighbouring `srand` seeds start alike), equipment after the morph index (backpack, `robot limbs`, clothing, crossbows,
+weapons: `setupInventorySections` order, **Verified**), the poses from FNV-1a of race/gender/index; money,
 names and personality keep their own per-purpose seeds.
 
 ### Random appearance
@@ -274,7 +275,8 @@ exe decompile unless marked; Meitou: `CharacterDraft` (data), `EditCharacter` / 
   editor opens, every pair's look is the template reset (`FUN_14007a490` with 1: first head, no hair or beard, the race's first `hair colors`,
   face sliders at mid) and then a hair roll, nothing else. Meitou (`CharacterDraft.SwitchedLook`): the same when a pair is first shown (sliders at mid).
 - **Preview**: a separate scene. **Verified** (install's compositor files): workspace `Kenshi_Character_Editor` = `GBuffer_Minimal` (characters only,
-  render queues 50-70) then a `Character_Editor` node, then the GUI. The background is a full-screen `render_quad` of
+  render queues 50-70) then a `Character_Editor` node, then the GUI. Its G-buffer uses output dimensions (`target_width target_height`) and `no_fsaa`
+  (`workspace.compositor`, verified against vanilla 1.0.68): no supersampling or multisampling. The background is a full-screen `render_quad` of
   `data/gui/gfx/SandyGround.dds` (1920x1080 DXT1, no depth). Lighting (`charedit.compositor`, `rtt.hlsl`, `lightingFunctions.hlsl`): world
   direction (-3, 2, -3) towards the light, colour 0.6: `CalcPunctualLight` (diffuse π·N.L·(1-0.04), GGX for roughness 1-0.99·gloss, specular
   colour 0.04) plus `CalcEnvironmentLight` (`mp_irradiance` mip 3 ·a·4, `mp_specularity` mip (1-gloss)·7 ·a·10, Lazarov BRDF), times exposure
@@ -303,14 +305,19 @@ exe decompile unless marked; Meitou: `CharacterDraft` (data), `EditCharacter` / 
   shadow cascades), short of the world 3000 below; headless 1280x960 Release: 4.0-4.2 ms a frame capped, 5-29 ms uncapped (**Observed**, noisy machine). The shown character stands at a fixed spot of the building's frame facing the counter; up to 5 other
   characters of the editor's list sit on the seats nearest the far tables behind it, each over 41 across from it (beyond the orbit's reach; the source's chair spots and sitting clips). Night shows
   in the dark windows. The bar's own people stand and sit in it: its residents' leader (Barman) at a shopkeeper node and first squad member (Ninja Guard) at a guard
-  node, 3 patrons of the town's `bar squads` on the next seats and 3 at general nodes, all beyond the same 41, rolled with fixed seeds. The bar stands on
+  node, 3 patrons of the town's `bar squads` on the next seats and 3 at general nodes, all beyond the same 41, rolled with fixed seeds. Their clips run at the
+  record's `play speed`; one without `loop` holds its last frame, as the simulation holds a one-shot clip, so a mod's sit-down seat clip is not replayed (#242);
+  the edited character's stance preview follows the same rule.
+  Base data has none: its seat clips loop (`sitting chair` a 0.033 s pose at speed 0.01, `sitting idle` 10.9 s at 1; **Verified** by probe on base data).
+  The original seats a sitter with the functionality's first `animation` reference (**Verified**, decompilation, `FUN_1402a0900`). The bar stands on
   `FLatTop_Pillar01.mesh` scaled to 1500 each way with its top at the bar's ground, with 14 shrubs round it. A white point light under the roof (half the
   lamps' mean power, radius 220) and a grey character fill (0.04) light the room neutrally. The camera is the stage's
   orbit, moved across instead of shifting the projection. The stage covers the bar until its parts, the streaming and the characters are in, or at most 3 s
   after its room is laid out (the counts are global and can stay up under memory pressure). The faithful UI keeps the stage. Metal: compiled, not yet seen on a Mac.
 - **Keys**: `in editor` true while open; a mode 0 character without a body file is randomised on open (Meitou's start characters are already
   rolled). Closing in mode 0 also sets health from the CHARACTER's `starting health` (Meitou: a new race at creation gets a new body, which
-  applies it; the edited look keeps stumps and prosthetics).
+  applies it; the edited look keeps stumps and prosthetics), then validates each human's inventory sections for its race (**Verified**, `FUN_1405f5d10`:
+  worn hats, shirts and shoes of a race that closes them are removed, [disabled slots](game/ui-screens.md); Meitou: `CharacterEditing.EndCreation`).
 - **Meitou validation** (`CharacterEditing.Apply`, `CharacterDraft.Sanitize`): player character with a person's look; creation only while
   `PlayerState.InCreation` (new game until CONFIRM) and within the start's force races; surgery needs the surgeon alive within 60 units
   (engine choice), the same race and gender, money > price, and takes the price. Head/hair/beard must be the race's, sliders and poses are
@@ -327,6 +334,8 @@ what the original does with another race in mode 1 is **Unknown**. **Verified** 
 type 15, one record, id 1, `1--INGAME`, name `default` or `0`, and round-trip byte-exact. Meitou (`CharacterDraft.Import`/`Export`,
 `PlayerInterface.Editor`): export writes that layout, overwriting a file of the same name; import sanitizes the file for its race and refuses a
 race the editor doesn't offer (creation) or another race or sex (surgeon).
+**Observed** (native 1.0.68 editor import/export): an imported appearance with head `99184-Newwworld.mod` exports with a different head id and explicit neutral face-slider defaults.
+For rendering comparisons, use the native editor's exported result on both sides; importing the same input alone does not establish identical appearance data. The head fallback rule is **Unknown**.
 Dialog (`FUN_1401a0b10`, refresh `FUN_14019fd70`, **Observed**): `CurrentFolder` shows the folder as kept (no trailing separator; "./data"
 when empty); `ListFiles` gets "[..]" and the subfolders as "[name]", then (open mode) the matching files by file name with extension, item data
 folder + "/" + name; ButtonUp cuts the folder at its last `\` or `/`; ButtonCancel is `Tr("Cancel")`, ButtonOpenSave `Tr("Import")` here, both

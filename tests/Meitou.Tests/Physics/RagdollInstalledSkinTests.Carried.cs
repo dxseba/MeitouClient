@@ -30,7 +30,7 @@ public partial class RagdollInstalledSkinTests
             Name = "Carried skin test corpse", Race = Human, Medical = Healthy(), Appearance = look, TorsoBisection = cut,
             Blow = (new(50, 10, 0), new(50, 10, 0)),
         };
-        if (missingLeg) cold.Medical.Sever(LArm + 2, Context(), false);
+        if (missingLeg) cold.Medical.Sever(LArm + 2, Context());
         cold.Medical.KillFromBisection();
         var id = world.Characters.Spawn(new() { Position = new(1000, 0, 1000), Yaw = yaw }, cold, 0);
         world.RunTicks(320);

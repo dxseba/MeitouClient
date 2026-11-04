@@ -116,8 +116,8 @@ public partial class RagdollInstalledSkinTests(ITestOutputHelper output)
             Blow = (new Vector3(50, 10, 0), new Vector3(50, 10, 0)),
         };
         cold.Medical.KillFromBisection();
-        cold.Medical.Sever(LArm, Context(), false);
-        cold.Medical.Sever(LArm + 1, Context(), false);
+        cold.Medical.Sever(LArm, Context());
+        cold.Medical.Sever(LArm + 1, Context());
         var id = world.Characters.Spawn(new() { Position = new(20, 0, 20) }, cold, 0);
         world.RunTicks(240);
         var shown = Assert.Single(world.Snapshot.Characters, c => c.Id == id);

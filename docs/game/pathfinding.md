@@ -65,7 +65,8 @@ characters round its owner and tests each as a circle (its footprint radius plus
   list is filled by `FUN_14085a070` ([combat](combat.md), "Deciding"): every other character except one for which `FUN_1407d1440` holds (**ragdolled** by a WHOLE/CARRY_MODE request, or
   **carried** `+0x3d4`, [ragdolls](ragdolls.md#ragdollpart-and-requests)), in a **bed or cage** (`+0x2f8` != 0), or **sitting** (status `+0xb8`, `isSitting`), within the two radii + 40 horizontally and 20 up.
   Each entry is then re-tested by `FUN_1401476f0`: status `+0xb8` clear again, Character `+0x1a9` set (the character is near the camera or an active zone: a level-of-detail flag from `FUN_1405c9f60`) and not carried.
-- **Observed**: a living character is a `PhysicsHullT` box ("hull size X/Y/Z" of the race, `FUN_140661a70` -> `FUN_1404ccb50`, in the physics manager's hull list), not a PhysX actor; a ragdoll's
+- **Observed**: a living character is a `PhysicsHullT` box ("hull size X/Y/Z" of the race, `FUN_140661a70` -> `FUN_1404ccb50`), a kinematic PhysX actor in group 0 that rays hit
+  ([combat](combat.md#line-of-fire-and-the-hit-shape)); a ragdoll's
   shapes are group 3/4, which skip groups 0 and 1 ([ragdolls](ragdolls.md#collision-groups)). Nothing found makes a body physically stop a walker, and the root-motion step goes through the same agent.
   Whether the hull is read by anything that blocks movement is **Unknown**.
 
@@ -185,7 +186,8 @@ the centre); others the plain group speed.
 
 ## Own builder
 
-DotRecast: cells2,height1,tile48 cells,agent18/climb5,ground/water/door areas. Build asynchronously,
+DotRecast: cells2,height1,tile 288 cells (576 units),no edge limit,watershed regions,agent18/climb5,ground/water/door areas (interiors: one tile,
+monotone regions, edges 24 cells; [Search cost](#search-cost)). Build asynchronously,
 cache tiles and gate population on readiness. Query A* through portal clearance (radius per wall end; tile-border, seam
 and area-change ends are open) and water/door costs. **Observed** (zone 18.39, `meitou-tools navmesh`): a Swamp Village
 shack's stair straddles the tile line x−62208 and its foot came out as 6..8-unit portals, so a 2*radius rule kept radius-4
@@ -200,6 +202,15 @@ the first 10 units of the straight line to it, else it walks to within 2 of the 
 stands, up to 3 times since its last waypoint or order (`BlockedRepathLimit`), before the path and a GoTo order are dropped. **Observed** (zone 22.10, save "stuck", scratch sim): a walker on the terrain at
 Y392 beside the Old Storm House's (`6-rebirth-INGAME`) door stair snapped to the stair's corner (Recast corner vertices take the highest neighbouring cell, 408 over
 ground at 395); that polygon's only exits were narrower than the radius, the next start's path was cut up the stair's side, and the walker stood still. With the three rules it enters in 3 s.
+<a id="shoved-into-furniture"></a>A walker off every surface at its height and its next step (shoved into something that cuts a hole in the mesh) may step only nearer its path's current
+point, and only when it can stand there (engine choice, `MovementSystem.EscapesToward`); back on the mesh the normal rule holds. **Observed** (Hub market stall
+-51119,2797, scratch sim, PR #230): its path was found, every step was refused, the GoTo dropped after 3 asks and it stood for good; with the rule it walks out and arrives.
+Inside the Storm House's shop counter and tables the mesh is not cut, so a walker there just walks out. **Unknown** whether the original lets such a walker out (PR #230's author says so).
+**No path at all** (the start sits on a pocket of the mesh with no way out: inside a cage whose walls are not a navmesh cut, or a walker shoved into solid geometry): a player's move order
+is kept instead of being dropped when its goal is within 64 units (`StraightOrderReach`) and walkable at the walker's height: the walker heads straight at
+the goal, the step test still refusing what cannot be walked (**engine choice**, `MovementSystem.ApplyAnswers`); a goal further off or off the mesh still drops the
+order. **Unknown** what the original does.
+**Observed** (a character put inside a cage in Stack, -55291,1181,-14055): every path request came back not found and it stood for good, the order dropped on the first answer.
 A goal that cannot be reached is replaced by the reachable point nearest it in 3D (engine choice). **Observed** (Hub north wall, zone 20.32, scratch probe, issue #59):
 the walkway keeps corner pockets of 8..64 square units whose only exits are 3..8 wide between wall ends; nearest on the X/Z plane, a click there
 sent the walker to the ground beside the wall, 115..138 below; in 3D all such goals end on the walkway within 10. Cache key and unload rules: [simulation](../simulation.md#navmesh). Original Havok tiles are
@@ -299,7 +310,7 @@ every feature of the zone, with no `hidden` test (only the render entity, `FUN_1
 pass (`FUN_1403c8660`) takes features as owner-less group 14 (a non-BUILDING handle resolves no owner): material −1, the walkable-foliage path,
 not the building one (groups 9, 10, 13, 19 and `path mode` play no part). **Observed** (`meitou-tools navmesh --probe`, zone 21.19): the
 original's tile walks the top of `Huge_Stone_Emperor_Statue`'s foundation (y 755.8, terrain 735) and has no ground inside the gravel piles, also those placed
-scaled (1.41/1.88); without features Meitou walked the terrain through both (issue #161). Their collision is a triangle mesh, mostly open at the bottom
+scaled (1.41/1.88); without features Meitou walked the terrain through both (issue #161). **Observed** (scratch probe, zones 14.22, 14.23, 15.22): the fog camps' `Mafic_HugeRockSlabs` by the nest markers south of Mongrel have no walkable span inside them in either navmesh (issue #132's walk-through was before features were gathered). Their collision is a triangle mesh, mostly open at the bottom
 (gravel piles: 24 open edges; Hub cliff blocks closed). Engine choice: a feature's triangle mesh is a `NavMeshSolid`; a walkable span is removed when the
 nearest of its triangles above the span's floor (more than 1 over it, at the cell's middle) faces up, so the span sees its back; an overhang's underside faces
 down and keeps the ground under it. `hidden` features keep their collision (above), as in Meitou. **Observed** (`--compare`,
@@ -402,7 +413,7 @@ unjoined are linked (`Links`, not `Neighbours`) when they run opposite, share on
 lie within 1.5 of each other's line at both ends of the overlap, and are within climb + 0.5 there, by the edges' own heights or else by both polygons' surfaces (own-region samples, interpolated) at every cell along the overlap: Recast simplifies contours in X/Z only, so a long edge from flat ground up a stair runs straight in height and misses the stair beside it by a step (engine choice). **Observed** (zone 14.23, Longhouse `14.23:78-`, west door stair): the stair's lower polygon (an 88-unit edge along z -37652, 1506 to 1536) against the upper stair's edge from (-82306,1515) was 12 off by the edge, 4 at most by the surfaces; unjoined, radius-4 walkers could not reach the door (the town's residents searched 300-600 ms for its cabinet again and again), now (-82140,-37692) → (-82157,-37664) goes round to it (818). Near-miss joins in 14.23, 27.22, 21.42, 20.32, 42.22, 18.39 grew 10-20 % (28.60 none); hub path pins unchanged. A* portals for such links take the overlap
 with the door joins' 6 gap when no facing edge is within 0.2. **Observed** (zone 18.39, `meitou-tools navmesh`): the Swamp Village stair foot's edge
 (-62220,108,34088 → -62208,105,34086) against two edges meeting at (-62216,106,34086) joins both; the path (-62218,34080) → (-62216,34148)
-`--to-y 140` climbs through that vertex (length 83) instead of detouring to the tile line x−62208 (97). **Observed** (after the terrain diagonal change, the same path from z 34080 exactly on a polygon edge): 153, the funnel from a start on its first portal's line swung out to that portal's end; `NavQuery.Pull` drops a first portal the start lies on, 82.
+`--to-y 140` climbs through that vertex (length 83) instead of detouring to the tile line x−62208 (97). **Observed** (after the terrain diagonal change, the same path from z 34080 exactly on a polygon edge): 153, the funnel from a start on its first portal's line swung out to that portal's end; `NavQuery.Pull` drops a first portal the start lies on, 82. **Observed** (576-unit tiles, watershed regions): 101, by the tile line again (x−62208 is still one).
 **Tile seams** (engine choice): tiles are rasterised with a 3-cell border from their neighbours (Recast `borderSize`), so contour
 vertices on a tile's edge are kept and those edges come out as portals. Without it Recast treats the edge as a wall and simplifies across
 it (error 1.3 cells): a strip one cell deep along the edge loses its edge vertex and the stitcher finds no edge on the line. **Observed**
@@ -436,7 +447,10 @@ fallback island.
 its walkable spans every 2 cells (`HeightGrid`, bilinear); a polygon keeps the grid only when a sample leaves its plane by more than 2, and one
 whose samples all lie within 3 of the heightmap (or the water) keeps just a marker and reads the heightmap. **Observed** (headless probe, 20000 random
 points against the nearest walkable collision or terrain): mesh heights more than 5 off went from 14.4 to 2.1 % (24.27), 11 to 0.7 % (20.32) and
-9.3 to 0.5 % (18.35), at 1.5..3.3 MB of samples per zone.
+9.3 to 0.5 % (18.35), at 1.5..3.3 MB of samples per zone. DotRecast leaves the region 0 on polygons merged across regions (most of the large
+watershed ones); their regions are taken from the spans at their corners, and each sample takes the span of those nearest the plane, however far.
+**Observed** (`HubNavigationTests`, Hub to Squin): sampled only within 25 of the plane, a large slope polygon west of the Hub had no heights and the
+walker gave its order up at (-52057,1399,3131).
 **Heights**: **Observed** polygons are up to ~15 off over stairs/ramps (Hub gate), so standing
 heights snap to walkable collision (`NavSurfaces`, also its edge within `EdgeReach`: the mesh overhangs raised floors, e.g. the Hub bar landing) or zone terrain (water-surface polygons keep their height); the layer is picked by mesh or real height within
 `StandRise` of the character wins. A layer more than `StandDrop` (12) below the character is not stepped onto (engine choice: the
@@ -462,7 +476,7 @@ than the agent height over it; each row's run of samples is one rectangle. **Obs
 building footprints, 17,085 feature rectangles, sampled in 1.2 s): across Rebirth west to east (-49500,-56080 → -45500,-56080) the samples of the route
 inside a feature fell 25 → 3 of ~360 (length 5,817 → 5,594), north to south past the statue (-47500,-58500 → -47500,-53500) 89 → 0 (5,318 → 6,054); at the
 Hub, past its cliff blocks (-52800,3000 → -51700,4800) 18 → 0 (3,764 → 3,775), (-53200,4500 → -51200,3400) 3 → 0. The navmesh part ends inside loaded zones, the rest is provisional and
-re-asked; its zones within `Lookahead` load early. When meshes go live the host sends one `RepathCommand` with those zones at most every second (`RepathCoalesceSeconds`), and only GoTo walkers whose path still to walk crosses one of them (or whose answer is pending) ask again: re-asking every walker at each zone turned long walks about again and again (issue #50). A goal in a loaded zone with no navmesh path is a long route too when its zone is
+re-asked; its zones within `Lookahead` load early. When meshes go live the host sends one `RepathCommand` with those zones at most every second (`RepathCoalesceSeconds`), and only GoTo walkers whose path still to walk crosses one of them (or whose answer is pending) ask again: re-asking every walker at each zone turned long walks about again and again (issue #50). A path asked for on the move starts where the walker stood then; it is entered at the end of the leg nearest the walker (within `JoinSlack` 10 of it, among the legs as long as the way the walker came, and steppable toward), not at its first point, which would turn the walker back in a loop (engine choice, `MovementSystem.Join`). A goal in a loaded zone with no navmesh path is a long route too when its zone is
 in another block of side-by-side loaded zones than the walker's (two groups of walkers far apart); within one block, the navmesh's
 nearest reachable point and a straight provisional tail (the terrain search, under one lock for every path thread, is not run there;
 a way round through an unloaded zone within one block is not found). **Observed**: Hub→(-36000,-6000) and Hub→Squin arrive; "6 dudes"
@@ -696,6 +710,15 @@ off-mesh start retries, then the nearest-point search, each exploring all the gr
 is remembered (goal polygon, radius, door rule; same navmesh; `NavmeshWalkability.UnreachableSeconds`), and a walker that reaches its
 remembered nearest point gets the provisional route at once; retries skip start polygons a failed search reached (same region, same
 failure). GoTo answers went from ~95 to ~17 ms on average, polygons per search ~11,000 to ~5,800.
+
+Polygon count (engine choice): 96-unit tiles with 48-unit edges cut open ground into a grid, and monotone regions into strips; 576-unit tiles, unlimited
+edges and watershed regions keep it in few polygons. **Observed** (`meitou-tools navmesh --compare`, 13 town zones): kept polygons fell 39..56 %
+(Hub 20.32 10,183 to about 6,200; the original's tile has 5,857 faces); a zone builds in about twice the time. Over 2,352 random pairs in 20.32
+(radius 4) polygons expanded per search fell 965 to 560 and search time 20..30 %, paths 1 % longer. The original's ground ours lacks stayed within 0.1
+point of its area (`orig%`) but in 18.39, 1.4 to 1.7 %: a walkable AshlandsRibs top (y ~293, -61200,35000) has no link to the ground and is pruned (whether
+the original reaches its own: **Unknown**). Interiors cover the original's interior faces as before. DotRecast refuses some watershed contours Recast
+only warns about (two outlines round a hole; "Bad outline", in a town zone of `--survey-interiors towns`): such a tile is built monotone. A walker shut out of its goal whose own polygon is the reachable one
+nearest the goal walks across it to the point nearest the goal; before, it got no path (`NavigationTests`: a gate's closed door, the polygon up to the wall).
 
 ## Gate codes
 

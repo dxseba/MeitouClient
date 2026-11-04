@@ -59,10 +59,14 @@ public sealed record SquadTemplate
     /// <summary><c>layout interior</c> / <c>layout exterior</c>: the layout names the home building is given (empty: none).</summary>
     public string LayoutInterior { get; init; } = "";
     public string LayoutExterior { get; init; } = "";
+    /// <summary><c>building name</c>: the home building's display name when set ("The Dancing Skeleton", docs/game/factions-squads-towns.md "Town residents").</summary>
+    public string BuildingName { get; init; } = "";
     /// <summary><c>initial door state</c> (DoorState: 0 CLOSED, 1 OPEN, 2 LOCKED, 3 BROKEN), applied to the home building when it is assigned (docs/game/locks.md "Doors").</summary>
     public int InitialDoorState { get; init; }
     /// <summary><c>public day</c> (fcs.def default true): written over the home building's public flag when it is assigned (docs/game/locks.md "Data").</summary>
     public bool PublicDay { get; init; } = true;
+    /// <summary><c>building ruined</c>: the home building is ruined when assigned, if it can be (docs/game/buildings-production.md "Ruined by residents").</summary>
+    public bool BuildingRuined { get; init; }
     /// <summary><c>nest</c> links.</summary>
     public IReadOnlyList<RecordLink> Nest { get; init; } = [];
 
@@ -132,9 +136,11 @@ public sealed record SquadTemplate
             BuildingDislike = Links("building dislike"),
             LayoutInterior = r.GetString("layout interior"),
             LayoutExterior = r.GetString("layout exterior"),
+            BuildingName = r.GetString("building name"),
             BuildingDesignation = r.GetInt("building designation"),
             InitialDoorState = r.GetInt("initial door state"),
             PublicDay = RecordReading.Bool(r, "public day", true),
+            BuildingRuined = r.GetBool("building ruined"),
             Nest = Links("nest"),
             IsTrader = RecordReading.Bool(r, "is trader", false),
             Vendors = Links("vendors"),

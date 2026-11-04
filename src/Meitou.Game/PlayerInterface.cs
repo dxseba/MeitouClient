@@ -75,6 +75,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public bool MouseDown(MouseButton button, Vector2 p, bool shift, bool ctrl = false, bool alt = false)
     {
         mouse = p;
+        uiInput++;
         (pressShift, pressCtrl) = (shift, ctrl);
         HideTooltip();   // a press captures the mouse, which hides a tooltip (MyGUI)
         if (button == MouseButton.Left && FeedbackButtonDown(p)) return true;
@@ -97,12 +98,12 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (button == MouseButton.Right && InventoryRightClick(p, shift)) return true;
         if (button == MouseButton.Right && CloseContextMenu()) return true;
         if (button == MouseButton.Right && MapRightDown(p)) return true;
-        // A right press on a squad bar portrait is remembered; its release over the same portrait selects the member and focuses the camera on it, as the double click
-        // (FUN_140413d80, docs/game/ui-input.md "Squad bar portraits"). The original has no portrait menu; Meitou's (PortraitMenu) opens on a held press, the quick release still focuses.
+        // A right press on a squad bar portrait held 0.25 s opens the member's context menu; a quicker release over it selects the member and focuses the camera on it,
+        // as the double click (FUN_140413d80, FUN_140415630, docs/game/ui-input.md "Squad bar portraits").
         if (button == MouseButton.Right && SquadBarMemberAt(p) is { } member)
         {
-            if (PortraitMenu && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == member) is { } shown
-                && ContextPressOn(p, at => Menu(shown.Name, at, Verbs(shown)), () => FocusMember(member, shift))) return true;
+            if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == member) is { } shown
+                && ContextPressOn(p, at => Menu(shown.Name, at, Verbs(shown)), () => FocusMember(member, shift), PortraitHoldSeconds)) return true;
             memberPress = member;
             return true;
         }
@@ -253,6 +254,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public void MouseUp(MouseButton button, Vector2 p, bool shift)
     {
         mouse = p;
+        uiInput++;
         EditorPointerUp(button);
         if (ContextMenuRelease(button, p)) return;
         if (BodyFragmentLabelMouseUp(button, p)) return;
@@ -338,8 +340,6 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// <summary>The character the strategy camera follows (a double tap of its number key, F, or a double click on its squad button); panning the camera lets go.</summary>
     public CharacterId? Follow { get; set; }
     CharacterId? memberPress;
-    /// <summary>Holding the right button on a squad bar portrait opens that member's context menu (Advanced settings "Portrait menu"; Meitou only).</summary>
-    public bool PortraitMenu { get; set; } = true;
 
     /// <summary>A portrait's right click: selects the member (Shift toggles) and focuses the camera on it, as the double click.</summary>
     void FocusMember(CharacterId member, bool shift)

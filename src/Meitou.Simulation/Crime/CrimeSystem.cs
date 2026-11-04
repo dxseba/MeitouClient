@@ -122,15 +122,22 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
     public void Loot(World world, int looter, int victim)
     {
         var table = world.Characters;
-        if (table.Cold(looter) is not { } l || table.Cold(victim) is not { } v || !IsLootTheft(l, v)) return;
+        if (table.Cold(looter) is not { } l || table.Cold(victim) is not { } v || !IsLootTheft(world, l, v)) return;
         SetPending(world, looter, CrimeCode.Looting, v.Faction, table.IdOf(victim), MinTimer);
     }
 
     /// <summary>
-    /// Whether the player's taking from a downed character is a theft: the permission test of <see cref="Loot"/> (<c>FUN_140793940</c>, <b>Observed</b>). The carry system marks what such a
-    /// loot takes as stolen from the victim's faction (<see cref="Items.ItemInstance.StolenFrom"/>).
+    /// Whether the player's taking from a downed character is a crime: a take that is stealing at all (<see cref="IsStealing(World, CharacterCold)"/>) and the permission test of
+    /// <see cref="Loot"/> (<c>FUN_140793940</c>, <b>Observed</b>) failing.
     /// </summary>
-    public static bool IsLootTheft(CharacterCold looter, CharacterCold victim) => looter.IsPlayer && !victim.IsPlayer && !LootAllowed(looter, victim);
+    public static bool IsLootTheft(World world, CharacterCold looter, CharacterCold victim) =>
+        MarksTheft(world, looter, victim) && !LootAllowed(looter, victim);
+
+    /// <summary>
+    /// Whether what the player takes from a character is marked stolen from it (<c>Item::notifyTheftFrom</c>, <b>Verified</b> call sites): <see cref="IsStealing(World, CharacterCold)"/>
+    /// alone, the loot permission aside, so a bandit's gear is stolen from the bandits too. Right click and drag mark only an item with no owner yet; a give overwrites.
+    /// </summary>
+    public static bool MarksTheft(World world, CharacterCold taker, CharacterCold victim) => taker.IsPlayer && !victim.IsPlayer && IsStealing(world, victim);
 
     /// <summary>
     /// <c>Character::isItOkForMeToLoot</c> (<c>FUN_140793940</c>, <b>Observed</b>) asked with no item: yes when the victim is a slave or escaped slave (slave state 1 or 2; Meitou also
@@ -221,7 +228,7 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
         // Each character every SweepEveryTicks on its slot's turn (slot mod the period), so the witness looks spread over the ticks (the original's AI updates run 8 characters a
         // frame in turn, FUN_140786e30); a character's timers still lose the whole period each visit. The alarms keep the shared beat.
         int phase = (int)(world.Tick % every);
-        Sweep(world, every * world.TickSeconds, phase, every);
+        Sweep(world, every * world.TickSeconds, every);
         if (phase != 0) return;
         if (alarms.Count > 0) Investigate(world, every * world.TickSeconds);
         // Alarms die 8 game seconds after their last raise, whether answered or not (AlarmManager update FUN_14092bfe0, Verified).
@@ -229,16 +236,17 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
             if ((alarms[k].Life -= every * world.TickSeconds) < 0) alarms.RemoveAt(k);
     }
 
-    void Sweep(World world, float seconds, int phase, int every)
+    void Sweep(World world, float seconds, int every)
     {
         var table = world.Characters;
         var next = table.Next;
         double hoursPerTick = world.TickSeconds * 11.0 / 1200.0;
-        for (int s = phase; s < table.HighWater; s += every)
+        for (int s = 0; s < table.HighWater; s++)
         {
-            if (!next[s].Alive || table.Cold(s) is not { } c) continue;
+            if (!next[s].Alive || !world.Turn(s, every) || table.Cold(s) is not { } c) continue;   // its turn (the far cadence, World.Turn)
             if (c.Bounties is { } ledger && !c.IsImprisoned) Expire(world, s, c, ledger, hoursPerTick);   // paused while imprisoned (economy.md 11.3)
             if (c.RecentlyWanted > 0) c.RecentlyWanted = MathF.Max(0, c.RecentlyWanted - seconds);
+            Locks.FixtureRegistry.LayLow(world, c);
             if (c.Pending is { } p)
             {
                 p.Timer -= seconds;

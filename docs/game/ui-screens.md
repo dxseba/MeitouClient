@@ -398,9 +398,11 @@ to Jobs; the saved `chase mode` flag is that switch (**Verified**, [perma-jobs](
       `max: N`, N = (int)(lerp(12, S, max((s − 40) / 60, 0)) × 0.2237) with s the stealth term (`FUN_140884850`, 0..1), so N is always (int)(12 × 0.2237) = 2; and `Total:` the
       line's text. The line's bracket is Bad for both signs (`FUN_140888fb0`). Meitou: in the panel's speed unit.
     - Hunger Rate (`FUN_14088a2b0`): `Racial hunger rate:`, `Age:` when the age (slot 0x398) is not 1, as the size factor (slot 0x390, lerp(age, `scale min`, `scale max`)), `Encumbrance effect:` 1 + (1 − e) `encumbrance hunger rate` (always,
-      though in a bed the rate uses the bed factor), `Resting/KO state:` `bed hunger rate` in a bed or KO or dead, then (independent of the resting row) `Idle:` 0.80x while the AI flag the rate's 0.8 reads is set, else
-      `Current work:` CharStats `+0x178 currentOperatingMachineHungerRate` when not 1 (**Verified**, decompile). Meitou has no idle flag: `Current work:` with the rate of the machine or seat in use
-      (`ExtendedStats.WorkHungerRate`), never `Idle:`.
+      though in a bed the rate uses the bed factor), `Resting/KO state:` `bed hunger rate` in a bed or KO or dead, then (independent of the resting row) `Idle:` 0.80x while `CharBody::amIdle` (the rate's 0.8) is set, else
+      `Current work:` CharStats `+0x178 currentOperatingMachineHungerRate` when not 1 (**Verified**, decompile). Meitou: `Current work:` with the rate of the machine or seat in use
+      (`ExtendedStats.WorkHungerRate`), else `Idle:` while `CharacterCold.AmIdle` (`ExtendedStats.Idle`). `amIdle` is not refreshed while the character is down
+      ([character-stats](character-stats.md#free-food)), so one knocked out while idle shows `Resting/KO state:` and `Idle:` both, one knocked out
+      in a fight or at work `Resting/KO state:` alone.
   - `HealthText` words in priority: Dead, BEING EATEN ALIVE!!, Dying, Unconscious (N) (N = (int) of the medical float `+0xa0`, the KO timer, taken
     only while it is &gt; 0; "Rebooting" for skeletons; `FUN_14088a8f0`), Recovery coma, Playing dead..., Blood loss KO, Bleeding out,
     Crippled, Crippled arm, Critical, Limb trauma, Staying low, Starving (hunger &lt; 1), Bleeding, disguise words; else by the overall health h:
@@ -449,7 +451,7 @@ to Jobs; the saved `chase mode` flag is that switch (**Verified**, [perma-jobs](
   can't vanish." plus " Current bounty is c.{2,num}" with the local faction's bounty (`getActualBounty`) above 0; the escaped flag (`+0xe8`) "Escaped Prisoner", text "... Leave town to
   clear this status. Expires in {1}" with `{1,num} hr(s)` of the constant 99999; a bounty: the bounty entry; else the slave states above. Crime, escaped and slave entries list the bounty rows
   (`FUN_1405d1400`) before their text. "Imprisoned:" belongs to the Lockpicking section. Meitou: `World.StatusOf`, `PlayerInterface.StatusLine` / `StatusRows` / `SlaveRows` (slave hints for
-  player characters only; engine choice); the entry's title is the `BountyText` line; Diplomatic Status is `CharacterCold.NpcClass` Diplomat; Ex-slave is not built.
+  player characters only; engine choice); the entry's title is the `BountyText` line; Diplomatic Status is `CharacterCold.NpcClass` Diplomat.
 - Bounty panel (`FUN_1405d2da0`, **Observed**; colour strings **Verified**: their static initialisers `FUN_14158a2a0` `#afa68b` Main, `FUN_14158a320` `#492620` Title,
   `FUN_14158a460` `#444444` Greyed). The *local faction* (`FUN_140852010`): while imprisoned (`+0x2f8 == 2`) the owner of the cage at `+0x300`, else the faction of the
   status object's `+0x88` (**Unknown**; Meitou: the town the character stands in, nearest whose radius holds it).
@@ -614,6 +616,21 @@ How a building gets selected: [ui-input](ui-input.md#building-picking-and-select
     `building cost mult` × 400), f = 0.375 when slot 102 (+0x330) answers true, else 1. That slot reads the destroyed byte +0x1a1
     ([construction state](buildings-production.md#construction-state), **Verified** there against `FUN_1405595a0`). The button (slot 80
     `FUN_1407ad410`) asks "Do you want to buy this building for c.{1,num}?".
+    Yes (slot 81 `FUN_1407ad6c0`, answer 2; **Observed** decompile): `General_Click`; without the money "Can't afford to buy this building. It costs
+    c.{1,num}" (the money test of the player faction's money object also takes it: the callback deducts it nowhere else); else, in order:
+    the owner faction's platoons (active and unloaded lists) whose home is the building (`FUN_1406ba570`) lose it (home hand set to null, type 11); the building goes to the player's faction
+    (vfunc 0xa0, between the factions' building lists); its owner-platoon hand (+0xd0, whose flags the trespass test reads, [trespassing](economy.md#112-how-a-bounty-is-gained)) becomes
+    null; each door (+0x1c0) goes to the player's faction and `FUN_140297040` runs on its lock (**Unknown**); each furniture piece of the interior
+    holding an occupant (slot 0x300) lets it out (`FUN_14032e2f0`, `FUN_140330600`); the interior's furniture and item groups are destroyed
+    (`FUN_14054f4d0(interior, 1)`, `_destroyAllInternalBuildings`: of the furniture set +0xe8 a building whose slot 0x438 parent hand is not null
+    is kept, a mounted light or turret, **Unknown** which in practice; every `BuildingItemGroup` of +0x128 goes, and a group going destroys the item
+    it still holds, `FUN_14054a600`); the interior's list +0x88 goes to the player's faction; the building's town (one made for it when it has
+    none) is flagged (+0x3d0) and takes it (`FUN_140928ee0`); a call on interior +0x30 with 0 (**Unknown**); each evicted platoon gets a new home (`FUN_14099e6e0`): a random
+    building of its town that passes slot 88 (for sale, above) and a test of the platoon against it (`FUN_140621230`, **Unknown**), found
+    through `FUN_1409fc2e0` with BuildingFunction bit mask 0x13 (BF_ANY, MINE, REFINERY: read as the worker finder's 0x41a, so the house
+    function 19 is not among them); its members are ordered GO_HOMEBUILDING (19), or with no home found PATROL (22) and a write to the platoon's
+    +0x115 (`persistent`) whose value the decompile lost (**Unknown**); `FUN_14038a720` and `FUN_1404d2dd0` with the building (**Unknown**);
+    "Building purchased!". Meitou: [house purchases](../simulation.md#town-house-purchases).
   - 4 is the medical panel's section (**Observed**: `MedicalDatapanel`'s constructor `FUN_140726a70` passes 4 to `FUN_1406fd7d0`; it finds the
     `LifeBarN` widgets and their `Value`, `Yellow`, `Green`, `White`, `Datapanel`, `Tooltip`, `Robot` and `Crushed` children (and one more whose name string was not read), and `HealthText`). The
     header word is slot 114 (`FUN_1402fe040`: Normal / Broken / Under construction with a tooltip); the rows slot 115 (`FUN_140302380`): `Condition`, or
@@ -631,7 +648,8 @@ How a building gets selected: [ui-input](ui-input.md#building-picking-and-select
   **Observed** (game data, not the decompile): many shop states carry a generic name (`Shop`, `Big Shop`, `General Shop`, `Bar`); what the
   building is lives in the SQUAD_TEMPLATE named by the state's `squad template`: `building name` ("The Dancing Skeleton") and, for a
   trader, its `vendors` VENDOR_LISTs ("medical and travel supplies"). The owner's screenshot shows "The Dancing Skeleton" in the name
-  bar with `Type:` the record. Meitou names the building from `building name` when set, and, in the Meitou UI mode only, a trader's shop whose
+  bar with `Type:` the record. Housing sets `name` (**Verified**) and `squad template` (**Observed**, [town residents](factions-squads-towns.md#town-residents)). Meitou names the building from
+  a loaded save's state, else the level state as the boot housed it: `building name` when set, else `name`, else the record; and, in the Meitou UI mode only, a trader's shop whose
   state name is only its layout's generic one ("Shop") from its first vendor list ("Medical and travel supplies"); the Faithful UI keeps "Shop".
   Meitou (`PlayerInterface.BuildingSelect.cs`): the header word (Normal, Broken, or a site's construction state); the condition rows as above, the bar
   in the yellow layer, a finished building's progress being its target (Meitou models no building damage) and the target of a world building or door
@@ -1078,7 +1096,7 @@ unless marked; Meitou: `PlayerInterface.Squads.cs`, commands in `SquadManagement
     cell, shown only when the section takes the item and the footprint fits (what is under it is ignored: swaps are legal); no red or green.
   - Meitou (`PlayerInterface.Inventory.cs`, `Items/HeldItems.cs`): the held item is world state (`PlayerState.Held`, commands `LiftItem`, `PlaceHeld`, `GiveHeld`, `DropHeld`,
     `ReturnHeld`; [simulation](../simulation.md#items-and-eating)). Engine choices: the release places only after the pointer moved at least 5 px since the press (a click keeps the item for the
-    next press); right click or Escape puts it back; a stock item goes only into the customer's windows and the customer's own items onto the stock; give range 1000 (60 for an item out of
+    next press); right click or Escape puts it back; a stock item goes into a player character's window and such a window's own items onto the stock, the trade passing to that character within 1000 ([simulation](../simulation.md#trade)); give range 1000 (60 for an item out of
     a non-player window) from the window's owner; let go over a squad bar portrait, it is given to that member (same range and room rules; its own portrait puts it back). Race limits: `ItemInstance.WearableBy` (an animal only with its race listed). Not built: section item-count caps (no section is known to set one, above), "That's not for sale." (no trader character window),
     CAMPING buildings.
 - **Observed** in the original Metaru screenshot supplied on 2026-10-15: inventory
@@ -1116,7 +1134,7 @@ unless marked; Meitou: `PlayerInterface.Squads.cs`, commands in `SquadManagement
   - `Disguise:` value = the uniform faction's name (S+0x108 non-null) in Main, else `None`; tooltip `Not currently in disguise.` at S+0x100 (disguise level) <= 0, else the rows `Clothing disguise:`, `In secure location:`, `Same faction:`, `Slave owner recognition:`, `Someone knows me personally:`, `Disguise blown:` (seconds, S+0x110) and `Total:` (level x 100). A second row follows with a 4-space label: `-` at level <= 0, else the percent (`{n}%` of S+0x100 x 100, Main) or `Blown!` (Bad) when S+0x110 > 0. Meitou: `PlayerInterface.DisguiseLines` from `CharacterSnapshot.Disguise` ([disguise](perception.md#disguise)).
   - `Slave of:` S+0 <= 0: value `-`, label and value Greyed, tooltip `You are a free person.`. S+0 > 0 (1 slave, 2 escaped; 3 ex-slave): the owner faction's name (S+0xe0, name at +0x1a8) in Bad, tooltip `The faction that owns you.`; **without an owner the line is not added**.
   - `Looks like slave:` S+0 <= 0: `-` Greyed, tooltip `You are no slave.`. Else `{n}%` with n = int(S+0xf4 x 100), Bad when S+0xf4 > 0.1 (else the default colour); tooltip `How much you look like an escaped slave...` followed, for slave states, by the rows `Clothing:` (S+0xf0), `Minimum (Escaping):` / `Minimum (Ex-Slave):` (S+0xec set: 10 / 1 %, floors) and `Total:` (Meitou: the first text only).
-  - The level S+0xf4 (**Observed**, `FUN_1405a51e0`, run for a character of the player's faction; constants read from the binary): reset to 0; inventory sections by item-slot id 3, 5, 6, 9 (**Observed**: 3 hat, 5 body armour, 6 legs, 9 boots): section 3 empty + a character flag (`CharacterHuman` slot 124, anim-class field `+0xe8` -> `+0x168`, meaning **Unknown**) +0.4; section 5 empty +0.1, or a locked piece (item slot 94 non-null, shackles) +1; section 6 empty +0.1, a locked piece +1, a piece with `+0x244` = 6 (slave clothing, **Observed**) +0.5; section 9 holding a locked piece +1, no piece in an existing section +0.1. S+0xf0 = that sum; state 2 doubles it; state 3 (ex-slave) below 0.01 becomes 0.01 (S+0xec = 1), state 2 below 0.1 becomes 0.1 (S+0xec = 10); above 1 becomes 1. Meitou: `CaptiveSystem.LooksLikeSlaveLevel` (any locked worn item = 1; the flag taken as true; state 3 does not exist).
+  - The level S+0xf4 (**Observed**, `FUN_1405a51e0`, run for a character of the player's faction; constants read from the binary): reset to 0; inventory sections by item-slot id 3, 5, 6, 9 (**Observed**: 3 hat, 5 body armour, 6 legs, 9 boots): section 3 empty + a character flag (`CharacterHuman` slot 124, anim-class field `+0xe8` -> `+0x168`, meaning **Unknown**) +0.4; section 5 empty +0.1, or a locked piece (item slot 94 non-null, shackles) +1; section 6 empty +0.1, a locked piece +1, a piece with `+0x244` = 6 (slave clothing, **Observed**) +0.5; section 9 holding a locked piece +1, no piece in an existing section +0.1. S+0xf0 = that sum; state 2 doubles it; state 3 (ex-slave) below 0.01 becomes 0.01 (S+0xec = 1), state 2 below 0.1 becomes 0.1 (S+0xec = 10); above 1 becomes 1. Meitou: `CaptiveSystem.LooksLikeSlaveLevel` (any locked worn item = 1; the flag taken as true; S+0xec not modelled).
   The character parchment has separate label/value rows: Total Weight, a burden description, Disguise, Slave of, Looks like slave. **Unknown**: exact runtime sizing/rounding,
   burden description thresholds, and race/mod overrides of the pocket dimensions. Meitou uses 8 by 10 for new pockets and retains taller loaded inventories when saved items require it.
   Total Weight `W/M` (**Observed** in the exe, checked on three characters of the owner's save against the original): both truncated; M = strength × its injury multiplier +
@@ -1224,9 +1242,12 @@ unless marked; Meitou: `PlayerInterface.Squads.cs`, commands in `SquadManagement
   replaced). **Verified** (decompile): "empties" destroys every item in the section (`FUN_140749c20` with its delete flag, "clearAllItems"); for boots with shoes allowed the first worn item is first
   taken off through character vtable slot 53 (`FUN_1405ca740`), which places it in the world just ahead of the character (the scalar of the offset is not readable) and removes it from the
   inventory: worn boots are dropped, not packed. With `no shoes` nothing is taken off, the items are destroyed. Callers (vtable slot 130 `+0x410`, **Observed**: a scan of the `+0x410` virtual calls, whose other hits are other classes' slots): the human inventory build
-  (`FUN_14062c4e0`, slot `0x2c0`, before the clothing is added) and the severing of a leg (`FUN_14064edc0`, parts 2 and 3). The other `InventorySection::setEnabled` callers are the furnace, crafting benches and animals. Meitou:
+  (`FUN_14062c4e0`, slot `0x2c0`, before the clothing is added) and the severing of a leg (`FUN_14064edc0`, parts 2 and 3); **Verified** (decompile): also the character editor's close
+  (`FUN_1405f5d10`) for each human of its list when not in mode 1 (the window's byte `+0x1c0` is mode == 1, set in `FUN_1405f4dd0`), right after `starting health`, so a race
+  switched at a new game loses what it wore in the sections it closes. The other `InventorySection::setEnabled` callers are the furnace, crafting benches and animals. Meitou:
   `InventoryCommands.SectionClosed`, `CharacterSnapshot.ClosedSlots`, drawn disabled and refusing drops and every automatic equip (`TryEquip`, `Transfer`, `MoveInto`: trade, pick-up, loot, scavenge, storage, slave clothing);
-  `InventoryCommands.ValidateSections` runs when a leg is severed (the limb queue of `PopulationSystem`): boots dropped 3 ahead of the character (as a dropped held item, engine offset), the rest destroyed.
+  `InventoryCommands.ValidateSections` runs when a leg is severed (the limb queue of `PopulationSystem`) and for the start's squad when the creation ends (`CharacterEditing.EndCreation`):
+  boots dropped 3 ahead of the character (as a dropped held item, engine offset), the rest destroyed.
 - **Unknown**: the trader window's panel lines beyond Money.
 - Item placement failure messages (FUN_14070f7e0; the checks behind them are in [economy.md](economy.md#shops-and-transactions)): Out of trading range; No room for that item; You can't
   afford that; The shopkeeper can't afford that; That's not for sale; Got caught stealing; Smugglers only buy
@@ -1235,7 +1256,8 @@ unless marked; Meitou: `PlayerInterface.Squads.cs`, commands in `SquadManagement
   building the cell and FUN_140847bf0 choosing the picture):
   - **Which kind** (**Verified**: FUN_140847bf0 decompiled, and against the saved pictures below). The game draws an item's icon from its mesh when the record is a WEAPON or its
     `auto icon image` is true (fcs.def default: true for CROSSBOW, ITEM, NEST_ITEM, WEAPON; false for ARMOUR, CONTAINER, LIMB_REPLACEMENT, MAP_ITEM; the base game's records all store it).
-    Any other record shows the PNG its `icon` field names, else `default_icon.png` (`data/items/icons`; the game logs "[Icon] Missing image").
+    Any other record shows the PNG its `icon` field names, else `default_icon.png` (`data/items/icons`; the game logs "[Icon] Missing image"). The name is looked up by its bare name in
+    the `Icons` resource group alone (`resourceExists("Icons", name)`, FUN_140847bf0, **Verified**): `Water.png` is also `data/materials/water.png` in General, a water normal map.
   - **Static files** (**Verified**, base game): 318 records (ITEM 268, ARMOUR 31, MAP_ITEM 17, CROSSBOW 2) name a PNG under `data/items/` (`.\data\items\icons\Fuel.png`, a few in
     `armour\pants\`); all 318 exist (**Observed**). The files are sized to the footprint at 25 px a cell (75x75 for 3x3, 150x25 for 6x1; **Observed**).
   - **The game's saved pictures**: it looks for the texture name in its `Icons` resource group first and draws only when it is not there, saving `<install>/data/icons/<name>`.

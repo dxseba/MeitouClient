@@ -197,7 +197,7 @@ public class LimbSeveranceGeometryTests
         database.Apply(file, "limb-tests.mod");
         var cold = new CharacterCold { Race = Human, Medical = Healthy(), Appearance = new() { Race = database.Find("overlap-race")! },
             LimbSeverances = [new(0, .506f, new(slant, -.293f))], Blow = (new(35, 7, 0), new(35, 7, 0)) };
-        cold.Medical.Sever(LArm, Context(), false);
+        cold.Medical.Sever(LArm, Context());
         cold.Medical.KnockOut(10000);
         using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { AdvancedRagdolls = true },
             _ => setup, (_, _, _) => definition);
@@ -249,7 +249,7 @@ public class LimbSeveranceGeometryTests
         };
         cold.Medical.KillFromBisection();
         foreach (int limb in new[] { firstLimb, firstLimb + 1 })
-            cold.Medical.Sever(cold.Medical.Parts.ToList().FindIndex(part => part.Template.LimbSlot == limb), Context(), false);
+            cold.Medical.Sever(cold.Medical.Parts.ToList().FindIndex(part => part.Template.LimbSlot == limb), Context());
         using var physics = new RagdollSystem(new(database, _ => null, _ => null), new Flat(), BodyOptions.Default with { AdvancedRagdolls = true },
             _ => setup, (_, _, _) => definition);
         using var world = new SimWorld(new WorldSettings { Seed = 13 }, new OpenGroundWalkability((_, _) => 0), [physics]);

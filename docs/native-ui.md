@@ -118,3 +118,18 @@ Inventory drags draw the cell's icon/count at its footprint size and original gr
 above windows without intercepting drops; the source hides until release/cancellation.
 Escape/right click cancels; changing the source snapshot or closing its window cancels too.
 [Host](engine.md), [saves](simulation.md#quicksave-and-quickload).
+
+## Text of a layout
+
+A caption or hint written in a MyGUI layout is a source string of the player's language, not final text: the original looks it up in the
+language's catalog (`locale/<code>/LC_MESSAGES/main.mo`) and draws the translation, the layout's own text when there is none. The layouts
+caption sections in capitals (`SKILLS`, `WEAPON I`, `OPEN BAG`) while the catalog keys are written normally (`Skills`, `Weapon I`,
+`Open bag`), so the lookup is made ignoring case as well as exactly (`Loc.TrCaption`, `GettextCatalog.FindIgnoringCase`; the case-free
+index keeps the first spelling when the catalog holds both `Map` and `MAP`).
+
+Punctuation that belongs to the panel stays outside the lookup: the dashes of the skill column titles (`"-" + Loc.Tr("Weapons") + "-"`),
+the brackets of the jobs hint (`"[" + Loc.Tr("No jobs assigned") + "]"`) and the dash of the burden row (`"-" + Loc.Tr("Weightless")`)
+are added after the translation, so a translation only ever holds the words. **Verified** (shipped `main.mo` of de/es/fr/ja/ko/pt_BR,
+`GettextCatalogTests`): the catalogs have `Skills`, `Weapon I`, `Weapons`, `No jobs assigned`, `Weightless` but not the capitalised or
+punctuated forms, and hold both `Map` and `MAP`. **Observed**: those captions render translated in the original, hence the case-free
+lookup; the original's lookup code is not located (**Unknown**).

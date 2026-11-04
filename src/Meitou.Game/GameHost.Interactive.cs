@@ -28,7 +28,8 @@ sealed partial class GameHost
         int fpsLimit = g.FpsLimit ?? config.FpsLimit;
         int initialFpsLimit = fpsLimit;
         VulkanDisplay.RayTracing = o.WantsRayTracing;
-        if (!g.NoPrecompile) JitWarmup.Start();   // the game's methods compiled ahead, from now on, behind the loading
+        // The game's methods compiled ahead, from now on (with code mods: once they are initialized), behind the loading.
+        if (!g.NoPrecompile) StartWarmup();
         // The world's files are read on a worker from here on: while the window and the device are made, then behind the loading screen.
         var sceneRead = LoadScene is { } readScene ? Task.Run(readScene) : null;
         BeginAudio();
@@ -104,8 +105,8 @@ sealed partial class GameHost
         var switches = WorldFrame.LiveSwitches(o, () => gpu, () => camera, () => render);
         var meitou = new MeitouToggle(switches);
         // Keep the shared rendering settings' callbacks and persistence keys; the game supplies its own modal layout.
-        // --low-end (WorldOptions.LowEnd) is a preset for this run: the saved sliders and switches would undo it, so they are left as saved and not applied.
-        bool lowEnd = Environment.GetCommandLineArgs().Contains("--low-end");
+        // --low-end (WorldOptions.LowEnd) and --benchmark-baseline are presets for this run: the saved sliders and switches would undo them, so they are left as saved and not applied.
+        bool lowEnd = Environment.GetCommandLineArgs().Contains("--low-end") || g.BenchmarkBaseline;
         var runOnly = RunOnlyKeys();   // the keys this run leaves as saved (--bloom)
         var settingsValues = overlay is null ? null : WorldFrame.CreateSettingsPanel(overlay, gpu, render,
             getHour: () => (float)session.Clock.HourOfDay, setHour: v => { session.Clock.SetHourOfDay(v); if (IsDuel) duelHour = v; },
@@ -170,6 +171,7 @@ sealed partial class GameHost
                 if (!SettingsMenu.HiddenSwitch(toggle.Label) && !runOnly.Contains(SwitchKey(toggle.Label)) && config.Graphics.TryGetValue(SwitchKey(toggle.Label), out float v) && (v >= 0.5f) != toggle.Get()) toggle.Set(v >= 0.5f);
             panel.ApplySavedPreset();
         }
+        if (g.BenchmarkBaseline) panel?.ApplyBenchmarkBaseline();
         var stats = new List<string>();
         bool statsVisible = false, fpsVisible = false;
         string fpsText = "";
@@ -580,6 +582,8 @@ sealed partial class GameHost
             cinema.Advance(cinema.FrameTime(dt));   // a flight through the keys moves the camera (and takes it from the rig)
             if (tour.Active && !tour.Advance(dt, camera, TourPosition)) EndTour();
             gpu.Ahead = tour.ArrivalEye(TourPosition);   // the streaming loads the landing view during the flight
+            session.ViewEye = cinemaHolds ? camera.Eye : null;   // the simulation's far cadence follows the flying camera, not the rig it left
+            gpu.CameraFlying = tour.Moving;   // the far shadow cascades wait for the landing (docs/render-shadows.md "Flights")
             gpu.Kept = !config.KeepTexturesAtCharacters ? []
                 : config.KeepTexturesAtAllSquads ? [.. session.CurrentSnapshot.PlayerSquads.SelectMany(s => s.Members).Select(TourPosition).OfType<Vector3>()]
                 : [.. player.SquadBarMembers().Select(c => TourPosition(c.Id)).OfType<Vector3>()];
@@ -692,6 +696,8 @@ sealed partial class GameHost
                     tickAhead = false;
                 }
                 Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiWorldEnd);
+                // MEITOU_DIAG_SUBMIT=1 (issue #108): the world submitted and finished before the interface draws, and the interface before the present.
+                if (GpuContext.DiagSubmit) display.Context.SubmitAndWait();
                 // The sky arrival's fade to and from black, over the world and under everything else.
                 if (skyArrival is { Fade: > 0 } fading && overlay is not null)
                 {
@@ -789,6 +795,7 @@ sealed partial class GameHost
                 bool generating = frameGen is not null && frameGen.Finish(uiTarget);
                 var finalPicture = generating ? null : uiLayer.Composite(backbuffer);
                 Meitou.Rendering.StageClock.UiPart(Meitou.Rendering.StageClock.UiComposite);
+                if (GpuContext.DiagSubmit) display.Context.SubmitAndWait();
                 display.Present(finalPicture);
                 profiler?.EndFrame();
                 BenchLap(7);

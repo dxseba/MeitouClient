@@ -74,7 +74,7 @@ public sealed class DownedAttackMenuTests
             Ui.ConfigureFrontend(SyntheticTown.Database(), () => [], "");
             Ui.Eye = new Vector3(0, 6, -14);
             Ui.ViewProjection = Matrix4x4.CreateLookAt(Ui.Eye, new(0, 1, 0), Vector3.UnitY)
-                * Matrix4x4.CreatePerspectiveFieldOfView(1, 1600 / 900f, 0.1f, 1000);
+                * Meitou.Rendering.DepthConvention.Perspective(1, 1600 / 900f, 0.1f, 1000);
             Ui.MeshHit = (id, _, _) => id == Target ? 10 : float.PositiveInfinity;
             Pixel = Ui.Project(new Vector3(3, 1, 0))!.Value;
         }

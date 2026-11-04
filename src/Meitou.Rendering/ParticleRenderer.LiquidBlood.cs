@@ -39,7 +39,7 @@ public sealed unsafe partial class ParticleRenderer
             };
         }
         if (written == 0) return;
-        int close = gpu.ClipDepthZeroToOne ? 0 : PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
+        int close = gpu is not GpuContext ? 0 : PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
         var instances = frame.AllocateConstants((ulong)(written * InstanceBytes), 16);
         scratch.AsSpan(0, written).CopyTo(new Span<ParticleInstance>(instances.Pointer, written));
         draws.Add(new DrawItem
@@ -71,7 +71,7 @@ public sealed unsafe partial class ParticleRenderer
             scratch[written++] = LiquidBloodStripGeometry.Pack(LiquidStreams, i, eye);
         }
         if (written == 0) return;
-        int close = gpu.ClipDepthZeroToOne ? 0 : PartitionLiquidByDepth(scratch.AsSpan(0, written), forward, nearPlane);
+        int close = gpu is not GpuContext ? 0 : PartitionLiquidByDepth(scratch.AsSpan(0, written), forward, nearPlane);
         var instances = frame.AllocateConstants((ulong)(written * InstanceBytes), 16);
         scratch.AsSpan(0, written).CopyTo(new Span<ParticleInstance>(instances.Pointer, written));
         draws.Add(new DrawItem

@@ -691,10 +691,14 @@ internal sealed unsafe partial class CharacterRenderer
 
     bool TorsoPartVisible(in Live live, AssetPart part)
     {
-        if (!part.Shared && part.Bone >= 0 && part.Bone < live.Asset.Rig.BindPosition.Length
-            && live.LimbPlanes.Band(live.Asset.Rig.BindPosition[part.Bone], woundMasks.GroupOfBone(live.Asset.Rig, part.Bone), live.LimbCuts, live.PartOnly) < 0) return false;
-        if (live.TorsoCut is not { } cut || part.Shared || part.Bone < 0 || part.Bone >= live.Asset.Rig.BindPosition.Length) return true;
-        return TorsoCutSurface.Band(live.Asset.Rig.BindPosition[part.Bone], cut.HeadOnly ? HeadCutSurface.Group(live.Asset, part.Bone) : woundMasks.GroupOfBone(live.Asset.Rig, part.Bone), cut) >= 0;
+        var rig = live.Asset.Rig;
+        if (part.Shared || part.Bone < 0 || part.Bone >= rig.BindPosition.Length) return true;
+        // The tag's offset is part of its mount; its bone origin can lie in a different cut half.
+        var mount = rig.BindPosition[part.Bone] + Vector3.Transform(part.Offset.Translation * rig.BindScale[part.Bone].Y,
+            Quaternion.Conjugate(rig.BindRotationInverse[part.Bone]));
+        if (live.LimbPlanes.Band(mount, woundMasks.GroupOfBone(rig, part.Bone), live.LimbCuts, live.PartOnly) < 0) return false;
+        return live.TorsoCut is not { } cut || TorsoCutSurface.Band(mount,
+            cut.HeadOnly ? HeadCutSurface.Group(live.Asset, part.Bone) : woundMasks.GroupOfBone(rig, part.Bone), cut) >= 0;
     }
 
     /// <summary>The limb bits a chosen cut height takes over from the game's fixed hide.</summary>

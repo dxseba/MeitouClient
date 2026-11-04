@@ -121,7 +121,6 @@ public sealed partial class CombatSystem
         var events = hitEvents;   // Apply is serial, so one list serves every hit
         events.Clear();
         bool aliveBeforeHit = !dc.Medical.Dead;
-        bool standingBeforeHit = dc.Medical.Standing;
         bool wasIncapacitated = dc.Medical.Incapacitated;
         int partCount = CanDepositWeaponBlood(strikingItem, dc.Race, aliveBeforeHit) ? dc.Medical.Parts.Count : 0;
         Span<bool> organicBeforeHit = partCount <= 64 ? stackalloc bool[partCount] : new bool[partCount];
@@ -131,7 +130,7 @@ public sealed partial class CombatSystem
         var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events, aimedPart);
         if ((uint)part < (uint)organicBeforeHit.Length)
             DepositWeaponBlood(strikingItem, dc.Race, damage, aliveBeforeHit, organicBeforeHit[part], mechanism);
-        TrySeverCounterpart(dc, part, packet, damage, ctx, cover, toughness, aliveBeforeHit, standingBeforeHit, brutality,
+        TrySeverCounterpart(dc, part, packet, damage, ctx, cover, toughness, aliveBeforeHit, brutality,
             direction, mechanism, CombatRolls.Float(world.Seed, Rng.Key(table.IdOf(d)), CombatRoll.PairedLimb,
                 CombatRolls.BlowCounter(a, seq, blow, 0)), events);
         var cutTravel = new Vector2(prev[d].Position.X - prev[a].Position.X, prev[d].Position.Z - prev[a].Position.Z);

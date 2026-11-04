@@ -37,7 +37,7 @@ public sealed unsafe partial class ParticleRenderer
         if (written == 0) return;
         if (kind == RobotExplosionQuadKind.Smoke)
             scratch.AsSpan(0, written).Sort(static (a, b) => b.Position.LengthSquared().CompareTo(a.Position.LengthSquared()));
-        int close = gpu.ClipDepthZeroToOne ? 0 : PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
+        int close = gpu is not GpuContext ? 0 : PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
         var instances = frame.AllocateConstants((ulong)(written * InstanceBytes), 16);
         scratch.AsSpan(0, written).CopyTo(new Span<ParticleInstance>(instances.Pointer, written));
         draws.Add(new DrawItem { Instances = instances, Count = written, Close = close,

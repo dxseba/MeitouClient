@@ -17,7 +17,7 @@ namespace Meitou.Rendering.Characters;
 /// <item><see cref="Update"/> once per frame, before the shadow cascades: asks the host's <see cref="Source"/> for the list, builds assets for
 /// appearances not seen yet, poses every character in range in parallel into the frame's bone-palette buffer, and writes the materials of the
 /// parts in view.</item>
-/// <item><see cref="Draw"/> / <see cref="DrawDepth"/> for each view (the scene's near slice, a shadow cascade): cull, pick each part's mesh LOD, group
+/// <item><see cref="Draw"/> / <see cref="DrawDepth"/> for each view (the scene, a shadow cascade): cull, pick each part's mesh LOD, group
 /// the instances by (mesh part, level) and record one instanced draw each.</item>
 /// </list>
 /// </summary>
@@ -399,6 +399,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     /// </summary>
     public bool InReach(Vector3 position, Vector3 eye) => Vector3.DistanceSquared(position, eye) <= (DrawDistance + ReachMargin) * (DrawDistance + ReachMargin);
     const float ReachMargin = 2000;
+    /// <summary>The distance within which a character may be drawn this frame (<see cref="DrawDistance"/> plus the margin): the simulation's near radius for its far cadence.</summary>
+    public float NearReach => DrawDistance + ReachMargin;
 
     /// <summary>
     /// The planes of the view the characters are shown in this frame (the host sets them before <see cref="Update"/>), for the off-screen rule (<see cref="Shown"/>);
@@ -472,7 +474,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     {
         Gpu = gpu;
         nativeFrame = new NativeFrame(gpu, extraStorage: 4);
-        colourProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.Vertex(), Gi.GiResolveShaders.WithAlbedo(CharacterShaders.Fragment(), inShader: true), "characters", CharacterShaders.InstanceLocation);
+        var colourFragment = CharacterShaders.Fragment(gpu.Shaders.DiscardNeedsLateDepth);
+        colourProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.Vertex(),
+            Gi.GiResolveShaders.WithAlbedo(colourFragment, inShader: true), "characters", CharacterShaders.InstanceLocation);
         depthProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.DepthVertex(), CharacterShaders.DepthFragment(), "characters depth", CharacterShaders.InstanceLocation);
         motionProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.MotionVertex(), CharacterShaders.MotionFragment(), "characters motion", CharacterShaders.InstanceLocation);
         content = new CharacterContent(gpu, install, db, assetLocator, rigs);
@@ -871,9 +875,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     void PoseLive(Vector3 eye, int boneTotal, int partTotal)
     {
         var watch = Stopwatch.StartNew();
-        bones = AllocateConstants((ulong)Math.Max(boneTotal, 1) * 64, 256);
+        // Not cleared: every live character's range is written below (an icon has none), so zeroing megabytes first was wasted.
+        bones = Gpu.Frame.AllocateConstants((ulong)Math.Max(boneTotal, 1) * 64, 256);
         nint bonePointer = (nint)bones.Pointer;
-        previousBones = Motion ? AllocateConstants((ulong)Math.Max(boneTotal, 1) * 64, 256) : bones;
+        previousBones = Motion ? Gpu.Frame.AllocateConstants((ulong)Math.Max(boneTotal, 1) * 64, 256) : bones;
         nint previousPointer = (nint)previousBones.Pointer;
         bool motion = Motion;
         if (partFrames.Length < partTotal) partFrames = new PartFrame[Math.Max(partTotal, partFrames.Length * 2)];
@@ -886,8 +891,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     void PoseOne(ref Live l, nint bonePointer, nint previousPointer, bool motion, Vector3 eye)
     {
         var asset = l.Asset;
-        if (asset.IsIcon) return;
+        if (asset.IsIcon) return;   // no rig, so no range in the palettes (GatherIcons gives it no bones)
         var rig = asset.Rig;
+
         var state = l.State;
         if (l.Repose) Repose(ref l, state);
 
@@ -1027,6 +1033,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
 
         static void Offer(AssetPart part, float need)
         {
+            // Negative attachment bias needs finer resident mips as well as biased sampling.
+            need *= MathF.Pow(2, part.Material.MipmapBias);
             foreach (var t in part.Material.Tex)
                 if (t is not null)
                 {
@@ -1196,8 +1204,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         r.VestCount = vests;
         r.AlphaThreshold = m.AlphaThreshold;
         r.ShirtColour = new Vector4(m.ShirtColour, m.GlossMult);
-        r.SkinTone = m.WeaponBloodAxis.W > 0 ? m.WeaponBloodAxis : new Vector4(m.SkinTone, has[CharacterShaders.SlotBlendNormal] ? m.MuscleBlend : 0);
-        // RGB uses hair colour; the unused alpha carries an exact 24-bit integer without growing the material.
+        float skinAlpha = m.Shading == CharacterShaders.ShadeHair ? m.MipmapBias
+            : has[CharacterShaders.SlotBlendNormal] ? m.MuscleBlend : 0;
+        r.SkinTone = m.WeaponBloodAxis.W > 0 ? m.WeaponBloodAxis : new Vector4(m.SkinTone, skinAlpha);
+        // Hair uses skinTone.w for its mip bias; hairColour.w retains the exact race blood RGB for every material.
         r.HairColour = new Vector4(m.HairColour, m.BloodColour & 0xFFFFFF);
         r.HairAlpha = m.HairAlpha; r.HairMult = m.HairMult; r.BeardAlpha = m.BeardAlpha;
         r.DiffuseChannel = m.DiffuseChannel; r.AlphaChannel = m.AlphaChannel;

@@ -215,7 +215,8 @@ public partial class RagdollHitReactionTests
         }
         else Assert.False(scene.Cold.Medical.Dead);
         scene.World.RunTicks(8);
-        Assert.True(scene.State.Pose.Average(p => p.Position.X) > before.Pose.Average(p => p.Position.X) + 0.05f);
+        // Ground tessellation changes contact friction; require forward recoil rather than a fixed sliding distance.
+        Assert.True(scene.State.Pose.Average(p => p.Position.X) > before.Pose.Average(p => p.Position.X) + 0.01f);
     }
 
     [Fact]
@@ -270,7 +271,7 @@ public partial class RagdollHitReactionTests
         using var scene = new Scene(combat: true, knockout: invalid != 2);
         scene.World.RunTick();
         string part = invalid == 0 ? "unknown-part" : invalid == 1 ? LeftArm.StringId : Head.StringId;
-        if (invalid == 1) scene.Cold.Medical!.Sever(LArm, Context(scene.Cold.Race), false);
+        if (invalid == 1) scene.Cold.Medical!.Sever(LArm, Context(scene.Cold.Race));
         if (invalid == 3) scene.Cold.Medical!.KillFromBisection();
         if (invalid == 4) scene.Cold.Faction = 0;
         if (invalid == 5) scene.Cold.CarriedBy = new(222, 1);

@@ -20,6 +20,8 @@ public sealed class CharacterAnimation
     {
         public int Definition;
         public float Time, Weight, Target;
+        /// <summary>Seconds of clip per second it last moved forwards at (the layer's play rate, +0x40): a block fading out plays backwards at it.</summary>
+        public float Rate;
         /// <summary>The clip's length in seconds as the character's skeleton has it (set while the time advances; derived, not hashed): the sound events' fractions need it.</summary>
         public float Length;
     }
@@ -92,6 +94,7 @@ public sealed class CharacterAnimation
             h.Add(Layers[i].Time);
             h.Add(Layers[i].Weight);
             h.Add(Layers[i].Target);
+            h.Add(Layers[i].Rate);
         }
         h.Add(Phase);
         h.Add(PhaseRate);
@@ -162,7 +165,9 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     // Resting on a chair plays the clip its functionality names ("sitting chair"), else sitting on the floor.
     int HeldClip(CharacterTask task, CharacterCold cold) => task switch
     {
-        CharacterTask.Treat or CharacterTask.Build or CharacterTask.DeliverMaterials or CharacterTask.Prospect => TreatingClip,
+        CharacterTask.Build or CharacterTask.DeliverMaterials or CharacterTask.Prospect => TreatingClip,
+        // A medic kneels only at a patient keeping still (Task_FirstAid's update plays the clip; FirstAidSystem); waiting for one that moves it stands.
+        CharacterTask.Treat => cold.TreatKneels ? TreatingClip : -1,
         // An NPC looting a body it has reached (Observed, Task_Loot_AI) or a forager waiting at one (Task_Loot_ResourcesWeHaveStorageFor); the player's own take is instant.
         CharacterTask.Loot when (!cold.IsPlayer || cold.Foraging) && cold.LiftTime >= 0 => TreatingClip,
         CharacterTask.Rest => cold.Ai?.SitClip is { } sit && SitClipOf(sit) is >= 0 and var chair ? chair : RestingClip,
@@ -210,12 +215,12 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         var table = world.Characters;
         var prev = table.Previous;
         var next = table.Next;
-        float dt = world.TickSeconds;
         var wantedLower = lowerScratch ??= [];
         var wantedUpper = upperScratch ??= [];
         for (int i = part.Start; i < part.End; i++)
         {
-            if (!prev[i].Alive) continue;
+            if (!prev[i].Alive || !world.Steps(i)) continue;
+            float dt = world.StepSeconds(i);   // a far character's step covers the ticks since its last (the far cadence, World.StepTicks)
             var cold = table.Cold(i)!;
             var a = cold.Animation ??= new CharacterAnimation();
             var v = next[i].Velocity;
@@ -390,14 +395,20 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         var stance = StanceOf(cold) with { Combat = cold.InCombat && !approaching };
         bool down = cold.Medical is { Incapacitated: true };
         bool crawling = !carried && cold.Medical is { Prone: true };
-        if (HoldsForRagdoll(a, down, carried, ragdoll)) return Vector2.Zero;
-
         bool inBed = cold.InSomething == Locks.HeldState.Bed, inCage = cold.InSomething == Locks.HeldState.Imprisoned;
-        if (down && !a.WasDown && !carried && !ragdoll.Has && !inBed) StartAction(a, fall, false);   // a ragdoll falls instead; one in a bed lies on
+        // One held in a cage or on a pole is posed by the fixture's clip, not by a ragdoll: the fixture refuses the whole-body ragdoll
+        // (RagdollSystem.Wanted), so holding the pose here would leave it flat in whatever pose the knockout left (docs/game/locks.md "Cages and beds").
+        if (!inCage && HoldsForRagdoll(a, down, carried, ragdoll)) return Vector2.Zero;
+
+        // Held in a cage or on a pole, it plays the fixture's own pose whatever it was doing: a fall left over from before it was put in, or a get-up, would show over it
+        // (docs/game/locks.md "Cages and beds": a captive lies in a cage or stands on a pole, and an awake one stands at once).
+        if (inCage) a.Action = -1;
+        // A ragdoll falls instead; one in a bed lies on; one already held in a cage takes the cage's own out-cold pose (its `animation KO`) at once.
+        if (down && !a.WasDown && !carried && !ragdoll.Has && !inBed && !inCage) StartAction(a, fall, false);
         if (carried) a.Action = -1;   // held on the shoulder: no falling or getting up
         // Waking with a leg down there is nothing to get up on, and one staying low does not stand: the original's get-up ends with the bone blend and the posture's idle
-        // follows (docs/game/ragdolls.md "Getting up"). Waking in a bed it lies on (engine choice).
-        else if (!down && a.WasDown && (crawling || inBed || cold.Medical is { StayingLow: true })) a.Action = -1;
+        // follows (docs/game/ragdolls.md "Getting up"). Waking in a bed it lies on (engine choice); one held in a cage or on a pole stands up at once, no get-up clip.
+        else if (!down && a.WasDown && (crawling || inBed || inCage || cold.Medical is { StayingLow: true })) a.Action = -1;
         else if (!down && a.WasDown)
         {
             StartAction(a, getUp, false);
@@ -405,7 +416,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             if (ragdoll.WasWhole) a.ActionTime = -Meitou.Simulation.Ragdolls.RagdollSystem.GetUpBlend;
         }
         // The leg back up: posture 2 ends in 0 and the posture setter queues the get-up task 65 (FUN_1405c7e20), which plays `standing up 3`.
-        else if (a.WasCrawling && !down && !carried && !inBed && cold.Medical is { Crawling: false, Prone: false }) StartAction(a, getUp, false);
+        else if (a.WasCrawling && !down && !carried && !inBed && !inCage && cold.Medical is { Crawling: false, Prone: false }) StartAction(a, getUp, false);
         a.WasDown = down;
         a.WasCrawling = cold.Medical is { Crawling: true };
         // The hit reaction the combat system picked (it holds the character helpless for the clip's length; see ChooseStumble).
@@ -416,8 +427,9 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         }
         int technique = down || carried ? -1 : fight.Technique;   // a carried body plays nothing but its held pose
         bool fullTechnique = technique >= 0 && Library.Definitions[technique].Area == AnimationArea.All;
-        // A technique cuts a reaction or getting up short, and so does walking off (except a hit reaction, which moves the character itself).
-        if (a.Action >= 0 && !down && (technique >= 0 || MathF.Abs(speed) >= MovingSpeed && !a.ActionIsStumble)) a.Action = -1;
+        // A technique cuts a reaction or getting up short, and so does walking off (except a hit reaction, which moves the character itself); a stumble the combat system
+        // ended with a won break-out fades out (FUN_140609290 -> FUN_1405b36f0, docs/game/combat.md "Hit reactions").
+        if (a.Action >= 0 && !down && (technique >= 0 || MathF.Abs(speed) >= MovingSpeed && !a.ActionIsStumble || a.ActionIsStumble && fight.StumbleClip < 0)) a.Action = -1;
         if (a.Action >= 0)
         {
             var d = Library.Definitions[a.Action];
@@ -654,11 +666,13 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             if (layer.Definition == lift) layer.Time = liftTime;
             else if (layer.Definition == technique) layer.Time = fight.Progress * length;   // the combat system's timing: the blow lands at its frame
             else if (layer.Definition == a.Action) layer.Time = MathF.Max(a.ActionTime, 0);   // held at the start while getting up blends out of a ragdoll
+            else if (layer.Target <= 0 && !RunsFading(d, synched)) layer.Time = FadingTime(d, layer, dt);
             else if (IsStrafe(d)) layer.Time = Wrap(layer.Time + dt * a.Rate * d.PlaySpeed * a.StrafeSpeed, length);   // signed: a step the other way plays it backwards
             else if (synched) layer.Time = (a.Phase + d.SynchOffset - MathF.Floor(a.Phase + d.SynchOffset)) * length;
             else if (d.MoveSpeed != 0) layer.Time += dt * a.Rate * d.PlaySpeed * speed;
             else layer.Time += dt * (d.PlaySpeed > 0 ? d.PlaySpeed : d.Technique ? 1 : 0);
             if (!d.Loop && !synched && !IsStrafe(d)) layer.Time = Math.Clamp(layer.Time, 0, length * 0.999f);   // a one-shot clip holds its last frame
+            if (layer.Time > before && dt > 0) layer.Rate = (layer.Time - before) / dt;
             if (d.Relocates && layer.Time > before) root += (lengths.Root(d.Clip, layer.Time) - lengths.Root(d.Clip, before)) * layer.Weight;
             if (layer.Weight <= 0 && layer.Target <= 0) continue;   // faded out: dropped
             a.Layers[kept++] = layer;
@@ -666,6 +680,18 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         a.Count = kept;
         return root * rootScale;
     }
+
+    /// <summary>
+    /// Whether a layer fading out goes on playing (<c>FUN_1405b5c30</c>, the fading list: only a looping layer, +0x5d, advances; <b>Verified</b>). Synched and side-step clips are the
+    /// looping movement clips.
+    /// </summary>
+    static bool RunsFading(AnimationDefinition d, bool synched) => d.Loop || synched || IsStrafe(d) || d.MoveSpeed != 0;
+
+    /// <summary>
+    /// A non-looping layer's time while it fades out: frozen, except a block (+0x62, set by <c>FUN_1405b7600</c> for a block technique), which plays backwards at its rate, lowering the guard.
+    /// </summary>
+    static float FadingTime(AnimationDefinition d, in CharacterAnimation.Layer layer, float dt) =>
+        d.Technique && d.Area == AnimationArea.Upper ? MathF.Max(0, layer.Time - layer.Rate * dt) : layer.Time;
 
     /// <summary>A side-step clip (<see cref="AnimationLibrary.Strafe"/>): its time follows the side speed.</summary>
     static bool IsStrafe(AnimationDefinition d) => d.Area == AnimationArea.Lower && d.MoveSpeed == 0 && d.StrafeSpeedMax > 0 && !d.Technique;
@@ -721,6 +747,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         if (a.Rate == 0) a.Rate = 1 / size;
         bool carried = !cold.CarriedBy.IsNone;
         bool down = cold.Medical?.Incapacitated ?? false;
+        // Held in a cage or on a pole, an animal is left as it is: the original shows a still frame there, no idle and no fall (docs/game/locks.md "Cages and beds").
+        if (cold.InSomething == Locks.HeldState.Imprisoned) return Vector2.Zero;
         if (HoldsForRagdoll(a, down, carried, ragdoll)) return Vector2.Zero;
         if (down && !a.WasDown && !carried && !ragdoll.Has) StartAction(a, plan.Fall, false);
         if (carried || !down) a.Action = -1;   // the fall is an animal's only one-shot clip

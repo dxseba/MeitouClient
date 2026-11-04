@@ -121,6 +121,24 @@ faction. Same faction/lawless holder (faction `fundamental type` 8 or `not real`
 handle even if unresolved, strict0 also requires resolution. Dropping ownerless items can set
 dropper as owner. The save's `ownedby` is item+0x140 (**Observed**, `Item` vfunc 75/76); preserve handles, not a boolean only.
 
+A take from the inventory window (right click `RClickAutoTrade` `FUN_140713d20`, drag `FUN_140715560`) books its Theft/Looting, rolls
+`ImStealingDoYouNotice` and marks an ownerless item (`Item::notifyTheftFrom`, vfunc 0x348: owner = the source, unless the source window is the
+player's) only when `InventoryGUI::isStealing(source window, other window)` (`FUN_140711740`, **Verified**) holds. It is false when:
+
+- both windows are the player's (a per-window byte, copied to child windows by `ForgottenGUI::toggleInventory`; meaning **Observed**);
+- the source character is an animal (`isAnimal`, vfunc 0x248) without a backpack on (`Character::hasABackpackOn` `FUN_1405cb320`), unless the
+  window is the one open on a CONTAINER: a carcass (cleansers included) is never stolen from, a pack beast's load is;
+- the source owner's faction is `not real` (+0x1d0), e.g. Wildlife;
+- source and other window are the same;
+- the source owner is a BUILDING whose `building category` is exactly `CAMPING` (Camp Bed, Campfire, tents);
+- the two windows trade for money (`isTradingForMoney`).
+
+The mark does not ask `isItOkForMeToLoot` (that only picks the crime), so a bandit's or bounty holder's gear is stolen from its faction too.
+Right click and drag mark only an item with no owner yet; a give to a portrait (`FUN_140712490`) calls `notifyTheftFrom` whatever the owner (**Verified** call sites).
+
+Meitou: `CrimeSystem.IsStealing` (character and container overloads) gates `Pickpocket`, `Steal` and the marks (`MarksTheft`, container takes);
+the player's-windows and trade terms are the callers' own-faction tests and the separate trade window.
+
 ### Character fields used here
 
 Offsets on the `Character` object; all **Observed** unless the row says otherwise. The names are ours.
@@ -259,13 +277,38 @@ perception mark is not modelled; `+0x110` is `CharacterCold.RecentlyWanted`. A w
 forced into its senses and the decision step answers with `CarrySystem.EngagedDefence` (an engine stand-in for the threats list, [decision step](../simulation.md#decision-step)); an awake player
 victim is only forced-sensed.
 
+### Escaped slaves lie low
+
+The status object's `+0x8` is a double of game hours (day x 24 + hour), saved as the float `ssct`. The slave state setter stamps it with the world clock on any change to a state above 1.
+
+A per-character status update lets a state above 1 run down from that stamp. With `elapsed` = now - `+0x8` in game hours:
+- **elapsed below 0:** the state becomes 0 at once, with the owner kept.
+- **State 3 and elapsed / 24 above 4.0:** the state becomes 0 and the owner is cleared.
+- **State 2 and elapsed above 12.0:** the state becomes 3 and `+0x8` is stamped again.
+
+These writes are direct, not through the setter. State 1 never takes this path. The update's cadence is **Unknown**.
+
+**Verified** by disassembly of a Kenshi 1.0.65 `kenshi_x64.exe`, sha256 `504b362c…cd3e`. In that build, the setter is `FUN_1405a3eb0`, the rule is `FUN_1405a44c0`, and its only caller is the vtable-reached `FUN_1405a4750`. Its constants are 24.0, 4.0 and 12.0. The other addresses in this file come from another build.
+
+Loading can free an escaped slave at once, because the clock is restored to the minute while the stamp is not. **Observed** with a "The Slaves" save written right after New Game:
+- the save holds `ssct` 34.00063 and the clock day 1 10:00, which is 34.0 h;
+- both escaped player characters were free within 120 calendar seconds of the load, in 5 runs out of 5, read with the KenshiOracle probe.
+
+What state 3 does elsewhere (**Observed**, the 64 callers of the getter `FUN_1405c8aa0` in 1.0.68): most tests are `== 1`, `== 2` or `!= 0`, so an ex-slave counts as unfree wherever the
+test is `!= 0` / `> 0` (a police carrier's cage desire 1.4 `FUN_1405a0f10`, the refugee package `FUN_140288ed0`, slave processing `FUN_1408cd630`, prison hunger 1.15 `FUN_1405c9ca0`) and as
+neither slave nor escapee elsewhere. Its own branches: the looks-like-slave level is kept at least 0.01 (`FUN_1405a51e0`, [UI](ui-screens.md)); the status panel shows "Ex-slave"
+(`FUN_1405d4260`); a looker that recognises one while the status `+0x110` is above 0 fires event 40 ESCAPED_EX_SLAVE_SPOTTED (`FUN_140859680`) and then sees through it as through an escapee
+(`FUN_140856f00`, with the line test 40 in place of 36). Meitou does not model event 40 or that recognition.
+
+Meitou: `FixtureRegistry.LayLow` runs from the crime sweep (engine choice) and also clears the owner on the first path. The stamp is `CharacterCold.SlaveSince`, and `SlaveSave` reads and writes `ssct`.
+
 ## Unknowns
 
 1. The bed search (`FUN_1408cfe00`) is decoded for player-faction characters and, in outline, for others ([locks](locks.md#beds)); the meaning of the designated-building kinds is not.
    Where 106 (no target finder) gets its bed is **Unknown**.
 2. The **sensed-list category bits** (`FUN_140853960` masks 1, 0x4010, 0x20, 0x210, 0x4008, 0x811, 0x10): which bit is ally, enemy, dead, slave;
    and the size of the sensed list, which is the search range of every finder.
-3. The **status object at `Character+0x1a0`** (int at +0, saved as `slavestate`: 1 slave, 2 escaped slave; the setter `FUN_1405a4940` posts "{1} has been enslaved" for a free player-faction character and sets `+0x110` to 250 on 2; its callers: caging, the squad factory's `slaves`, slave processing (task 182), escapes, release and bail); its `+0x88`, `+0xe0` (a slave's owner faction); its class name, and what sets `+0xe9` (the "innocent victim" flag; see the character finder).
+3. The **status object at `Character+0x1a0`** (int at +0, saved as `slavestate`: 1 slave, 2 escaped slave, 3 ex-slave; `+0x8` the [lie-low stamp](#escaped-slaves-lie-low); the setter `FUN_1405a4940` posts "{1} has been enslaved" for a free player-faction character and sets `+0x110` to 250 on 2; its callers: caging, the squad factory's `slaves`, slave processing (task 182), escapes, release and bail); its `+0x88`, `+0xe0` (a slave's owner faction); its class name, and what sets `+0xe9` (the "innocent victim" flag; see the character finder).
    Partly known (**Observed**, [economy 11.4-11.8](economy.md#115-bail-and-sentence)): `+0xe8` escaped-prisoner flag, `+0xea` freed flag ([perception](perception.md#sense-tags-who-is-an-enemy): set on release, bail and slave buy; cleared outside towns and by a wrapper-set pending crime, saved as `tn`), `+0x110` the "recently wanted" marker (250.0).
 4. The **writer of `+0x5b9`**, read as "unconscious" from its readers only.
 5. **Which inventory transfer the player's usual loot takes** (drag and drop gives Theft for a down owner, the right-click transfer Looting): both
@@ -279,7 +322,7 @@ victim is only forced-sensed.
 11. The **speed caps** of the `carrying left/right` movement clips (RACE `male/female carry ragdoll` are unused: [ragdolls](ragdolls.md)).
 12. `FUN_14079c600`, called when the player picks up a non-player character, and **`CharStats+0x12b`** (set by slot 97 order kind 0xc), which turns
     both rescue goals off.
-13. The put-down KO time: `FUN_140644980` has no roll and only the blood term (**Verified**, [character-stats](character-stats.md#cut-off-and-leg-loss)); Meitou's `PutDownKoSeconds` follows it (`MedicalState.KoBlood`, shared with leg loss). The relation test `FUN_1406b27b0` of "friendly".
+13. The put-down KO time: `FUN_140644980` has no roll and only the blood term (**Verified**, [character-stats](character-stats.md#cut-off-and-leg-loss)); Meitou's `PutDownKoSeconds` follows it (`MedicalState.KoBlood`). The relation test `FUN_1406b27b0` of "friendly".
 
 ## Expression reference
 

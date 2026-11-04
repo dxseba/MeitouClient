@@ -49,7 +49,7 @@ Pairs disabled in `FUN_1407dbee0` (third argument hidden on a few calls, assumed
 | 28–31 | 0, 1, 3, 4, 14, 23–26, 6 (last pair's group assumed) |
 
 So ragdolls hit each other, items, building floors/stairs/furniture/roofs (9–22, 27), but not doors,
-foliage group 6 or passable parts. A living character is no PhysX actor and a ragdolled, carried or dead
+foliage group 6 or passable parts. A living character's only PhysX shape is its click hull in group 0, which ragdolls skip, and a ragdolled, carried or dead
 body is left out of the movement avoidance list, so it blocks no walker
 ([pathfinding](pathfinding.md#bodies-in-the-way)).
 
@@ -107,10 +107,13 @@ No path from hits, knockback, stagger or explosions: a conscious character is ne
 0 `PS_NORMAL`, 1 `PS_STAYING_LOW` (voluntary crawl, [below](#staying-low)), 2 `PS_CRIPPLED`, 3 `PS_PLAYING_DEAD`, 4 `PS_KO`.
 The medical tick `FUN_140649320` (while conscious) sets the crippled flag (medical `+0x160` = Character `+0x5b8`, [combat](combat.md#crippled-flag)) and posture 2 when **any one** part with `collapse part` 0x10/0x20 tests down,
 and keeps those leg ragdoll bits on; the character tick `FUN_1405d00b0` sets posture 2 exactly while the flag is set (else 0, unless the character stays low). So it lasts exactly while a leg is down.
-- **Verified** (decompile of `FUN_140649320`, `FUN_140649870`, `FUN_1405c7e20`, `FUN_1405d00b0`): a leg collapse of a conscious human is **no knock-out, no stun, no timer and no fall clip**. The tick requests WHOLE only for the unconscious flag `+0x161`
-  (a vital part down, blood, the KO timer), and the leg bits `0x10`/`0x20` are never part of that; the posture setter writes only the posture, the repertoire bit and (0 to 2) a float 3.0 at Character `+0x4f8` whose reader was not found (**Unknown**).
+- **Verified** (decompile of `FUN_140649320`, `FUN_140649870`, `FUN_1405c7e20`, `FUN_1405d00b0`): a leg collapse of a conscious human has **no stun and no fall clip**. The tick requests WHOLE only for the unconscious flag `+0x161`
+  (a vital part down, blood, the KO timer), and the leg bits `0x10`/`0x20` are never part of that; the posture setter writes the posture, the repertoire bit and (0 to 2) 3.0 at Character `+0x4f8`.
+  That is the medical KO timer (`MedicalSystem` at +0x458, `knockoutTimer` +0xa0, KenshiLib 1ce4a16), and the same `FUN_140649320` then sets `+0x161` for a timer above 0, so posture 0 to 2 is a
+  3 s knock-out: **Verified** in game for a leg cut off standing (issue #134, [cut-off and leg loss](character-stats.md#cut-off-and-leg-loss)); for a leg only crushed or worn below the KO point it
+  follows from the same path (**Observed**, not measured; Meitou gives that case no knock-out).
   The body does not fall: a partial ragdoll simulates only the masked bodies, the rest follow the animation ([bodies](#bodies-kinematic-or-simulated)), and posture 2 picks the crawl clips the same tick.
-- The only knock-out beside a crippling is the sever: `FUN_14064edc0` knocks a leg out only when the posture is 0, for a few seconds to minutes ([cut-off and leg loss](character-stats.md#cut-off-and-leg-loss)), then it wakes into the crawl. A character that collapses and is out cold at once is a vital part or blood knock-out in the same blow.
+- The sever's own knock-out (`FUN_14064edc0`, a leg lost at posture 0) is overwritten by that 3 s one ([cut-off and leg loss](character-stats.md#cut-off-and-leg-loss)), then it wakes into the crawl. A character that collapses and is out cold at once is a vital part or blood knock-out in the same blow.
 - **Observed**: the first tick that sets the flag (not in furniture, not carried) also calls `FUN_1405c8330`. It acts on the AI (`Character +0x648`: its vfunc `0x60`) and the orders receiver (`+0x650 +0x20`, the same object that holds the order queue `+0x40`, [ai-tasks](ai-tasks.md)): it sets the receiver's stop flag `+0x26c`, deletes its queued tasks (`FUN_14050d1b0` on `+0x300`) and its active ones (`FUN_140507530`). So the running task, queued orders and fight go; whether the AI's goal list is also dropped is **Unknown**, and no replan is requested there (the chooser finds the task gone). Skipped when the AI's current task has the flag at task data `+0x22`: 28 Standing, 65 Get up, 147 Stumbling.
   Meitou: `MedicalState.CollapseOnset` (set by `Tick` when a leg is down where the last update had none; the first tick after a load only learns it), taken by `BodySystem.SlowWorld` the same tick (the medical update is parallel): `OrderQueue.Clear()` and `TaskStart.End(Stopped)` (ends the task and fight, stops, asks the decision step; an NPC's AI picks again from idle). Spared: carried, in a bed or cage, stumbling or getting up (`StaggeredUntil`; Meitou has no task 28).
 - **Observed**: going from posture ≠ 0 to 0 with the crippled flag clear (a leg back up, a stun worn off) makes `FUN_1405c7e20` queue the get-up task 65 (`standing up 3`, [Getting up](#getting-up)) unless one is queued.
@@ -203,6 +206,9 @@ legs included, is pinned to the animation. The carried body's scene node is **no
 carry placement of [carry-loot](carry-loot.md) sets it each frame. The pick-up attach (`FUN_1405ced90`) clears the active mask (`+0x2f8` = 0) and the CARRY_MODE request then rebuilds the ragdoll from the
 animated pose; put-down / drop (`FUN_1405ce9c0(0)`) requests CARRY_MODE off, the medical tick requests WHOLE again for a still-unconscious body. Meitou: `RagdollSystem` (`Simulates`, `Rebuild`) does the
 same; the limbs that swing are the forearms and the head, so a body's upper arms and legs follow only the `carry me` clip (`play speed` 0.006: almost still).
+The animal's pinned body is matched by **bone**, not by actor name: `FUN_1405b8720` keys its pin map by the bone names it hands to `disableBone`. **Verified** (probe of the shipped
+`.phs` files): Bonedog `dog1.phs`, River Raptor, Small Spider, Spider and Skimmer name their root actor `Actor` (bone `Bip01`), and the Bonedog, River Raptor and Small Spider have no `carry bone`, so
+their root fallback `Bip01` is that actor; matched by name, nothing would be pinned and the carried body would fall off the shoulder. Meitou: `RagdollSystem.CarryBoneOf` (a bone handle).
 
 Activating a simulated body: clear kinematic, ENERGY_SLEEP_TEST, linear damping 0.05, angular 0.01,
 sleep energy threshold 5.0, wake 0.4 if asleep. No joint motors or springs are set: a "powered"
@@ -247,6 +253,8 @@ Engine feature behind the same switch (`BodyOptions.AdvancedRagdolls`; Faithful:
 Cut pieces use the same Bepu scene and Advanced ragdolls switch (Meitou): torso planes clip collision shapes in bind space, while ordinary amputations remove the corresponding head/limb actors from the remaining body. Crossed spheres/capsules use sampled convex hulls; retained primitives stay native. Clipped hulls require positive-definite inertia and a stable reconstructed centre; unstable point clouds are welded or reduced to validated inscribed hulls. Compact microscopic colliders with no principal radius of gyration of at least 0.02 units are omitted; long thin actors retain their joints and skin anchors. **Verified** (`RagdollSimultaneousCutTests`): microscopic-corner rejection without source mutation while retaining a broad thin slab, and 20 installed Samurai with varied simultaneous oblique cuts remain finite and settle. Without this inertia guard, the native 20-Samurai pile produced runaway poses and a Bepu broad-phase refinement stack overflow.
 
 **Observed** (Meitou limb-cut implementation): `LimbCutState` stores a slot, a fraction along UpperArm–Forearm–Hand or Thigh–Calf–Foot bind segments, and a bounded two-axis slant. `LimbCutGeometry.TryPlane` fits the same race-relative parameters for skin and physics; its positive side retains the stump. Only that limb's actors are clipped, preserving unrelated chains and robot mass. If both actors of an original joint survive in one half, their connection is retained and a removed anchor is projected inside that half; separately built halves never share joints. This prevents overlapping elbow actors from pulling continuous skin apart. Carry surface queries use the same plane. Absent explicit cuts retain the legacy whole-limb/height rules; loose limb physics remains transient. **Verified** (`LimbSeveranceGeometryTests`): scaled/bent chains, oblique hull sides, retained carry material, paired organic/robot losses, and overlapping elbow actors retaining finite connected poses for 120 moving frames on both sides of an oblique cut.
+
+**Meitou design choice** (Advanced ragdolls): equipped weapons are checked once per changed cut. A sliced skin support patch, a bone-to-offset mount crossing the cut, or a lost supporting hand releases the exact inventory item as recoverable ground loot; intact mounts on either half stay equipped. The fall uses the existing ground-item path. **Verified** (`CutWeaponDropTests`): complementary support sides, offset mounts, limb ownership and single transfer preserving grade, blood and unrelated loot.
 
 Hulls use the bounded managed triangulator in normalized coordinates, validate closed outward faces and containment, then supply checked HullData to Bepu CreateShape. Ragdoll setup, cuts, runtime shapes and carry grips do not invoke the unchecked Bepu 2.4 ComputeHull face walk ([source](https://raw.githubusercontent.com/bepu/bepuphysics2/v2.4.0/BepuPhysics/Collidables/ConvexHullHelper.cs)).
 
@@ -330,7 +338,7 @@ fixture): fragment poses move with bounded spasms and then settle.
 
 ## Unknowns
 
-- Meaning of groups 0, 1, 2, 7, 28–31 and the terrain's group.
+- Meaning of groups 1, 2, 7, 28–31 and the terrain's group (0: the click hulls, [combat](combat.md#line-of-fire-and-the-hit-shape)).
 - Exact condition of character slot 103 (group 4) and the downward-ray branch of `FUN_1407d2440`.
 - Which body is the root (RagdollAnimation `+0x48` key); likely the pelvis.
 - `FUN_1405ce9c0`'s branch for Character `+0x388` 1 / 0x5b (calls `FUN_1405b4fa0` on put-down).

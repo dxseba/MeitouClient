@@ -252,12 +252,23 @@ Same targets as picking; Task_CutLock / Task_BruteForceLock share the shackle ta
   `is for position marker` part: it places the building's position marker (where characters use the cage), not the mesh. The mesh and the occupant both sit at the origin.
 - **Locked cage**: the occupant cannot leave; `Get out of cage` (133, 207) needs `!isDoorLocked`; tooltip shows the lock level
   or "The cage you are in is UNLOCKED. Nobody knows this but you" (`FUN_1405d4260`).
+- **Pose while held** (**Observed**, the original against Meitou): the fixture's own clips play, nothing else. A caged prisoner out cold or dead lies on its side in
+  the cage's `animation KO` (the Prisoner Cage's `foetal`), an awake one stands in its `animation` (the Cage's stand) at once, and the Prisoner Pole keeps its stand
+  pose whatever its occupant's state. No fall is played into the cage and no get-up out of it. An animal, which has no such clips, is left as a still frame: its
+  animation does not advance. Meitou: `AnimationSystem` skips the ragdoll hold for a held character (the furniture refuses the ragdoll, so nobody posed it and it
+  stayed flat in the knockout's pose) and leaves a held animal's layers alone. A prisoner loaded from a save takes its cage's clips when `FixtureRegistry.Bind` binds it,
+  as one put in by `Imprison` does; before, it played the plain idle or lying clip.
 - **Leaving** (`Task_GetOutOfCage`, `FUN_1403554b0`, **Verified**): restores AI flags and pose. The task's constructor flag (`+0x80`; 1 for 207 and 256, 0 for 133, the task factory `FUN_14032ebd0` and `FUN_140335200`) is copied to the prisoner's
   `+0x1a0 -> +0xe8` (Meitou `Escaped`) only when the cage owner faction is real (`+0x1d0` clear); for a `not real` owner nothing is written. A nonzero flag also turns a slave in
   state 1 into state 2 and sets crime 0xc Escaping Prison against the cage owner (the setter refuses a `not real` or `fundamental type` 8 victim), after the hold is cleared (`FUN_140330600`), since the setter
   refuses an imprisoned culprit. There is no sentence test: a prisoner whose sentence has run out who leaves through 207 or 256 still escapes. 133 (flag 0) is added by `Task_ReleasePrisoner` only for a releaser
   that books bounties or is the player's. Lifting a prisoner out of another faction's cage (`FUN_14034fbe0`): the lifter gets code 7; the prisoner gets the escaped flag and a code 0xc call made while it is still
   held (`+0x2f8` = 2), which the setter refuses ([carry-loot](carry-loot.md)), so no pending crime (**Verified**).
+- **Exit spot** (**Observed** from decompile, `FUN_140330600` → `FUN_140661f90`): clearing the hold resets the character's movement body while `+0x2f8` and the handle are
+  still set, so it looks up the held building's `Node Use` (type 4) node nearest the character's position (`FUN_14038ab50`; the character stands at the cage origin) and
+  moves the body there after a physics ray query at the node (`FUN_1403a2fa0`, door hit filter; the ray's exact use is **Unknown**). No node (Prisoner Pole): it stays.
+  Data (base game probe): Prisoner Cage's nearest is `usenode008` at local (0.2, 9.4), the door side; Spiked Cage's `Cage_GuardNode003` at (-1.6, -13.4), behind it
+  (its lock node is 14.1 away); Peeler Machine's one node at (0.1, 11.3). Meitou: `FixtureRegistry.ExitSpot` for Get out and Release; lifting out leaves the body to the carrier.
 - **Release** (`Task_ReleasePrisoner` 110): clears the occupancy, "{1} has been released from prison." (**Observed**).
 - **Beds**: `+0x2f8 = 1`, bed handle +0x300 ([carry-loot](carry-loot.md)); beds have no lock. Details below.
 - Character save keys: `in something` (= +0x2f8) and `in what` (handle +0x300) (**Verified**, `FUN_1406280a0`); platoons

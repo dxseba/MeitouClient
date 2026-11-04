@@ -6,7 +6,7 @@ public sealed partial class CombatSystem
 {
     /// <summary>One swing may reach the matching opposite limb. Its own armour must still permit a real severing cut.</summary>
     internal bool TrySeverCounterpart<TCover>(CharacterCold victim, int part, in DamagePacket packet, in HitDamage primary,
-        in MedicalContext ctx, TCover cover, float toughness, bool aliveBeforeHit, bool standingBeforeHit, float brutality,
+        in MedicalContext ctx, TCover cover, float toughness, bool aliveBeforeHit, float brutality,
         int direction, CombatWoundMechanism mechanism, float roll, List<MedicalEvent> events) where TCover : struct, ICoverRoll
     {
         if (!aliveBeforeHit || !ctx.Options.AdvancedRagdolls || ctx.Options.Dismemberment < Dismemberment.Rare || !ctx.HasStats || ctx.ExemptFromWear
@@ -30,7 +30,7 @@ public sealed partial class CombatSystem
         float needed = counterpart.Flesh - counterpart.Stun + counterpart.Rig + counterpart.MaxHp;
         // Blunt/stun alone cannot extend the blade through a second limb. Failed armour/health checks leave it untouched.
         if (!float.IsFinite(needed) || !float.IsFinite(damage.Cut) || damage.Cut <= MathF.Max(0, needed)) return false;
-        medical.ApplyFollowThroughHit(other, damage, ctx, standingBeforeHit, events);
+        medical.ApplyHit(other, damage, ctx, events);
         return events.Any(e => e.Kind == MedicalEventKind.PartSevered && e.Part == other);
     }
 }

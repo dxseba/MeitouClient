@@ -3,6 +3,7 @@ using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.Gameplay.Bodies;
+using Meitou.Simulation.Ai;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Items;
 using Meitou.Simulation.Locks;
@@ -13,7 +14,7 @@ namespace Meitou.Simulation.FirstAid;
 /// First aid and resting in play (docs/simulation.md "Bodies", docs/game/character-stats.md "First aid, medkits and robot repair" and "Sleep, beds and resting").
 /// <list type="bullet">
 /// <item><b>Treat</b> (<see cref="CharacterTask.Treat"/>): <see cref="TreatOrder"/> (the player), the medic job and the NPC rule start it. <c>Schedule</c> walks the medic to the patient
-/// (the pursuit system's pattern: a path at free speed, asked again when the patient has moved); <c>Act</c> (own slot, read-only on the patient) emits one effect per tick while the medic
+/// (the pursuit system's pattern: a path at free speed, asked again when the patient has moved) and, in reach, asks the patient to stand still (<see cref="CharacterCold.StandStillUntil"/>); <c>Act</c> (own slot, read-only on the patient) emits one effect per tick while the medic
 /// is in reach, awake, not fighting and still, and the patient is still or down; <c>Apply</c> (serial commit, in target / source order) picks the kit, bandages the patient, drains the kit
 /// and trains the medic. So nothing on another character is written in a parallel phase.</item>
 /// <item><b>Rate</b> (<b>Observed</b>, character-stats.md): <c>lerp(1, 15, min(skill, kit quality) x 0.01) x medic speed mult</c> (x <c>robot medic speed mult</c> for a robot kit) per unit of <c>dt</c> on the first part with room (the next only once it fills), after any open wound is closed;
@@ -197,15 +198,26 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
 
     static void LetGo(CharacterCold cold)
     {
+        cold.TreatKneels = false;
         cold.TreatTarget = CharacterId.None;
         cold.TreatSplint = false;
         cold.TreatKit = null;
     }
 
-    static float Gap(in CharacterHot a, in CharacterHot b)
+    /// <summary>
+    /// Where a medic treats <paramref name="patient"/> from: a caged one's cage use node (in front of its door, <see cref="FixtureRegistry.ExitSpot"/>; the medic cannot stand in
+    /// the cage), else where the patient is.
+    /// </summary>
+    static Vector3 TreatSpot(World world, CharacterCold patient, in CharacterHot at) =>
+        patient is { IsImprisoned: true, InWhat: { } id } && world.Fixtures.Find(id) is { Kind: FixtureKind.Cage } cage && FixtureRegistry.ExitSpot(cage) is { } door
+            ? door
+            : at.Position;
+
+    /// <summary>In reach of the treatment spot: within <see cref="FirstAidSettings.Reach"/> on X/Z and <see cref="FirstAidSettings.ReachHeight"/> in height (on its floor).</summary>
+    bool InReach(in CharacterHot medic, Vector3 spot)
     {
-        float dx = a.Position.X - b.Position.X, dz = a.Position.Z - b.Position.Z;
-        return MathF.Sqrt(dx * dx + dz * dz);
+        float dx = medic.Position.X - spot.X, dz = medic.Position.Z - spot.Z;
+        return dx * dx + dz * dz <= Settings.Reach * Settings.Reach && MathF.Abs(medic.Position.Y - spot.Y) <= Settings.ReachHeight;
     }
 
     // ------------------------------------------------------------------ walking to the patient
@@ -227,9 +239,14 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
                 continue;
             }
             const ushort Path = (ushort)MoveFlags.AnyPath;
-            if (t == i || Gap(next[i], next[t]) <= Settings.Reach)
+            var spot = TreatSpot(world, table.Cold(t)!, next[t]);
+            if (t == i || InReach(next[i], spot))
             {
-                // In reach (or treating itself): stand still and let the Act step work.
+                // In reach (or treating itself): stand still and let the Act step work, and ask the patient to stand still too. The medic kneels only while the patient
+                // keeps still (the original plays the clip in the first aid task's update, which runs once the target stands still, row 25's state 42).
+                if (t != i) AskToStandStill(world, table.Cold(t)!);
+                bool patientStill = Speed2(table.Previous[t].Velocity) <= Settings.StillSpeed * Settings.StillSpeed;
+                cold.TreatKneels = t == i || table.Cold(t)!.Medical!.Incapacitated || patientStill;
                 if ((n.Flags & Path) != 0)
                 {
                     n.Flags = (ushort)(n.Flags & ~Path);
@@ -239,14 +256,14 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
                 n.TaskTime = 0;
                 continue;
             }
+            cold.TreatKneels = false;
             n.TaskTime -= dt;
-            var goal = new Vector2(next[t].Position.X, next[t].Position.Z);
+            var goal = new Vector2(spot.X, spot.Z);
             bool asking = (n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
             // No way to the patient: no path, or one that ends short of the asked goal (the walkability answers an unreachable goal with the way to the reachable point nearest it). The
             // original's task walk reports it (notifyPathImpossible): the patient goes on the medic's path failures for 20 s, which the finder skips, and the treatment ends. Without it
             // a medic asked for the same hopeless path every half second (issue #124: searches run to the iteration limit, ~280 MB/s of garbage).
-            if (!asking && (cold.PathFailed || (n.Flags & (ushort)MoveFlags.HasPath) != 0 && cold.Path.Length > 0
-                && Vector2.Distance(new Vector2(cold.Path[^1].X, cold.Path[^1].Z), n.Goal) > Settings.Reach))
+            if (!asking && (cold.PathFailed || (n.Flags & (ushort)MoveFlags.HasPath) != 0 && cold.Path.Length > 0 && EndsShort(cold.Path[^1], n.Goal, spot.Y)))
             {
                 cold.PathFailed = false;
                 PursuitSystem.GiveUp(world, cold, table.IdOf(t));
@@ -256,11 +273,26 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
             bool stale = (n.Flags & (ushort)MoveFlags.HasPath) == 0 || Vector2.DistanceSquared(goal, n.Goal) > PursuitSystem.RepathDistance * PursuitSystem.RepathDistance;
             if (asking || !stale || n.TaskTime > 0) continue;
             n.Goal = goal;
+            (cold.GoalHeight, cold.GoalHeightAt) = (spot.Y, goal);   // the spot's floor: an upstairs patient is walked to up the stairs, not to the ground below it
             n.Mode = SpeedMode.Free;
             n.Flags |= (ushort)MoveFlags.NeedPath;
             n.TaskTime = PursuitSystem.RepathSeconds;
         }
     }
+
+    /// <summary>How long a medic's ask to stand still lasts after its last renewal: the request's time to live (3 s, <c>FUN_140269ff0</c>).</summary>
+    const float StandStillSeconds = 3;
+
+    /// <summary>
+    /// The first aid task's every update asks the patient to stand still (<c>Task_FirstAid</c> / <c>Task_FirstAidRig</c> call <c>FUN_1403346d0</c>, docs/game/ai-tasks.md "Medic jobs"):
+    /// a crawling or walking patient stops, so the treatment can run (<see cref="Act"/> treats only a patient standing still). Without it a medic knelt, stood to follow, knelt again (issue #232).
+    /// </summary>
+    static void AskToStandStill(World world, CharacterCold patient) =>
+        patient.StandStillUntil = world.Tick + (long)MathF.Ceiling(StandStillSeconds / world.TickSeconds);
+
+    /// <summary>A path whose last waypoint is farther than the reach from the goal on X/Z, or off the treatment spot's floor: the patient cannot be got to.</summary>
+    bool EndsShort(Vector3 end, Vector2 goal, float spotHeight) =>
+        Vector2.Distance(new Vector2(end.X, end.Z), goal) > Settings.Reach || MathF.Abs(end.Y - spotHeight) > Settings.ReachHeight;
 
     // ------------------------------------------------------------------ the treatment
 
@@ -270,10 +302,9 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
         var prev = table.Previous;
         var next = table.Next;
         float still2 = Settings.StillSpeed * Settings.StillSpeed;
-        float reach = Settings.Reach;
         for (int i = part.Start; i < part.End; i++)
         {
-            if (!prev[i].Alive || next[i].Task != (byte)CharacterTask.Treat) continue;
+            if (!prev[i].Alive || !world.Steps(i) || next[i].Task != (byte)CharacterTask.Treat) continue;
             var cold = table.Cold(i)!;
             if (cold.Medical is not { Incapacitated: false } medical || cold.InCombat || medical.Aggregates().BothArmsDisabled || cold.StaggeredUntil > world.Tick) continue;
             var target = cold.TreatTarget;
@@ -283,7 +314,7 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
             if (Speed2(prev[i].Velocity) > still2) continue;
             if (t != i)
             {
-                if (Gap(prev[i], prev[t]) > reach) continue;
+                if (!InReach(prev[i], TreatSpot(world, table.Cold(t)!, prev[t]))) continue;
                 if (!patient.Incapacitated && Speed2(prev[t].Velocity) > still2) continue;
             }
             effects.Emit(i, t, EffectTreat);
@@ -312,7 +343,7 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
             Splint(world, m, medicCold, medical, stats, medicRace, body, race);
             return;
         }
-        float dt = world.TickSeconds;
+        float dt = world.StepSeconds(m);   // a far medic's step covers the ticks since its last (the far cadence, World.StepTicks)
         // The skill and trained stat: medic with a first aid kit, robotics with a robot repair kit; treating oneself x0.8 (FUN_14033c5a0, Task_FirstAid's kit phase).
         StatsEnumerated StatOf(bool robotKit) => robotKit ? StatsEnumerated.Robotics : StatsEnumerated.Medic;
         float SkillOf(bool robotKit) => stats[StatOf(robotKit)] * medical.StatMultiplier(StatOf(robotKit)) * (m == p ? 0.8f : 1);
@@ -338,8 +369,9 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
         }
         if (kitless)
         {
-            // Without a kit every part takes 1 HP a second, organic or robotic alike, and nothing drains (FUN_140649a00).
-            if (body.Bandage(dt, null, race, out _) <= 0)
+            // Without a kit every part takes 1 HP a second, organic or robotic alike, and nothing drains (FUN_140649a00). Done as with a kit: once the parts are bandaged up,
+            // healing turns bandage into flesh and float dust leaves a sliver of room every update, which would keep the treatment going for ever.
+            if (body.BandageRoom(race, false) + body.BandageRoom(race, true) <= Done || body.Bandage(dt, null, race, out _) <= 0)
             {
                 Say(world, m, medicCold.TreatTarget, HealingOtherFinished, BeingHealedFinished);
                 patientCold.StuckBolts = null;
@@ -517,6 +549,9 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
 
     // ------------------------------------------------------------------ treating by themselves
 
+    // Resolved on the first sweep: whose goal lists hold the Medic goal.
+    AiSystem? ai;
+
     public void SlowWorld(World world)
     {
         // Each NPC looks every AutoEveryTicks ticks, a slot's turn falling on its own tick (slot mod the period), so the looks spread over the ticks instead of all landing on one
@@ -525,21 +560,63 @@ public sealed partial class FirstAidSystem(GameConstants constants, BodyOptions 
         int every = world.Every(Settings.AutoEveryTicks);
         var table = world.Characters;
         var next = table.Next;
-        int phase = (int)(world.Tick % every);
         // The treated list and the sweep are made on the turn's first idle NPC (a turn with none, most of them in a quiet world, makes neither).
         List<(int Medic, int Patient)>? taken = null;
         try
         {
-            for (int i = phase; i < table.HighWater; i += every)
+            for (int i = 0; i < table.HighWater; i++)
             {
-                if (!next[i].Alive) continue;
+                if (!next[i].Alive || !world.Turn(i, every)) continue;   // its turn (the far cadence, World.Turn)
                 var cold = table.Cold(i)!;
                 if (cold.IsPlayer || !Settings.AutoNpcs) continue;   // a player's medic jobs are the decision step's (MedicJobs)
-                // Idle: no task, following, wandering or an implicit job.
+                if (cold.Ai is { Engine: false } mind)
+                {
+                    // The AI's own: its Medic goal weighs the patient found here (AiBehaviour.Medic); one whose lists hold no Medic goal does not treat.
+                    if ((ai ??= world.SystemOf<AiSystem>())?.ListsGoal(world, i, TaskType.JOB_MEDIC) != true) mind.MedicScore = 0;
+                    else
+                    {
+                        if (taken is null) { taken = Treated(table); BeginSweep(world); }
+                        KeepPick(world, i, mind, taken);
+                    }
+                    continue;
+                }
+                // An NPC the AI does not run (an engine mind, or none) treats when idle: no task, following, wandering or an implicit job.
                 bool idle = next[i].Task is (byte)CharacterTask.Idle or (byte)CharacterTask.Wander or (byte)CharacterTask.Follow || Production.PermaJobs.ListJob(cold, (CharacterTask)next[i].Task) is { Implicit: true };
                 if (!idle) continue;
                 if (taken is null) { taken = Treated(table); BeginSweep(world); }
                 HealSomeone(world, i, taken, robotics: false, TaskSource.Npc);
+            }
+        }
+        finally { EndSweep(); }
+    }
+
+    /// <summary>The Medic goal's finder result for the think (<see cref="AiMind.MedicPatient"/>, <see cref="AiMind.MedicScore"/>; none and 0 without a patient).</summary>
+    void KeepPick(World world, int i, AiMind mind, List<(int Medic, int Patient)> taken)
+    {
+        var (patient, score) = FindPatient(world, i, taken, robotics: false);
+        mind.MedicPatient = patient >= 0 ? world.Characters.IdOf(patient) : CharacterId.None;
+        mind.MedicScore = patient >= 0 ? score : 0;
+    }
+
+    /// <summary>
+    /// Starts the treatment of each NPC whose think chose its Medic goal (<see cref="AiMind.MedicAsk"/>; serial, after the think): the finder runs again on the state of now, so a patient
+    /// treated meanwhile is not walked to; one that finds none drops its kept pick, and the next think chooses again.
+    /// </summary>
+    internal void SendGoalTreatments(World world)
+    {
+        var table = world.Characters;
+        List<(int Medic, int Patient)>? taken = null;
+        try
+        {
+            for (int s = 0; s < table.HighWater; s++)
+            {
+                if (table.Cold(s)?.Ai is not { MedicAsk: true } mind) continue;
+                mind.MedicAsk = false;
+                if (!table.Next[s].Alive) continue;
+                if (taken is null) { taken = Treated(table); BeginSweep(world); }
+                if (HealSomeone(world, s, taken, robotics: false, TaskSource.Npc)) continue;
+                mind.MedicPatient = CharacterId.None;
+                mind.MedicScore = 0;
             }
         }
         finally { EndSweep(); }

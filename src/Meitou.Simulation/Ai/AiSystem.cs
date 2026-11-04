@@ -125,9 +125,10 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         int hour = world.Hour;
         for (int i = part.Start; i < part.End; i++)
         {
-            if (!prev[i].Alive || table.Cold(i) is not { Ai: { Squad: var squad } mind } cold || (mind.Engine ? EngineBoard : squad.Ai) is not { } board) continue;
-            // Cheapest test first: most characters are not due this tick.
-            if ((world.Tick + i) % every != 0 && mind.Version == board.Version && !mind.Replan) continue;
+            if (!prev[i].Alive || !world.Steps(i) || table.Cold(i) is not { Ai: { Squad: var squad } mind } cold || (mind.Engine ? EngineBoard : squad.Ai) is not { } board) continue;
+            // Cheapest test first: most characters are not due this tick (a far character's step covers several ticks: due when its turn fell in them, as World.Turn; the think's
+            // turn is anchored at Tick + slot, the sweeps' at Tick - slot, so a slot's aggro look and its think interleave).
+            if ((world.Tick + i) % every >= world.StepTicks(i) && mind.Version == board.Version && !mind.Replan) continue;
             mind.Replan = false;
             var id = table.IdOf(i);
             var roles = mind.Engine ? mind.EngineGoals : ObeyedRoles(world, squad, cold) ?? board.Roles[(int)RoleOf(squad, id, cold)];
@@ -256,7 +257,8 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
             CharacterTask.Idle or CharacterTask.Wander or CharacterTask.Follow => true,
             // The walks to its spots, and lying or sitting there, are the AI's own.
             CharacterTask.GoTo => mind.Behaviour is AiBehaviour.Post or AiBehaviour.Sleep or AiBehaviour.Sit or AiBehaviour.GoHome or AiBehaviour.Patrol or AiBehaviour.Turret
-                or AiBehaviour.TownNode or AiBehaviour.Shop or AiBehaviour.Relax or AiBehaviour.ToTown or AiBehaviour.Travel or AiBehaviour.Work or AiBehaviour.Investigate,
+                or AiBehaviour.TownNode or AiBehaviour.Shop or AiBehaviour.Relax or AiBehaviour.ToTown or AiBehaviour.Travel or AiBehaviour.Work or AiBehaviour.Investigate
+                or AiBehaviour.PatrolTown,
             CharacterTask.Rest => mind.Behaviour is AiBehaviour.Sleep or AiBehaviour.Sit or AiBehaviour.Relax,
             // In the bed it went to (or lying in one when loaded, before its first think).
             CharacterTask.Sleep => cold.InSomething == Locks.HeldState.Bed && (mind.Behaviour == AiBehaviour.Sleep || mind.Goal is null),
@@ -268,7 +270,7 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
     /// Job 187 Obedient Slave (<c>FUN_14050e5b0</c>, docs/game/ai-tasks.md "Obedient Slave"): a slave (state 1) not sneaking, owned by another squad, takes that squad's
     /// <c>Slave AI Goals</c> instead of its own lists. Null: it plans with its own squad's (a slave in its owner's squad already takes the Slave role there).
     /// </summary>
-    static IReadOnlyList<AiGoal>? ObeyedRoles(World world, Squad squad, CharacterCold cold) =>
+    internal static IReadOnlyList<AiGoal>? ObeyedRoles(World world, Squad squad, CharacterCold cold) =>
         cold.SlaveState == 1 && cold.SlaveMaster >= 0 && cold.SlaveMaster != squad.Id && (cold.Orders & CharacterOrders.Sneak) == 0
             && world.Squads.Find(cold.SlaveMaster) is { Ai: { } master } && master.Roles[(int)AiRole.Slave] is { Count: > 0 } list ? list : null;
 
@@ -383,6 +385,8 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
             // A turret is only wanted by a member its squad gave one (the nearest free one in <see cref="ClaimTurrets"/>).
             AiBehaviour.Turret => board.TurretClaims.ContainsKey(self.Slot) ? 1 : 0,
             AiBehaviour.TownNode => WanderIn(board.Town, world.Characters.Previous[self.Slot].Position).Count > 0 || OccupiedBuildings(world, board) > 0 ? 1 : 0,
+            // Row 36 has no finder; its walk needs a town to stroll round (engine choice: the original's walk without one, round the task's target, is not decoded).
+            AiBehaviour.PatrolTown => board.Town >= 0 || OccupiedBuildings(world, board) > 0 ? 1 : 0,
             // Shopping is wanted while its list has something left to buy today (FUN_140999620), and there is a shop to go to.
             // The finder's factor follows its pick: 1 for a shop, 0.4 for any other public building, 0 when it finds none (FUN_1409997f0).
             AiBehaviour.Shop => !mind.Shopping.Pending(ShoppingList.DayOf(world.GameHours), world.Hour) ? 0
@@ -404,6 +408,8 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
             AiBehaviour.Flee => world.Characters.Cold(self.Slot) is { } runner ? SelfPreservation.RunDesire(runner) : 0,
             // A combat goal: its own desire's zeros and factors, times its finder's factor (an attack goal's 1 with a target, a protect goal's fight threat; AiSystem.Fights.cs).
             AiBehaviour.Fight => FightDesire(world, self.Slot, type, mind) is var want and > 0 ? want * FightFactor(world, self.Slot, type, mind) : 0,
+            // The Medic goal: the finder's score from the serial sweep (its desire's fight and carrying cases are gates of the finder).
+            AiBehaviour.Medic => world.Characters.IsAlive(mind.MedicPatient) ? mind.MedicScore : 0,
             _ => 1,
         };
     }
@@ -492,6 +498,8 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
             var seats = new List<SeatClaim>();
             var seatOwners = new Dictionary<TownBuilding, int>(ReferenceEqualityComparer.Instance);
             foreach (var b in buildings)
+            {
+                if (world.Fixtures.IsEmptied(b.Key)) continue;   // a bought house's furniture is gone
                 for (int i = 0; i < b.SeatCount; i++)
                     if (Sittable(b.SeatAt(i).Kind, dummies: true))
                     {
@@ -499,9 +507,10 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
                         if (!seatOwners.ContainsKey(b))
                             seatOwners[b] = world.Fixtures.PropertyOwner(b.Key) ?? (b.OwnerFactionId is { } o && data.FactionIndex(o) is var fi and >= 0 ? fi : townFaction);
                     }
+            }
             places[site] = new(wander, shopList, [.. buildings.Where(b => (b.IsBar || bars.Contains(b)) && IsPublic(b))],
-                [.. buildings.Where(b => b.IsOutdoorTable)], [.. buildings.Where(b => !b.Destroyed && b.Function is >= 0 and var fn && (WorkFunctions >> fn & 1) != 0)], stock, seats, seatOwners,
-                [.. buildings.Where(b => b.HasInterior && !b.IsWall && !b.Destroyed && IsPublic(b))]);
+                [.. buildings.Where(b => b.IsOutdoorTable)], [.. buildings.Where(b => !world.Fixtures.IsDestroyed(b) && b.Function is >= 0 and var fn && (WorkFunctions >> fn & 1) != 0)], stock, seats, seatOwners,
+                [.. buildings.Where(b => b.HasInterior && !b.IsWall && !world.Fixtures.IsDestroyed(b) && IsPublic(b))]);
         }
     }
 
@@ -539,6 +548,17 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
     string WorkClipOf(TownBuilding b) => workClips.GetOrAdd(b.BuildingId, id =>
         data.Db.Find(id)?.GetReferences("functionality") is [var link, ..] && data.Db.Find(link.TargetStringId)?.GetReferences("animation") is [var anim, ..]
             && data.Db.Find(anim.TargetStringId) is { } clip ? clip.Name : "stonemine");
+
+    /// <summary>
+    /// The BUILDING_FUNCTIONALITY (string id) of a worker's building, null without one: <c>Task_OperateMachine</c>, which the original runs for 189 / 190's act-outs (87, 221), adds its
+    /// <c>animation events</c> to the work clip each update (docs/audio.md "Machine work").
+    /// </summary>
+    string? WorkFunctionalityOf(TownBuilding b) =>
+        data.Db.Find(b.BuildingId)?.GetReferences("functionality") is [var link, ..] ? link.TargetStringId : null;
+
+    /// <summary>The machine events of standing work at a functionality's clip (<see cref="CharacterCold.ActionWork"/>); null without a functionality or clip.</summary>
+    internal static WorkEvents? StandingWork(string? functionality, string? clip) =>
+        functionality is not null && clip is not null ? new WorkEvents(functionality, clip) : null;
 
     readonly System.Collections.Concurrent.ConcurrentDictionary<string, float> workHungerRates = new(StringComparer.Ordinal);
 
@@ -612,6 +632,50 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
                 }
                 return best < 0 ? null : data.Sites[best].Position;
             }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Acts out 36 Patrolling town (<c>Task_PatrolTown</c>, docs/game/ai-tasks.md "Town goals"): walks to the point drawn round its town (<see cref="PatrolPoint"/>; an occupier, whose town is the
+    /// one it holds as the original's blackboard town is the campaign's target first, to a building of that player town) and, once the walk is over, forgets it, so the next think draws
+    /// another, as the original's update sends a new move each time the last one ended.
+    /// </summary>
+    void Patrol(World world, int slot, AiMind mind, Blackboard board)
+    {
+        var self = world.Characters.IdOf(slot);
+        mind.Target ??= OccupiedSpot(world, board, self) ?? PatrolPoint(world, self, board.Town);
+        if (mind.Target is not { } point)
+        {
+            Become(world, slot, CharacterTask.Idle);
+            return;
+        }
+        if (!GoToSpot(world, slot, mind, Flat(point), GiveUp.Target, SpeedMode.Walk, height: float.IsNaN(point.Y) ? null : point.Y)) return;
+        Become(world, slot, CharacterTask.Idle);
+        mind.Target = null;
+    }
+
+    /// <summary>The least scatter of a patrol round its town (<c>FUN_1405c6b30</c>, <c>DAT_14168dcf4</c>).</summary>
+    const float PatrolTownMinScatter = 500;
+
+    /// <summary>
+    /// Where 36 Patrolling town walks next (<c>Task_PatrolTown</c> through <c>FUN_1405c6b30</c> and <c>setPatrolInput</c>, docs/game/ai-tasks.md "Town goals", Observed): its town's centre moved by up
+    /// to half the scatter in X and Z, the scatter being half the town's radius but at least 500; of up to 10 draws the first on walkable ground (the original redraws a point on a building that
+    /// is not public, allied or the player's, or under water for a race that avoids it; Meitou tests the ground only). Null without a town or a walkable draw.
+    /// </summary>
+    Vector3? PatrolPoint(World world, CharacterId self, int town)
+    {
+        if (town < 0 || town >= data.Sites.Count) return null;
+        var site = data.Sites[town];
+        float scatter = MathF.Max(PatrolTownMinScatter, site.Town.Radius * 0.5f);
+        ulong roll = TargetRoll(world, self, AiBehaviour.PatrolTown);
+        for (int i = 0; i < 10; i++)
+        {
+            roll = Rng.Mix(roll);
+            float x = site.Position.X + (Rng.Float(roll) - 0.5f) * scatter;
+            roll = Rng.Mix(roll);
+            float z = site.Position.Z + (Rng.Float(roll) - 0.5f) * scatter;
+            if (world.Walkability.IsWalkable(x, z)) return new Vector3(x, float.NaN, z);
         }
         return null;
     }
@@ -712,8 +776,13 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
             // It stopped working: the next pick is a new one and the work clip goes.
             mind.WorkActive = false;
             mind.WorkEpoch++;
-            if (table.Cold(slot) is { } worker && mind.WorkClip is not null && worker.ActionClip == mind.WorkClip) worker.ActionClip = null;
+            if (table.Cold(slot) is { } worker && mind.WorkClip is not null && worker.ActionClip == mind.WorkClip)
+            {
+                worker.ActionClip = null;
+                worker.ActionWork = null;
+            }
             mind.WorkClip = null;
+            mind.WorkFunctionality = null;
         }
         mind.FollowTarget = CharacterId.None;   // set again below for a follow goal aimed at the squad's mission
         ref var n = ref table.Next[slot];
@@ -725,15 +794,18 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         {
             case TaskType.GET_OUT_OF_BED or TaskType.GET_OUT_OF_BED_IF_ITS_EMERGENCY or TaskType.GET_OUT_OF_BED_ONCE_HEALED:
                 Become(world, slot, CharacterTask.Idle);
+                StepDone(mind);
                 return;
             case TaskType.UNEQUIP_WEAPON:
                 table.Cold(slot)!.DrawnWeapon = WeaponKinds.None;
+                StepDone(mind);
                 return;
             case TaskType.EQUIP_WEAPON or TaskType.EQUIP_CROSSBOW:
                 // Task_EquipBestWeapon (6 melee only, 264 ranged only; FUN_140346c30, Verified): the matching weapon it carries comes out, else the hand is emptied.
                 var armed = table.Cold(slot)!;
                 if (armed.Fighter is { } fighter)
                     armed.DrawnWeapon = mind.Step == TaskType.EQUIP_WEAPON ? Combat.CombatSystem.MeleeDrawn(fighter) : fighter.Crossbow is not null ? BowHold : WeaponKinds.None;
+                StepDone(mind);
                 return;
             case TaskType.GO_HOMEBUILDING:
                 // 19 Going home before the goal (43 Staying home and the like away from home): the walk home of the GoHome act-out.
@@ -798,7 +870,11 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
                 else Become(world, slot, CharacterTask.Wander);
                 break;
             case AiBehaviour.Sleep when table.Cold(slot)!.InSomething == Locks.HeldState.Bed:
-                break;   // lying in its bed
+                // Lying in its bed. One loaded there, or laid in by the walk's end, sleeps by no start of this goal: the goal takes the sleep as its own
+                // (the original's sleeper runs its plan's 98 Task_UseBed).
+                if (table.Cold(slot)!.Running is not { Source: TaskSource.Goal } own || !own.Runs(CharacterTask.Sleep))
+                    TaskStart.StartOwn(world, slot, new TaskRequest(CharacterTask.Sleep, type, TaskSource.Goal));
+                break;
             case AiBehaviour.Post:
             case AiBehaviour.Sleep:
             case AiBehaviour.GoHome:
@@ -838,6 +914,9 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
                 }
                 else if (behaviour == AiBehaviour.Shop) mind.NextBuyTick = 0;   // walking again: the task is not running
                 break;
+            case AiBehaviour.PatrolTown:
+                Patrol(world, slot, mind, board);
+                break;
             case AiBehaviour.Work:
                 if (mind.Target is null)
                 {
@@ -847,6 +926,7 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
                     {
                         mind.Target = new Vector3(building.Position.X, float.NaN, building.Position.Z);
                         mind.WorkClip = WorkClipOf(building);
+                        mind.WorkFunctionality = WorkFunctionalityOf(building);
                         mind.WorkHungerRate = WorkHungerRateOf(building);
                     }
                 }
@@ -857,7 +937,11 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
                     Become(world, slot, CharacterTask.Idle);
                     var face = working - n.Position;
                     if (face.X * face.X + face.Z * face.Z > 1e-4f) n.Yaw = MathF.Atan2(face.X, face.Z);
-                    if (table.Cold(slot) is { } workerCold) workerCold.ActionClip = mind.WorkClip;
+                    if (table.Cold(slot) is { } workerCold)
+                    {
+                        workerCold.ActionClip = mind.WorkClip;
+                        workerCold.ActionWork = StandingWork(mind.WorkFunctionality, mind.WorkClip);
+                    }
                 }
                 break;
             case AiBehaviour.Investigate:
@@ -882,6 +966,12 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
                 Become(world, slot, CharacterTask.Idle);
                 mind.AssaultTarget = AssaultTargetFor(world, slot, board);
                 if (!mind.AssaultTarget.IsNone) Interlocked.Exchange(ref assaulting, 1);
+                break;
+            case AiBehaviour.Medic:
+                // Stands while the serial step starts the treatment of the patient its finder gives then (FirstAidSystem.SendGoalTreatments).
+                Become(world, slot, CharacterTask.Idle);
+                mind.MedicAsk = true;
+                Interlocked.Exchange(ref treating, 1);
                 break;
             case AiBehaviour.Fight:
             case AiBehaviour.SelfPreserve when mind.Step != TaskType.RUN_AWAY:
@@ -1199,6 +1289,16 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         TaskStart.StartOwn(world, slot, new TaskRequest(task, GoalRow(world, slot), TaskSource.Goal));
     }
 
+    /// <summary>
+    /// A one-think step carried out leaves the plan, as the original's queue moves on when a task ends: a plan its committed goal keeps
+    /// (<see cref="Choose"/>) goes on to the next step instead of doing this one again at every think. A plan made anew no longer has the step,
+    /// whose state now holds.
+    /// </summary>
+    static void StepDone(AiMind mind)
+    {
+        if (mind.Plan.Count > 1) mind.Plan.RemoveAt(0);
+    }
+
     /// <summary>Sends it walking (or running) to a point, unless it is going there already (<see cref="TaskStart.StartOwn"/>, as <see cref="Become"/>).</summary>
     static void WalkTo(World world, int slot, Vector2 to, byte mode)
     {
@@ -1239,6 +1339,7 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         aggro ??= world.SystemOf<AggroSystem>();
         if (Interlocked.Exchange(ref assaulting, 0) != 0) SendAssaults(world);
         if (Interlocked.Exchange(ref fighting, 0) != 0) SendFights(world);
+        if (Interlocked.Exchange(ref treating, 0) != 0) (firstAid ??= world.SystemOf<FirstAid.FirstAidSystem>())?.SendGoalTreatments(world);
         if (Interlocked.Exchange(ref leaving, 0) != 0) LeaveFights(world);
         bool cadence = world.Tick % world.Every(Settings.PackageEveryTicks) == 0;
         // Each town's turrets are claimed once per cadence, by the squads in squad order (derived, not hashed).
@@ -1722,11 +1823,18 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
     /// one (made without building data, or a save's without a home) an <b>engine choice</b>: among its town's
     /// buildings no other squad has, the nearest of the template's <c>building</c>; else by <c>building designation</c> a shop (SHOP) or the bar (BAR, or one of the
     /// town's bar squads; shared);
-    /// else the nearest with beds, else the nearest at all. None for a squad without a town or a town without building data.
+    /// else the nearest with beds, else the nearest at all. None for a squad without a town or a town without building data. A squad not of the player's faction is never
+    /// given a building the player owns (the original's housing leaves player-owned buildings out, docs/game/factions-squads-towns.md "Town residents").
     /// </summary>
     TownBuilding? AssignHome(World world, Squad squad, SquadTemplate? template)
     {
-        if (squad.HomeBuilding is { } given) return given;
+        int player = world.Player.Faction;
+        bool players = squad.Faction == player;
+        if (squad.HomeBuilding is { } given)
+        {
+            if (players || !world.Fixtures.OwnsBuilding(given.Key, player)) return given;
+            return squad.HomeBuilding = HouseForSale(world, squad);   // a save from before a bought house's squads moved out (Evict)
+        }
         if (squad.Town < 0 || data.Sites[squad.Town].Buildings is not { Count: > 0 } buildings) return null;
         var taken = new HashSet<TownBuilding>(ReferenceEqualityComparer.Instance);
         foreach (var other in world.Squads.All)
@@ -1738,7 +1846,7 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
             float bestD = float.MaxValue;
             foreach (var b in buildings)
             {
-                if (!accept(b) || (!shared && taken.Contains(b))) continue;
+                if (!accept(b) || (!shared && taken.Contains(b)) || !players && world.Fixtures.OwnsBuilding(b.Key, player)) continue;
                 float d = Vector2.DistanceSquared(at, Flat(b.Position));
                 if (d < bestD) (best, bestD) = (b, d);
             }
@@ -1748,6 +1856,58 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         if (template?.BuildingDesignation == 1 && Nearest(b => b.IsShop) is { } shop) return shop;
         if ((template?.BuildingDesignation == 3 || IsBarSquad(squad)) && Nearest(b => b.IsBar, shared: true) is { } bar) return bar;
         return Nearest(b => b.Beds > 0) ?? Nearest(_ => true);
+    }
+
+    /// <summary>
+    /// The squads living in a town house the player has bought move out (the original's purchase callback <c>FUN_1407ad6c0</c>, docs/simulation.md "Town house purchases"):
+    /// each is given another house of its town that is for sale (<see cref="HouseForSale"/>), else none, and its members plan again for it. A platoon away from the world
+    /// (<see cref="StoredSquad"/>) only loses it.
+    /// </summary>
+    public void Evict(World world, string building)
+    {
+        foreach (var squad in world.Squads.All)
+            if (squad.HomeBuilding?.Key == building || squad.Ai?.OwnHome?.Key == building) Rehome(world, squad);
+        foreach (var platoon in world.Platoons.All)
+            if (platoon.Stored is { } stored && stored.HomeBuilding?.Key == building) stored.HomeBuilding = null;
+    }
+
+    void Rehome(World world, Squad squad)
+    {
+        var home = HouseForSale(world, squad);
+        squad.HomeBuilding = home;
+        if (squad.Ai is not { } board) return;
+        var old = board.OwnHome;
+        board.OwnHome = home;
+        if (board.Home == old) board.Home = home;
+        board.Touch();
+        foreach (var id in squad.Members)
+            if (world.Characters.TryResolveNext(id, out int slot) && world.Characters.Cold(slot)?.Ai is { } mind)
+            {
+                mind.HomeUnreachable = false;
+                mind.Replan = true;
+            }
+    }
+
+    /// <summary>
+    /// The BuildingFunction bits the finder of a new home looks through: 0x13, BF_ANY, MINE and REFINERY (the house function's number 19 passed as a bit mask, as the worker finder's
+    /// 0x41a is read, <b>Observed</b>); a building with no functionality counts as BF_ANY.
+    /// </summary>
+    const int RehomeFunctions = 0x13;
+
+    /// <summary>
+    /// The home a squad moving out is given (<c>FUN_14099e6e0</c> through <c>FUN_1409fc2e0</c>, <b>Observed</b>): one of its town's buildings in <see cref="RehomeFunctions"/> that is for
+    /// sale (the panel's test, slot 88 <c>FUN_14029c500</c>: <see cref="Locks.FixtureRegistry.SalePrice"/>), at random; null when there is none. The original also tests the squad
+    /// against each (<c>FUN_140621230</c>, meaning <b>Unknown</b>, not modelled).
+    /// </summary>
+    TownBuilding? HouseForSale(World world, Squad squad)
+    {
+        if ((uint)squad.Town >= (uint)data.Sites.Count) return null;
+        static bool Searched(int function) => function < 0 || function < 32 && (RehomeFunctions >> function & 1) != 0;
+        var houses = data.Sites[squad.Town].Buildings
+            .Where(b => Searched(b.Function) && world.Fixtures.SalePrice(b.Key, world.Player.Faction) is not null).ToList();
+        if (houses.Count == 0) return null;
+        ulong roll = Rng.Hash(world.Seed, (ulong)squad.Id, RngPurpose.Think, SeedSalts.AiRehome ^ (ulong)world.Tick << 8);
+        return houses[Rng.Int(roll, houses.Count)];
     }
 
     /// <summary>A squad made from one of its town's <c>bar squads</c> entries (the original gives it no home; Meitou keeps it at the bar, not in a free building with beds).</summary>

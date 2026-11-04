@@ -20,7 +20,6 @@ public class PairedLimbCombatTests
         public CombatSystem Combat { get; }
         public List<MedicalEvent> Events { get; } = [];
         public int Part { get; }
-        public bool Standing { get; }
         public HitDamage Primary { get; } = new(250, 0, 0);
         public DamagePacket Packet { get; set; } = new(250, 0, 0, 0, 1, 0);
         public HealthPart Other => Victim.Medical!.LimbPart(Victim.Medical.Parts[Part].Template.LimbSlot ^ 1)!;
@@ -32,13 +31,13 @@ public class PairedLimbCombatTests
             Context = new(BaseGame with { ImmediateBloodLoss = 0 }, Options, Victim.Race) { Toughness = 50, Strength = 50, Seed = 42, CharacterKey = 7 };
             Combat = new([Cut("cut left")], Constants, BaseGame, Options, DuelFixture.Lengths);
             Part = legs ? LArm + 2 : LArm;
-            Standing = Victim.Medical.Standing;
+            Victim.Medical.Tick(.001f, Context); // Match the live body update that latches posture before the swing.
             Victim.Medical.ApplyHit(Part, Primary, Context, Events);
             Assert.Single(Events, e => e.Kind == MedicalEventKind.PartSevered && e.Part == Part);
         }
         public bool Follow(float level = 100, int direction = 2, CombatWoundMechanism mechanism = CombatWoundMechanism.Slash,
             float roll = 0, bool alive = true) => Combat.TrySeverCounterpart(Victim, Part, Packet, Primary, Context, new Covered(),
-                50, alive, Standing, level, direction, mechanism, roll, Events);
+                50, alive, level, direction, mechanism, roll, Events);
     }
 
     [Theory]

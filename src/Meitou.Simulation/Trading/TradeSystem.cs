@@ -20,6 +20,8 @@ public sealed record BuyItem(InventoryItemToken Item, int Quantity) : SimCommand
     public int Y { get; init; }
     /// <summary>The window's right click (no cell chosen): one unit goes into the equipment slot that takes it when that is free, before the grids (<see cref="InventoryCommands.TryEquip"/>).</summary>
     public bool Equip { get; init; }
+    /// <summary>The character whose window it goes into: the trade passes to them (<see cref="TradeSystem.TradeWith"/>). None: the customer, or the selection's.</summary>
+    public CharacterId Into { get; init; } = CharacterId.None;
 }
 
 /// <summary>Sells <see cref="Quantity"/> units of the customer's item <see cref="Item"/> (its index in the customer's inventory) to the shop, at the stock cell dropped on when free.</summary>
@@ -27,6 +29,8 @@ public sealed record SellItem(InventoryItemToken Item, int Quantity) : SimComman
 {
     public int? X { get; init; }
     public int Y { get; init; }
+    /// <summary>The character whose window it comes from: the trade passes to them (<see cref="TradeSystem.TradeWith"/>). None: the customer, or the selection's.</summary>
+    public CharacterId From { get; init; } = CharacterId.None;
 }
 
 /// <summary>One item of a trade window, with what it costs (stock) or fetches (the customer's goods) as a whole stack.</summary>
@@ -78,8 +82,12 @@ public sealed record ArrangeStock : SimCommand;
 public sealed record TradeView(CharacterId Customer, CharacterId Trader, string TraderName, long ShopMoney, long PlayerMoney, int StockWidth, int StockHeight,
     IReadOnlyList<TradeItemView> Stock, IReadOnlyList<TradeItemView> Goods, bool BuysStolen, bool BuysIllegal = false)
 {
-    /// <summary>The held item (<see cref="PlayerState.Held"/>) priced as stock (lifted from the stock) or as the customer's goods (lifted from the customer); null for none or another's.</summary>
+    /// <summary>The held item (<see cref="PlayerState.Held"/>) priced as stock (lifted from the stock) or as a seller's goods (lifted from one in <see cref="GoodsOf"/>); null otherwise.</summary>
     public TradeItemView? Held { get; init; }
+    /// <summary>
+    /// The movable items of every player character who could take the trade over (the customer's are <see cref="Goods"/>), priced for that seller; keyed by character.
+    /// </summary>
+    public IReadOnlyDictionary<CharacterId, IReadOnlyList<TradeItemView>> GoodsOf { get; init; } = new Dictionary<CharacterId, IReadOnlyList<TradeItemView>>();
     /// <summary>The stock cells outside every container of a building shop (<see cref="Shop.Unused"/>), which hold nothing; empty for a squad shop.</summary>
     public IReadOnlyList<GridRegion> Unused { get; init; } = [];
 }
@@ -94,6 +102,11 @@ public sealed class TradeSettings
 {
     /// <summary>How close the customer must stand to the trader (the original's "Out of trading range." distance is <b>Unknown</b>; engine choice).</summary>
     public float Range { get; init; } = 30;
+    /// <summary>
+    /// How close another selected character must stand to the trader to take over the open trade: the original's item move between two characters' inventories (the stock dropped on a
+    /// character window) allows 1000 when unflagged (<c>FUN_14070d290</c>, <b>Observed</b>; whether the trade window flags it is <b>Unknown</b>, docs/game/economy.md "Trading range").
+    /// </summary>
+    public float PassRange { get; init; } = 1000;
     /// <summary>Ticks between looks at the squads for new shops and due restocks (engine choice: half a game second).</summary>
     public int CheckEveryTicks { get; init; } = 15;
     /// <summary>Game seconds the customer has to reach the trader before the opening is dropped (engine choice).</summary>
@@ -169,12 +182,10 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
                     Close(world);
                     break;
                 case BuyItem buy when open:
-                    FollowSelection(world);
-                    Buy(world, buy);
+                    if (CustomerTrades(world, buy.Into)) Buy(world, buy);
                     break;
                 case SellItem sell when open:
-                    FollowSelection(world);
-                    Sell(world, sell);
+                    if (CustomerTrades(world, sell.From)) Sell(world, sell);
                     break;
                 case ArrangeStock when open:
                     if (Resolve(world, out _, out _, out var arranged)) InventoryCommands.Arrange(arranged!.Stock);
@@ -190,7 +201,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         if (!customer.IsNone)
         {
             if (!Resolve(world, out int c, out int t, out _)) Close(world);
-            else if (InReach(world, c, t))
+            else if (InReach(world, c, t, open ? Settings.PassRange : Settings.Range))   // opens in reach, stays open within the pass-on reach
             {
                 open = true;
                 Hold(world, t);
@@ -229,20 +240,53 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
     }
 
     /// <summary>
-    /// The open trade passes to another selected character of the player's in reach of the trader when its customer is no longer selected (the original buys into the window the stock is
-    /// dropped on, <c>FUN_140712490</c>, <b>Observed</b>); out of reach the customer stays.
+    /// The open trade passes to another selected character of the player's within <see cref="TradeSettings.PassRange"/> of the trader when its customer is no longer selected
+    /// (the original buys into the window the stock is dropped on, <c>FUN_140712490</c>, <b>Observed</b>); farther the customer stays.
+    /// False when it stays while not selected.
     /// </summary>
-    void FollowSelection(World world)
+    bool FollowSelection(World world)
     {
         var selection = world.Player.Selection;
-        if (selection.Count == 0 || selection.Contains(customer) || !world.Characters.TryResolveNext(trader, out int t)) return;
+        if (selection.Count == 0 || selection.Contains(customer) || !world.Characters.TryResolveNext(trader, out int t)) return true;
         foreach (var id in selection)
-            if (world.Characters.TryResolveNext(id, out int c) && world.Characters.Cold(c) is { IsPlayer: true, Inventory: not null, Medical: not { Incapacitated: true } } && InReach(world, c, t))
+            if (world.Characters.TryResolveNext(id, out int c) && Trades(world.Characters.Cold(c)) && InReach(world, c, t, Settings.PassRange))
             {
                 customer = id;
-                return;
+                return true;
             }
+        return false;
     }
+
+    /// <summary>
+    /// Whether a buy or sell goes ahead: the trade passes to the character whose window it uses (<see cref="TradeWith"/>), or with none named follows the selection; when that
+    /// character is out of reach nothing moves and "Out of trading range." is posted.
+    /// </summary>
+    bool CustomerTrades(World world, CharacterId window)
+    {
+        if (!window.IsNone) return TradeWith(world, window);
+        if (FollowSelection(world)) return true;
+        world.Post("Out of trading range.");
+        return false;
+    }
+
+    /// <summary>
+    /// Passes the open trade to the player's character <paramref name="who"/> whose window the stock is dropped on or taken from, when within <see cref="TradeSettings.PassRange"/>
+    /// of the trader; farther it posts "Out of trading range." (one who cannot trade, down or without an inventory, is refused silently), as the original refuses such a drop beyond the item limit (<c>FUN_140712490</c>, docs/game/economy.md "Trading range").
+    /// </summary>
+    internal bool TradeWith(World world, CharacterId who)
+    {
+        if (who == customer) return true;
+        if (!world.Characters.TryResolveNext(who, out int c) || !world.Characters.TryResolveNext(trader, out int t) || !Trades(world.Characters.Cold(c))) return false;
+        if (InReach(world, c, t, Settings.PassRange))
+        {
+            customer = who;
+            return true;
+        }
+        world.Post("Out of trading range.");
+        return false;
+    }
+
+    static bool Trades(CharacterCold? c) => c is { IsPlayer: true, Inventory: not null, Medical: not { Incapacitated: true } };
 
     internal void RefreshView(World world) =>
         view = open && Resolve(world, out int ci, out int ti, out var shop) ? Publish(world, ci, ti, shop!) : null;
@@ -421,12 +465,14 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         return shop is not null;
     }
 
-    bool InReach(World world, int c, int t)
+    bool InReach(World world, int c, int t) => InReach(world, c, t, Settings.Range);
+
+    static bool InReach(World world, int c, int t, float range)
     {
         var a = world.Characters.Next[c].Position;
         var b = world.Characters.Next[t].Position;
         float dx = a.X - b.X, dz = a.Z - b.Z;
-        return dx * dx + dz * dz <= Settings.Range * Settings.Range;
+        return dx * dx + dz * dz <= range * range;
     }
 
     static ItemInstance? Find(Inventory inventory, InventoryItemToken token)
@@ -739,14 +785,17 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
     /// <summary>A bag trades only empty (engine choice; its contents would go unpriced and unchecked for theft).</summary>
     internal const string BagNotEmpty = "That bag isn't empty.";
 
+    /// <summary>
+    /// The open trade for the UI: the stock, and the goods of the customer and of every other player character who could take the trade over (<see cref="Sellers"/>), each priced
+    /// for its seller, so any of their windows shows sell prices and asks before fencing.
+    /// </summary>
     TradeView Publish(World world, int c, int t, Shop shop)
     {
         var m = Market(world);
-        var cold = world.Characters.Cold(c)!;
         var squad = world.Squads.Find(world.Characters.Cold(t)!.SquadId)!;
-        float thievery = cold.Stats?[StatsEnumerated.Thieving] ?? 0;
-        TradeItemView View(ItemInstance item, int index, bool sell, int holder)
+        TradeItemView View(ItemInstance item, int index, bool sell, int seller)
         {
+            int holder = sell ? world.Characters.Cold(seller)!.Faction : squad.Faction;
             long value = m.UnitPrice(item, false, shop.Terms, holder), sellValue = m.UnitPrice(item, true, shop.Terms, holder);
             bool buyback = IsBuyback(item, sell);
             if (buyback)
@@ -756,7 +805,8 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
             }
             bool stolen = item.IsStolenFor(holder, data);
             // The roll's own odds feed the hover box, the sale prompt and the roll alike; only where the shop would roll on the item at all.
-            float? odds = sell && stolen && Fences(item, squad, shop.Terms) ? FenceOdds(world, thievery, item, c, t, squad, shop.Terms) : null;
+            float thievery = world.Characters.Cold(seller)!.Stats?[StatsEnumerated.Thieving] ?? 0;
+            float? odds = sell && stolen && Fences(item, squad, shop.Terms) ? FenceOdds(world, thievery, item, seller, t, squad, shop.Terms) : null;
             return new(index, item.Record, item.Name, item.Section, item.X, item.Y, item.Width, item.Height, item.Quantity,
                 item.Quality, Price(m, item, item.Quantity, sell, shop.Terms, holder), Price(m, item, 1, sell, shop.Terms, holder), stolen)
             {
@@ -768,22 +818,53 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
                 Illegal = sell && (uint)shop.Terms.Site < (uint)data.SiteFactions.Count && m.FactionCulture(data.SiteFactions[shop.Terms.Site]) is { } culture && culture.Illegal.Contains(item.Record),
             };
         }
-        // Only the stock grid's own items, at their All() indices (which tokens use): a bag's contents are not loose stock.
+        var stock = StockViews(shop, item => View(item.Item, item.Index, false, c));
+        var goodsOf = new Dictionary<CharacterId, IReadOnlyList<TradeItemView>>();
+        foreach (int seller in Sellers(world, c, t))
+            goodsOf[world.Characters.IdOf(seller)] = Goods(world.Characters.Cold(seller)!, item => View(item.Item, item.Index, true, seller));
+        var held = HeldView(world, goodsOf, (item, sell, seller) => View(item, -1, sell, seller), c);
+        string name = world.Characters.Cold(t)!.Name;
+        return new TradeView(customer, trader, name, squad.Money, world.Player.Money, shop.Stock.Width, shop.Stock.Height, stock, goodsOf[customer], shop.Terms.BuysStolen, shop.Terms.BuysIllegal)
+        {
+            Held = held, GoodsOf = goodsOf, Unused = shop.UnusedCells,
+        };
+    }
+
+    /// <summary>Only the stock grid's own items, at their All() indices (which tokens use): a bag's contents are not loose stock.</summary>
+    static List<TradeItemView> StockViews(Shop shop, Func<(ItemInstance Item, int Index), TradeItemView> view)
+    {
         var stock = new List<TradeItemView>(shop.Stock.Items.Count);
         int at = 0;
         foreach (var item in shop.Stock.Items)
         {
-            stock.Add(View(item, at, false, squad.Faction));
+            stock.Add(view((item, at)));
             at += 1 + (item.Contents?.All().Count() ?? 0);
         }
-        var goods = cold.Inventory!.All().Select((item, index) => (item, index)).Where(p => InventoryCommands.IsMovableSection(p.item.Section))
-            .Select(p => View(p.item, p.index, true, cold.Faction)).ToArray();
-        var held = world.Player.Held switch
+        return stock;
+    }
+
+    static TradeItemView[] Goods(CharacterCold seller, Func<(ItemInstance Item, int Index), TradeItemView> view) =>
+        seller.Inventory!.All().Select((item, index) => (item, index)).Where(p => InventoryCommands.IsMovableSection(p.item.Section)).Select(view).ToArray();
+
+    /// <summary>The customer, then the player's other characters who could take the trade over: able to trade and within <see cref="TradeSettings.PassRange"/> of the trader.</summary>
+    IEnumerable<int> Sellers(World world, int c, int t)
+    {
+        yield return c;
+        foreach (var squad in world.Squads.All)
         {
-            { From.Holder: ItemHolder.Stock } h => View(h.Item, -1, false, squad.Faction),
-            { From.Holder: ItemHolder.Character } h when h.From.Character == customer => View(h.Item, -1, true, cold.Faction),
+            if (squad.Faction < 0 || squad.Faction != world.Player.Faction && squad.Faction != data.PlayerFaction) continue;
+            foreach (var id in squad.Members)
+                if (id != customer && world.Characters.TryResolveNext(id, out int s) && Trades(world.Characters.Cold(s)) && InReach(world, s, t, Settings.PassRange))
+                    yield return s;
+        }
+    }
+
+    /// <summary>The held item priced as stock (lifted from the stock) or as its seller's goods (lifted from a seller's window, <see cref="Sellers"/>); null otherwise.</summary>
+    static TradeItemView? HeldView(World world, Dictionary<CharacterId, IReadOnlyList<TradeItemView>> goodsOf, Func<ItemInstance, bool, int, TradeItemView> view, int c) =>
+        world.Player.Held switch
+        {
+            { From.Holder: ItemHolder.Stock } h => view(h.Item, false, c),
+            { From.Holder: ItemHolder.Character } h when goodsOf.ContainsKey(h.From.Character) && world.Characters.TryResolveNext(h.From.Character, out int s) => view(h.Item, true, s),
             _ => null,
         };
-        return new TradeView(customer, trader, world.Characters.Cold(t)!.Name, squad.Money, world.Player.Money, shop.Stock.Width, shop.Stock.Height, stock, goods, shop.Terms.BuysStolen, shop.Terms.BuysIllegal) { Held = held, Unused = shop.UnusedCells };
-    }
 }

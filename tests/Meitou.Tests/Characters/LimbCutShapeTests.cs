@@ -115,7 +115,7 @@ public class LimbCutShapeTests
         source = new() { Bodies = source.Bodies, Joints = source.Joints, Joined = source.Joined, Root = 0, BodyOfBone = map };
         var cold = new CharacterCold { Race = Human, Medical = Healthy(), Appearance = look,
             LimbSeverances = [new(0, .7f, new(.2f, -.1f))] };
-        cold.Medical.Sever(LArm, Context(), false);
+        cold.Medical.Sever(LArm, Context());
         using var physics = new RagdollSystem(cache, new Flat(), BodyOptions.Default with { AdvancedRagdolls = true }, _ => setup, (_, _, _) => source);
         using var world = new SimWorld(new WorldSettings(), new OpenGroundWalkability((_, _) => 0), [physics]);
         var id = world.Characters.Spawn(new() { Position = new(20, 25, 20) }, cold, 0);

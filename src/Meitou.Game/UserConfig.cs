@@ -62,8 +62,6 @@ sealed class UserConfig
     public float InGameTransitionSpeed { get; set; } = 1.5f;
     /// <summary>A double click (or double tap) on a squad member farther than <see cref="FlightDistance"/> from the view flies the camera there in an arc (Advanced settings; Meitou only, the game cuts).</summary>
     public bool CharacterFlights { get; set; } = false;
-    /// <summary>Holding the right button on a squad bar portrait opens that member's context menu (Advanced settings; Meitou only, the game has none).</summary>
-    public bool PortraitMenu { get; set; } = true;
     /// <summary>Keeps the object meshes and textures and the terrain textures around every squad bar character loaded, not only around the camera (Advanced settings; Meitou only, costs video memory).</summary>
     public bool KeepTexturesAtCharacters { get; set; } = true;
     /// <summary>With <see cref="KeepTexturesAtCharacters"/>, the other player squads' members are kept too, not only the squad bar's (more video memory).</summary>
@@ -148,6 +146,8 @@ sealed class UserConfig
     public int? SimThreads { get; set; }
     /// <summary>The autosave slot written last (the original's <c>settings.cfg</c> <c>autosaveindex</c>); the next autosave takes the one after.</summary>
     public int AutosaveIndex { get; set; }
+    /// <summary>The code mods (by mod name) the player allowed to run their own code (docs/modding.md "Trust"); the launcher asks and adds them. Others load as data only.</summary>
+    public List<string> TrustedCodeMods { get; set; } = [];
     /// <summary>The feedback form's ticks and Discord name, as last used; null until the form first opens.</summary>
     public FeedbackSettings? Feedback { get; set; }
     public Dictionary<string, float> Graphics { get; set; } = [];

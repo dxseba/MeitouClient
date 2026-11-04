@@ -19,8 +19,8 @@ public sealed record DebugMoney(long Delta) : DebugCommand;
 /// <summary>Puts the characters on the ground at <see cref="Target"/> (side by side, 10 units apart) and drops their orders.</summary>
 public sealed record DebugTeleport(IReadOnlyList<CharacterId> Characters, Vector3 Target) : DebugCommand;
 
-/// <summary>Heals the characters fully (<see cref="MedicalState.Heal"/>).</summary>
-public sealed record DebugHeal(IReadOnlyList<CharacterId> Characters) : DebugCommand;
+/// <summary>Heals the characters (<see cref="MedicalState.Heal"/>); with <see cref="Limbs"/> their lost and crushed limbs come back first (<see cref="MedicalState.RestoreLimbs"/>).</summary>
+public sealed record DebugHeal(IReadOnlyList<CharacterId> Characters, bool Limbs = false) : DebugCommand;
 
 /// <summary>Sets every stat of the characters to 100.</summary>
 public sealed record DebugMaxSkills(IReadOnlyList<CharacterId> Characters) : DebugCommand;
@@ -124,7 +124,12 @@ static class DebugCheats
                 break;
             case DebugHeal heal when data is not null:
                 foreach (var id in heal.Characters)
-                    if (Body(world, data, id) is ({ } medical, var ctx)) medical.Heal(ctx);
+                    if (Body(world, data, id) is ({ } medical, var ctx))
+                    {
+                        // The look and kit follow the limbs (boots, two-handed holds), as after a prosthetic is fitted.
+                        if (heal.Limbs && medical.RestoreLimbs() && table.TryResolveNext(id, out int healed)) assembly?.RefreshEquipment(table.Cold(healed)!);
+                        medical.Heal(ctx);
+                    }
                 break;
             case DebugMaxSkills max:
                 foreach (var id in max.Characters)
@@ -195,7 +200,7 @@ static class DebugCheats
                 else if (item.Type == FcsRecordType.WEAPON && DebugGiveItem.Grade(data.Db, give.Quality) is { } grade)
                     (item.CompanyId, item.MaterialId, item.Level) = (CraftBench.PlayerWeapons, grade.Model, grade.Level);
                 else if (DebugGiveItem.QualityTypes.Contains(item.Type)) item.Level = Math.Clamp(give.Quality, 0, 100);
-                if (Items.InventoryCommands.TryEquip(inventory, item.WithQuantity(1)))
+                if (Items.InventoryCommands.TryEquip(inventory, item.WithQuantity(1), table.Cold(owner)))
                 {
                     // One unit is worn when its slot is free (as the trade window's right click); the rest of a stack goes to the grids.
                     assembly?.RefreshEquipment(table.Cold(owner)!);

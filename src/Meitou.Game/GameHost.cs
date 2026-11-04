@@ -50,6 +50,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     long lastRepath;
     /// <summary>Seconds between <see cref="Meitou.Simulation.RepathCommand"/>s at least: zones go live in runs along a long walk, and are sent together (engine choice).</summary>
     const double RepathCoalesceSeconds = 1;
+    /// <summary>The far cadence (docs/simulation.md "Far cadence"): a character far from the camera and from every player character steps once in this many ticks.</summary>
+    const int FarTickPeriod = 4;
     readonly Dictionary<Meitou.Data.World.ZoneCoordinate, long> navZones = [];
     PlayerInterface player = null!;
     Meitou.Simulation.Squad? playerSquad;
@@ -140,10 +142,11 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             simulation: worldSettings = new Meitou.Simulation.WorldSettings
             {
                 Seed = g.Seed, MinPartitionSize = 32, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)),
-                Sunrise = (float)clock.Sunrise, Sunset = (float)clock.Sunset,
+                Sunrise = (float)clock.Sunrise, Sunset = (float)clock.Sunset, FarTickPeriod = FarTickPeriod,
             },
             systems: systems, walkability: walkability);
         session.World.BenchFacingFix = config.FixBenchFacing;
+        if (gpu.Characters is { } nearChars) session.World.NearRadius = nearChars.NearReach;   // every drawn character steps every tick (docs/simulation.md "Far cadence")
         BootPlayer(display, interactive);
     }
 
@@ -165,6 +168,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             var levels = IsSandbox || IsDuel || IsBattle ? null : scene.Objects?.Levels ?? Meitou.Data.World.WorldLevelData.Load(install, includeInteriors: true);
             if (levels is not null)
             {
+                // The homes' ruins and layouts before anything reads the levels (done already when the renderer read them).
+                Meitou.Data.World.ResidentRuins.Apply(gameDb, levels, scene.Objects?.Layouts ?? new Meitou.Data.World.BuildingLayouts(gameDb, levels.Interiors));
                 nav = new Meitou.Navigation.NavSystem(install, gameDb, levels!, heights.HeightAt);
                 nav.ZoneReady += ready => { lock (navReady) navReady.Add(ready.Zone); };
                 walkability = new NavAdapter(nav.Walkability);
@@ -194,7 +199,11 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             }
             var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root),
                 bodyOptions: Meitou.Simulation.Bodies.BodyOptions.Default with { Dismemberment = Gameplay.Dismemberment, Decapitation = config.Decapitation, AdvancedRagdolls = config.AdvancedRagdolls }, biomes: biomes, buildings: buildings, roads: levels?.Roads(), townZones: levels?.TownZones(), level: levels?.Level);
-            if (levels is not null) data.Sight = new BuildingSight(install, gameDb, levels, scene.Objects?.Layouts ?? new Meitou.Data.World.BuildingLayouts(gameDb, levels.Interiors));
+            if (levels is not null)
+            {
+                data.Layouts = scene.Objects?.Layouts ?? new Meitou.Data.World.BuildingLayouts(gameDb, levels.Interiors);
+                data.Sight = new BuildingSight(install, gameDb, levels, data.Layouts);
+            }
             if (nav is not null) nav.Walkability.Roads = data.Roads;   // one network for both: on-screen long routes take the roads as the off-screen squads do
             // The mineable rocks for ore mines, from the foliage placement (read through the renderer's layout cache when it has the zone).
             if (levels is not null)
@@ -210,6 +219,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root, gameDb, name => assets.Find(name));   // with the animals' own skeletons and the animation files
             animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb);
             popData = data;
+            StartMods(gameDb, data);
             townPlacements = towns;
             saveLevels = levels;
             simWalkability = walkability;
@@ -219,6 +229,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             systems = built.Systems;
             constants = data.Bodies.Constants;
         }
+        StartDeferredWarmup();
         return (walkability, systems, constants);
     }
 
@@ -228,6 +239,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     /// </summary>
     void ConfigurePlayerInterface(PlayerInterface ui)
     {
+        ConnectModUi(ui);
         ui.FixLoadButton = config.FixLoadButton;
         ui.SaveInUse = folder => session.World.Player.Exists && saveInUse is { } used && string.Equals(Path.GetFullPath(used), Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase);
         ui.DeleteSave = folder =>
@@ -338,7 +350,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         player.Floaters = config.Floaters;
         player.FeedbackButtonInPlay = config.FeedbackButton;
         player.FixLoadButton = config.FixLoadButton;
-        player.PortraitMenu = config.PortraitMenu;
         // The region (BIOME_GROUP) under a point, for the biome banner.
         player.RegionAt = (x, z) => gpu.Weather?.World.RegionAt(x, z).Def is { } def ? (def.StringId, def.Name) : null;
         player.Markers = gpu.Markers ??= MarkerRenderer.Create(context, assets.Find);

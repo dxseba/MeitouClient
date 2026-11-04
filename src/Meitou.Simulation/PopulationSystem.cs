@@ -20,7 +20,7 @@ namespace Meitou.Simulation;
 /// its characters are removed (the original turns the squads into abstract "unloaded" ones, which the AI stage will do). The
 /// characters are built on a background thread when <see cref="PopulationSettings.Background"/> is set and taken in at the first tick
 /// after they are ready.
-/// <para>Residents (docs/game/factions-squads-towns.md "Town residents"): the resident table (<see cref="ResidentEntries"/>) is housed in the town's buildings
+/// <para>Residents (docs/game/factions-squads-towns.md "Town residents"): the resident table (<see cref="ResidentHomes.Entries"/>) is housed in the town's buildings
 /// and each squad made at a node of its home (<c>PopulationHomes.cs</c>); a town without building data puts each entry's v0 squads at random spots within
 /// <see cref="PopulationSettings.PlacementRadiusShare"/> of the town radius round its placed position, on dry ground (engine choice). Bar squads, the roaming squads (<c>PopulationRoaming.cs</c>) and the wild, homeless squads and nests (<c>PopulationWild.cs</c>), are made here too.</para>
 /// </summary>
@@ -420,14 +420,16 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         bool held = !replaced && (HoldsSquads(world, site.Index) || PoolsOf(site.Index) is { Started: true });
         if (held) CheckRegeneration(world, site.Index);
         else if (!replaced) DropUnmade(world, site.Index);
+        // Taken here, not on the build thread: the buildings the player owns house no residents (docs/game/factions-squads-towns.md "Town residents").
+        var owned = world.Fixtures.PlayerOwnedIn(data, site.Index, world.Player.Faction >= 0 ? world.Player.Faction : data.PlayerFaction);
         if (work is null)
         {
-            Spawn(world, BuildTown(site, loadId, seed, walk, held));
+            Spawn(world, BuildTown(site, loadId, seed, walk, held, owned));
             state.Status = SiteStatus.Loaded;
         }
         else
         {
-            work.Add(() => built.Enqueue(BuildTown(site, loadId, seed, walk, held)));
+            work.Add(() => built.Enqueue(BuildTown(site, loadId, seed, walk, held, owned)));
         }
     }
 
@@ -568,6 +570,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         // The town's doors, cages, containers and beds, once (they stay registered when the town unloads).
         world.Fixtures.RegisterSite(world, data, town.Site);
         world.ItemSlots.RegisterSite(world, data, town.Site);
+        StandTownCamp(world, site);
         // A town made counts as visited in every zone of its buildings (engine choice: its residents and its buildings' locks are saved whole, docs/formats/save.md "Zone files"),
         // but for the centre zone of another town: a file there would tell the original that town was made, with no residents saved for it.
         foreach (var b in site.Buildings)

@@ -124,6 +124,12 @@ public sealed partial class FixtureRegistry
     /// <summary>The GAMESTATE_BUILDING records of a loaded save by building instance id (<see cref="Saving.SaveLoader"/>): a building registered later takes its lock and door state from them.</summary>
     public IReadOnlyDictionary<string, FcsRecord>? Saved { get; set; }
 
+    /// <summary>
+    /// The placements of a loaded save's building lists by building instance id (<see cref="Saving.HeldSave.BuildingSpots"/>): a prisoner whose <c>in what</c> names a generated
+    /// interior cage binds to the interior cage fixture of the same record at that place (<see cref="Bind"/>).
+    /// </summary>
+    public IReadOnlyDictionary<string, SavedSpot>? SavedSpots { get; set; }
+
     /// <summary>The item factory a loaded save's container contents are made with (<see cref="ContainerSave"/>); set by the loader.</summary>
     public Meitou.Simulation.Items.ItemFactory? Items { get; set; }
 
@@ -140,10 +146,10 @@ public sealed partial class FixtureRegistry
         foreach (var b in data.Sites[site].Buildings)
         {
             RegisterBuilding(world, data, site, b, townFaction);
-            if (data.Sight is { } sight) world.Sight.Add(sight, SightBuilding(b,
-                Saved?.GetValueOrDefault(b.Key)?.Bools.GetValueOrDefault("destroyed", b.Destroyed) ?? b.Destroyed));
+            if (data.Sight is { } sight) world.Sight.Add(sight, SightBuilding(b, IsDestroyed(b)));
         }
         Bind(world);
+        EmptyPurchased(world, site);
     }
 
     void RegisterBuilding(World world, PopulationData data, int site, TownBuilding b, int townFaction)
@@ -159,7 +165,7 @@ public sealed partial class FixtureRegistry
         var list = new List<Fixture>();
         var record = db.Find(b.BuildingId);
         // A destroyed building has no doors and no lock of its own (docs/game/locks.md "Doors"); its interior's fixtures stay.
-        if (record is not null && !(Saved?.GetValueOrDefault(b.Key)?.Bools.GetValueOrDefault("destroyed", b.Destroyed) ?? b.Destroyed))
+        if (record is not null && !IsDestroyed(b))
         {
             AddDoors(world, db, record, b.Key, site, owner, faction, b.Position, b.Yaw, list);
             if (Lockable(db, record) is { } own) list.Add(Make(world, db, own, b.Key, b.Key, record, site, owner, faction, b.Position, b.Yaw));
@@ -268,6 +274,37 @@ public sealed partial class FixtureRegistry
     }
 
     /// <summary>
+    /// Registers a camp building's cage or lock (<see cref="NestBuildings"/>: a Prisoner Pole of a fog nest), owned by the camp's faction: a nest's is marked
+    /// (<see cref="Fixture.Nest"/>), a town's has the town's <paramref name="site"/>. Then binds the held characters whose <see cref="CharacterCold.InWhat"/> names it. A piece
+    /// with neither is left out.
+    /// </summary>
+    public void RegisterNestBuilding(World world, PopulationData data, NestPiece piece, int owner, int site = -1)
+    {
+        if (byBuilding.ContainsKey(piece.Id) || data.Db.Find(piece.Record) is not { } record || Lockable(data.Db, record) is not { } kind) return;
+        var faction = owner >= 0 && owner < data.Factions.Count ? data.Factions[owner] : null;
+        var made = Make(world, data.Db, kind, piece.Id, piece.Id, record, site, owner, faction, piece.Position, TownBuildings.YawOf(piece.Rotation), host: record.StringId);
+        made.Nest = site < 0;
+        byBuilding[piece.Id] = [made];
+        buildings.Add(piece.Id);
+        all.Add(made);
+        byId[made.Id] = made;
+        containerSpots = null;
+        cageList = null; publishedCages = null;
+        Bind(world);
+    }
+
+    /// <summary>A nest's buildings leave the world: whoever its cages hold is let out first.</summary>
+    public void UnregisterNestBuildings(World world, IEnumerable<NestPiece> pieces)
+    {
+        foreach (var piece in pieces)
+        {
+            foreach (var f in OfBuilding(piece.Id))
+                if (!f.Occupant.IsNone) Release(world, f.Occupant);
+            Unregister(piece.Id);
+        }
+    }
+
+    /// <summary>
     /// A BUILDING's bed data when one of its functionalities is a bed (<c>function</c> 6 BF_BED or 25 BF_SKELETON_BED): the function, the functionality's <c>animation</c> (the clip it is
     /// lain in) and the sum of its construction materials (<see cref="Meitou.Data.Gameplay.Construction.BuildingBuildData.Target"/>). Null for anything else.
     /// </summary>
@@ -277,16 +314,16 @@ public sealed partial class FixtureRegistry
             foreach (var r in building.GetReferences(list))
                 if (db.Find(r.TargetStringId) is { Type: FcsRecordType.BUILDING_FUNCTIONALITY } f && f.GetInt("function") is TownBuildings.BedFunction or TownBuildings.SkeletonBedFunction)
                     return new BedData(f.GetInt("function"), f.GetReferences("animation").Select(a => db.Find(a.TargetStringId)?.Name).FirstOrDefault(n => n is not null),
-                        Meitou.Data.Gameplay.Construction.BuildingBuildData.From(building).Target, UseNodes(db, building));
+                        Meitou.Data.Gameplay.Construction.BuildingBuildData.From(building).Target, UseNodes(db, building) is { Length: >= 2 } nodes ? nodes : null);
         return null;
     }
 
-    /// <summary>A bed's NODE_USE instances (<see cref="BedNode"/>) in instance id order; null with fewer than 2 (the original then uses the bed's own origin).</summary>
-    static BedNode[]? UseNodes(GameDatabase db, GameRecord building)
+    /// <summary>A BUILDING's NODE_USE instances (<see cref="UseNode"/>) in instance id order; null with none (a bed with fewer than 2 is lain in at its own origin).</summary>
+    static UseNode[]? UseNodes(GameDatabase db, GameRecord building)
     {
-        BedNode[] nodes = [.. building.Instances.Values.Where(i => !i.IsCleared && db.Find(i.Target) is { } n && n.GetBool("is node") && n.GetInt("node type") == UseNodeType)
-            .OrderBy(i => i.Id, StringComparer.Ordinal).Select(i => new BedNode(i.Position, TownBuildings.YawOf(i.Rotation) - MathF.PI / 2))];
-        return nodes.Length >= 2 ? nodes : null;
+        UseNode[] nodes = [.. building.Instances.Values.Where(i => !i.IsCleared && db.Find(i.Target) is { } n && n.GetBool("is node") && n.GetInt("node type") == UseNodeType)
+            .OrderBy(i => i.Id, StringComparer.Ordinal).Select(i => new UseNode(i.Position, TownBuildings.YawOf(i.Rotation) - MathF.PI / 2))];
+        return nodes.Length > 0 ? nodes : null;
     }
 
     const int UseNodeType = 4;
@@ -295,17 +332,27 @@ public sealed partial class FixtureRegistry
     /// Where a sleeper is put in a bed and the way it faces (<c>Building::getPositionMarker</c> / <c>getDirectionMarkerQuat</c>, docs/game/locks.md "Beds"): the bed's use node
     /// nearest <paramref name="from"/>, else the bed's own origin and facing.
     /// </summary>
-    public static (Vector3 At, float Yaw) LieSpot(Fixture bed, Vector3 from)
+    public static (Vector3 At, float Yaw) LieSpot(Fixture bed, Vector3 from) => Nearest(bed, bed.Bed.Nodes, from) ?? (bed.Position, bed.Yaw);
+
+    /// <summary>
+    /// Where an occupant getting out of a cage stands (the original's hold clear <c>FUN_140661f90</c>, run while it is still held, docs/game/locks.md "Cages and beds"): the cage's use
+    /// node nearest the cage's own position (a Prisoner Cage's is on its door side, local +Z); null when the cage has none (the pole), where it stays.
+    /// </summary>
+    public static Vector3? ExitSpot(Fixture cage) => Nearest(cage, cage.UseNodes, cage.Position)?.At;
+
+    /// <summary>The use node of <paramref name="f"/> nearest <paramref name="from"/> in the world (squared 3D distance), with its facing; null with no nodes.</summary>
+    static (Vector3 At, float Yaw)? Nearest(Fixture f, UseNode[]? nodes, Vector3 from)
     {
-        if (bed.Bed.Nodes is not { } nodes) return (bed.Position, bed.Yaw);
-        var turn = Matrix4x4.CreateRotationY(bed.Yaw);
-        var best = (At: bed.Position, Yaw: bed.Yaw);
+        if (nodes is null) return null;
+
+        var turn = Matrix4x4.CreateRotationY(f.Yaw);
+        (Vector3 At, float Yaw)? best = null;
         float bestD = float.MaxValue;
         foreach (var n in nodes)
         {
-            var at = bed.Position + Vector3.Transform(n.At, turn);
+            var at = f.Position + Vector3.Transform(n.At, turn);
             float d = Vector3.DistanceSquared(at, from);
-            if (d < bestD) (best, bestD) = ((at, MathF.IEEERemainder(bed.Yaw + n.Yaw, MathF.Tau)), d);
+            if (d < bestD) (best, bestD) = ((at, MathF.IEEERemainder(f.Yaw + n.Yaw, MathF.Tau)), d);
         }
         return best;
     }
@@ -341,6 +388,7 @@ public sealed partial class FixtureRegistry
         {
             Id = id, Building = building, Kind = kind, RecordId = record.StringId, Site = site, Owner = owner, Position = at, Yaw = yaw, HostRecordId = host,
             Clips = kind == FixtureKind.Cage && functionality is not null ? new CageClips(FirstClip(db, functionality, "animation"), FirstClip(db, functionality, "animation KO"), FirstClip(db, functionality, "animation dazed")) : default,
+            UseNodes = kind == FixtureKind.Cage ? UseNodes(db, record) : null,
             Restrains = functionality?.GetBool("restrains movement") ?? false, OccupantSelection = kind == FixtureKind.Cage && (functionality?.GetBool("occupant selection") ?? false), UseRange = functionality is null ? 25 : FloatOf(functionality, "use range", 25),
             Contents = kind == FixtureKind.Container && storageWidth > 0 && storageHeight > 0 ? new Meitou.Simulation.Items.Inventory(storageWidth, storageHeight) { StackBonusMult = record.GetFloat("stackable bonus mult", 1) } : null,
             Lock = !locked ? null : new LockState { Level = RollLevel(world.Seed, id, faction, IntOf(record, "lock level bonus"), door: false), Hardness = FloatOf(record, "hardness") },
@@ -371,14 +419,68 @@ public sealed partial class FixtureRegistry
         for (int s = 0; s < table.HighWater; s++)
         {
             if (!next[s].Alive || table.Cold(s) is not { InSomething: not HeldState.None, InWhat: { } what } c) continue;
-            // The original's `in what` of one lying in a bed the player built names that bed's building.
-            if (!byId.TryGetValue(what, out var f) && !(c.InSomething == HeldState.Bed && byId.TryGetValue(what + "@bed0", out f) && f.Site < 0)) continue;
-            if (!IsFree(table, f)) continue;
+            if (HeldFixture(c, what) is not { } f || !IsFree(table, f)) continue;
             f.Occupant = new CharacterId(s, next[s].Generation);
             c.InWhat = f.Id;
-            // A loaded sleeper is put at its lie spot again (engine choice: a save from before LieSpot holds it at the bed's origin, half off the mattress).
-            if (c.InSomething == HeldState.Bed) { var (at, yaw) = LieSpot(f, next[s].Position); table.Place(s, at, yaw); }
+            // A loaded prisoner plays its cage's poses as one put in does (Imprison): stand, out-cold foetal, a pole's own clip.
+            if (c.InSomething == HeldState.Imprisoned && f.Kind == FixtureKind.Cage) c.CageClips = f.Clips;
+            // Matched from the original's keys: the held state is the one loaded, so they are written back as read (HeldSave.Write).
+            if (c.Save is { } loaded && loaded.InWhat == what) loaded.InWhat = f.Id;
+            // A loaded sleeper is put at its lie spot again (engine choice: a save from before LieSpot holds it at the bed's origin, half off the mattress),
+            // still sleeping: a task other than Sleep would get it up (BedSystem).
+            if (c.InSomething == HeldState.Bed)
+            {
+                var (at, yaw) = LieSpot(f, next[s].Position);
+                table.Place(s, at, yaw, CharacterTask.Sleep);
+            }
         }
+    }
+
+    /// <summary>
+    /// The fixture a held character's <see cref="CharacterCold.InWhat"/> names: a fixture id, a bed the player built, or a generated interior
+    /// cage or bed of the original's save.
+    /// </summary>
+    Fixture? HeldFixture(CharacterCold c, string what)
+    {
+        if (byId.TryGetValue(what, out var f)) return f;
+        // The original's `in what` of one lying in a bed the player built names that bed's building.
+        if (c.InSomething == HeldState.Bed && byId.TryGetValue(what + "@bed0", out f) && f.Site < 0) return f;
+        if (SavedSpots?.GetValueOrDefault(what) is not { } spot) return null;
+        return c.InSomething switch
+        {
+            HeldState.Imprisoned => InteriorCageAt(spot),
+            HeldState.Bed => InteriorBedAt(spot),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The most a generated interior cage or bed of a save may stand from Meitou's fixture of the same record and still be that one: Meitou places
+    /// the interior from the same layout (<b>Observed</b>: the Rebirth Slave Shop's caged prisoner's cage at distance 0, the next cage of the room
+    /// 27.8 away; the 24 saved sleepers of the Rebirth garrison's beds at distance 0, the next bed of the record 33 away).
+    /// </summary>
+    const float SavedSpotReach = 1;
+
+    /// <summary>The interior bed fixture with the spot's record standing at the spot (<see cref="SavedSpotReach"/>), or null.</summary>
+    Fixture? InteriorBedAt(SavedSpot spot)
+    {
+        foreach (var b in BedSpots)
+        {
+            bool near = Vector3.DistanceSquared(b.Position, spot.Position) <= SavedSpotReach * SavedSpotReach;
+            if (b.Record == spot.Record && near) return byId.GetValueOrDefault(b.Id);
+        }
+        return null;
+    }
+
+    /// <summary>The interior cage fixture with the spot's record standing at the spot (<see cref="SavedSpotReach"/>), or null.</summary>
+    Fixture? InteriorCageAt(SavedSpot spot)
+    {
+        foreach (var f in cageList ??= [.. all.Where(x => x.Kind == FixtureKind.Cage)])
+        {
+            bool near = Vector3.DistanceSquared(f.Position, spot.Position) <= SavedSpotReach * SavedSpotReach;
+            if (f.Id != f.Building && f.RecordId == spot.Record && near) return f;
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ doors
@@ -788,6 +890,12 @@ public sealed partial class FixtureRegistry
         }
     }
 
+    /// <summary>Puts a character leaving <paramref name="cage"/> at its <see cref="ExitSpot"/>, facing as it did; it stays where it is when the cage has no use node.</summary>
+    static void StepOut(CharacterTable table, int slot, Fixture cage)
+    {
+        if (ExitSpot(cage) is { } at) table.Place(slot, at, table.Next[slot].Yaw);
+    }
+
     static void Hold(CharacterTable table, int slot, CharacterCold c, Vector3 at, float yaw)
     {
         table.Place(slot, at, yaw);
@@ -799,8 +907,8 @@ public sealed partial class FixtureRegistry
     /// <summary>
     /// Frees a prisoner (Task_ReleasePrisoner, economy.md 11.5, <b>Observed</b>): the cage is unlocked and emptied, the state and sentence cleared (not the slave state: a slave released
     /// by a faction other than the player's becomes that faction's slave); when the releaser's faction books
-    /// bounties its entry and the jail's (the cage owner's) are erased. A player-faction prisoner gets "{1} has been released from prison.". The prisoner stays where it stands
-    /// (getting out of the cage is the caller's walk). False when the character is not imprisoned.
+    /// bounties its entry and the jail's (the cage owner's) are erased. A player-faction prisoner gets "{1} has been released from prison.". The prisoner is put in front of the
+    /// cage (<see cref="ExitSpot"/>). False when the character is not imprisoned.
     /// </summary>
     public bool Release(World world, CharacterId prisoner, int releaserFaction = -1, CrimeSystem? crimes = null)
     {
@@ -811,6 +919,7 @@ public sealed partial class FixtureRegistry
         {
             if (cage.Lock is { } l) l.Locked = false;
             if (cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+            StepOut(table, s, cage);
         }
         if (releaserFaction >= 0 && crimes is not null && crimes.Factions.Books(releaserFaction) && c.Bounties is { } ledger)
         {
@@ -844,6 +953,7 @@ public sealed partial class FixtureRegistry
         if (cage?.Lock is { EffectivelyLocked: true }) return false;
         bool escape = cage is not null && !c.Kidnapped;
         if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+        if (cage is not null) StepOut(table, s, cage);
         Clear(c);
         if (!(cage is not null && crimes?.Factions.NotReal(cage.Owner) == true)) c.Escaped = escape;
         if (escape && c.SlaveState == 1) SetSlave(world, c, 2, c.SlaveOwner);   // a slave getting out is an escaped slave (Task_GetOutOfCage)
@@ -896,7 +1006,11 @@ public sealed partial class FixtureRegistry
         if (master >= 0) c.SlaveMaster = master;
         SetSlave(world, c, 1, owner);
         // Handed to another master (engine choice: the original resets and re-adds job 187 where it chains or processes, FUN_14032e590, FUN_14035aa20): its job names the new one.
-        if (handed) Kidnap.ObedientSlave.Reset(world, c);
+        if (handed)
+        {
+            Kidnap.ObedientSlave.Reset(world, c);
+            c.Save?.DropSlaver();   // the save's owner character is not its owner any more
+        }
     }
 
     /// <summary>Clears a character's slave state and owner (state 0) without DA 53's "Free!" (a slave bought free, <c>FUN_1406add20</c>).</summary>
@@ -921,18 +1035,36 @@ public sealed partial class FixtureRegistry
 
     /// <summary>
     /// The slave state setter (<c>FUN_1405a4940</c>, <b>Observed</b>): free to slave posts "{1} has been enslaved" for a player-faction character; becoming an escaped slave sets the
-    /// recently-wanted marker to 250 (status <c>+0x110</c>), so a looker who knows recognises it at once.
+    /// recently-wanted marker to 250 (status <c>+0x110</c>), so a looker who knows recognises it at once; a change to a state above 1 stamps the game hours (status <c>+0x8</c>,
+    /// <see cref="CharacterCold.SlaveSince"/>; docs/game/carry-loot.md "Escaped slaves lie low").
     /// </summary>
     static void SetSlave(World world, CharacterCold c, byte state, int owner)
     {
         byte before = c.SlaveState;
         if (c.SlaveState == 0 && state == 1 && (c.IsPlayer || world.Player.Faction >= 0 && c.Faction == world.Player.Faction)) world.Post(Loc.Tr("{1} has been enslaved", c.Name));
         if (state == 2) c.RecentlyWanted = Crime.CrimeSystem.RecentlyWantedSeconds;
+        if (state > 1 && before != state) c.SlaveSince = world.GameHours;
         c.SlaveState = state;
         c.SlaveOwner = state == 0 ? -1 : owner;
         if (state == 0) c.SlaveMaster = -1;
+        if (state == 0 && before != 0) c.Save?.DropSlaver();
         // The state setter then fixes the orders object of one that changed (FUN_14032e0d0): a slave gets job 187 Obedient Slave, one that stops being a slave loses it.
         if (before != state) Kidnap.ObedientSlave.StateChanged(world, c, state);
+    }
+
+    /// <summary>
+    /// An escaped slave lies low (docs/game/carry-loot.md "Escaped slaves lie low", <b>Verified</b>): for a state above 1, with <c>elapsed</c> the game hours since
+    /// <see cref="CharacterCold.SlaveSince"/>, a stamp in the future (elapsed below 0) frees it at once; an ex-slave (3) is free after more than 4 days, its owner cleared; an escaped
+    /// slave (2) becomes an ex-slave after more than 12 hours, stamped again. The original writes these states directly, not through the setter, so no message, marker or job
+    /// change follows; it keeps the owner on the first path, Meitou clears it (engine choice: a free character has no owner here, in the hash and in saves). Called from the crime
+    /// sweep (engine choice: the original's per-character status update runs on a cadence that is <b>Unknown</b>).
+    /// </summary>
+    public static void LayLow(World world, CharacterCold c)
+    {
+        if (c.SlaveState <= 1) return;
+        double elapsed = world.GameHours - c.SlaveSince;
+        if (elapsed < 0 || c.SlaveState == 3 && elapsed / 24 > 4) (c.SlaveState, c.SlaveOwner, c.SlaveMaster) = (0, -1, -1);
+        else if (c.SlaveState == 2 && elapsed > 12) (c.SlaveState, c.SlaveSince) = (3, world.GameHours);
     }
 
     static void Clear(CharacterCold c)

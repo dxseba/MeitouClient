@@ -51,9 +51,27 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
     /// <summary>A character within this distance of a waypoint has reached it.</summary>
     public const float ArriveRadius = 10;
     /// <summary>
+    /// How far (units) a player's order with no path at all may stand in for one by walking straight at its goal (a few metres, the width of a room: one shoved into furniture
+    /// is that close). A goal further off is off the mesh as a rule, and walking at it would go on for ever, so the order is dropped (engine choice; what the original does is unknown).
+    /// </summary>
+    public const float StraightOrderReach = 64;
+    /// <summary>
     /// How near (units) a walker comes to a corner it may not cut (<see cref="CanCut"/>) before it turns for the next waypoint (engine choice: about a step).
     /// </summary>
     public const float CornerReach = 2;
+
+    /// <summary>
+    /// Whether a walker off every surface (shoved into something that cuts a hole in the mesh) may step to (<paramref name="x"/>, <paramref name="z"/>): only nearer its path's current
+    /// point, and only when that point is a surface it can stand on, so it walks out and never further in (docs/game/pathfinding.md "Own builder", shoved into furniture).
+    /// </summary>
+    static bool EscapesToward(IWalkability walk, in CharacterHot n, CharacterCold cold, Vector3 from, float x, float z)
+    {
+        if ((n.Flags & (ushort)MoveFlags.HasPath) == 0 || n.PathCursor >= cold.Path.Length) return false;
+        var point = cold.Path[n.PathCursor];
+        var aim = new Vector2(point.X, point.Z);
+        if (Vector2.Distance(new Vector2(x, z), aim) >= Vector2.Distance(new Vector2(from.X, from.Z), aim)) return false;
+        return walk.TryStand(point.X, point.Z, from.Y, out _);
+    }
 
     /// <summary>
     /// Whether a walker at <paramref name="from"/> can step straight toward <paramref name="to"/> for <see cref="ArriveRadius"/> units, its height carried on as each step's is: a corner
@@ -489,34 +507,89 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 // before their path comes, so a found path newer than the one followed is still taken while the latest request is on its way.
                 bool waiting = (n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
                 if (!answer.Path.Found || !waiting || n.Task != (byte)CharacterTask.GoTo || answer.Id <= cold.PathApplied) continue;
-                cold.Path = [.. answer.Path.Points.Skip(1)];
-                cold.PathExact = answer.Path.IsProvisional ? answer.Path.Exact - 1 : int.MaxValue;
-                if (answer.Path.Exact > 1) cold.ProvisionalBlocked = 0;
+                TakePath(world.Walkability, ref n, cold, answer.Path);
                 cold.PathApplied = answer.Id;
-                n.PathCursor = 0;
-                n.Flags |= (ushort)MoveFlags.HasPath;
                 continue;
             }
             n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.Pending);
             if (answer.Path.Found)
             {
                 cold.PathFailed = false;
-                cold.Path = [.. answer.Path.Points.Skip(1)];
-                cold.PathExact = answer.Path.IsProvisional ? answer.Path.Exact - 1 : int.MaxValue;
-                if (answer.Path.Exact > 1) cold.ProvisionalBlocked = 0;
-                n.PathCursor = 0;
-                n.Flags |= (ushort)MoveFlags.HasPath;
+                TakePath(world.Walkability, ref n, cold, answer.Path);
             }
             else
             {
-                // No way there: the old path (an order given on the move) is dropped too.
-                cold.PathFailed = true;
-                n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.HasPath);
-                n.PathCursor = 0;
-                n.TaskTime = FailedPathWait;
-                if (n.Task == (byte)CharacterTask.GoTo) { TaskStart.Step(table, slot, CharacterTask.Idle); cold.OrderQueue.Clear(); }
+                // A player ordered out of a spot no path can leave (shut in a hollow the navmesh does not cross, or shoved into one) walks straight at the order's goal instead of
+                // losing the order: the ordinary step test still refuses what it cannot walk, and EscapesToward above clears the step out of a hole that cuts the mesh. Only a short
+                // order with a goal on the mesh: a goal off it (a click that hit nothing, an order restored from a save) would be walked at for ever, through walls, so it keeps the drop.
+                float toGoal = new Vector2(n.Goal.X - n.Position.X, n.Goal.Y - n.Position.Z).Length();
+                bool shortHop = toGoal <= StraightOrderReach && world.Walkability.IsWalkable(n.Goal.X, n.Goal.Y, n.Position.Y);
+                if (cold.IsPlayer && n.Task == (byte)CharacterTask.GoTo && shortHop)
+                {
+                    cold.PathFailed = false;
+                    cold.Path = [new Vector3(n.Goal.X, n.Position.Y, n.Goal.Y)];
+                    cold.PathExact = int.MaxValue;
+                    n.PathCursor = 0;
+                    n.Flags |= (ushort)MoveFlags.HasPath;
+                }
+                else
+                {
+                    // No way there: the old path (an order given on the move) is dropped too.
+                    cold.PathFailed = true;
+                    n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.HasPath);
+                    n.PathCursor = 0;
+                    n.TaskTime = FailedPathWait;
+                    if (n.Task == (byte)CharacterTask.GoTo) { TaskStart.Step(table, slot, CharacterTask.Idle); cold.OrderQueue.Clear(); }
+                }
             }
         }
+    }
+
+    /// <summary>Follows a found path from its point after the start (the start is where the walker stood when it asked), entering it at <see cref="Join"/>.</summary>
+    static void TakePath(IWalkability walk, ref CharacterHot n, CharacterCold cold, PathResult path)
+    {
+        cold.Path = [.. path.Points.Skip(1)];
+        cold.PathExact = path.IsProvisional ? path.Exact - 1 : int.MaxValue;
+        if (path.Exact > 1) cold.ProvisionalBlocked = 0;
+        n.PathCursor = Join(walk, n.Position, path.Points[0], cold.Path);
+        n.Flags |= (ushort)MoveFlags.HasPath;
+    }
+
+    /// <summary>How far (units) a walker may be off a leg of its new path to enter the path there (<see cref="Join"/>; engine choice: a stride).</summary>
+    public const float JoinSlack = ArriveRadius;
+
+    /// <summary>
+    /// The point of a new path a walker heads for first. A path asked for on the move (the provisional part of a long route asks every few seconds) starts where the walker
+    /// stood then; it has walked on meanwhile, and heading for the path's first point would turn it back and round (engine choice). So the end of the leg nearest it, among
+    /// the legs within the distance it has come, when it is within <see cref="JoinSlack"/> of that leg and can step toward its end; else 0.
+    /// </summary>
+    static int Join(IWalkability walk, Vector3 at, Vector3 start, Vector3[] path)
+    {
+        var here = new Vector2(at.X, at.Z);
+        var a = new Vector2(start.X, start.Z);
+        float reach = Vector2.Distance(a, here) + JoinSlack, along = 0, best = JoinSlack;
+        int join = 0;
+        for (int k = 0; k < path.Length && along <= reach; k++)
+        {
+            var b = new Vector2(path[k].X, path[k].Z);
+            float gap = SegmentDistance(here, a, b);
+            if (gap < best)
+            {
+                best = gap;
+                join = k;
+            }
+            along += Vector2.Distance(a, b);
+            a = b;
+        }
+        return join > 0 && CanCut(walk, at, path[join]) ? join : 0;
+    }
+
+    static float SegmentDistance(Vector2 p, Vector2 a, Vector2 b)
+    {
+        var ab = b - a;
+        float lengthSquared = ab.LengthSquared();
+        float t = lengthSquared < 1e-6f ? 0 : Math.Clamp(Vector2.Dot(p - a, ab) / lengthSquared, 0, 1);
+        return Vector2.Distance(p, a + ab * t);
     }
 
     public void Think(World world, Partition part)
@@ -524,10 +597,10 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         var table = world.Characters;
         var prev = table.Previous;
         var next = table.Next;
-        float dt = world.TickSeconds;
         for (int i = part.Start; i < part.End; i++)
         {
-            if (!prev[i].Alive) continue;
+            if (!prev[i].Alive || !world.Steps(i)) continue;
+            float dt = world.StepSeconds(i);   // a far character's step covers the ticks since its last (the far cadence, World.StepTicks)
             ref var n = ref next[i];
             var task = (CharacterTask)n.Task;
             var flags = (MoveFlags)n.Flags;
@@ -567,7 +640,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     if (heading == Vector2.Zero) heading = leadDir;
                     else if (moving)
                     {
-                        heading += (leadDir - heading) * (HeadingEase * dt);
+                        heading += (leadDir - heading) * MathF.Min(1, HeadingEase * dt);
                         heading = heading.LengthSquared() > 1e-8f ? Vector2.Normalize(heading) : leadDir;
                     }
                     cold.FollowHeading = heading;
@@ -748,16 +821,23 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         return slowest;
     }
 
+    /// <summary>
+    /// Whether a medic's ask to stand still holds the character (<see cref="CharacterCold.StandStillUntil"/>): the original's patient takes 62 Standing still as an urgent goal, which its
+    /// orders outrank and whose row needs no attack on it (<c>!isAggressionTowardsMe</c>). Engine reading: an NPC (the player's characters move by orders), not fighting or fleeing.
+    /// </summary>
+    static bool AskedToStandStill(in CharacterHot n, CharacterCold cold, long tick) =>
+        cold.StandStillUntil > tick && !cold.IsPlayer && !cold.InCombat && !cold.Fleeing && cold.CarriedBy.IsNone && n.Task != (byte)CharacterTask.Attack;
+
     public void Move(World world, Partition part)
     {
         var table = world.Characters;
         var prev = table.Previous;
         var next = table.Next;
         var walk = world.Walkability;
-        float dt = world.TickSeconds;
         for (int i = part.Start; i < part.End; i++)
         {
-            if (!prev[i].Alive) continue;
+            if (!prev[i].Alive || !world.Steps(i)) continue;
+            float dt = world.StepSeconds(i);   // a far character's step covers the ticks since its last (the far cadence, World.StepTicks)
             ref readonly var p = ref prev[i];
             ref var n = ref next[i];
             var cold = table.Cold(i)!;
@@ -791,6 +871,13 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 // tick's inputs is already at its spot in Next.
                 n.Velocity = Vector3.Zero;
                 n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.AnyPath);
+                cold.AgentSpeed = 0;
+                continue;
+            }
+            if (AskedToStandStill(n, cold, world.Tick))
+            {
+                // A medic treating it asked it to stand still (FirstAidSystem): it stops where it is; its own walk is kept and goes on when the ask lapses.
+                n.Velocity = Vector3.Zero;
                 cold.AgentSpeed = 0;
                 continue;
             }
@@ -895,6 +982,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             }
 
             if (!steering && n.Task == (byte)CharacterTask.Attack && Fights is not null && Fights.SwingAim(world, i, out var swingAim)) n.Yaw = MathF.Atan2(swingAim.X, swingAim.Y);   // a swing turns at once to its target (FUN_140666400, FUN_14060a590)
+            else if (!steering && n.Task == (byte)CharacterTask.Attack && Fights is not null && Fights.DefenceAim(world, i, out var defenceAim)) n.Yaw = MathF.Atan2(defenceAim.X, defenceAim.Y);   // a defence turns at once to the swing it follows (FUN_140609c70)
             if (steering) { }   // its velocity is the steering's
             else if (finished)
             {
@@ -1003,7 +1091,11 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 // the layer is looked for at the path's height there (docs/game/pathfinding.md "Heights").
                 if (!stands && !steering && CorridorHeight(n, cold, x, z) is { } along && MathF.Abs(along - p.Position.Y) > CorridorSlack)
                     stands = walk.TryStand(x, z, along, out y);
-                if (stands || !walk.IsWalkable(p.Position.X, p.Position.Z, p.Position.Y) && walk.IsWalkable(x, z))
+                bool offSurface = !stands && !walk.IsWalkable(p.Position.X, p.Position.Z, p.Position.Y);
+                // Shoved into something that cuts a hole in the mesh (a market stall), it walks out along its path toward the surface the path starts on, at its own height.
+                bool escaping = offSurface && !steering && !walk.IsWalkable(x, z) && EscapesToward(walk, n, cold, p.Position, x, z);
+                if (escaping) y = p.Position.Y;
+                if (stands || offSurface && walk.IsWalkable(x, z) || escaping)
                 {
                     n.Position = new Vector3(x, y, z);
                     if (speed > 0.1f && !facing) n.Yaw = MathF.Atan2(dir.X, dir.Y);

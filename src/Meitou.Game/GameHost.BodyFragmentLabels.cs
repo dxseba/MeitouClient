@@ -86,12 +86,21 @@ sealed partial class GameHost
                 if (renderer.BonePosition(part.Key, bone) is not { } at) continue;
                 var owner = snapshot.Characters.FirstOrDefault(c => DrawKey(c.Id) == part.From);
                 if (owner is not null && CharacterHidden(owner.Id)) continue;
-                if (owner is not null && kind is >= 0 and <= 3 && snapshot.GroundItems.Any(item => item.Fall is { } fall && fall.Character == owner.Id
+                if (owner is not null && kind is >= 0 and <= 3 && snapshot.GroundItems.Any(item => item.Type is not (Meitou.Data.Fcs.FcsRecordType.WEAPON or Meitou.Data.Fcs.FcsRecordType.CROSSBOW)
+                    && item.Fall is { } fall && fall.Character == owner.Id
                     && FragmentLabelBones.First(p => p.Part == kind).Bones.Contains(fall.Bone, StringComparer.OrdinalIgnoreCase))) continue;
                 string ownerName = owner?.Name ?? part.Look.Character?.Name ?? Loc.Tr("Unknown");
                 string partName = kind == -1 && part.FragmentId != 0 ? $"Head fragment {part.FragmentId}" : BodyFragmentNames.Part(kind);
                 result.Add(new(part.Key, owner?.Id ?? CharacterId.None, Name(ownerName, partName), at, BodyFragmentLabelKind.Detached));
             }
+        foreach (var (id, fall) in gutFalls)
+        {
+            if (fall.Section && !fall.Positioned) continue;
+            if (snapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } owner || CharacterHidden(id)) continue;
+            var pose = fall.Physical ? gutPhysics?.PoseOf(fall.RigKey) : null;
+            var at = pose?.Centre ?? fall.Position;
+            result.Add(new(DrawKey(id), id, Name(owner.Name, "Intestines"), at, BodyFragmentLabelKind.Detached, Component: -2));
+        }
         return result;
     }
 

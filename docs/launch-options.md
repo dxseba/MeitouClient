@@ -201,6 +201,7 @@ Authority: `src/Meitou.Rendering/WorldFrame.cs` (`Parse`, `Usage`), `src/Meitou.
 | `--impostor-budget <MB>` | MB | 8% of video memory (5% integrated), 48 to 1024 | Video memory for resident impostor atlases. |
 | `--no-load-cache` | | off | Do not read or write the load caches (foliage layout, character LOD, world colour map and terrain colour tile caches). |
 | `--low-end` | | off | Potato-PC preset: short draw distances, no shadows, reflections, AO, relief, light shafts or AA, 0.83 render scale, sparse grass and particles, Faithful UI (over `--ui` and the saved mode, which it leaves as saved). Options after it override the graphics. |
+| `--benchmark-baseline` | | off | The settings of benchmarks for the [benchmarks page](../bench/README.md): a 1920x1080 window (implies `--windowed` and `--size 1920x1080`; a later `--size` overrides), the Medium tier, then no GI (indirect light and indoor GI; the device is made without ray queries), ground parallax or tessellation (displacement, rock smoothing, outline refinement), no upscaler, SMAA at render scale 1. Like `--low-end`, the saved graphics are neither applied nor overwritten. Fixed for the run in the game: later graphics options it covers do not take effect (the viewer, which has no tier, honours them). Vulkan only: the Metal renderer applies the saved graphics over it. |
 
 ### Post-processing and upscaling (`PostProcessOptions.cs`)
 
@@ -276,7 +277,7 @@ Authority: `tools/Meitou.Tools/Program.cs` (dispatch and usage), with the option
 
 The launcher takes no command-line options of its own. It passes to the game:
 
-- the user's launch arguments from its settings (`LauncherConfig`), split on spaces; the Graphics page warns that `--low-end` makes the game ignore the graphics sliders;
+- the user's launch arguments from its settings (`LauncherConfig`), split on spaces; the Graphics page warns that `--low-end` or `--benchmark-baseline` makes the game ignore the graphics sliders;
 - `--renderer <vulkan|metal>`, appended last, so it wins over a hand-written one (`MainWindow.axaml.cs`).
 
 Environment it sets for the game: `KENSHI_PATH`; on Windows with `steam_api64.dll` and **Launch as Kenshi on Steam** on, `SteamAppId` and `SteamGameId` (and a temporary `steam_appid.txt`); on macOS `MEITOU_METAL_GPU_BUDGET_MB` (Metal) or the Vulkan loader path. It removes any inherited `MEITOU_METAL_GPU_CULL` and `MEITOU_METAL_GPU_BUDGET_MB` first. It reads `DYLD_LIBRARY_PATH` on macOS (`MacSupport.cs`).
@@ -311,6 +312,8 @@ These have no user-facing docs; options are from their top-level argument loops.
 | `MEITOU_FORCE_INTEGRATED` | `src/Meitou.Rendering/Gpu/Core/VulkanDevice.cs` | `1`: treat any GPU as integrated (budgets for integrated GPUs). |
 | `MEITOU_VRAM_BUDGET_MB` | `src/Meitou.Rendering/Gpu/Core/VulkanDevice.cs` | Caps the video memory reported, for testing the memory guard. |
 | `MEITOU_VK_VALIDATION` | `src/Meitou.Rendering/Gpu/Core/VulkanDeviceOptions.cs` | `1` validation; `sync` adds synchronisation checks; `gpu` adds GPU-assisted checks; `0` off. Unset: caller's default. |
+| `MEITOU_DIAG_SUBMIT` | `src/Meitou.Rendering/Gpu/FrameLoop.cs`, `src/Meitou.Game/GameHost.Interactive.cs` | `1`: diagnostic (issue #108): the world is submitted and waited for before the interface draws, and the interface before the present. Slower frames. |
+| `MEITOU_DIAG_IDLE` | `src/Meitou.Rendering/Gpu/FrameLoop.cs` | `1`: diagnostic (issue #108): each frame waits for every frame in flight before it begins. Slower frames. |
 | `MEITOU_VRAM_GUARD` | `src/Meitou.Rendering/WorldFrame.cs`, `src/Meitou.Game/GameHost.Metal.cs` | `0` turns the memory-pressure guard off. On by default. |
 | `MEITOU_OBJECT_LOD_CACHE` | `src/Meitou.Rendering/ObjectLodGen.cs` | Folder for the object LOD cache (default under `%LOCALAPPDATA%\Meitou`). |
 | `MEITOU_CHARACTER_LOD_CACHE` | `src/Meitou.Rendering/Characters/CharacterContent.cs` | Folder for the character LOD cache (default under `%LOCALAPPDATA%\Meitou`). |

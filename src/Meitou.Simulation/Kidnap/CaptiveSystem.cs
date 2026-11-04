@@ -175,6 +175,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
     public void SlowWorld(World world)
     {
         var table = world.Characters;
+        if (world.Tick % RestoreEveryTicks == 0) RestoreSlavers(world);
         for (int k = 0; k < jobs.Count;)
         {
             var j = jobs[k];
@@ -191,8 +192,8 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
         // a frame in turn, FUN_140786e30).
         int every = world.Every(Settings.SweepEveryTicks), phase = (int)(world.Tick % every);
         if (phase == 0) ExpireWaits(world.GameHours);
-        Sweep(world, every, phase);
-        RunPlayerAnimalGoals(world, every, phase);
+        Sweep(world, every);
+        RunPlayerAnimalGoals(world, every);
     }
 
     /// <summary>
@@ -202,13 +203,13 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
     /// step's (<see cref="RaceGoals"/>: priority 3 at step 4, priority 2 at step 6); this pass runs them in list order for the other animals of the player's faction, idle only (engine).
     /// An order that runs ends one (<see cref="CaptiveJob.PlayerSide"/>).
     /// </summary>
-    void RunPlayerAnimalGoals(World world, int every, int phase)
+    void RunPlayerAnimalGoals(World world, int every)
     {
         if (world.Player.Faction < 0) return;
         var table = world.Characters;
-        for (int s = phase; s < table.HighWater; s += every)
+        for (int s = 0; s < table.HighWater; s++)
         {
-            if (!table.Next[s].Alive || table.Next[s].Task != (byte)CharacterTask.Idle || table.Cold(s) is not { Fighter.IsAnimal: true } c || !PlayerSquad(world, c) || DecisionSystem.Decides(c)) continue;
+            if (!table.Next[s].Alive || !world.Turn(s, every) || table.Next[s].Task != (byte)CharacterTask.Idle || table.Cold(s) is not { Fighter.IsAnimal: true } c || !PlayerSquad(world, c) || DecisionSystem.Decides(c)) continue;
             if (!FreeForRaceGoal(world, s, c)) continue;
             if (PickRaceGoal(world, s, c, null, firstInList: true) is { } pick) StartRaceGoal(world, s, c, pick);
         }
@@ -382,7 +383,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
         return table.Next[slot].Alive && table.Cold(slot) is { } c && AiSystem.Holds(table.Next[slot], c) && table.Next[slot].Task != (byte)CharacterTask.Rest && !Busy(table.IdOf(slot));
     }
 
-    void Sweep(World world, int every, int phase)
+    void Sweep(World world, int every)
     {
         var table = world.Characters;
         int hour = world.Hour, started = 0;
@@ -395,9 +396,10 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
             foreach (var member in squad.Members)
             {
                 if (jobs.Count >= Settings.MaxJobs || started >= maxNew) return;
-                if (!table.TryResolveNext(member, out int slot) || slot % every != phase || !Free(world, slot)) continue;
+                if (!table.TryResolveNext(member, out int slot) || !world.Turn(slot, every) || !Free(world, slot)) continue;
                 var cold = table.Cold(slot)!;
-                var roles = board.Roles[(int)AiSystem.RoleOf(squad, member, cold)];
+                // An obeying slave takes its master squad's Slave AI Goals instead of its own lists, as the AI's goal pick does (job 187).
+                var roles = AiSystem.ObeyedRoles(world, squad, cold) ?? board.Roles[(int)AiSystem.RoleOf(squad, member, cold)];
                 for (int g = 0; g < roles.Count; g++)
                 {
                     if (!roles[g].InWindow(hour)) continue;
@@ -729,7 +731,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
     /// <summary>
     /// A character's "looks like a slave" level in 0..1 (status object +0xf4, shown by the inventory window's data panel and the status tooltip; <c>FUN_1405a51e0</c>, <b>Observed</b>, docs/game/ui-screens.md):
     /// a sum over its worn kit, locked shackles 1; else the hat section empty 0.4 (when a character flag, <b>Unknown</b>, holds; taken as true), the body section empty 0.1, the legs section empty 0.1
-    /// or holding the owner's slave clothing 0.5, the boots section empty 0.1. An escaped slave (state 2) doubles it and keeps at least 0.1; at most 1. Sections by the item slot ids: 3 head, 5 body (armour), 6 legs, 9 boots.
+    /// or holding the owner's slave clothing 0.5, the boots section empty 0.1. An escaped slave (state 2) doubles it and keeps at least 0.1, an ex-slave (3) keeps at least 0.01; at most 1. Sections by the item slot ids: 3 head, 5 body (armour), 6 legs, 9 boots.
     /// </summary>
     public float LooksLikeSlaveLevel(CharacterCold c)
     {
@@ -744,6 +746,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
         level += legs is null ? 0.1f : clothing.Contains(legs.Record) ? 0.5f : 0;
         if (!inv.Items.Any(i => i.Section == "boots")) level += 0.1f;
         if (c.SlaveState == 2) level = MathF.Max(level * 2, 0.1f);
+        if (c.SlaveState == 3) level = MathF.Max(level, 0.01f);
         return MathF.Min(level, 1);
     }
 
@@ -893,6 +896,14 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
     /// eater's sight (engine reading of its sensed list): 230 a dead body of a <c>carriable</c> race lying down, for an animal eater not a robot and not of its own race; 233 a dead or
     /// downed one not of an allied faction, not a robot and not of the eater's race. Not carried, not caged, and no other job's. -1: none.
     /// </summary>
+    /// <summary>Whether a job holds <paramref name="id"/> as its captive. A plain loop: a lambda capturing the id made a closure per character the scan looked at.</summary>
+    bool IsJobCaptive(CharacterId id)
+    {
+        foreach (var j in jobs)
+            if (j.Captive == id) return true;
+        return false;
+    }
+
     int BodyToEat(World world, int slot, CharacterCold cold, bool dead)
     {
         var table = world.Characters;
@@ -911,8 +922,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
                 if (!m.Dead || !race.Carriable || animal && (race.IsRobot || race.StringId == cold.Race?.StringId)) continue;
             }
             else if (!m.Incapacitated || race.IsRobot || race.StringId == cold.Race?.StringId || Allied(cold.Faction, body.Faction)) continue;
-            var id = table.IdOf(s);
-            if (jobs.Any(o => o.Captive == id)) continue;
+            if (IsJobCaptive(table.IdOf(s))) continue;
             (found, best) = (s, d2);
         }
         return found;

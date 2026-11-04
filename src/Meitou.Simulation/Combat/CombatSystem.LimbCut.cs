@@ -13,7 +13,6 @@ public sealed partial class CombatSystem
         int[] selected = limbs switch { "left-arm" => [0], "right-arm" => [1], "left-leg" => [2], "right-leg" => [3], "arms" => [0, 1], "legs" => [2, 3], _ => [] };
         if (selected.Length == 0) return false;
         var ctx = MakeContext(world, slot, victim);
-        bool standing = medical.Standing;
         var events = new List<MedicalEvent>();
         int first = -1;
         HitDamage damage = default;
@@ -25,7 +24,7 @@ public sealed partial class CombatSystem
                 || medical.Parts[part].Limb is not (LimbState.Original or LimbState.Crushed)) continue;
             damage = new(prewounded ? MathF.Min(20, medical.Parts[part].MaxHp * .2f) : MathF.Max(300, medical.Parts[part].MaxHp * 3), 0, 0);
             if (prewounded) medical.Parts[part].Flesh = -medical.Parts[part].MaxHp + damage.Cut * .5f;
-            medical.ApplyFollowThroughHit(part, damage, ctx, standing, events);
+            medical.ApplyHit(part, damage, ctx, events);
             if (first < 0) first = part;
         }
         if (first < 0 || !events.Any(e => e.Kind == MedicalEventKind.PartSevered)) return false;

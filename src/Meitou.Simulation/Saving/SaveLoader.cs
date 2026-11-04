@@ -89,6 +89,7 @@ public static partial class SaveLoader
         // Building locks and doors are taken from the zones when their town registers; held characters name their bed or cage by building instance.
         var buildingStates = HeldSave.BuildingStates(save);
         world.Fixtures.Saved = buildingStates;
+        world.Fixtures.SavedSpots = HeldSave.BuildingSpots(save);
         world.Fixtures.Items = data.Items;
         var instanceOf = new Dictionary<Meitou.Data.Fcs.FcsRecord, string>(ReferenceEqualityComparer.Instance);
         foreach (var (instance, record) in buildingStates) instanceOf[record] = instance;
@@ -100,7 +101,8 @@ public static partial class SaveLoader
         if (playerFaction is not null) BuildingSave.Read(save, world, data.Db, playerFaction.Id, playerIndex);
         // The machines of the player's complete buildings: recipe slots, storage, farms (docs/simulation.md "Production").
         if (playerFaction is not null && world.Systems.OfType<Production.ProductionSystem>().FirstOrDefault() is { } production) MachineSave.Read(save, world, production, data.Items);
-        // The loose items of the zone files (docs/simulation.md "Ground items").
+        // The loose items of the zone files (docs/simulation.md "Ground items"); a zone with a file is not loaded fresh (no nest items are laid there).
+        world.SavedZones.UnionWith(save.Zones.Keys);
         if (GroundItemSave.Load(save, world, data.Items, id => data.FactionIndex(id) is var f and >= 0 && !data.Factions[f].NotReal ? f : -1) is > 0 and var lost) loaded.Notes.Add($"{lost} loose items name records this game does not have; they stay in the zone files.");
 
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
@@ -123,6 +125,10 @@ public static partial class SaveLoader
             if (site.InstanceId.Length > 0 && context.TownStates.TryGetValue(site.InstanceId, out var state)
                 && state.Strings.GetValueOrDefault("replacementTown") is { Length: > 0 } replacement && data.Db.Find(replacement) is { Type: FcsRecordType.TOWN } record)
                 data.SetReplacement(site.Index, TownData.From(record));
+        world.Fixtures.LayoutsFromSave(world, data);   // the layouts the original furnished the saved buildings with
+        world.Fixtures.RuinsFromSave(world, data);
+        foreach (var site in data.Sites)
+            if (site.Replacement is not null) world.Fixtures.ApplyTownRuins(world, data, site.Index);   // the ruins its residents made
         // The war states, and the town handles their targets and homes name (docs/formats/save.md WAR_SAVESTATE).
         var siteOf = data.Sites.Where(s => s.InstanceId.Length > 0).GroupBy(s => s.InstanceId).ToDictionary(g => g.Key, g => g.First().Index, StringComparer.Ordinal);
         foreach (var town in save.Towns)

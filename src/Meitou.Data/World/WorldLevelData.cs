@@ -25,6 +25,18 @@ public sealed class WorldLevelData
     /// <summary>Layers in the order they were applied.</summary>
     public List<WorldLevelLayer> Layers { get; } = [];
 
+    /// <summary>Whether <see cref="ResidentRuins.Apply"/> has set the ruins the residents make.</summary>
+    public bool ResidentRuinsApplied { get; internal set; }
+
+    /// <summary>The keys of the buildings <see cref="ResidentRuins.Apply"/> ruined (their level files have them standing).</summary>
+    public HashSet<string> ResidentRuined { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>The interior and exterior layout names the level files give the buildings <see cref="ResidentRuins.Apply"/> named otherwise, by building key.</summary>
+    public Dictionary<string, (string Interior, string Exterior)> LevelLayoutNames { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>The name and squad template the level files give the buildings <see cref="ResidentRuins.Apply"/> named otherwise, by building key.</summary>
+    public Dictionary<string, BuildingNaming> LevelNames { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Merged zone files by grid cell.</summary>
     public SortedDictionary<ZoneCoordinate, GameDatabase> Zones { get; } = new(Comparer<ZoneCoordinate>.Create((a, b) => a.Y != b.Y ? a.Y.CompareTo(b.Y) : a.X.CompareTo(b.X)));
 
@@ -49,12 +61,44 @@ public sealed class WorldLevelData
     /// </summary>
     public List<GameDataIssue> Problems() => [.. Issues.Where(i => i.Kind != GameDataIssueKind.RecordAlreadyDefined)];
 
+    /// <summary>
+    /// The height the original stands each outdoor level building at, by <see cref="BuildingKey"/> (docs/formats/zones.md "Placement height"); filled by
+    /// <see cref="PlaceOnGround"/>. A building without one keeps its state's <c>world Y pos</c>.
+    /// </summary>
+    readonly Dictionary<string, float> groundHeights = new(StringComparer.Ordinal);
+
+    /// <summary>The original deletes a building whose instance Y is below this when it makes it ("under the ground", docs/formats/zones.md "Placement height").</summary>
+    public const float UnderGround = -1000;
+
+    /// <summary>Loads the install's world with its outdoor buildings stood on the ground (<see cref="PlaceOnGround"/>).</summary>
     public static WorldLevelData Load(GameInstall install, bool includeInteriors = false) =>
-        Load(Path.Combine(install.DataDirectory, RelativeDirectory), LoadOrder.FromInstall(install).Entries, includeInteriors);
+        OnGround(Load(Path.Combine(install.DataDirectory, RelativeDirectory), LoadOrder.FromInstall(install).Entries, includeInteriors), install);
 
     /// <summary>The base game's world alone (the core files' layers, no mod's): what the install tests are written against.</summary>
     public static WorldLevelData LoadBaseGame(GameInstall install, bool includeInteriors = false) =>
-        Load(Path.Combine(install.DataDirectory, RelativeDirectory), LoadOrder.BaseGame(install).Entries, includeInteriors);
+        OnGround(Load(Path.Combine(install.DataDirectory, RelativeDirectory), LoadOrder.BaseGame(install).Entries, includeInteriors), install);
+
+    static WorldLevelData OnGround(WorldLevelData world, GameInstall install)
+    {
+        string path = GameFiles.Resolve(Path.Combine(install.DataDirectory, TerrainHeightmap.RelativePath));
+        if (!File.Exists(path)) return world;
+        using var map = TerrainHeightmap.Open(path);
+        world.PlaceOnGround(map.BuildingGroundAt);
+        return world;
+    }
+
+    /// <summary>
+    /// Stands every outdoor level building on <paramref name="ground"/> (<see cref="TerrainHeightmap.BuildingGroundAt"/>) plus its instance Y, and one inside
+    /// or mounted on another of its zone on that one's height plus its instance Y, as the original does whatever its state's <c>world Y pos</c> says
+    /// (docs/formats/zones.md "Placement height"). One whose parent is not found keeps its state's height.
+    /// </summary>
+    public void PlaceOnGround(Func<double, double, float> ground)
+    {
+        groundHeights.Clear();
+        foreach (var (zone, db) in Zones)
+            if (db.Find(BuildingListId) is { } list)
+                new PlacementHeights(zone, db, list, ground, groundHeights).Resolve();
+    }
 
     /// <summary>A mod's own world layer, under its folder (docs/formats/zones.md "Mods").</summary>
     public const string ModDirectory = "leveldata";
@@ -141,8 +185,10 @@ public sealed class WorldLevelData
             foreach (var instance in list.Instances.Values)
             {
                 if (instance.IsCleared) continue; // emptied by a later layer
+                if (instance.Position.Y < UnderGround) continue;   // the original deletes it on load
                 string? stateId = instance.States.Count > 0 ? instance.States[0] : null;
-                float? worldY = stateId is not null && db.Find(stateId) is { } state && state.Floats.TryGetValue("world Y pos", out var y) ? y : null;
+                float? worldY = groundHeights.TryGetValue(BuildingKey.Of(zone, instance.Id), out float onGround) ? onGround
+                    : stateId is not null && db.Find(stateId) is { } state && state.Floats.TryGetValue("world Y pos", out var y) ? y : null;
                 yield return new BuildingPlacement(zone, instance.Id, instance.Target, instance.Position, instance.Rotation, stateId, worldY)
                 {
                     TargetsZoneRecord = db.Find(instance.Target) is not null,
@@ -209,11 +255,27 @@ public sealed class WorldLevelLayer(string name, string directory)
 /// <param name="Position">X and Z are world coordinates; Y is the height above the terrain (Observed).</param>
 /// <param name="BuildingId">String id of the placed <see cref="FcsRecordType.BUILDING"/> record.</param>
 /// <param name="StateId">String id of its <see cref="FcsRecordType.GAMESTATE_BUILDING"/> record in the same zone file.</param>
-/// <param name="WorldY">The state's <c>world Y pos</c>: absolute height (terrain height + <c>Position.Y</c> for most).</param>
+/// <param name="WorldY">Absolute height: for an outdoor level building the original's building ground + <c>Position.Y</c> (<see cref="WorldLevelData.PlaceOnGround"/>),
+/// else its state's <c>world Y pos</c>.</param>
 public sealed record BuildingPlacement(ZoneCoordinate Zone, string InstanceId, string BuildingId, Vector3 Position, Quaternion Rotation, string? StateId, float? WorldY)
 {
     /// <summary>Runtime repair state; null leaves the level/save flag in control.</summary>
     public bool? DestroyedOverride { get; init; }
+    /// <summary>Its state's interior layout is not laid out: a town house the player bought, whose furniture the purchase destroyed (docs/simulation.md "Town house purchases").</summary>
+    public bool WithoutInterior { get; init; }
+    /// <summary>
+    /// Its interior and exterior layout names when not its state's: a town override's or a loaded save's residents named them (<see cref="TownBuildings.Relay"/>,
+    /// docs/game/factions-squads-towns.md "Town residents"); null leaves the state's.
+    /// </summary>
+    public string? InteriorLayout { get; init; }
+    public string? ExteriorLayout { get; init; }
+
+    /// <summary>The name of its interior or exterior layout: its own (<see cref="InteriorLayout"/>), else its state's; "" for none.</summary>
+    public string LayoutName(GameRecord? state, bool exterior) =>
+        (exterior ? ExteriorLayout : InteriorLayout) ?? state?.GetString(exterior ? ResidentRuins.ExteriorKey : ResidentRuins.InteriorKey) ?? "";
+    /// <summary>A loose item's mesh and scale when not its record's own (a nest's numbered debris piece, docs/game/factions-squads-towns.md "Nest furniture").</summary>
+    public string? ItemMesh { get; init; }
+    public float ItemScale { get; init; } = 1;
     readonly string? key;
 
     /// <summary>The run-time name of the building (<see cref="BuildingKey.Of"/>); a player-placed building, whose id is unique already, is given its own.</summary>

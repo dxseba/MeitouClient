@@ -74,7 +74,7 @@ An item may move between two inventories of different owners only within an X/Z 
 with the sound `gui_notrade` (`FUN_14070f7e0`). The limit is 1000 unless a flag is set: the caller's flag (the one-unit move sets it when the target is a building's
 inventory, `uses_building_category`), or an owner of type 1 whose +0x2f8 is 2, or of type 0x5b whose +0xc0 object has +0x2f8 = 2, or the source owner's +0x78 object passing
 its slot +0x260 (meanings **Unknown**). Flagged: the owners must not be enemies (faction test) and must be on the same floor, and the limit is 60, or the source owner's bounds radius + 40
-when the source is a building (class 0). Same owner: always allowed. **Unknown**: which windows the three drop callers flag; whether take-all uses the check.
+when the source is a building (class 0). The limits are stored squared (1e6, 3600). Same owner: always allowed. **Unknown**: which windows the three drop callers flag; whether take-all uses the check.
 
 Meitou (engine choices): window moves to and from a machine or storage need the character within `ProductionSettings.TransferReach` 40 of the building's footprint hull (for the
 bounds radius + 40), to and from a container within `PlayerSystem.TradingRange` 60; both post "Out of trading range.". The loot window closes beyond 1.5 x the carry reach. A held item given to a
@@ -88,6 +88,8 @@ character: within `PlayerSystem.GiveRange` 1000 of its window's owner, `StealRan
   Trader 3 lines, Thief Boss, Thief, Ninja Guard and the squad's `dialog squad` (TOUGH 1234) none; Skeleton Barman, Smuggler Barman, Stone Camp Trader yes; Shop Guard, Traders Guard, Slaver,
   Samurai no. Of 125 trader templates with vendors in the probe load order, 89 mark a member CHARACTER `is trader`.
 - Meitou (the right-click Trade verb, engine): a member of a shop squad whose record sets `is trader` or whose dialogue reaches a Trade line (`DialogueSet.Trades`, conditions not checked).
+- A shop squad can have several traders: Flotsam Village's armoury (50348-rebirth.mod, 3 Flotsam Ninja + 3 Flotsam Refugee) has three same-named Flotsam Refugee traders, since the
+  refugee's dialogue package reaches Trade under `IS_A_TRADER` and `IN_MY_BUILDING` only (**Verified**: the original's METARU save holds the same 6 members, and the dialogue data; #180).
 - The context menu's pick-up verb tests "not a trader" with `FUN_1405cff70` itself (`FUN_140796f80`, **Verified**), so any member of a trader squad counts, guards included. Meitou: `World.VerbFactsOf` reads the squad template's `is trader`.
 - Shop squads with no such member (8 in the probe load order: bank, armory UC, holy Armoury, holy General storage, farm shop UC, Crab Man Shop, Shop bar black desert, Cannibal
   hunter hq) cannot be bought from in the original either (**Observed**, owner's play); their stock is only in their home's containers.
@@ -196,10 +198,9 @@ interior object with an inventory of the trader's home (`FUN_140953850`, `FUN_14
 `unique`, written only when set (`FUN_1407609e0` / `FUN_140761550`).
 
 **Meitou** (`Artifacts`, `PopulationSystem.Artifacts.cs`): the lists are made for a new game and an import (`SaveImport.Filter` writes them into the town states), kept per town,
-saved and read back with the keys above, and given out when a town makes its residents. Engine choices: the candidates are all the town's buildings with `interior` parts whose interior layout,
-when the level data names one, places an object, and whose template Meitou housed there ([town residents](factions-squads-towns.md#town-residents)); ties keep the buildings' placement order, the entries' order and the containers' layout order, and the buildings
-draw in placement order; an entry of 0 or fewer units is skipped. A building whose interior layout the level data does not name has no interior in Meitou (the original
-generates one on first load, which is not modelled), so what it is given is lost; what goes to a building in another town's centre zone is placed, but a save made before
+saved and read back with the keys above, and given out when a town makes its residents. Engine choices: the candidates are all the town's standing buildings with `interior` parts whose named interior layout (their residents', [layouts](factions-squads-towns.md#town-residents))
+places an object, and whose template Meitou housed there ([town residents](factions-squads-towns.md#town-residents)); ties keep the buildings' placement order, the entries' order and the containers' layout order, and the buildings
+draw in placement order; an entry of 0 or fewer units is skipped. A building with no interior objects is no candidate, as in the original; what goes to a building in another town's centre zone is placed, but a save made before
 that zone is visited writes no file for it, so loses it. Items flagged unique (`ItemInstance.Unique`) do not stack with others; a shop
 fill and `FillHome` keep them, and a building shop takes its containers' items into its stock when it is made and gives its unique items back to them when its squad is
 dropped or made afresh; once nobody of its squad is alive the shop closes and its whole stock goes back into the containers, which a save keeps with the building. Not modelled: the shop fill's container choice and relocking,
@@ -604,7 +605,7 @@ Meitou's reading: [simulation, slave trading](../simulation.md#arrest-and-jail).
   manufacturer form a set, a weapon outside it logs "No valid manufacturer found for weapon" and is dropped, an empty set skips the whole weapons branch); other lists are not gated.
 - **The FACTION field names of the armour vendor quality chances** (`armors 0..5` in section 9.2): read as the ints `armors 0` .. `armors 5`, falling back to the editor defaults; not
   checked against the data.
-- **Opening a trade**: Meitou opens it within 30 units; the original's opening distance is not traced (the item check is in [Trading range](#trading-range)).
+- **Opening a trade**: Meitou opens it within 30 units and passes it to the character whose window a buy or sell uses within 1000 ([simulation](../simulation.md#trade)); the original's opening distance is not traced (the item check is in [Trading range](#trading-range)).
 
 ## Expression reference
 

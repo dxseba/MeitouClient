@@ -134,7 +134,7 @@ World-state replacement towns and faction ownership affect both population and b
   resident data is set up again; the town goes into the ZoneManager set `updatedTownOverrides` (+0x168148). The zone file is then trimmed (`FUN_1409fe340`): of the
   `0-buildinglist` entries (only those with a field at +0x88 of -1, meaning **Unknown**), the first GAMESTATE_BUILDING state decides: not the player's and naming
   this town (`townC` / `townCS`) drops the entry; an ITEM_PLACEMENT_GROUP state drops it whatever the town. Every `1-itemlist` item goes, and the zone counts as
-  fresh, so the residents are made again. Only the town's own zone is trimmed. Existing platoons are untouched.
+  fresh, so the residents are made again ([their ruins](buildings-production.md#ruined-by-residents)). Only the town's own zone is trimmed. Existing platoons are untouched.
 - `updatedTownOverrides`: while a town is in it, the check answers "repopulate" at once (no new choice), so each load trims the zone again. The pass that places
   residents after zones load (`FUN_140a0e760`, ZoneManager state 2) places them for the collected towns not of the player's faction and erases them (`FUN_140a22ef0`).
   Nothing else touches it, and it is not saved.
@@ -427,11 +427,27 @@ Meitou: [ground items](../simulation.md#items-and-eating).
 - **When**: at zone populate (`FUN_140a0e760`) per non-player town, the zone's buildings sorted by handle serial (random-looking).
 - **Candidates**: buildings of the town ([membership](../formats/zones.md#town-membership)) with an `interior` reference, not player-owned, holding no residents template
   or the default one; walls (`links together`, a vfunc override) never, gates (`is wall gate`) only for entries naming
-  `building`s. Level data agrees: 1946 walls, none with a resident.
+  `building`s. Level data agrees: 1946 walls, none with a resident. Player-owned is ownership now: a house the player bought
+  houses nobody, and its squads moved out when it was bought ([purchase](ui-screens.md#selected-building)).
 - **Driver** (`FUN_1409370d0`): re-owns the buildings to the town's faction; priority 5 down to 0, each entry with count
   left gets one building per pass, passes repeat while one placed and has more. An entry with no building left makes
   no more squads (Stack: civilians v0 9, 2 made). Then every free building whose interiors take the default resident's
   `layout interior` gets it (`FUN_14092e4b0`).
+- **Layouts** (**Verified**, decompile): housing (`FUN_14092e4b0`, called only by the driver, → `FUN_140552140`, called only by it) re-owns the home
+  to the template's `faction` (else the town's), clears its interior and exterior objects, sets the interior layout name (LayoutInterior vfunc 12
+  `FUN_14054c420`, a name only) to the template's `layout interior` and the exterior one to `layout exterior`, empty ones included, whatever the level
+  state said, and reloads the exterior; ruins are not exempt. The interior loads its layout when the squad is made (`FUN_14057f820` → `FUN_1405621e0`)
+  or when it is next loaded; an empty name loads nothing (`Layout::loadLayout` `FUN_1405512a0`), nor does a name the building has no layout for
+  (logged), nor any layout of a player-owned building that is not a wall (the name is cleared; when a bought house's exterior is next loaded, so whether its
+  signs go, is **Unknown**: Meitou drops only its interior). With `layout interior` set, a building that does not
+  offer it is not housed (`FUN_14055ad40`, before anything changes). A non-empty interior name also becomes the building's display name, then the
+  template's `building name` when it has one. Each home has one template (the chooser skips buildings holding another), so the last housing wins:
+  the default resident pass only takes buildings with none. Buildings housed by nobody keep the level state's names. **Observed**, saves (METARU,
+  autosaves 1 and 2, redev, Beep Fan Club 1; level buildings of the saved zones): the saved interior name equals the saved `squad template`'s
+  `layout interior` for 318 of 324 standing homes in METARU (6 differ, e.g. `ninja guards` homes at 26.13 named `Bar`: **Unknown** why), and the level
+  state's for 590 of 592 buildings with no template. Meitou's housing (base data) changes 83 homes' interior name, clears 7, names 136 the level state
+  leaves empty (every Ash Dome, Cat-Lon's Exile and Ashland Domes I..IV, and the Ancient Tech Lab at zone 2.46: templates `Throne`, `lab`, `Lab no.2`);
+  exteriors: 20 replaced, 20 cleared, 33 named.
 - **Chooser** (`FUN_14092e870`): a template with `layout interior` needs a building offering it (own layouts or
   `shares interiors with`; gates exempt); without one, an entry naming buildings takes only those. Weight 1, x 0.4 when
   `layout exterior` is not offered, x 10 named in `building`, x 0.05 in `building dislike`; highest wins, first on a tie.
@@ -446,8 +462,15 @@ Meitou: [ground items](../simulation.md#items-and-eating).
 - **New game vs level data**: level-data building states carry `residents template` / `squad template`; save 2 against
   them has the same multiset per town but shuffled across buildings (223 same, 125 moved), so a new game rerolls homes
   (**Observed**). Destroyed buildings stay candidates (the Hub's ruins house squatters).
-- **Meitou engine choices**: the level data's assignment is kept where it fits the rules (interiors are drawn from it,
-  not relaid to the template's layout); on a tie a building already laid out as the template wants wins; bar squads
+- **Meitou engine choices**: buildings are taken in a fixed order (a hash of their keys), not rerolled per game, so the boot can lay out the
+  [ruins the homes make](buildings-production.md#ruined-by-residents) and name the homes' layouts, display `name` and `squad template` as above (`ResidentRuins.Apply`, before anything reads the
+  levels: renderer, lamps, effects, navmesh and `NavmeshTool`, homes); the level data's assignment is kept where it fits the rules. Later changes lay a
+  building out afresh (`TownBuildings.Relay`, `FixtureRegistry.Layouts.cs`): its beds, nodes, fixtures and item slots come from the new names, which its
+  placement carries to the renderer, navmesh overlay, lamps, effects and indoor sight, and a save writes into its state. A town override's own zone
+  (not the player's buildings) takes the replacement's housing: a home its template's layouts, `name` and `squad template`, any other building its level files' (as the original reads
+  the zone back from them); its other zones keep theirs (**Observed** headless: Stoat's half-destroyed override relays 15 of its zone's 219
+  buildings, whose fixtures and item slots then match a fresh registration). A loaded save's building states name the layouts the original furnished them with, so they win
+  ([zone files](../formats/save.md#zone-files)), as do their `name` and `squad template` for the selected-building panel. Not followed: sound emitters (laid out once from the boot's names); bar squads
   stand in the town's bars and take the nearest bar as home (their templates, e.g. `Bar thugs`, have designation 0, **Verified** in the data); a loaded town keeps its saved squads, homes and bar squads and rolls no new bar squads.
 
 ### Off-screen world
@@ -510,6 +533,35 @@ Meitou: [ground items](../simulation.md#items-and-eating).
   **Observed**) and never spawns again. New nests come only from the area tick, up to `num nests` per biome group; whether a dead nest
   frees its count is **Unknown**. A group with `nests at fixed markers only` picks among its NEST_MARKER towns, leaving out every marker whose
   nearest town (by XZ, markers skipped) is within 2500 (3D) (**Verified**, `FUN_1408f6350`, 6,250,000 squared).
+- **Nest furniture** (**Verified** by code unless marked): when an area loads (`FUN_1409fdbd0` → `FUN_1408f5e70`; "area load" **Observed**), each of its nests runs `Nest` slot 64
+  (`FUN_1409278a0`), which queues its TOWN record at its position, owner none; the queue (`FUN_140928410`, "delayedSpawningChecks") runs `TownBase` slot 113
+  (`FUN_140938440`) once the zone is loaded. That seeds `srand` from the nest's X/Z and places: `debris` (ITEM / NEST_ITEM, `FUN_140937510`, within
+  `size radius`); `debris building` round `num centrepoints` centres (none when 0); `loot spawn` ITEM lists. Nest buildings are not saved
+  ([save](../formats/save.md)), so they come back from the seed each load (**Observed**). The fog nests' Prisoner Poles come from here (`Fog Deathyard`
+  6, `ruin- fogman resident` 4, `Cannibals` 5; `Nest of Beak Things` has `Beak Thing Egg` debris). Towns with `spawn in town centre` (`Cannibal Village`,
+  `Deadhive Overrun` and overrides) queue the same at their own position from `Town::setup` (`FUN_1409353c0` → `FUN_140929340`), run on load (`FUN_14092f260`).
+  - Centres (disassembly): each a random direction (X, Z uniform in [-1, 1], normalised) × uniform [0, `size radius`] from the nest, snapped to the navmesh
+    (`FUN_140927600`); one within 140 of an earlier centre is put 190 from it, along the line between them.
+  - Per centre, per `debris building` entry: count from v0 (0: one on a coin flip; 1: one; more: v0 + an int in [-v0/2, v0/2]); each piece (`FUN_140930120`)
+    a random direction × uniform [v1, v2] from the centre, put 25 from a piece of the same entry within 17 (the list is cleared per entry), dropped when the
+    navmesh query (`FUN_1403a2300`, box half-size 60 round the point at the centre's height) finds nothing or a piece of the entry is within 12; ground and
+    normal from a ray down from 10000; facing a random yaw, tilted to the normal, a tilt over the BUILDING's `max slope` (degrees) slerped back to it
+    (t = max slope / tilt); owned by the nest's faction (the nest's vtable +0x58, **Observed**).
+  - `debris` (`spawnDebris` `FUN_140937510`, disassembly for the arguments): per entry v0 to v1 clusters (`Rand_IntInRange`: lo + a uniform step over
+    [lo, hi], clamped, so lo when lo > hi), scale v2 × 0.01 (v2 0: 1). A NEST_ITEM without `physics file`: a point within `size radius`, then `cluster min`
+    to `cluster max` meshes, each within `cluster range` × scale of the one before, yaw random, scale ± 0.1, its `ground mesh` (else `mesh`); with
+    `number of meshes` n > 1 the bare name less its last character plus an int in [1, n] (`FUN_14092bdc0`: `bone1.mesh`, 6 → `bone1`..`bone6`). Drawn
+    only (a static batch). With a `physics file` (`Beak Thing Egg`): as many real items within `cluster range` of the entry's point, each persisted to
+    the nest. Then the item's own `cluster` list from the last one placed (v0 to v1 clusters within v2; the egg's `Bone Fragment=15,0,0` is 15).
+  - `loot spawn` (VENDOR_LIST): the list for the nest's faction (`FUN_1409592a0`), v0 to v1 items rolled as an item slot's (`FUN_1409540d0`), each at
+    a point within `size radius` snapped to the navmesh, none below height 1; persisted to the nest.
+  - The real items (physics debris, loot) are made only when the zone's `ZoneMapContent::newGameFirstTimeLoaded` (+0xa8, read through
+    `getZoneMapLocation`) is set: a zone with no save file. The meshes and buildings come every load.
+  - Meitou (`NestFurniture`, `PopulationCamps.cs`): all of it when a nest's zone activates, removed when it unloads (NPCs in its cages let out); a
+    `spawn in town centre` town's when it is made, kept (again when its TOWN record changed). Its own rolls keyed by the camp's place; the navmesh query
+    is the walkability at the centre's height within 60. The items are loose ground items, laid once per camp in this world and only in a zone the
+    loaded save has no file of. A nest's cage of a kidnapper's faction is always a candidate, and a standing nest is a town for the fogman worship finder
+    (nest markers skipped). Not modelled: the dedupe of a town's saved pieces (Meitou makes them again, not saving them).
 - **Homeless squads** (area tick `FUN_1408f9240`, every 2 s, per island): the island's load (sum over its loaded sectors of intact +
   0.5 × not-intact squads, [counts](#off-screen-world) above; clamped to [0, 2] for a sector with its own town or the town flag `FUN_1408f62e0` / +0x30) is compared with `FUN_1408f5ca0`, the sum of P × `homeless spawn
   amount` over the loaded zones of the island; while below, one sector is picked by weight max(0, P × amount + 1 − load), halved when its own town stands in it (`FUN_1408f62e0`; only a
@@ -528,6 +580,14 @@ Meitou: [ground items](../simulation.md#items-and-eating).
   beyond 50000 (`createRandomUnloadedSquad` → `Ownerships::setHomeTown`, KenshiLib 1ce4a16 names; **Verified** by code). It tethers the
   patrol (below). Saved homeless platoons have no `basetown`/`hometown` ([save.md](../formats/save.md)); whether the home is saved
   elsewhere is **Unknown**. Meitou decides it at the squad's first patrol, from where it stands (engine choice, so saved squads get one).
+  The maker's template source (`FUN_1408f8060`, **Observed** by disassembly, not traced): when the sector's own town is a nest object
+  (vfunc `0x270`) with a non-empty pool-2 list, the group's `homeless spawns` are not used; if that town is near the sector and not the
+  player's, the candidates are the nest's pool-2 list within its free budget (`FUN_1408f7e80`, the nest rule above), else the maker
+  returns 0. **Observed** (an hour's hold of a Rebirth save, native hooks on the tick and the maker): every pass drew the Wolf Pack Den's
+  cell (the only active one with a non-zero amount; target 1, load 0) and the maker returned 0, so no homeless squad appeared. Meitou
+  (`BuildSector`, load-time fill and refill): a sector whose own town is a nest with roaming squads (`OwnNest`: the nearest nest site,
+  or a level-data nest town, standing in the sector and nearer than any other town) makes none of the group's squads; the nest's pool
+  stays its own site's (engine choice: the sector route to it is not modelled).
 - **Patrol task** (`Task_Patrol`, loaded; **Verified** by code and disassembly unless marked): the platoon's `PatrolInfo` (+0x1e8: biome
   group, has-home flag and home town position, sector range near/far, `patrol approaches towns`, a smell factor) is made once; the
   start sets the range to (1, 2), or (0, 1) when the platoon has a home town, then orders a move whose destination (`CharMovement`

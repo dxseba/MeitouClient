@@ -27,7 +27,7 @@ public sealed record WildSite(int Index, WildKind Kind, ZoneCoordinate Zone, int
 /// <c>max(0, v0 - k x count)</c> with k = (sum of v0) / (P x amount) and the counts of this sector's own picks; world-state gated templates are skipped.
 /// The spot: a random point of the sector, pushed out of the nearest town to twice its radius and out of other towns of another faction to their radius,
 /// at least <see cref="PopulationSettings.HomelessPlayerDistance"/> from every player character, walkable; 40 tries (the original's 4 rounds of 10), else
-/// that squad is not made. A sector whose nearest town is the player's makes none.</item>
+/// that squad is not made. A sector whose nearest town is the player's makes none, and so does one whose own town is a nest with roaming squads.</item>
 /// <item><b>Nests</b> (6.3). The original adds one nest per area tick until a group has <c>num nests</c> x the nests multiplier; here the layout is made at
 /// once from the world seed (engine choice; the end state is the same count): each nest's TOWN is a weighted pick from the group's <c>nests</c> (v0, 0 as
 /// 100, the TOWN's <c>world state</c> gate), its place a seeded cell of the group's area with candidate spots away from placed towns, or for groups with
@@ -62,8 +62,11 @@ public sealed partial class PopulationSystem
     /// <summary>The squads an unloaded wild site keeps (empty: none, or the site is loaded).</summary>
     internal IReadOnlyList<KeptWild> KeptWildOf(int site) => keptWild.TryGetValue(site, out var kept) ? kept : [];
 
-    /// <summary>A wild site's squads, built. <paramref name="Rolls"/>: the nest rolls used (the next top-up's keys follow them); <paramref name="Exhausted"/>: a nest roll found no entry that fits or weighs anything.</summary>
-    sealed record BuiltWild(int Site, long LoadId, Vector2 Centre, List<BuiltSquad> Squads, int Rolls = 0, bool Exhausted = false, bool TopUp = false);
+    /// <summary>
+    /// A wild site's squads, built. <paramref name="Rolls"/>: the nest rolls used (the next top-up's keys follow them); <paramref name="Exhausted"/>: a nest roll found no entry that fits or
+    /// weighs anything; <paramref name="Layout"/>: what a loading nest scatters (<see cref="NestFurniture"/>).
+    /// </summary>
+    sealed record BuiltWild(int Site, long LoadId, Vector2 Centre, List<BuiltSquad> Squads, int Rolls = 0, bool Exhausted = false, bool TopUp = false, NestLayout? Layout = null);
 
     /// <summary>What a nest build may make: members up to <paramref name="Cap"/> with <paramref name="Members"/> there already, <paramref name="Counts"/> squads per entry, rolls keyed from <paramref name="First"/>, at most <paramref name="Rolls"/> of them and <paramref name="Squads"/> squads; <paramref name="Place"/> false only weighs (a player is near).</summary>
     sealed record NestBudget(int Cap, int Members, int[] Counts, int First, int Rolls, int Squads, bool Place = true, Vector2? Centre = null);
@@ -330,6 +333,7 @@ public sealed partial class PopulationSystem
                     PayNestDespawn(world, wildSites[i], state);
                 }
                 Drop(world, state);
+                FoldCamp(world, i);
                 wildLoaded.Remove(i);
             }
         }
@@ -446,6 +450,7 @@ public sealed partial class PopulationSystem
         var site = wildSites![b.Site];
         if (site.Kind == WildKind.Nest && (b.Squads.Count > 0 || site.SaveInstance is not null)) wildCentres[b.Site] = b.Centre;
         if (!b.TopUp) SpawnKeptWild(world, b.Site, state);
+        if (b.Layout is { IsEmpty: false } layout) StandCamp(world, site.Index, layout, site.Faction, b.Centre, site.Nest!.Id, -1);
         foreach (var built in b.Squads)
         {
             var squad = SpawnSquad(world, built, null, 0);
@@ -520,6 +525,10 @@ public sealed partial class PopulationSystem
         // A sector whose nearest town is the player's makes nothing (6.2).
         if (NearestTown(centre, out _) is { } nearest && data.PlayerFaction >= 0 && data.SiteFactions[nearest.Index] == data.PlayerFaction)
             return new BuiltWild(site.Index, loadId, centre, squads, TopUp: topUp >= 0);
+        // A sector whose own town is a nest with roaming squads makes none of the biome's: the original's maker then draws from the nest's
+        // pool within its free budget (docs/game/factions-squads-towns.md "Homeless squads"), which Meitou leaves to the nest's own site.
+        if (OwnNest(site, centre) is { RoamingSquads.Count: > 0 })
+            return new BuiltWild(site.Index, loadId, centre, squads, TopUp: topUp >= 0);
         int n = HomelessCount(group, settings.PopulationMultiplier);
         var counts = new int[group.HomelessSpawns.Count];
         // The save's homeless squads standing in this sector are of its count (and of their entry's).
@@ -546,6 +555,29 @@ public sealed partial class PopulationSystem
     const float MarkerTownGap = 2500;
 
     TownSite? NearestTown(Vector2 p, out float distance) => NearestTown(data, p, out distance);
+
+    /// <summary>
+    /// The nest that is a sector's own town (<c>FUN_1408f62e0</c>: the town nearest the sector's centre, when it stands in the sector): the nearest nest site
+    /// when no level-data town is nearer and it stands in the sector, or the nearest level-data town when it is a nest standing in the sector, else null.
+    /// A rolled nest counts at its first spot (it settles among its spots as it loads).
+    /// </summary>
+    TownData? OwnNest(WildSite sector, Vector2 centre)
+    {
+        var town = NearestTown(centre, out float nearest);
+        WildSite? own = null;
+        foreach (var s in wildSites!)
+        {
+            if (s.Kind != WildKind.Nest || s.Spots.Count == 0)
+                continue;
+            float d = Vector2.Distance(centre, s.Spots[0]);
+            if (d < nearest)
+                (own, nearest) = (s, d);
+        }
+
+        if (own is not null)
+            return own.Zone == sector.Zone ? own.Nest : null;
+        return town is { Town.Type: TownType.Nest } && town.Zone == sector.Zone ? town.Town : null;
+    }
 
     static TownSite? NearestTown(PopulationData data, Vector2 p, out float distance)
     {
@@ -647,6 +679,7 @@ public sealed partial class PopulationSystem
             squads.Add(one);
             members += one.Plan.TotalMembers;
         }
-        return new BuiltWild(site.Index, loadId, c, squads, rolls, exhausted, topUp);
+        var layout = topUp ? null : NestFurniture.Scatter(data.Db, nest, c, walk, seed, $"nest{(int)c.X},{(int)c.Y}:");   // keyed by place: a save names its cages
+        return new BuiltWild(site.Index, loadId, c, squads, rolls, exhausted, topUp, layout);
     }
 }

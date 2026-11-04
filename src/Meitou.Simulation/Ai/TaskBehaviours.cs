@@ -27,7 +27,7 @@ public enum AiBehaviour : byte
     GoHome = 8,
     /// <summary>Walks to the turret of its town it claimed and stands at its gun (docs/simulation.md "AI"), where the combat system fires it.</summary>
     Turret = 9,
-    /// <summary>Walks to a general node of a random building of its town and stands there (WANDER_TOWN, docs/game/ai-tasks.md "Town goals", Observed); PATROL_TOWN too (its <c>Task_PatrolTown</c> is not decoded: engine choice).</summary>
+    /// <summary>Walks to a general node of a random building of its town and stands there (WANDER_TOWN, docs/game/ai-tasks.md "Town goals", Observed).</summary>
     TownNode = 10,
     /// <summary>Walks into a shop of its town and stands at a node in it (SHOPPING; buying is not modelled).</summary>
     Shop = 11,
@@ -71,6 +71,16 @@ public enum AiBehaviour : byte
     /// <see cref="AiSystem"/>, AiSystem.Fights.cs); the think asks for the fight (<see cref="AiMind.FightTarget"/>) and the serial step starts it, which the combat system fights.
     /// </summary>
     Fight = 20,
+    /// <summary>
+    /// JOB_MEDIC (58, the Medic goal of most packages, docs/game/ai-tasks.md "Medic jobs"): wanted at the patient finder's score (<see cref="FirstAid.FirstAidSystem.FindPatient"/>, run on the
+    /// NPC's sweep turn and kept in <see cref="AiMind.MedicScore"/>); the think asks for the treatment (<see cref="AiMind.MedicAsk"/>) and the serial step starts it, row 58's Treat.
+    /// </summary>
+    Medic = 21,
+    /// <summary>
+    /// PATROL_TOWN (36, <c>Task_PatrolTown</c>, docs/game/ai-tasks.md "Town goals"): walks to a random point round its town's centre, and draws the next one each time a walk is over,
+    /// so it keeps strolling about the town (an occupier: round the complete buildings of the player town it holds).
+    /// </summary>
+    PatrolTown = 22,
 }
 
 /// <summary>The engine's table from <see cref="TaskType"/> to <see cref="AiBehaviour"/>, and the TaskData display text (docs/game/ai-tasks.md "TaskData registry", Verified) of the types it acts out.</summary>
@@ -81,7 +91,7 @@ public static class TaskBehaviours
         [TaskType.IDLE] = (AiBehaviour.Mill, "Idleness"),
         [TaskType.WANDERER] = (AiBehaviour.ToTown, "Wandering"),
         [TaskType.WANDER_TOWN] = (AiBehaviour.TownNode, "Wandering town"),
-        [TaskType.PATROL_TOWN] = (AiBehaviour.TownNode, "Patrolling town"),
+        [TaskType.PATROL_TOWN] = (AiBehaviour.PatrolTown, "Patrolling town"),
         [TaskType.PATROL] = (AiBehaviour.Patrol, "Patrolling"),
         [TaskType.RELAX_IN_TOWN_PACKAGE] = (AiBehaviour.Relax, "Relaxing"),
         [TaskType.SHOPPING] = (AiBehaviour.Shop, "Shopping"),
@@ -131,6 +141,7 @@ public static class TaskBehaviours
         [TaskType.PROTECT_OWN_SQUAD] = (AiBehaviour.Fight, "Protect close allies"),
         [TaskType.PROTECT_ALLIES] = (AiBehaviour.Fight, "Protect allies"),
         [TaskType.PROTECT_ALLIES_STAY_IN_TOWN] = (AiBehaviour.Fight, "Protect allies"),
+        [TaskType.JOB_MEDIC] = (AiBehaviour.Medic, "Medic"),
     };
 
     // Flat tables by type number for the think's hot loop (a dictionary lookup per goal was a third of the think).

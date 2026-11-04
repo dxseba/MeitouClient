@@ -295,7 +295,7 @@ public class RagdollTorsoPhysicsTests
     {
         using var scene = new Scene(torso: false);
         scene.World.RunTick();
-        scene.Cold.Medical!.Sever(LArm, Context(scene.Cold.Race), false);
+        scene.Cold.Medical!.Sever(LArm, Context(scene.Cold.Race));
         var item = new ItemInstance { Record = "severed-arm-test", Type = FcsRecordType.ITEM };
         scene.World.GroundItems.Drop(item, scene.Snapshot.Position, 0, new(scene.Id, "Bip01 L UpperArm", scene.World.Tick));
         int itemId = Assert.Single(scene.World.GroundItems.All).Id;

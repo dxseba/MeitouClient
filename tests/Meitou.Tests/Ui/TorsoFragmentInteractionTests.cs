@@ -50,7 +50,7 @@ public sealed class TorsoFragmentInteractionTests
             Ui.ConfigureFrontend(SyntheticTown.Database(), () => [], "");
             Ui.Eye = new Vector3(0, 6, -14);
             Ui.ViewProjection = Matrix4x4.CreateLookAt(Ui.Eye, new(0, 1, 0), Vector3.UnitY)
-                * Matrix4x4.CreatePerspectiveFieldOfView(1, 1600 / 900f, 0.1f, 1000);
+                * Meitou.Rendering.DepthConvention.Perspective(1, 1600 / 900f, 0.1f, 1000);
             // Mesh/plane intersection belongs to the renderer; this scene controls its published answer while exercising the real UI event path.
             Ui.MeshHit = (id, _, _) => id == Body ? 10 : float.PositiveInfinity;
             Ui.TorsoSideHit = (_, _, _) => HitSide;

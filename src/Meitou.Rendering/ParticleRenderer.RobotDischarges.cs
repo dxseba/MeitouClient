@@ -46,7 +46,7 @@ public sealed unsafe partial class ParticleRenderer
                 Direction = along / length, Width = stroke.Width, Height = length, Colour = stroke.Colour };
         }
         if (written == 0) return 0;
-        int close = gpu.ClipDepthZeroToOne ? 0 : PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
+        int close = gpu is not GpuContext ? 0 : PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
         var instances = frame.AllocateConstants((ulong)(written * InstanceBytes), 16);
         scratch.AsSpan(0, written).CopyTo(new Span<ParticleInstance>(instances.Pointer, written));
         draws.Add(new DrawItem { Instances = instances, Count = written, Close = close, Technique = TracerTechnique,

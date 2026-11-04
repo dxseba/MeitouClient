@@ -193,7 +193,7 @@ setting reaches the launcher with its release; the launcher knows none of them. 
   the game still holds the tier's look switches off at start unless kept on (`SettingsMenu.ApplySavedPreset`). No `faithfulLook`
   reads Faithful when every switch Faithful turns off and Meitou turns on is saved off, as the game does (unsaved, not written back). A look slider's Default writes the look's value.
 - `presets` (null in older schemas: no row) is the Quality preset row over the top-level `graphicsPreset`. The game saves the preset its
-  settings sit at (Custom when none) and at start applies a saved one they do not sit at (not under `--low-end`, `--meitou` or `--faithful`), so a preset chosen in
+  settings sit at (Custom when none) and at start applies a saved one they do not sit at (not under `--low-end`, `--benchmark-baseline`, `--meitou` or `--faithful`), so a preset chosen in
   the launcher takes effect on the next start; the rows show the old values until then. Changing a row the preset sets (`presets.keys`)
   saves Custom, so the game keeps that change. No saved preset shows High without saved graphics, else Custom.
 - Detect (when `presets.detect` names the game's option, `--recommend-preset <file>`) runs the played version's game, which makes a
@@ -216,13 +216,16 @@ setting reaches the launcher with its release; the launcher knows none of them. 
 - A slider marked `reversed` (terrain detail's error in pixels) is drawn mirrored (`min + max - value`; logarithmic: `min x max / value`),
   so right is always the better end; the value written is unchanged. Texture quality, also reversed, is a drop-down, best first.
 - Read-only when the file is unreadable, or its `version` differs from the schema's `settingsVersion` (another layout: the keys may
-  mean something else). Warnings: the game is running (it writes the file on exit), `--low-end` (the game ignores `graphics`).
+  mean something else). Warnings: the game is running (it writes the file on exit), `--low-end` or `--benchmark-baseline` (the game ignores `graphics`).
 
 The Settings page's Language picks the game's and the launcher's language: English, Kenshi's nine languages, the install's `locale/` folders and the
 languages Meitou has texts for, marked when Meitou's own texts are not translated. Choosing one writes only the `language` line of the Kenshi
 folder's `settings.cfg` (encoding and line endings kept) and remembers the code in `launcher.json` (`Language`, used without a Kenshi folder); at
 start the `settings.cfg` value wins. The launcher's labels come from the same `.po` catalogs as the game's Meitou texts
 ([localisation](formats/localisation.md)); a string without a translation stays English. Mod names, news and release notes are data, not translated.
+Labels the layout holds are translated by one walk of the visual tree (texts, button captions, placeholders, tooltips); a text the code
+builds with a value in it is a catalog key with the game's `{1}`, `{2}` placeholders (`Tr("Downloading {1}...", title)`), never an
+interpolated string, which no translation could match.
 
 `meitou.user.json` layout (`UserConfig`; **Verified** by loading crafted files through the built game 2026-10-20):
 - `version` (no key: 1) is raised when a key is renamed, retyped or reinterpreted; `UserConfig.Migrate` converts older files step by
@@ -249,6 +252,11 @@ start the `settings.cfg` value wins. The launcher's labels come from the same `.
 - A preset is a named, ordered list of names with enabled flags. Applying one reorders the list. Mods the preset doesn't name go
   to the end, disabled, and mods it names that aren't on disk are reported. Applying doesn't save.
 - A mod folder with `RE_Kenshi.json` is marked as a plugin mod whose DLLs Meitou ignores ([RE_Kenshi](formats/rekenshi.md)).
+- A mod folder with `meitou.json` is marked as a code mod ([modding](modding.md)). Play asks about the enabled code mods not decided
+  yet; the Code mods button beside Save mod list asks about every code mod in the list, so a choice can be changed or revoked. The
+  question has a box per mod (ticked: allowed now) and three answers: Data only all, Trust all, Apply (the ticks). Escape decides
+  nothing. Allowed names go to `trustedCodeMods` in `meitou.user.json` (kept by game releases since 2026-10-20, which keep unknown
+  keys); data-only names go to the launcher's `DataOnlyCodeMods`, so Play does not ask about them again.
 
 ## News
 

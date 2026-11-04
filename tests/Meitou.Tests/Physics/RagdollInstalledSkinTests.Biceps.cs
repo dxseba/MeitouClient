@@ -65,7 +65,7 @@ public partial class RagdollInstalledSkinTests
         {
             var cold = new CharacterCold { Name = bisected ? "Cut QA" : "Whole QA", Race = Human, Medical = Healthy(), Appearance = look,
                 TorsoBisection = bisected ? cut : null };
-            if (missingLeg) cold.Medical.Sever(LArm + 2, Context(), false);
+            if (missingLeg) cold.Medical.Sever(LArm + 2, Context());
             cold.Medical.KillFromBisection();
             return cold;
         }

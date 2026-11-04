@@ -202,6 +202,9 @@ sealed partial class SettingsMenu
 
     IEnumerable<string> LowCut() => LowOffSwitches.Where(CutAtLow);
 
+    /// <summary>The switches Low holds off, translated, as one list for a hint or notice.</summary>
+    string LowCutList() => string.Join(", ", LowCut().Select(s => Loc.Tr(s)));
+
     /// <summary>The <see cref="LowOffSwitches"/> as the preset and the tier say: off where Low cuts them, else the preset's.</summary>
     void ApplyLowCut()
     {
@@ -469,8 +472,8 @@ sealed partial class SettingsMenu
         Text("Quality", R(212, 134, 70, 30), 15, LightInk);
         var q = R(286, 136, 172, 28);
         DropDown(PresetNames[CurrentPreset()], q, () => OpenChoice(QualityChoice, q));
-        string cut = string.Join(", ", LowCut());
-        if (cut.Length > 0) Text($"Low holds off: {cut}.", R(474, 134, 626, 30), 12, Brass);
+        string cut = LowCutList();
+        if (cut.Length > 0) Text(Loc.Tr("Low holds off: {1}.", cut), R(474, 134, 626, 30), 12, Brass);
         viewport = keep;
     }
 

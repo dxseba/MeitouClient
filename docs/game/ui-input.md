@@ -190,7 +190,7 @@ behind-the-scene pass 1 adds nothing (**Observed** reading) and the visible part
 `depth_func less_equal`, pass 1 `depth_write off`, `depth_func greater`, `alpha_blend` (the part behind the scene); both `Basic_Lit_VP`
 (`NORMALS`: `rgb *= saturate(N·sun) * contrast + 1 - contrast`, contrast 0.5) and `Basic_FP` (`colour × vertex colour`).
 Meitou (`MarkerRenderer`) draws both passes after the tone map, so the colours show as given whatever the exposure, sorting fragments by
-the near slice's scene depth, multisampled (up to 8×) and resolved over the picture: the mesh's rough band at the cone's widest part
+the scene depth, multisampled (up to 8×) and resolved over the picture: the mesh's rough band at the cone's widest part
 and the notch on the stem are in `position.mesh` itself; on every ground move, following the cursor each frame while the button steers, always on (settings.cfg is not read yet). The rotation marker is drawn in the visible pass only, while the Orbit binding is held, at the camera rig's target + (0, 1, 0), scaled max(3, 0.06 x distance) (the zoom node's z read as the rig distance), always on.
 
 ### Quick right click on a character
@@ -259,7 +259,7 @@ not read) shows the Windows cursor instead, applied at once.
 ### Character picking
 
 **Observed** (`FUN_140800250`): the original picks characters with the same physics ray as buildings ([building picking](#building-picking-and-selection)): hits in groups 0, 1,
-3, 4 (3 and 4 are ragdoll shapes, [ragdolls](ragdolls.md#collision-groups); what 0 and 1 are is **Unknown**). Meitou (engine choice, [phs](../formats/phs.md)): clicks, quick orders, the hover
+3, 4 (3 and 4 are ragdoll shapes, [ragdolls](ragdolls.md#collision-groups); 0 the click hulls, [combat](combat.md#line-of-fire-and-the-hit-shape); 1 is **Unknown**). Meitou (engine choice, [phs](../formats/phs.md)): clicks, quick orders, the hover
 label, pointer and outline take the nearest character whose posed mesh the ray meets. Each mesh keeps, from its bind-pose vertices, one
 box per bone (vertices by their strongest weight; an unskinned part one box), grown 0.4 units; the boxes are posed by the live bone palette,
 so people and animals pick over their whole drawn body, a ragdoll where it lies. **Verified** (sandbox probe, 2026-10-16): a person hits from the feet to 18 units
@@ -282,11 +282,14 @@ Rendering details: [objects](../render-objects.md#building-sign-highlight).
 **Verified** (`FUN_140415e00` hooks the ItemBox of each squad tab to `MainBarGUI`; disassembly of `FUN_140413d80`, the eventNotifyItem handler, and `FUN_140413d30`, eventSelectItemAccept):
 - Left press (notify 0, button 0): closes the context menu (`FUN_1407a6bc0`), selects the member (`FUN_1407f90b0` -> `FUN_1407f8f60`, Shift toggles, [above](#quick-right-click-on-a-character)), no camera move.
 - Double click (accept, `FUN_140413d30`): the same with the focus flag set, which runs `FUN_1407f5400` (focus the camera on the character).
-- **Right** press (button 1): closes the context menu and remembers the pressed index; right release over the same portrait calls `FUN_140413cd0` with the focus flag set: the same
-  select-and-focus as the double click, at once, whatever the hold time. **There is no portrait context menu in the original**, and no right-click menu on any other path of the bar.
-- So the report in GitHub issue #137 (the base game lacks it) is wrong: vanilla focuses on a right click. Meitou (`PlayerInterface.MouseDown` / `MouseUp`): a right release on the pressed portrait selects it
-  (Shift toggles) and centres / flies the camera as the double click. Meitou switch "Portrait menu" (Advanced settings, on by default; not in the original): a held right press opens the
-  member's context menu, as on the character in the world; a quick release still selects and focuses.
+- **Right** press (button 1): closes the context menu, remembers the pressed index, copies the portrait's character hand into `MainBarGUI` `+0x1e8` and zeroes the hold timer `+0x208`.
+- **Held** (**Verified**, `FUN_140415630`, `MainBarGUI`'s frame update; `DAT_141696c80` = 0.25): while that hand is not a `NULL_ITEM` (11) one, the timer adds the frame time; past
+  0.25 s it drops the MyGUI mouse capture, opens the context menu (`FUN_1407a6bc0` mode 1) for the hand's character (type 1; a hand of type 91 resolves another way, **Unknown**) and
+  clears the hand to `NULL_ITEM`. So the original has a portrait menu: the same menu as on the character in the world, after 0.25 s rather than the world's 0.2 s.
+- Right release over the same portrait with the hand still set (a press shorter than 0.25 s) calls `FUN_140413cd0` with the focus flag set: the same select-and-focus as the double click.
+  After the menu opened, the release does not focus. No right-click menu on any other path of the bar.
+- Meitou (`PlayerInterface.MouseDown` / `MouseUp`): a press held `PortraitHoldSeconds` (0.25) opens the member's context menu; a quicker right release on the pressed portrait selects it
+  (Shift toggles) and centres / flies the camera as the double click. With no verbs (nothing selected) no menu opens and the release focuses.
 
 ### Ground item labels
 
@@ -328,14 +331,14 @@ labels are stacked above the nearer one. No quantity. The owner (`GroundItem.Own
 platoon faction, else the `insideBuilding` building's `owner faction ID` (also for the verb, engine choice), none for a `not real` faction; items dropped or
 placed in play have none. Picking up another faction's item marks it stolen from that faction (`StolenFrom`); standing inside a building it also sets a pending Theft against the building's faction ([economy](economy.md#fencing-stealing-and-smuggling)).
 
-Meitou fragment labels (`PlayerInterface.BodyFragmentLabels`, engine addition): Alt also labels dead bodies and each independently carried torso half with owner and anatomy. Strong horizontal/side/front cuts use upper/lower, left/right (from the rig's left arm axis), or front/back; oblique cuts use fragment 1/2. Labels stack above item labels, keep the piece's identity after moving away from its mesh, and omit hidden, occluded, off-floor and distant pieces. Left click picks up the indicated half; a held right click offers its own Pick Up/Put Down and Loot. Loose disconnected arm/head chains and severed heads/jaws are inspection-only. A limb already represented by a ground item keeps one loot label with its owner name.
+Meitou fragment labels (`PlayerInterface.BodyFragmentLabels`, engine addition): Alt also labels dead bodies and each independently carried torso half with owner and anatomy. Strong horizontal/side/front cuts use upper/lower, left/right (from the rig's left arm axis), or front/back; oblique cuts use fragment 1/2. Labels stack above item labels, keep the piece's identity after moving away from its mesh, and omit hidden, occluded, off-floor and distant pieces. Left click picks up the indicated half; a held right click offers its own Pick Up/Put Down and Loot. Loose disconnected arm/head chains, severed heads/jaws and exposed intestines are inspection-only. Intestine labels follow the rendered bowel centre while attached or fallen, and appear only after the tissue is positioned. A limb already represented by a ground item keeps one loot label with its owner name.
 
 ### Hover outline
 
 Meitou only (Advanced → Hover outline, `HoverOutline`, default on; the game has none). The character under the cursor is drawn alone into a
 mask (colour pass, live pose, picture levels, own depth planes round it) right after the portraits, then after the tone map an outline
 (about 2.5 px at 1080p, 60 % strength fading outward) is blended round the silhouette, through walls, and its visible part tinted at 11 %, visible meaning its
-linear depth within 1 % + 1 unit of the near slice's scene depth (jittered, render size). Outline and tint take the pointer's order's colour: attack red (a hostile character as the pointer counts it above), treat green, talk gold, carry/loot blue, else white (no selection or no order). No name or goal label is shown over a character (**Observed** by the owner in play, not traced in the exe: the original shows none for ordinary NPCs, only the outline; Meitou had a plain name and goal label until 2026-10-17). Holding the Highlight key (Alt, which also lights up signs) outlines the same way every character (the squad's too, people and animals) within 500 units of the camera's focus, each in the colour hovering it would give (own hurt green, downed or carried blue, trader or someone to talk to gold, hostile red, else white; all white with no selection); one mask per colour, overlapping outline rectangles joined. The pointer and hovered character are picked again when the mouse, the camera or Ctrl/Alt changed, else every 3rd tick (engine choice; a pick costs about 0.5 ms with ~1000 characters). Off in the free camera, with the interface hidden and in
+linear depth within 1 % + 1 unit of the scene depth (jittered, render size). Outline and tint take the pointer's order's colour: attack red (a hostile character as the pointer counts it above), treat green, talk gold, carry/loot blue, else white (no selection or no order). No name or goal label is shown over a character (**Observed** by the owner in play, not traced in the exe: the original shows none for ordinary NPCs, only the outline; Meitou had a plain name and goal label until 2026-10-17). Holding the Highlight key (Alt, which also lights up signs) outlines the same way every character (the squad's too, people and animals) within 500 units of the camera's focus, each in the colour hovering it would give (own hurt green, downed or carried blue, trader or someone to talk to gold, hostile red, else white; all white with no selection); one mask per colour, overlapping outline rectangles joined. The pointer and hovered character are picked again when the mouse, the camera or Ctrl/Alt changed, else every 3rd tick (engine choice; a pick costs about 0.5 ms with ~1000 characters). Off in the free camera, with the interface hidden and in
 screenshots and cinema takes. Not in the Shift+F1 switch list (a game setting, like Attackers per target).
 
 ### Building picking and selection
@@ -603,8 +606,9 @@ The settings panel and the native Meitou UI have their own keyboard focus ([nati
 Meitou only (no original counterpart). F10 (`ToggleDebugMenu`, rebindable) opens a cheat list; while open it takes every key (Up/Down, typing, Enter, Esc).
 Rows send `DebugCommand`s, applied in the next tick's Inputs phase: teleport the selection to the camera target, spawn a character record there
 (own squad, first faction hostile to the player), give an item record (`name x5 q80`; quality 0-100: armour's quality, crossbows' and limbs' level, a weapon the `PLAYER_WEAPONS` model of the highest level at or below it (else the lowest) and that level; what does not fit drops at their feet) to the first selected, add or remove money (signed number),
-heal fully (`MedicalState.Heal`), every stat to 100, one cut of n damage (Enter/Right opens a body part list: random as a blow picks, or a part of the first target by template id; others without it are skipped), force hits to a part (the same list from the first target; every blow, melee, bolt or execution, then lands on that template id, else on a part of that name on another body, while a blow could pick it; Off restores the roll; `BodyOptions.ForcedHitPart`, not saved), set the Global damage multiplier of the running world (0 to 100; blows and XP at once, a crossbow when next equipped; not saved), finish every RESEARCH record and repetition (queue emptied). Heal, stats and damage fall back to the inspected character. Names match a record's string id,
+heal (`MedicalState.Heal`; stumps and crushed limbs stay), heal fully (its sub-row: stumps and crushed limbs become the original again first, `MedicalState.RestoreLimbs`; a fitted prosthetic stays), every stat to 100, one cut of n damage (Enter/Right opens a body part list: random as a blow picks, or a part of the first target by template id; others without it are skipped), force hits to a part (the same list from the first target; every blow, melee, bolt or execution, then lands on that template id, else on a part of that name on another body, while a blow could pick it; Off restores the roll; `BodyOptions.ForcedHitPart`, not saved), set the Global damage multiplier of the running world (0 to 100; blows and XP at once, a crossbow when next equipped; not saved), finish every RESEARCH record and repetition (queue emptied). Heal, stats and damage fall back to the inspected character. Names match a record's string id,
 its exact name, else the shortest name containing the text. Replaces the game's F10 key list (the viewer keeps its own).
+Code mods add rows after these ([modding](../modding.md) "Registration surface").
 
 ## Unknowns
 

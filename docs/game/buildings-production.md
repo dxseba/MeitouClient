@@ -501,7 +501,8 @@ not a natural site, has a functionality and passes the owner test of [resources]
 skipped when a virtual test on the character (`+0x30`) fails (**Unknown** what it tests; Meitou skips animals). Meitou
 shows it for the whole operate task, the walk there included, and drops it when the task ends (the original's removal
 was not traced, **Unknown**).
-Operator animation: the functionality's `animation` reference (**Verified**, probe of vanilla BUILDING_FUNCTIONALITY). No
+Operator animation: the functionality's `animation` reference (**Verified**, probe of vanilla BUILDING_FUNCTIONALITY); its `animation events` (the pick hitting ore, stone, a plate)
+sound on that clip ([audio](../audio.md#characters-footsteps-combat-voices) "Machine work"). No
 farming clip exists: cactus, cotton, potato, rice and veg farms use `stonemine` (the mining swing, with the Hoe); `farming
 wheat` and `farming hemp` have none (what the original plays then is **Unknown**; Meitou falls back to `stonemine`). Whether
 the original plays it while the crop grows is moot (**Observed**): row 87 needs state 73 `machineHasFreeOperatorSlot`, whose evaluator `FUN_140598de0` is **Verified** false while the machine's
@@ -876,8 +877,7 @@ and `power capacity` (battery store, "in seconds" per fcs.def), plus research ([
 - **What damages a building** (**Verified**, decompile): hits go to slot 62, which is `FUN_1402972c0` (returns 1, no effect) for every UseableStuff class (machines,
   turrets, storages, lights) and `FUN_1400d20b0` (returns 0, no effect either) for plain and gate buildings; only WallBuilding (`FUN_14029d560`, [walls](#walls)) and doors (`FUN_14029d690`)
   lose health, a wall at 0 becoming destroyed (slot 104). Destroyed (+0x1a1) is otherwise set only by SQUAD_TEMPLATE `building ruined` (28 true; `FUN_14057f1f0` from `RootObjectFactory::createRandomUnloadedSquad`, **Verified**: the squad's
-  building gets the template's `building designation` if it has none, its `public day`, and is destroyed when ruined and destructible; not modelled: Meitou's town buildings take
-  destroyed only from the level and saves) and
+  building gets the template's `building designation` if it has none, its `public day`, and is destroyed when ruined and destructible: [ruined by residents](#ruined-by-residents)) and
   its own deferred replay: slot 104 (`FUN_140557280`) called while `FUN_14025c6d0(DAT_1421348a0)` holds queues message 0x10 (`FUN_140349be0` on
   `DAT_142134110`) instead, replayed by `FUN_1407b65b0` from the GameWorld update `FUN_140786e30` (**Observed**, decompile), so it adds no source; the first build step on it ruins the building ([construction tick](#construction-tick)). Dismantle (slot 73, its
   only damage path for machines) is offered only when slot 79 (`FUN_14029c380`) holds: the owner is a player faction. So raids and fights never break a
@@ -955,6 +955,35 @@ interior meshes but no functionality record, their level states lack `sell home`
 (`44421-rebirth.mod`, `44426-rebirth.mod`) set it; target 16, owner's `building cost mult` 2: 0.375 × 16 × 2 × 400 = 4,800.
 Meitou reads `sell home` from the saved state, else the level state, else the resident template; **Unknown** whether the
 original falls back to the template.
+
+## Ruined by residents
+
+**Verified** (decompile): the squad setup `FUN_14057f1f0` calls slot 104 (set destroyed) on the squad's home with `building ruined` of its template and slot 105
+(`FUN_14055b520`, can be destroyed): true when the building's int +0x198 is 7 (meaning **Unknown**) or it, or a part reached through `parts` at any depth, has a
+`destroyed mesh`. So a home whose template is not ruined is set intact. **Observed** (data, base game and its mods): 26 SQUAD_TEMPLATEs set `building ruined`, among
+them `_ruined empty building (DEFAULT)` (`44421-rebirth.mod`), the `default resident` of Old Village (Deadcat, `50243-rebirth.mod`), whose level states are
+intact and name no template. Its houses are ruins in the original (issue #145).
+
+**A ruin holds no furniture.** **Verified** (decompile): set destroyed (`FUN_140557280`) destroys the interior's internal buildings and furniture (`FUN_14054f4d0`,
+`FUN_140548580`), after the squad setup has loaded the template's interior; the layout names stay, and housing names a ruin's layouts as any home's
+([layouts](factions-squads-towns.md#town-residents)). **Observed** (saves METARU, autosaves 1 and 2, redev, Beep Fan Club 1): no saved building lies inside any ruin
+(0 of 56, 56, 23, 23, 62), while 283 of 284 standing buildings with an interior name hold furniture; every saved ruin names no interior layout (its template
+names none). Whether a ruin's interior is laid out again when it next loads (the interior loader `FUN_1405621e0` has no destroyed test) is **Unknown**: no save
+has a ruin whose name is set. Meitou: no reader lays out a ruin's layouts (drawing, lamps, effects, emitters, navmesh, and `TownBuildings`: no beds, nodes,
+fixtures or item slots).
+
+Meitou (`ResidentRuins`): before anything reads the level data's `destroyed`, every town is housed by the population's rule ([town residents](factions-squads-towns.md#town-residents))
+and each home of a ruined template that has a destroyed mesh is set destroyed in its level state; 71 base-game buildings (Old Village 10 of 10, Abandoned Town 9 of 9,
+the library ruins). A saved `destroyed` false does not undo a level ruin unless the player's repair saved it (`meitou town construction`; engine choice: saves
+made before this pass wrote those buildings intact). A town's baked distant mesh is a fixed file of the install, drawn as it is (as in the original). Not modelled: the int +0x198 test; setting a level ruin intact (13 level ruins get a template that is not ruined, e.g. Bast's and Endin's
+`Trashed building w/squatters`, yet those towns are ruins in the original, so where the original skips the call is **Unknown**).
+
+A [town override](factions-squads-towns.md#town-overrides) reads its zone back from the level file and houses the replacement's residents, so Meitou
+(`FixtureRegistry.ApplyTownRuins`) sets each of the town's buildings in its own zone that is not the player's: a home of a ruined template that can be destroyed is a
+ruin, any other as its level file has it (a resident ruin of the old town stands again). Its other zones keep their state, but such a home there becomes a ruin
+too. A loaded save takes its ruins of standing buildings back, then applies its replacements again; the building states it writes carry them. The host replaces those
+buildings' level placements (drawing, navmesh, lamps) and drops a ruin's particle effects (a standing one's come back); doors, locks and indoor sight follow. **Observed** (data):
+95 overrides change ruins, e.g. Stoat (override) half destroyed 8, Catun (override) fishman takeover 14; Free Settlement to The Free City stands 7 up again.
 
 ## Unknowns
 

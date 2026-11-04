@@ -20,23 +20,27 @@
     "areas": "Audio, Saves"
   },
   "gosuboy": {
-    "commits": 6,
-    "areas": "Seats, Metal, Materials"
+    "commits": 7,
+    "areas": "Metal rendering, Materials, Seat interaction, Mesh paths"
   },
   "crockmr": {
-    "commits": 2,
-    "areas": "Save system, Squads"
+    "commits": 19,
+    "areas": "Slaves, Sleep, Plans, Platoons, Prisoner care, Save files, Squads"
   },
   "dmlen": {
     "commits": 1,
     "areas": "Projectile tracers"
   },
   "lucasskrewer": {
-    "commits": 3,
-    "areas": "Animal hunger"
+    "commits": 5,
+    "areas": "Benchmarks, Animal hunger"
   },
   "dxseba": {
     "commits": 1,
     "areas": "Character meshes"
+  },
+  "dfdffish": {
+    "commits": 11,
+    "areas": "Picking, Launcher, Localization"
   }
 }

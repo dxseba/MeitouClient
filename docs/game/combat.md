@@ -11,7 +11,7 @@ Simulation.Combat and Animation; approximate engine scheduling is not original p
 
 XP is delivered post-armour cut + blunt + pierce, capped at the struck part's pre-hit usable health range, multiplied by the native attacker-versus-defender skill-difference factor (clamped 0–6) and global XP rate. Armour stun and overkill do not train it. The native skill-difference penalty can reduce gain to zero against much weaker enemies (a 25-point gap with base constants). The hit captures Brutality before awarding XP, so crossing an unlock cannot upgrade that same hit. Progression/save: [character stats](character-stats.md#brutality-meitou).
 
-**Paired limb follow-through** (Meitou design choice, Advanced ragdolls only): after a real arm/leg severance, a slashing sweep (directions 2/3/9) with pre-hit Brutality 80–100 has a separate 1–5% smoothstep chance to reach the matching opposite limb. The delivered primary cut must be at least 100 and that other limb's maximum HP; the same swing's packet resolves that limb's own armour/toughness and must destroy it through cut alone. Only living-before-hit humanoids with original/crushed native limbs qualify, including robots; stumps, fitted prostheses, animals, corpses, bolts and executions do not. A target killed by the first limb hit is not hit again. Both legs use the swing's original standing posture. Both medical losses, loot, victim toughness XP and dialogue follow the ordinary event path, while the attacker receives one hit and one original-part Brutality award. Existing limb bits save both amputations (`PairedLimbCombatTests`, `BrutalityCombatTests`).
+**Paired limb follow-through** (Meitou design choice, Advanced ragdolls only): after a real arm/leg severance, a slashing sweep (directions 2/3/9) with pre-hit Brutality 80–100 has a separate 1–5% smoothstep chance to reach the matching opposite limb. The delivered primary cut must be at least 100 and that other limb's maximum HP; the same swing's packet resolves that limb's own armour/toughness and must destroy it through cut alone. Only living-before-hit humanoids with original/crushed native limbs qualify, including robots; stumps, fitted prostheses, animals, corpses, bolts and executions do not. A target killed by the first limb hit is not hit again. Both legs use the medical update's latched posture; one swing does not restart the leg-collapse KO twice. Both medical losses, loot, victim toughness XP and dialogue follow the ordinary event path, while the attacker receives one hit and one original-part Brutality award. Existing limb bits save both amputations (`PairedLimbCombatTests`, `BrutalityCombatTests`).
 
 Levels below 20 keep ordinary injuries and native limb loss. Levels 20–39 permit superficial severe head wounds; 40+ permit major organic head wounds and humanoid head cutting from a lethal Slash, including deliberate attacks on living downed enemies. The medical destruction threshold still applies. Bolts, Thrust and Crush cannot use that decapitation gate. At 60+, sufficiently powerful, already lethal chest or stomach Slash hits can [bisect the torso](../simulation.md#torso-bisection-meitou); level alone never makes a nonlethal hit fatal. Humanoid robot heads and torsos use the same cutting gates; animal rigs remain excluded. Original robot limbs retain the native severance rule; fitted replacements retain their existing exclusion. Forced debug wound/bisection scenes bypass these gates without granting skill XP.
 
@@ -114,6 +114,13 @@ own technique (its blow never lands) and holds it in the stumble state until the
 `FUN_14060cf60`, `FUN_140435570`); with no clip the technique is still cancelled. The break-out timer (`+0x124`, 1.2 s from the stumble's start, `FUN_14060cf60`)
 counts down each tick; once due, the first tick a swing at 10-99% progress is incoming (`+0x120`, the incoming list is non-empty) rolls the stumble break-out (`FUN_1406085e0`, chance `FUN_140885d80`);
 a failed roll sets the timer to 1.2 s again, a tick with no such swing leaves it due (**Verified**, decompile). Meitou: `CombatSlot.BreakOutTick`.
+A won roll plans a defence (+0x1f4 = 1), leaves the stumble for state 3 and clears +0x14c; state 3 (`FUN_14060d0b0`) starts it through `FUN_140609290`, whose chooser, the fighter still
+stumbling (`FUN_140435570`), takes only `is stumble dodge` rows; with none it gets no technique and 1.2 s, but the stumble state has ended either way (**Verified**).
+The stumble clip is faded out, not cut, either way (**Verified**, decompile and base data): `FUN_140609290` (called with 0 from state 3) first moves every layer of manager 1 flagged +0x5c
+to the fading list (`FUN_1405b36f0`), and a stumble dodge then clears manager 1 too (`FUN_1405b7800` -> `FUN_1405b35c0`). +0x5c is the ANIMATION record's `is action` or `layer` "all"
+(`FUN_1405ba280`; `layer` "all" and any name but lower / overlay / two others puts the layer in manager 1), and every stumble record of the base game is `layer all`, `is action`. The fade
+needs a swing still incoming on that tick (the start's `FUN_140665e00` pick); without one the clip plays on (**Observed**). Meitou: `Act`, step 2 (`StumbleClip` dropped only with such a
+swing), `AnimationSystem` (a stumble action whose `StumbleClip` is gone fades out; a fading one-shot layer then freezes, [animation](../animation.md#layer-managers)).
 Knockback is the clips' root motion only (**Observed**: no impulse in these functions; [animation](../animation.md); ragdolls: [ragdolls](ragdolls.md)).
 A blocked blow neither staggers nor pushes (`FUN_140665540`). A shackled defender is knocked out instead 25% of the time; a defender whose fight is off: [stagger outside a fight](#fight-lifecycle-and-orders).
 **Verified** (`FUN_140520490` → `FUN_14051eab0`; `FUN_140435570` → `FUN_1405b3a40`): the clip plays at its record's play speed
@@ -159,15 +166,39 @@ at the asker" (the ask's refusal) is 0 < v < 1, so the asker may swing once the 
 list (attackers that asked it, i.e. that target it) and its declaration list (an attacker pushes itself on its own target's list every tick of a swing, `FUN_14060bcf0`), keeping those with 0 < v < 1 that have it in
 their hit candidates or target it. So a defender reacts only to attackers that target it (a blow from one that targets someone else is met only with a defence already playing), and to the
 one whose blow is most advanced (largest v). **One technique at a time** (+0x150): the outcome (`FUN_140665fa0`) compares the current block's direction with the blow's, whoever swings, and needs the clip past 0.5, so
-one block covers every later blow of its direction while it plays; the defence update re-picks (`FUN_140609290`) when the most advanced incoming swing changes, its blow index changes or the 1 s timer
+one block covers every later blow of its direction while it plays. The blow's side is worked out **at the impact** (`FUN_140436520`): the swing's own direction, turned to the rear one (1 -> 7, 2/3 -> 9)
+when the front/rear test `FUN_140435600` (the attacker's current position against the defender's and a heading vector it holds now, +0x640 -> +0xd0) says behind; nothing is stored at the pick. So a
+defender that turns between the pick and the blow is judged on the new side (Meitou matches: `Apply` reads `HitOutcomes.Facing`/`Behind` again); the defence update re-picks (`FUN_140609290`) when the most advanced incoming swing changes, its blow index changes or the 1 s timer
 (+0x274) runs out, only for a non-dodge technique whose direction differs from the new blow's; a failed new start ends the defence (state 4, no defence for 1.2 s). Dodges are never re-picked. There is no
 limit on blocks other than this: a fighter blocks one blow at a time, its swing or wait excluding it. Meitou: `CombatSystem.SwingProgress` (before this the clip's own progress was used, so
-a swing was never cut short for a blow before its impact: a skilled fighter alone against four blocked 17 % of the blows at it in a sandbox battle, 34 % with it), `React(reconsider: true)`.
-**Measured** (Meitou `--battle`, sandbox floor, base data, 1800 ticks): 1 v 1 Samurai Heavy 62-75 % of blows blocked; 6 v 6 70 %; one stat-100 Samurai Heavy against 4: 36 % (most of the rest were seen with too little lead for the block clip to pass 0.5, or hit it while it swung, waited or was staggered:
-a failed block roll is rare at skill 100). The original's own rate was not measured in play (no original binary run here).
-**Measured** (Meitou scripted world, base data, katana, defence 86 with heavy plate and attack 60 against four at attack 62 / 37 / 32 / 98, hit reactions on, 60 seeds, to incapacitation): 70 % of blows blocked
-(attack 98: 20 %, its block chance is 40 %; the others 64-79 %). Of the 120 blows that landed: stumbling 41 %, a failed roll that played a block of the wrong direction 35 %, mid-swing past 50 % 14 %, a block started
-too late for its clip to pass 0.5 (right after the defender's own swing's wait) 8 %. Without hit reactions 68 % blocked and the late blocks lead (95 of 169 landed). No hit met the 1.2 s no-defence lockout. All follow the rules above; the original's rate was not measured.
+a swing was never cut short for a blow before its impact: a skilled fighter alone against four blocked 17 % of the blows at it in a sandbox battle, 34 % with it), `Reconsider`.
+**Verified** (defence start and hold; `FUN_140609290`, `FUN_140609c70`, `FUN_140665e00`, `FUN_140887970`, `FUN_1405b7600`/`7800`). The incoming pick takes the largest v with `<=`, so on a tie the
+later one in the +0x220 list wins and stays picked (no flip-flop). The pick takes only 0 < v < 1 (a blow landing now starts nothing). A defence starts only once that v is 0.1 or more
+and the defender is in that attacker's attack zone list (`FUN_140608460` over +0x1e0, the list `FUN_1406087a0` builds at the attack start `FUN_1402b4570` and at each blow's impact
+`FUN_14060a590`); else no technique, retry in 0.1 s, +0x274 = 0.25 (a started one sets +0x14c to 0.2). The break-out's start goes the same way. Its clip
+starts **at once**: nothing times it so its blocked frame meets the impact; speed = CombatClass+400 +0x18c x technique +0x28. The chooser pools, on a passed roll, only rows of the blow's
+direction, on a failed one only rows of another direction in the same group (`FUN_140665630`); an empty pool returns none and the caller sets 1.2 s (+0x14c) either way, so "no row for that
+side" is the same as a failed roll. Each defence tick replays the technique through `FUN_1405b7600`, which finds the playing layer by name and continues it; a re-pick to the same technique
+continues it too, a different one clears the layers and starts fresh (`FUN_1405b7800`). A block is not ended by its clip: it lasts while any incoming swing has 0 < v < 1, then ends with the wait
+(+0x148); a dodge ends past 0.98 (state 4). A held block stays on its last frame (**Observed**, static reading of `FUN_1405b7600`'s stack arguments: its replay passes the loop flag
++0x5d off, so the layer's time clamps at the clip's end and its progress +0x54 stays 1). When a start from deciding fails on its outer path (no swing under 1, or the attacker
+itself blocking) with a plain block current, `FUN_140609200` replays that block at -0.3 x its speed (`DAT_1416f6648`), lowering it slowly (**Observed**, rarely reached; Meitou: not modelled).
+The front/rear heading is the movement object's current unit heading (+0x640 +0xd0, [fight steering](#fight-steering)).
+**Verified** (`FUN_140666400`, `FUN_14060a190`): each defence tick turns the defender at once towards the followed attacker when it is over 5 away (3D, 25 = 5²) and sets the movement's look-at to it,
+except while the current technique is a block (+0x2c) of direction 7, 8 or 9, which is met turned away. The defending band (slot 12) is kept to the followed attacker (limit 16), or, with a
+focused target (+0x2c8, orders 5 and 61), to that one (powerThrough, limit 18). There is no conflict for a focused defender: the fight steering (`FUN_1402af1e0`) holds the band target (+0x150 of its
+struct) and the look-at (+0x130, the hand `FUN_1402ae2e0` writes) apart and faces the **look-at** (the flat unit vector to it, the band target only when no look-at is set; its velocity while
+running), so a focused defender keeps its band to the pick and faces the followed attacker (**Verified**, decompile). The look-at is written only by `FUN_140666400` (attack start, defence),
+the swing update `FUN_14060a590` and state 5 `FUN_1402b3180` (both from +0x290, the current opponent `FUN_140665580` sets: the target in state 5, the followed attacker in a defence); nothing
+clears it, so during a rear block, which skips the turn, it keeps the last one. The seek and the power-through cone run along the line to the band target, the side-step snap and the speed
+caps along the facing. Meitou: `SteerState.Face` (set by `PursuitSystem.LookAt`; a look-at that is gone falls back to the band target, an engine reading), `CombatSteering.Velocity`. Meitou: `PursuitSystem.BandTarget` (the band; the player's pick is the focused target), `CombatSystem.DefenceAim` (the turn when not
+steering, e.g. on Hold). Animals never defend: for a defender whose `asAnimal` (vfunc 0x248) is set the start takes no technique, sets +0x14c to 2 s and succeeds, and the defending state (`FUN_14060a190`)
+goes back to deciding at once for want of a technique (`FUN_140609290`, **Verified**). Meitou: `React`, `CombatTuning.AnimalNoDefenceSeconds`. An animal never reaches the stumble break-out: the take-hit (`FUN_1404391f0`) picks a stumble clip only when `asAnimal` is null and
+the stumble state (8) is planned only with a clip (`FUN_140665490`) (**Verified**); Meitou matches (`AnimationSystem.ChooseStumble` returns none for an animal).
+Meitou: `CombatSystem.MostAdvanced` (the followed swing; an exact tie keeps the followed one, else the lower slot, since the grid's order is not stable), `React` (start),
+`Reconsider` (the update; it follows the furthest swing during a dodge too, as `FUN_140609c70` updates +0x1a8 before its technique checks), `ReactionEnds` (a blow counts as on its way until the attacker's state shows it struck: strikes apply after every Act, a far attacker's at its own step), `CombatTuning.DefenceStartProgress`. A held block's progress
+is clamped at 1, so it keeps blocking. A blow decided again draws afresh (`ChooseDefence` salts the blow's roll counter with the tick). The zone list: `CombatSystem.InZone`, double-buffered,
+so a defender sees the list an attacker built last tick (the original reads it in its own update order).
 
 **Observed** (decompiled, not measured in game), with several attackers: a target answering a request is asked by
 anyone, not only its own target, and the winner of the roll turns to attack the asker (`FUN_140666a30`). Deciding
@@ -175,8 +206,8 @@ anyone, not only its own target, and the winner of the roll turns to attack the 
 to deciding, except in the wait after its own swing (above). During its own swing a fighter aborts to defend only while under 50% of it with an incoming blow past
 50% (`FUN_14060a970` → `FUN_1406083d0(0.5, 0.5)`); while anyone attacks it the swing ends at the current blow's stop
 frame (`FUN_14060a590`). The defence covers the most advanced incoming blow from anyone; a failed defence roll means
-no defence for 1.2 s (+0x14c). A dodge plays its whole clip at its own speed, then decides at once; a block that
-ends leaves 0.2 s.
+no defence for 1.2 s (+0x14c). A dodge ends past 0.98 of its clip and decides at once; a defence with no swing left at it
+ends with 0.2 s (Pacing above).
 
 **Verified** (decompile; the waits are `deadTimer` +0x148): there is no wait before the first swing (`startupState`, state 3, enters the
 planned state at once). Deciding sets the wait to 0.5 s before it asks; the impact check overwrites it by outcome, so a swing that finds
@@ -530,8 +561,8 @@ Each frame it builds a velocity from forces, not a path:
   +0x110 = CombatClass +0x278 = 1.5 × the raw footprint × the size k (**Verified**: `FUN_14060ce30` rewrites it every tick from `myRadiusX` × the double at `0x1416b3be0` = 1.5, then × Character vfunc 0x390; `FUN_1402ae6d0` copies it; the 1.4 written here before was wrong). Calls: attack start and state 5 (n = 1.4r, f = max' of `FUN_14060cd20`, powerThrough on);
   state 5 escorting (+0x178 → +0x20 set: n = max', f = 50); state 6 (n = N/4 + 15, f = 3N + 25, the drawn side speed); the walk
   of `AttackState.Enter` when no technique is in reach (slot 1 `1402b4af0` → `FUN_1402b4570`: n = 0.7r, f = max'/2, powerThrough; **a swing itself has no band**, see
-  [Facing and movement in a swing](#facing-and-movement-in-a-swing)); defending (slot 12: n = r + 7.5, f = r + 19, limit 16, or 18 with powerThrough on a designated
-  target +0x2c8); the defaults are 10, 20, limit 200. The **circling speed +0x114 is written but never read** (no read of +0x114 or
+  [Facing and movement in a swing](#facing-and-movement-in-a-swing)); defending (slot 12: n = r + 7.5, f = r + 19, kept to the followed attacker +0x1a8 with limit 16, or to a designated
+  target +0x2c8 with powerThrough and limit 18); the defaults are 10, 20, limit 200. The **circling speed +0x114 is written but never read** (no read of +0x114 or
   CharMovement +0x22c anywhere): state 6 does not orbit.
 - **Seek** along the facing (the unit vector to the target, or the lead point while chasing): with d = centre distance and R = own radius
   `+0xe0` + target radius (`getRadius`, footprint × size), m(X) = (d / (R + X) − 1) × 100; outside max the seek is m(max) × 2 × speed mult
@@ -700,10 +731,21 @@ values; trajectory, aim timing and obstruction uncertainties remain labelled.
 - **Controller tick** (`FUN_140438c70`): sets the trigger flag `+0x34` every tick (so the fire gate `FUN_14043aee0`, run from the character update `FUN_1405cf130`, works every
   frame); chooses the target; none → state 3. Empty gun → state 2. In range (`FUN_140436860`: squared distance gunner→target < h × range², h the height factor from the gunner):
   XP perception and the stat (`FUN_1408c7250`: turrets 1.0, perception 3.0 per second), then the fire decision. With a turret it never walks to the target (blocked or out of range: wait).
-- **Fire decision** (`FUN_140437ad0`): aim error ≤ 1°; the steady timer (0.4 s, reset after a shot or reload) counts down only then; a ray from the muzzle along the barrel
-  (`FUN_140435b40`, mask `0x87f9e07`): a non-hostile character → hold; something nearer than the target → blocked; else fire.
+  A crossbowman out of range or blocked walks to the target (state 1, `FUN_1405c68a0` → `CharMovement::setDestination(Character)`, slot 0x80) unless Hold position (CharStats `+0x12b`) or the target is off its navmesh island (`FUN_140597160`);
+  entering state 1 sets the closing timer `+0x7c` to 0. In state 1 (**Observed**): in range, the closing ray ([line of fire](#line-of-fire-and-the-hit-shape)) passing adds the frame
+  time to `+0x7c`, and past 0.3 (`DAT_14168955c`) the walk halts and the state is 0 (the fire decision runs from the next tick); a ray that does not pass sets it to 0;
+  then `CharMovement::pathFailed` (slot 0x50) halts and sets state 3, else a walker that stopped (`+0x24` clear) is sent to the target again. A new target (`FUN_1404371f0`) sets
+  `+0x7c` to 5.0 and, in state 1, re-sends the walk. A held shot (2) does not walk.
+- **Fire decision** (`FUN_140437ad0`, **Observed**): aim error ≤ 1 (a crossbow's is the constant 1, `GunClassPersonal` slot 13); then, while the gun's ready flag holds (slot 7, a
+  crossbow's `+0x120`), the steady timer `+0x70` (0.4 s, reset after a shot or a reload) counts down, and without the flag it is set to 0.4 and the shot holds. A crossbow's flag
+  is written each controller tick by `FUN_14051e4e0`: cleared, then (target set, not walking, not reloading, the character's near-camera flag `+0x1a9` set) the shooter turns to the
+  target and the flag is the aim clip's weight > 0.9. With the timer out, the line of fire ([below](#line-of-fire-and-the-hit-shape)) decides: 1 fire, 2 hold, 0 blocked (walk).
 - **Fire gate** each frame: the reload `FUN_140437ce0` (an empty gun reloads clamp(lerp(s, max, min)), s = 0.01 (0.6 skill + 0.4 dex); XP stat and dexterity while it runs;
   ammo only used when the gun has an ammo record); while loaded the aim point (target `Bip01 Spine2` + lead, `FUN_140436d10`) goes to the building (slot 5 → `+0x4a8`); with the fire flag, the shot.
+  **Observed** (decompile, Ghidra field writes): the controller's reload timer `+0x78` and reloading flag `+0x80` are written only by the reload step and the constructor
+  `FUN_140439f20`; the task-end clear `FUN_140437470` leaves them, so a reload cut off by a lost target or a switch to melee resumes where it stopped the next time the controller runs.
+  The fire gate needs only the active flag `+0x36` and the trigger `+0x34`, which the controller tick sets before it looks for a target, so the reload runs on in state 3 (no
+  target). Starting a reload sets the current target to the finder's pick (`FUN_1404374d0` with no current); finishing one halts the movement (`CharMovement::halt`).
 - **Turning** (`TurretBuilding::vfunc_28` `140434b70`, `RotatingEnt::vfunc_2`, **Verified**): `+0x448` = −99, then while `+0x464` > 0 and someone operates, each `rotation function` 5
   part turns toward `+0x4a8` by its error (yaw about Y or pitch) limited to ± `+0x464` × frame time, down the part chain; `+0x448` = the largest error (degrees,
   `FUN_1404cc0d0`). So an unpowered turret does not turn and its error −99 passes the 1° test: it fires where it points. Sounds: [audio.md](../audio.md#other-world-side-events).
@@ -727,6 +769,10 @@ Meitou ([simulation](../simulation.md#ranged)): `CombatSystem.Turrets.cs`, `Turr
 
 Order 228 "Stealth KO" (verb list `FUN_14079b2d0`), `Task_StealthKO` (vtable slots `FUN_140345eb0` start,
 `FUN_14034cd80` update). **Verified** literals, flow **Observed**:
+
+- Offered (order list `FUN_1407a6bc0` and the quick right click `PlayerInterface::characterSelected` `FUN_1407fb410`, **Verified**): only while the attacker `Character::isStealthMode` (`FUN_1405c9750`: sneaking, not
+  in combat) and the target is not an animal (vfunc +0x248 `isAnimal`, non-zero only on `CharacterAnimal`); no faction or race test.
+  So no animal can be KO'd, cleansers included ("Cleanser Unit" is an `ANIMAL_CHARACTER`, Newwworld.mod). Meitou: `CarrySystem.CanBeKnockedOut`.
 
 - The attacker walks to the target's position minus the target's heading, a unit vector (+0xd0 of its movement object `+0x640`,
   written normalised by `FUN_140665250`; **Verified**), so to a point 1 behind it; the goal is re-issued every update, also while it walks.
@@ -862,11 +908,32 @@ node in the shooter's `hands` (`Bip01 Prop2` with the attach offset; without bui
 `FUN_140434fc0`) is that node's world position + its orientation x (`barrel pos Y`, `barrel pos Z`, 0), the place of loaded bolt 0 (base game: (-1, 5.9, 0),
 Spring Bat (-1, 1.75, 0)). The direction is normalise(aim point - muzzle) (slot 12), the aim point the target's `Bip01 Spine2` (`Spine1` for some targets)
 plus a lead of target velocity x distance / `shot speed` (first order, **Verified**), tilted by `randomDeviant(random x deviation)`. Flight: each frame a ray from the bolt along its z on the physics
-thread (raycastClosestShape, group mask `0x087fde47`, read one frame late); a hit counts within 2 x the step. Groups tested: 0 and 1 (characters among them),
+thread (raycastClosestShape, group mask `0x087fde47`, read one frame late); a hit counts within 2 x the step. Groups tested: 0 and 1 (0: the characters' click hulls, below),
 2 terrain, 6 and 14 foliage, 9-12 building floors, 15-18 stairs, 19-22 furniture, 27 unwalkable roofs; not ragdolls, items, doors, interior hulls or
 passable parts. The shooter is skipped (`FUN_1400cd0b0`). Meitou: the simulation fires from a fixed point 15 up and 8 ahead (`RangedTuning.Barrel*`, measured
-from the posed muzzle) and tests the terrain and the buildings' collision (`SolidHits`; no foliage); the renderer draws a new bolt from the shooter's posed
+from the posed muzzle) and tests the click hulls, the terrain and the buildings' collision (`SolidHits`; no foliage); the renderer draws a new bolt from the shooter's posed
 muzzle and closes the gap to its simulated flight over 150 units (`GameHost.LaunchBlend`).
+
+### Line of fire and the hit shape
+
+**Observed** (decompile; functions cited). **Hit shape**: every character has a click hull, `CharMovement +0x3b0` (`clickHull`, KenshiLib 1ce4a16), a `PhysicsHullT` built by
+`FUN_140661a70` → `FUN_1404ccb50`, whose physics side (`PhysicsHullT` slot 6 → `FUN_1407e32d0`) is a kinematic PhysX actor (body flag `0x80`) with one box shape of default flags and
+collision group 0. Half size = (`hull size X`, `Y`, `Z`) of the RACE × 0.5 × slot 0x390 (1 for people, an animal's size), Y also × the appearance's `characterHeight` (`+0x184`);
+while the prone state (slot 0x368) is not 0 and `+0x2f8` is not 2, Y = max(X, Z) first. The box sits on the feet (shape offset +Y half) and only its position follows the
+character (slot 5: `moveGlobalPosition`), so it is not turned. The posture setter (`CharacterAnimal` slot 110) rebuilds it on a change to or from upright; a whole-body or carry
+ragdoll request removes it (`FUN_1405d0db0` → `FUN_14065fe40`) and the end rebuilds it. Base data (**Verified**, probe of the merged RACE records): people 5 × 17 × 5 (fishmen 5 × 20 × 5),
+bonedogs 10 × 15 × 10, spiders 25 × 22 × 25, Leviathan and Big-Bones 75 × 90 × 75; fcs.def's default 5 × 20 × 5 ("size of the click hull"). `characterHeight` is set by
+`FUN_14052e6c0` (age × `Height` / 100 + `Leg length` / 100 − 1) and `FUN_1405334d0` (`Height` / 100); which one a hull read first is **Unknown**.
+**Rays** are queued (`FUN_1404ccd00`, two buffers) and run on the physics thread (`FUN_1404cc460`): `raycastClosestShape` over all shapes in the mask, unbounded (`FLT_MAX`); a request
+still running answers "pending". Group 1's contents are **Unknown**.
+**Line of fire** (`FUN_140437ad0`): from the muzzle along the aim direction, mask `0x87f9e07` (groups 0–2, 9–12, 15–22, 27). Pending: hold. The first shape met names its object by
+the shape's handle: a character that is not the shooter and not an enemy (`Character::isEnemy` slot 0x3e8, disguises counted) holds (2); any enemy, the target or another, fires (1);
+another object (a building) blocks (0) unless the shooter is nearer the target than the hit point (feet to feet, `FUN_1404346d0`); a shape without an object and no hit at all
+fire. The terrain is such a shape (`FUN_1407eaf90`: heightfield, group 2, no user data and no handle set), so a hill in the way fires into the hill. So packed ranks hold: a rear rank's line runs into the front rank's hulls (5 wide, 6 apart in Meitou's battle) unless they stand aside.
+**Closing ray** (`FUN_140438c70`, state 1): from the muzzle along (target feet + 5 up) − (own feet + 5 up) (read through the decompiler's garbled Ogre operators: the feet-to-feet
+line), mask `0x87f9e04` (no characters); it passes when it meets something
+farther from the shooter than the target is. Meeting nothing does not pass, so on open ground a walker goes on until its path fails or the planner turns it to melee.
+Meitou: `CombatSystem.HullHalf`, `HitHull`, `LineOfFire`, `ClosingRayPasses`; a down character has no hull (every Meitou knock-out is ragdolled).
 
 ### Arms
 
@@ -899,8 +966,7 @@ the shoot orders 0x106 / 0x107 / 0x10a (`FUN_1407f9e20`), i.e. the Shooting task
 `hasTwoWorkingArm` and `hasWeaponEquipped`; where it does not, attack orders stay melee. The attack-on-sight post and area test `FUN_140598630` skips its 80 / 140 unit melee
 reach limits when the gate holds, so a Ranged-on crossbowman engages from afar (Meitou: `Orders.RangedExempt` in `AggroSystem`; a crossbow on the hip, a crouching or one-armed holder does not skip it). Nothing switches back by the target's distance: melee comes from the planner
 dropping the Shooting task when a threat is within 40 (`immediate`, [lifecycle](#fight-lifecycle-and-orders), which also has the shooting desire). Meitou: `CombatSystem.ChooseMode` follows that (crossbow unless dry, crawling (the gate's prone test) or a threat
-is within 40; never with the flag off; NPCs always on). The Shooting rows' desire reads the flag too; the `CharStats` constructor sets it on for every character (the +0x128 dword = 0x100), and only the player's standing order and the save change it, so NPCs are always Ranged. Other unknowns: the reload animation against the timer (the timer paces the shots, so only the clip's look is open); a character's hit shape
-(capsule or ragdoll) and whether downed bodies stop bolts; whether the crossbow's bleed and target multipliers and the armour's `ranged skill mult` do anything; how NPC crossbowmen get their bolts.
+is within 40; never with the flag off; NPCs always on). The Shooting rows' desire reads the flag too; the `CharStats` constructor sets it on for every character (the +0x128 dword = 0x100), and only the player's standing order and the save change it, so NPCs are always Ranged. Other unknowns: the reload animation against the timer (the timer paces the shots, so only the clip's look is open); whether the crossbow's bleed and target multipliers and the armour's `ranged skill mult` do anything; how NPC crossbowmen get their bolts.
 (The trigger flag `+0x34` is set by the controller tick itself every tick, so a shot leaves in the frame of its decision: [Turrets](#turrets), **Observed**.)
 
 ## Unknowns

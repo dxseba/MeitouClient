@@ -11,6 +11,12 @@ public readonly record struct AnimationLayer(string Name, float Time, float Weig
     public int Definition { get; init; } = -1;
 }
 
+/// <summary>
+/// The sound events a working machine puts on its operator's clip: the BUILDING_FUNCTIONALITY's <c>animation events</c> (string id) and the ANIMATION record (name) they ride on
+/// (docs/audio.md "Character tasks").
+/// </summary>
+public readonly record struct WorkEvents(string Functionality, string Clip);
+
 /// <summary>What a character is doing about its body: nothing, bandaging someone (<see cref="CharacterTask.Treat"/>) or resting (<see cref="CharacterTask.Rest"/>).</summary>
 public enum CareKind { None, Treating, Resting }
 
@@ -129,7 +135,7 @@ public readonly record struct SkillTerms(float Base, int Injuries, int Hunger, i
 /// of the drawn weapon, or with nothing drawn (<see cref="Fists"/>) 1 - encumbrance, instead of the carrying rate.
 /// </summary>
 public readonly record struct ExtendedStats(float AthleticsXp, float StrengthXp, float ToughnessXp, float KoPoint, float RunSpeed, float RunValue, float HungerRate, bool Resting = false,
-    bool Fighting = false, bool Fists = false, float? WorkHungerRate = null);
+    bool Fighting = false, bool Fists = false, float? WorkHungerRate = null, bool Idle = false);
 public sealed record InventoryItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Weight, float Quality)
 {
     /// <summary>The item's material record (<c>material sid</c>; "" none), which picks its icon.</summary>
@@ -259,6 +265,8 @@ public sealed class CharacterSnapshot
     public Carrying.CarryAttach? TorsoPositiveCarry { get; internal set; }
     /// <summary>The ITEM (string id) held in the <c>hands</c> point while operating: the functionality's <c>special tool</c> (docs/game/buildings-production.md "Production"); null for none.</summary>
     public string? HeldTool { get; internal set; }
+    /// <summary>While it works a machine (playing its clip): the functionality whose <c>animation events</c> sound on that clip; null otherwise. Display only.</summary>
+    public WorkEvents? WorkEvents { get; internal set; }
     /// <summary>The size the body is drawn at: an animal's lerp(age, <c>scale min</c>, <c>scale max</c>) (its <c>MedicalState.ScaleK</c>), 1 for people.</summary>
     public float Scale { get; internal set; } = 1;
     /// <summary>The movement task (<see cref="CharacterTask"/>); the host's sounds follow building, treating and looting from it.</summary>
@@ -385,8 +393,8 @@ public readonly record struct PrisonView(bool Locked, float Sentence, double Hou
     public int LockLevel { get; init; } = -1;
 }
 
-/// <summary>A slave's state (1 slave, 2 escaped slave; <c>SlaveStateEnum</c>) and the name of the faction that owns it ("someone" is the caller's word for none).</summary>
-/// <summary>The slave state of a character (1 slave, 2 escaped), its owner faction's name and its "looks like a slave" level in 0..1 (<see cref="Kidnap.CaptiveSystem.LooksLikeSlaveLevel"/>).</summary>
+/// <summary>A slave's state (1 slave, 2 escaped slave, 3 ex-slave; <c>SlaveStateEnum</c>) and the name of the faction that owns it ("someone" is the caller's word for none).</summary>
+/// <summary>The slave state of a character (1 slave, 2 escaped, 3 ex-slave), its owner faction's name and its "looks like a slave" level in 0..1 (<see cref="Kidnap.CaptiveSystem.LooksLikeSlaveLevel"/>).</summary>
 public readonly record struct SlaveView(int State, string Owner, float Looks = 0);
 
 /// <summary>
@@ -452,6 +460,17 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public IReadOnlyList<Construction.BuildingSnapshot> Buildings { get; init; } = [];
     /// <summary>Bumped when a building is added, completed, destroyed or removed (not on progress): the host diffs <see cref="Buildings"/> by id when it changes.</summary>
     public long BuildingsRevision { get; init; }
+    /// <summary>The loaded nests' buildings (<see cref="NestBuildings"/>), complete and of the nest's faction, and their revision (bumped when a nest's come or go).</summary>
+    public IReadOnlyList<Construction.BuildingSnapshot> NestBuildings { get; init; } = [];
+    /// <summary>The standing camps' <c>debris</c> meshes (drawn only); they change with <see cref="NestBuildingsRevision"/>.</summary>
+    public IReadOnlyList<NestMesh> NestMeshes { get; init; } = [];
+    public long NestBuildingsRevision { get; init; }
+    /// <summary>The town buildings a town override ruined or stood up again against the level data (<see cref="Locks.FixtureRegistry.Ruins"/>), and their revision.</summary>
+    public IReadOnlyList<Locks.RuinedBuilding> Ruins { get; init; } = [];
+    public long RuinsRevision { get; init; }
+    /// <summary>The bought town houses drawn without their interior layout (<see cref="Locks.FixtureRegistry.PublishedEmptied"/>), and their revision.</summary>
+    public IReadOnlyList<Meitou.Data.World.TownBuilding> EmptiedHouses { get; init; } = [];
+    public long EmptiedHousesRevision { get; init; }
     /// <summary>The player outposts with their power totals (the town panel, docs/game/ui-screens.md "Town panel").</summary>
     public IReadOnlyList<Production.OutpostSnapshot> Outposts { get; init; } = [];
     /// <summary>Loose items lying in the world (<see cref="Items.GroundItems"/>), oldest first.</summary>

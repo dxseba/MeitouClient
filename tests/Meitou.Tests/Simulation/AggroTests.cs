@@ -490,6 +490,37 @@ public class AggroTests
     static void Think(Arena a) => a.World.RunTick();
 
     /// <summary>
+    /// An NPC is never fully rested (state 72, docs/game/ai-tasks.md "StateType ids"): with only Sleeping on ground (175) in its lists and no town, no enemy and no weapon
+    /// drawn, it sleeps. Catches the planner's done test leaving the NPC's sleep row out as already achieved (it idled then).
+    /// </summary>
+    [Fact]
+    public void An_npc_sleeps_on_the_ground_by_its_goal_since_it_is_never_fully_rested()
+    {
+        using var a = Make(5, 1, TownRelations(), ai: true);
+        var o = new Vector2(2000, 2000);
+        var pack = a.Squad(Drifters, o, o, o + new Vector2(10, 0));
+        Lists(pack, [Goal(TaskType.SLEEP_ON_FLOOR)], [Goal(TaskType.SLEEP_ON_FLOOR)]);
+        a.World.RunTicks(30);
+        Assert.All(pack.Members, m => Assert.Equal(TaskType.SLEEP_ON_FLOOR, a.World.Characters.Cold(m.Slot)!.Ai!.Goal!.Task.Type));
+    }
+
+    /// <summary>
+    /// A healthy character of the player's faction is fully rested (state 72): the same squad, of the player's faction, leaves 175 out as done and idles. Catches the player's
+    /// side losing its rested test along with the NPCs'.
+    /// </summary>
+    [Fact]
+    public void A_healthy_character_of_the_players_faction_is_fully_rested_and_does_not_sleep_by_that_goal()
+    {
+        using var a = Make(5, 1, TownRelations(), ai: true);
+        a.World.Player.Faction = Drifters;
+        var o = new Vector2(2000, 2000);
+        var pack = a.Squad(Drifters, o, o, o + new Vector2(10, 0));
+        Lists(pack, [Goal(TaskType.SLEEP_ON_FLOOR)], [Goal(TaskType.SLEEP_ON_FLOOR)]);
+        a.World.RunTicks(30);
+        Assert.All(pack.Members, m => Assert.Equal(TaskType.IDLE, a.World.Characters.Cold(m.Slot)!.Ai!.Goal!.Task.Type));
+    }
+
+    /// <summary>
     /// A squad shares a sighting, not the attack (docs/simulation.md "Hostility and relations"): a guard that attacks on sight (16) goes for a bandit, and its mate with no combat goal,
     /// which sees the bandit too, never joins. Catches the squad's free mates being dragged into a member's fight whatever their own goals.
     /// </summary>
@@ -708,11 +739,12 @@ public class AggroTests
     }
 
     /// <summary>
-    /// Self preservation is a goal of the same chooser (docs/game/ai-tasks.md "Combat goals", 32 and 35): a member fighting a bandit by its attack goal, whom the bandit fights back, has a leg go
-    /// down; the chooser takes 32, whose plan is 35 for a crippled character, and the flee step runs it from its threat. Catches the run left to a special case outside the chooser.
+    /// Self preservation is a goal of the same chooser (docs/game/ai-tasks.md "Combat goals", 32 and 35): a member fighting a bandit by its attack goal, whom the bandit fights back, loses
+    /// both arms; the chooser takes 32, whose plan is 35 for a character with no working arm, and the flee step runs it from its threat. Catches the run left to a special case outside the
+    /// chooser. (A leg going down at posture 0 knocks out first, and the bandit drops the downed target.)
     /// </summary>
     [Fact]
-    public void A_crippled_fighter_runs_away_by_self_preservation_in_the_chooser()
+    public void A_fighter_with_no_working_arm_runs_away_by_self_preservation_in_the_chooser()
     {
         using var a = Make(18, 1, TownRelations(), ai: true, flee: true);
         a.Aggro.Combat = a.Combat;
@@ -727,9 +759,9 @@ public class AggroTests
         Assert.True(a.Fighting(member) && a.Combat.StateOf(bandit).TargetSlot == member.Slot, "the member attacks and the bandit fights back");
         a.World.RunTicks(15);   // a look that lists the bandit among its threats
         var cold = table.Cold(member.Slot)!;
-        cold.Medical!.Parts[RLeg].Flesh = -80;
+        cold.Medical!.Parts[RArm].Flesh = cold.Medical.Parts[LArm].Flesh = -80;
         for (int k = 0; k < 2 * 15 && !cold.Fleeing; k++) a.World.RunTicks(1);
-        Assert.True(cold.Medical.Crawling, "a leg is down");
+        Assert.False(cold.Medical.ArmWorks(left: true) || cold.Medical.ArmWorks(left: false), "no arm works");
         Assert.True(cold.Fleeing && cold.FleesAlone, "it crawls away from its threat");
         Assert.Equal(TaskType.SELF_PRESERVATION, cold.Ai!.Goal!.Task.Type);
     }
@@ -754,7 +786,7 @@ public class AggroTests
         Assert.True(a.Fighting(member), "the member attacks the bandit");
         table.Cold(leader.Slot)!.Medical!.KnockOut(1000);
         var cold = table.Cold(member.Slot)!;
-        for (int k = 0; k < 2 * 15 && !cold.Fleeing; k++) a.World.RunTicks(1);
+        for (int k = 0; k < 10 / a.World.TickSeconds && !cold.Fleeing; k++) a.World.RunTicks(1);
         Assert.True(cold.Fleeing && !cold.FleesAlone, "the broken squad's member runs");
         a.World.RunTicks(3);
         Assert.Equal("Running away", Meitou.Simulation.Ai.AiSystem.ActivityText(table.Next[member.Slot], cold));

@@ -175,7 +175,7 @@ public class LimbCutStorageTests
     {
         var context = new MedicalContext(GameConstants.Default, BodyOptions.Default, cold.Race!) { Strength = 50, Toughness = 50, Seed = 31 };
         for (int part = 0; part < cold.Medical!.Parts.Count; part++)
-            if (cold.Medical.Parts[part].Template.LimbSlot is 2 or 3) cold.Medical.Sever(part, context, false);
+            if (cold.Medical.Parts[part].Template.LimbSlot is 2 or 3) cold.Medical.Sever(part, context);
         Assert.Equal(2, cold.Medical.Parts.Count(part => part.Limb == LimbState.Stump));
     }
 

@@ -193,6 +193,16 @@ public sealed class CharacterCold
     public long DiedTick { get; set; } = -1;
     /// <summary>The tick of the body system's last step for it (<see cref="BodySystem"/>, 2x and 5x step in turns); -1 before the first. Derived, not hashed or saved.</summary>
     public long BodyStepTick { get; set; } = -1;
+    /// <summary>
+    /// The medical time the character's update budget turns gave since its last body step (<see cref="Bodies.MedicalTimeBudget"/>, the original's second add to Character
+    /// <c>+0xc8</c>); the body step adds it to its own time and clears it. Derived, not hashed or saved.
+    /// </summary>
+    public float MedicalBudgetSeconds { get; set; }
+    /// <summary>
+    /// The original's <c>CharBody::amIdle</c> (<see cref="BodySystem"/>): standing still out of combat with no task, refreshed only while the character is not down, so a knock-out
+    /// keeps the value it had before. Derived, not hashed or saved.
+    /// </summary>
+    public bool AmIdle { get; set; }
     /// <summary>A corpse with flies (docs/game/character-stats.md "Corpses": 4 game hours after death while the weather leaves characters alone); it smells of blood (<see cref="SmellSystem"/>).</summary>
     public bool HasFlies { get; set; }
     /// <summary>Where the character came from in a loaded save, with the saved stats and medical state (null for a character the game made itself); see <c>Meitou.Simulation.Saving</c>.</summary>
@@ -299,6 +309,17 @@ public sealed class CharacterCold
     /// Runtime only (not saved, not hashed): derived, as the next treatment tick finds the same kit again by the fewest-charges rule.
     /// </summary>
     public (Meitou.Simulation.Items.ItemInstance Item, Meitou.Simulation.Items.Inventory Owner)? TreatKit { get; set; }
+    /// <summary>
+    /// The tick until which a medic treating this character asked it to stand still (the original's request of 62 Standing still on the patient's blackboard, renewed by every update of
+    /// the first aid task, docs/game/ai-tasks.md "Medic jobs"; <see cref="FirstAid.FirstAidSystem"/>). <see cref="MovementSystem"/> holds an NPC still until then unless it fights or flees.
+    /// Runtime only (not saved, not hashed): the running treatment renews it every tick.
+    /// </summary>
+    public long StandStillUntil { get; set; }
+    /// <summary>
+    /// The treating medic kneels at its patient (the <c>medic</c> clip): in reach of a patient keeping still, or treating itself (<see cref="FirstAid.FirstAidSystem"/>'s serial step, every tick of
+    /// the treatment). Runtime only (not saved, not hashed): drawing only.
+    /// </summary>
+    public bool TreatKneels { get; set; }
     /// <summary>The medic job (58 <c>JOB_MEDIC</c>) is in <see cref="Jobs"/>: an idle character with a kit treats hurt squad mates by itself. NPCs with a kit do so without it (an engine rule until the AI).</summary>
     public bool MedicJob => Jobs.Exists(j => j.Type == Meitou.Data.Gameplay.Ai.TaskType.JOB_MEDIC);
     /// <summary>The character this one carries on its left shoulder (none: not carrying); the original's <c>isCarrying</c> with the partner handle. Set and cleared by <see cref="Carrying.CarrySystem"/> in serial phases only, together with <see cref="CarriedBy"/> of the other.</summary>
@@ -423,10 +444,12 @@ public sealed class CharacterCold
     /// </summary>
     public bool Freed { get; set; }
     /// <summary>
-    /// The original's slave state (status <c>+0</c>, saved as <c>slavestate</c>; <c>FUN_1405a4940</c>): 0 free, 1 slave, 2 escaped slave. A slave's sentence is never served.
-    /// <see cref="Locks.FixtureRegistry.Enslave"/>; hashed only while set.
+    /// The original's slave state (status <c>+0</c>, saved as <c>slavestate</c>; <c>FUN_1405a4940</c>): 0 free, 1 slave, 2 escaped slave, 3 ex-slave. A slave's sentence is never served.
+    /// <see cref="Locks.FixtureRegistry.Enslave"/>; an escaped slave lies low to ex-slave, then free (<see cref="Locks.FixtureRegistry.LayLow"/>); hashed only while set.
     /// </summary>
     public byte SlaveState { get; set; }
+    /// <summary>The game hours at which <see cref="SlaveState"/> last became 2 or 3 (status <c>+0x8</c>, saved as the float <c>ssct</c>; <see cref="Locks.FixtureRegistry.LayLow"/>). Hashed with a state above 1.</summary>
+    public double SlaveSince { get; set; }
     /// <summary>The faction owning a slave or escaped slave (the original keeps a <c>slaver</c> handle; -1 none). Saved as <c>meitou slave owner</c>; hashed with <see cref="SlaveState"/>.</summary>
     public int SlaveOwner { get; set; } = -1;
     /// <summary>The squad a slave obeys (the original's owner handle naming a platoon; -1 none): job 187 Obedient Slave runs that squad's <c>Slave AI Goals</c> (<see cref="Ai.AiSystem"/>).
@@ -489,6 +512,8 @@ public sealed class CharacterCold
     public string? OperateClip { get; set; }
     /// <summary>The clips of the cage it is held in (<see cref="Locks.Fixture.Clips"/>), set when it is caged; read only while <see cref="InSomething"/> is imprisoned. Derived, not hashed.</summary>
     public Locks.CageClips CageClips { get; set; }
+    /// <summary>The BUILDING_FUNCTIONALITY (string id) of the machine its operate task runs, whose <c>animation events</c> sound on <see cref="OperateClip"/>; derived, not hashed.</summary>
+    public string? OperateFunctionality { get; set; }
     /// <summary>The ITEM the operator holds while its operate task runs (the functionality's <c>special tool</c>); derived, not hashed.</summary>
     public string? OperateTool { get; set; }
     /// <summary>The machine's <see cref="Meitou.Data.Gameplay.Construction.MachineData.HungerRate"/> while its operate task runs; derived, not hashed.</summary>
@@ -497,6 +522,11 @@ public sealed class CharacterCold
     public bool Operating { get; set; }
     /// <summary>The whole-body clip (an ANIMATION record name) a captor holds while it works a captive standing (<see cref="Kidnap.CaptiveSystem"/>: "chop down static", "eat", "medic"); null: none. Derived, not hashed.</summary>
     public string? ActionClip { get; set; }
+    /// <summary>
+    /// The machine an AI worker or obedient slave works standing (its functionality and the clip it set as <see cref="ActionClip"/>), whose <c>animation events</c> sound on that clip
+    /// while <see cref="ActionClip"/> is still it (the original runs <c>Task_OperateMachine</c> for them too); null: none. Derived, not hashed.
+    /// </summary>
+    public WorkEvents? ActionWork { get; set; }
     /// <summary>
     /// The replan bit (<see cref="DecisionSystem.Request(CharacterCold)"/>): set by a replan trigger, consumed by the decision step. Player characters only; not saved (a load sets it); hashed while set.
     /// </summary>
@@ -543,6 +573,8 @@ public sealed class CharacterTable
     public int HighWater => highWater;
     /// <summary>Characters alive.</summary>
     public int Count => highWater - free.Count;
+    /// <summary>The characters ever added: a pass waiting for a character to appear runs again only when this has changed.</summary>
+    public long Spawns { get; private set; }
 
     /// <summary>The last tick's state of the slots 0..HighWater-1.</summary>
     public ReadOnlySpan<CharacterHot> Previous => previous.AsSpan(0, highWater);
@@ -620,6 +652,7 @@ public sealed class CharacterTable
         // Outside a tick there is no "last tick" to keep apart from the new one.
         if (!inTick) previous[slot] = state;
         this.cold[slot] = cold;
+        Spawns++;
         return new CharacterId(slot, generation);
     }
 
@@ -640,10 +673,10 @@ public sealed class CharacterTable
     }
 
     /// <summary>
-    /// Puts a character at <paramref name="position"/> facing <paramref name="yaw"/>, standing still with no path (a teleport: into a cage). Serial phases or setup only; outside a
-    /// tick both buffers are written, as <see cref="Spawn"/> does.
+    /// Puts a character at <paramref name="position"/> facing <paramref name="yaw"/>, standing still with no path (a teleport: into a cage), its task
+    /// <paramref name="task"/>. Serial phases or setup only; outside a tick both buffers are written, as <see cref="Spawn"/> does.
     /// </summary>
-    public void Place(int slot, Vector3 position, float yaw)
+    public void Place(int slot, Vector3 position, float yaw, CharacterTask task = CharacterTask.Idle)
     {
         if (phase == TablePhase.Parallel) throw new InvalidOperationException("characters are placed in the serial phases only");
         ref var n = ref next[slot];
@@ -652,7 +685,7 @@ public sealed class CharacterTable
         n.Velocity = Vector3.Zero;
         n.Goal = new Vector2(position.X, position.Z);
         n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.AnyPath);
-        n.Task = (byte)CharacterTask.Idle;
+        n.Task = (byte)task;
         n.TaskTime = 0;
         if (!inTick) previous[slot] = n;
     }
@@ -765,7 +798,7 @@ public sealed class CharacterTable
             if (k.Kidnapped) hasher.Add(0x4B64706E);
             if (k.Freed) hasher.Add(0x46726564);
             if (k.Ordered) hasher.Add(0x4F72646E);
-            if (k.SlaveState != 0) { hasher.Add(0x536C7653); hasher.Add(k.SlaveState); hasher.Add(k.SlaveOwner); }
+            if (k.SlaveState != 0) { hasher.Add(0x536C7653); hasher.Add(k.SlaveState); hasher.Add(k.SlaveOwner); if (k.SlaveState > 1) hasher.Add(k.SlaveSince); }
             if (k.PickingLock is { } pick) { hasher.Add(0x5069636B); hasher.Add(Rng.StableHash(pick)); }
             if (k.Bashing is { } bash) { hasher.Add(0x42617368); hasher.Add(Rng.StableHash(bash)); hasher.Add(k.BashTime); if (k.BashOrdered) hasher.Add(0x4F726473); }
             if (k.ForcingLock is { } force) { hasher.Add(0x466F7263); hasher.Add(Rng.StableHash(force)); hasher.Add((int)k.Force); }

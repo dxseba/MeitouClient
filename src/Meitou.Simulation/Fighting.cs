@@ -22,13 +22,14 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
     public void Schedule(World world)
     {
         var table = world.Characters;
-        float dt = world.TickSeconds;
         int count = table.HighWater;
         combat.IndexAttackers(world);   // for FightersAt: this schedule runs before combat's
         // Each attacker writes only its own slot and reads its target's place and the combat state of the last tick, so the slots run in parallel in any order.
+        // A far character pursues at its step, the step covering the ticks since its last (the far cadence, World.Steps).
         world.ParallelFor((count + SlotsPerJob - 1) / SlotsPerJob, job =>
         {
-            for (int i = job * SlotsPerJob, end = Math.Min(count, i + SlotsPerJob); i < end; i++) Pursue(world, table, i, dt);
+            for (int i = job * SlotsPerJob, end = Math.Min(count, i + SlotsPerJob); i < end; i++)
+                if (world.Steps(i)) Pursue(world, table, i, world.StepSeconds(i));
         });
     }
 
@@ -148,13 +149,15 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         var steer = cold.Steer ??= new SteerState();
         bool was = steer.Active;
         steer.Active = false;
+        steer.Face = LookAt(world, in st, t, steer.Face);
         // A swing has no steering: the movement is animation driven (the attack start and every swing tick set the movement's lock, FUN_14065e240; CharMovement update
         // FUN_14065ffa0 then moves it by the clip's root motion only), so it stands in its place (MovementSystem turns it, CombatSystem.SwingAim).
         if (st.TargetBodyPart is not null || cold.CombatRunning || st.Ranged || holding || st.Down || st.AttackTech >= 0) return false;
         // A fighter on a path chase tests the line every tick (CombatClassAI update FUN_14060d6a0, in the chase states); one in its footwork only when it decides again, about
         // every RepathSeconds. A blocked line met at a new pick or in the footwork starts a chase of at least PathChaseSeconds (FUN_14060c8b0, timer +0x14c), a holder's not.
         bool chasing = steer.ChaseTarget == t;
-        if (chasing || world.Tick >= steer.LineTick || steer.Target != t)
+        int band = BandTarget(world, in st, t);
+        if (chasing || world.Tick >= steer.LineTick || steer.Target != band)
         {
             bool clear = combat.SteersAt(world, i, t);
             if (!clear && !chasing) steer.PathUntil = Orders.Holding(cold) ? 0 : world.Tick + (long)MathF.Ceiling(PathChaseSeconds / world.TickSeconds);
@@ -175,11 +178,11 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         bool waiting = st.AttackTech < 0 && st.ReactTech < 0 && world.Tick < st.PauseUntil;
         int around = st.AttackTech < 0 && st.ReactTech < 0 && (!st.Engaged || waiting) ? combat.FightersAt(world, t) : 0;
         // Swinging (AttackState), defending (CombatClassAI slot 12), engaged (attack start, state 5), else waiting (state 6).
-        var (near, far, through, limit) = st.ReactTech >= 0 ? (r + 7.5f, r + 19, false, 16f)
+        var (near, far, through, limit) = st.ReactTech >= 0 ? (r + 7.5f, r + 19, st.Picked, st.Picked ? 18f : 16f)
             : st.Engaged && !waiting ? (1.4f * r, reach, !st.CircleState, 200f)
             : (around * 0.25f + CombatTuning.CircleNear, 3 * around + CombatTuning.CircleFar, false, 200f);
         (steer.Min, steer.Max) = CombatSteering.Band(near, far, r * (cold.Medical?.ScaleK ?? 1));
-        (steer.PowerThrough, steer.Limit, steer.Target) = (through, limit, t);
+        (steer.PowerThrough, steer.Limit, steer.Target) = (through, limit, band);
         if ((n.Flags & (ushort)MoveFlags.AnyPath) != 0)
         {
             n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.AnyPath);
@@ -190,6 +193,29 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         if (!was) steer.Reset();
         steer.Active = true;
         return true;
+    }
+
+    /// <summary>
+    /// The look-at it faces (<see cref="SteerState.Face"/>): its target while it swings (the attack start, <c>FUN_140666400</c>; the swing update <c>FUN_14060a590</c>) and in its footwork (state 5,
+    /// <c>FUN_1402b3180</c>), the swing its defence follows (the defence update, not during a block of a rear direction), else the last one (the wait, state 6, writes none).
+    /// </summary>
+    int LookAt(World world, in CombatSlot st, int t, int last)
+    {
+        bool waiting = st.AttackTech < 0 && st.ReactTech < 0 && world.Tick < st.PauseUntil;
+        if (st.ReactTech >= 0) return combat.DefenceFaces(st.ReactTech) && (uint)st.ReactedSlot < (uint)world.Characters.Previous.Length ? st.ReactedSlot : last;
+        if (st.AttackTech >= 0 || st.Engaged && !waiting) return t;
+        return last;
+    }
+
+    /// <summary>
+    /// Whom the band is kept to (<c>FUN_14060a190</c>): a defender's is the swing its defence follows, unless it has a focused target (the player's pick, CombatClassAI +0x2c8);
+    /// in every other state the fight target.
+    /// </summary>
+    static int BandTarget(World world, in CombatSlot st, int t)
+    {
+        int followed = st.ReactedSlot;
+        if (st.ReactTech < 0 || st.Picked || (uint)followed >= (uint)world.Characters.Previous.Length || !world.Characters.Previous[followed].Alive) return t;
+        return followed;
     }
 
     /// <summary>

@@ -52,13 +52,17 @@ public sealed partial class AiSystem
         /// <summary>Restricted rows are offered: the character's faction is not the player's (the name is the old reading, kept; see <see cref="IPlanWorld.Squadless"/>).</summary>
         public bool Squadless => restrictedOpen;
         bool restrictedOpen;
+        // Of the player's faction (the character or its faction): the side whose characters can be fully rested (state 72).
+        bool playerSide;
 
         public PlanContext Bind(AiSystem s, World w, int at, AiMind m, Blackboard b)
         {
             (system, world, slot, mind, board) = (s, w, at, m, b);
             // Restricted rows are open to every plan that is not the player faction's (FUN_14051bae0, Verified; the flagged search is the orders step, not planned here).
             int player = w.Player.Faction >= 0 ? w.Player.Faction : s.Data.PlayerFaction;
-            restrictedOpen = w.Characters.Cold(at) is { } c && !c.IsPlayer && !(player >= 0 && c.Faction == player);
+            var cold = w.Characters.Cold(at);
+            playerSide = cold is not null && (cold.IsPlayer || player >= 0 && cold.Faction == player);
+            restrictedOpen = cold is not null && !playerSide;
             return this;
         }
 
@@ -72,7 +76,8 @@ public sealed partial class AiSystem
             // The assault is its own plan (engine choice): its finder's target is not a plan target, the combat system draws weapons and closes in, and its only list B entry (!47,
             // not carrying) is what Holds already requires of a character the AI runs.
             // So are the combat goals (engine choice): the desire already holds the finder's pick (and for the protect goals row 13's attacker), and the fight is the combat system's.
-            if (type == TaskType.DEFEAT_SQUAD || TaskBehaviours.Of(type) == AiBehaviour.Fight)
+            // And the Medic goal: its desire holds the patient finder's score, and the treatment is the first aid system's.
+            if (type == TaskType.DEFEAT_SQUAD || TaskBehaviours.Of(type) is AiBehaviour.Fight or AiBehaviour.Medic)
             {
                 mind.Plan.Clear();
                 mind.Plan.Add(new PlanStep(type, default));
@@ -187,7 +192,9 @@ public sealed partial class AiSystem
                 // Any alarm of its town in reach (goal 210's own-faction filter is its desire's).
                 StateType.ALARMS_IN_THE_VICINITY => system.AlarmOf(world, slot, TaskType.INVESTIGATE_ALARMS, board) is not null,
                 StateType.isLeaderDown => mind.Squad.Leader.IsNone || !world.Characters.IsAlive(mind.Squad.Leader),
-                StateType.isFullyRested => cold.Medical is not { Incapacitated: true },
+                // 72 (FUN_1405a0610, Observed): never for a character not of the player's faction, so an NPC's sleep rows (98, 100, 175, 261)
+                // are never done; for the player's a medical float above 0.9 (MedicalSystem +0xb0, meaning Unknown), here "not incapacitated".
+                StateType.isFullyRested => playerSide && cold.Medical is not { Incapacitated: true },
                 StateType.hasOneWorkingArm => cold.Medical is not { } arms || arms.ArmWorks(left: true) || arms.ArmWorks(left: false),
                 StateType.hasTwoWorkingArm => cold.Medical is not { } arms2 || arms2.BothArmsWork,
                 // The turret goals' done test (149, 222, 234: list A "6*"): no enemy near, so guards man the turrets only while enemies come (docs/simulation.md "AI", turrets).
@@ -247,6 +254,9 @@ public sealed partial class AiSystem
                     if (type == TaskType.STAY_IN_HOME && board.SeatClaims.TryGetValue(slot, out var chair) && !mind.SeatUnreachable) return new PlanTarget(Targets.Seat, chair.Position);
                     return Spot(Targets.Spot, system.SpotFor(mind, board, AiBehaviour.Post, type));
                 case TaskType.GO_HOME_AND_GO_TO_BED or TaskType.GO_HOME_AND_GO_TO_BED_SECURE:
+                    // A character in a bed keeps it (the bed search FUN_1408cfe00, docs/game/locks.md "Bed search"): the target is where it lies.
+                    if (world.Characters.Cold(slot) is { InSomething: Locks.HeldState.Bed })
+                        return Spot(Targets.Bed, (Flat(Me.Position), true, Me.Position.Y, null));
                     if (system.SpareBed(world, board, mind, slot) is { } spare) return Spot(Targets.Bed, (Flat(spare.Position), true, spare.Position.Y, null));
                     if (!system.HasBed(world, board, mind, slot)) return default;
                     return Spot(Targets.Bed, system.SpotFor(mind, board, AiBehaviour.Sleep, type));

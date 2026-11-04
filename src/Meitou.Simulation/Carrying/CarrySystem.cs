@@ -516,10 +516,10 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         SeedTorsoFallbackPositions(world);
         var table = world.Characters;
         var next = table.Next;
-        float dt = world.TickSeconds;
         for (int i = 0; i < table.HighWater; i++)
         {
-            if (!next[i].Alive) continue;
+            if (!next[i].Alive || !world.Steps(i)) continue;
+            float dt = world.StepSeconds(i);   // a far character's step covers the ticks since its last (the far cadence)
             switch ((CharacterTask)next[i].Task)
             {
                 case CharacterTask.PickUp: Lift(world, table, i, dt); break;
@@ -791,7 +791,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         }
         int death = DeathUnits(victim.Inventory!);
         int cashed = cold.Faction == player.Faction ? CashMoney(world, victim.Inventory!) : 0;
-        var (taken, left) = TakeAll(bag, victim.Inventory!, Crime.CrimeSystem.IsLootTheft(cold, victim) ? StolenMark.Of(victim, world.Characters.IdOf(t)) : null);
+        var (taken, left) = TakeAll(bag, victim.Inventory!, Crime.CrimeSystem.MarksTheft(world, cold, victim) ? StolenMark.Of(victim, world.Characters.IdOf(t)) : null);
         taken += cashed;
         Butcher(world, i, t, death);
         bool seen = Looted(world, table, i, t, taken, left, crime: true);
@@ -844,7 +844,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
 
     /// <summary>
     /// A right click on an item of the open loot (its grids, bag or worn gear): units into the looter's inventory (<see cref="InventoryCommands.MoveInto"/>; what does not fit stays), marked
-    /// stolen when the loot is a theft (<see cref="Crime.CrimeSystem.IsLootTheft"/>). Gear changing hands re-dresses both.
+    /// stolen when the take marks (<see cref="Crime.CrimeSystem.MarksTheft"/>, an unmarked item only). Gear changing hands re-dresses both.
     /// </summary>
     void TakeLoot(World world, TakeLootItem take)
     {
@@ -866,7 +866,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         bool worn = InventoryCommands.IsEquipmentSection(item.Section);
         var mark = item.Mark;
         int death = DeathUnits(from);
-        if (Crime.CrimeSystem.IsLootTheft(cold, victim)) item.Mark = StolenMark.Of(victim, table.IdOf(t));
+        if (Crime.CrimeSystem.MarksTheft(world, cold, victim) && item.Mark == StolenMark.None) item.Mark = StolenMark.Of(victim, table.IdOf(t));
         var owner = from.Items.Contains(item) ? from : from.Backpack?.Contents ?? from;
         // Money taken by the player's own becomes cats, as when it is dropped into their window (PlayerSystem.Place, FUN_140714a20).
         if (item.ItemFunction == PlayerSystem.MoneyFunction && cold.Faction == world.Player.Faction && Data is not null)
@@ -1004,7 +1004,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         {
             var mark = item.Mark;
             bool death = item.Death;
-            if (stolen is { } s) item.Mark = s;
+            if (stolen is { } s && mark == StolenMark.None) item.Mark = s;
             item.Death = false;
             if (into.Add(item))
             {

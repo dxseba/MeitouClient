@@ -85,6 +85,7 @@ sealed class WorldObjects : IDisposable
             DistantTowns = Meitou.Data.World.DistantTowns.Find(install, db, levels),
         };
         foreach (var t in objects.DistantTowns) objects.bakedTowns.Add(t.InstanceId);
+        int ruins = ResidentRuins.Apply(db, levels, objects.Layouts);
         foreach (var b in levels.Buildings())
         {
             if (!objects.buildingsByZone.TryGetValue(b.Zone, out var list)) objects.buildingsByZone[b.Zone] = list = [];
@@ -93,7 +94,7 @@ sealed class WorldObjects : IDisposable
         objects.interiorCollisions = new InteriorCollisions(install);
         objects.heights = new ThreadLocal<TerrainHeightmap>(() => TerrainHeightmap.Open(install), trackAllValues: true);
         Console.WriteLine($"objects   {objects.buildingsByZone.Values.Sum(l => l.Count)} placed buildings and {objects.Features.All().Count()} map features in {objects.PopulatedZones.Count()} zones, " +
-            $"{objects.DistantTowns.Count} towns with a distant mesh, {objects.Layouts.Count} building layouts ({watch.ElapsedMilliseconds} ms)");
+            $"{objects.DistantTowns.Count} towns with a distant mesh, {objects.Layouts.Count} building layouts, {ruins} ruined by their residents ({watch.ElapsedMilliseconds} ms)");
         return objects;
     }
 
@@ -176,6 +177,7 @@ sealed class WorldObjects : IDisposable
             result.Add(new BuildingFloor
             {
                 Key = b.Key,
+                Placement = b,
                 Position = position,
                 Interior = record.GetInt("interior material", 3),
                 Exterior = record.GetInt("exterior material", 2),
@@ -203,7 +205,7 @@ sealed class WorldObjects : IDisposable
             bool sounds = !incomplete && record.GetReferences("sounds").Count > 0;
             var layouts = new List<GameRecord>(2);
             foreach (bool exterior in (ReadOnlySpan<bool>)[true, false])
-                if (state?.GetString(exterior ? "exterior layout name" : "interior layout name") is { Length: > 0 } layoutName && Layouts.Find(record, layoutName, exterior) is { } layout)
+                if (b.LayoutName(state, exterior) is { Length: > 0 } layoutName && Layouts.Find(record, layoutName, exterior) is { } layout)
                     layouts.Add(layout);
             if (!sounds && layouts.Count == 0) continue;
             float y = b.WorldY ?? map.HeightAt(b.Position.X, b.Position.Z) + b.Position.Y;
@@ -245,11 +247,12 @@ sealed class WorldObjects : IDisposable
                 if (record.Type != Meitou.Data.Fcs.FcsRecordType.BUILDING)
                 {
                     // A loose item (GameHost.GroundItems): its one mesh, at its absolute height.
-                    if (WorldObjectLayout.Item(record, b.InstanceId, new Vector3(b.Position.X, b.WorldY ?? map.HeightAt(b.Position.X, b.Position.Z) + b.Position.Y, b.Position.Z), b.Rotation) is { } item)
+                    var at = new Vector3(b.Position.X, b.WorldY ?? map.HeightAt(b.Position.X, b.Position.Z) + b.Position.Y, b.Position.Z);
+                    if (WorldObjectLayout.Item(record, b.InstanceId, at, b.Rotation, b.ItemMesh, b.ItemScale) is { } item)
                         result.Items.Add(item);
                     continue;
                 }
-                // Y: the state's absolute "world Y pos" when there is one, else terrain height + the instance's Y (zones.md).
+                // Y: the placement's absolute height when it has one (the building ground + instance Y, or a state's "world Y pos"), else terrain height + the instance's Y (zones.md).
                 float y = b.WorldY ?? map.HeightAt(b.Position.X, b.Position.Z) + b.Position.Y;
                 if (b.WorldY is not null) Interlocked.Increment(ref fromState);
                 var state = b.StateId is not null && Levels.Zones.TryGetValue(b.StateZone ?? b.Zone, out var zoneDb) ? zoneDb.Find(b.StateId) : null;
@@ -272,10 +275,13 @@ sealed class WorldObjects : IDisposable
                 Interlocked.Increment(ref buildings);
                 // The state's exterior layout (signs and banners) and interior layout (furniture), placed relative to the building, each object on its
                 // layout floor. An interior layout's object shows only in the interior view unless its state is flagged outside (game: the closed interior hides
-                // its contained objects but those; "is exterior furniture" plays no part). Skipped for a destroyed building (Unknown).
+                // its contained objects but those; "is exterior furniture" plays no part). Skipped for a ruin, which holds no furniture
+                // (docs/game/buildings-production.md "Ruined by residents"); the interior one also for a bought town house, whose furniture the purchase
+                // destroyed (BuildingPlacement.WithoutInterior).
                 foreach (bool exterior in (ReadOnlySpan<bool>)[true, false])
                 {
-                    if (isDestroyed || state?.GetString(exterior ? "exterior layout name" : "interior layout name") is not { Length: > 0 } layoutName) continue;
+                    if (isDestroyed || !exterior && b.WithoutInterior) continue;
+                    if (b.LayoutName(state, exterior) is not { Length: > 0 } layoutName) continue;
                     if (Layouts.Find(record, layoutName, exterior) is not { } layout) { Interlocked.Increment(ref layoutsNotFound); continue; }
                     Interlocked.Increment(ref layouts);
                     foreach (var item in Layouts.Items(layout))

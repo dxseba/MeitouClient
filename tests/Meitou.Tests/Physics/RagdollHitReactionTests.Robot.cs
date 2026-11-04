@@ -69,7 +69,7 @@ public partial class RagdollHitReactionTests
         foreach (var scene in new[] { human, robot })
         {
             scene.Cold.Blow = (new(30, 0, 0), new(30, 0, 0));
-            if (arm) scene.Cold.Medical!.Sever(LArm, Context(scene.Cold.Race), false);
+            if (arm) scene.Cold.Medical!.Sever(LArm, Context(scene.Cold.Race));
             else scene.Cold.Medical!.Decapitate();
             scene.World.RunTick();
             int bone = arm ? 2 : 1;

@@ -21,6 +21,7 @@ sealed partial class PlayerInterface
     void UpdateMenuPause() => session.Simulation.RequestedPause = settingsOpen || faithfulScreens.HasModal;
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
+        uiInput++;
         if (!UiVisible) return false;
         if (key == Meitou.Engine.Input.Key.Escape && CloseContextMenu()) return true;
         if (key == Meitou.Engine.Input.Key.Escape && CancelInventoryDrag()) return true;
@@ -87,9 +88,15 @@ sealed partial class PlayerInterface
         }
         return false;
     }
-    public void UiText(char value) { if (UiVisible) faithfulScreens.TextInput(value); }
+    public void UiText(char value)
+    {
+        uiInput++;
+        if (UiVisible) faithfulScreens.TextInput(value);
+    }
+
     public bool UiScroll(Vector2 p, float steps)
     {
+        uiInput++;
         if (!UiVisible) return false;
         ArrangeUi();
         if (InventoryWheel(p, steps)) return true;
@@ -328,7 +335,8 @@ sealed partial class PlayerInterface
         }
         b.Lists["JobsPanel"] = jobs;
         if (jobs.Count > 0) b.Hidden.Add("JobsPanelInfo");
-        else b.Text["JobsPanelInfo"] = Loc.Tr("[No jobs assigned]") + "\n" + Loc.Tr("[To add jobs, hold shift key when giving an order]");
+        // The brackets are the panel's, not the catalog's (its keys have none: "No jobs assigned", "To add jobs, hold shift key when giving an order").
+        else b.Text["JobsPanelInfo"] = "[" + Loc.Tr("No jobs assigned") + "]\n[" + Loc.Tr("To add jobs, hold shift key when giving an order") + "]";
     }
 
     /// <summary>The X at the right end of each jobs row (the original's remove button, its tutorial: "remove a job at any time by pressing the X button").</summary>
