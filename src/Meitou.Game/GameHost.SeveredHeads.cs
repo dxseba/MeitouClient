@@ -30,6 +30,7 @@ sealed partial class GameHost
         public required ulong Blood;
         /// <summary>A cut-off limb part: <see cref="CharacterInstance.PartOnly"/>.</summary>
         public uint PartOnly;
+        public IReadOnlyList<Meitou.Data.Characters.LimbCutState> LimbSeverances = [];
         public int FragmentId;
         public CharacterTorsoCut? HeadCut;
         public float RestHeight = HeadRestHeight;
@@ -65,7 +66,9 @@ sealed partial class GameHost
         ulong roll = unchecked((ulong)from * 0x9E3779B97F4A7C15UL ^ (ulong)session.ShownTick * 0xBF58476D1CE4E5B9UL);   // a look, not the simulation's: no world roll
         roll ^= roll >> 31;
         float angle = (roll & 0xFFFF) / 65536f * MathF.Tau, reach = 3 + ((roll >> 16) & 0xFFFF) / 65536f * 4;
-        var thrown = c.Knockdown;
+        float response = Meitou.Simulation.Ragdolls.RobotRagdollWeight.Response(c.Appearance?.Race.GetBool("is robot") == true);
+        reach *= response;
+        var thrown = c.Knockdown * response;
         // Thrown: it tumbles over the way it flies, faster the faster it goes.
         var flat = new Vector2(thrown.X, thrown.Z);
         if (flat.LengthSquared() > 1) angle = MathF.Atan2(flat.Y, flat.X);
@@ -83,7 +86,7 @@ sealed partial class GameHost
                 Key = key, From = from, Look = before.SeveredHead(), World = world, Start = start,
                 Aside = new(start.X + MathF.Cos(heading) * reach, start.Z + MathF.Sin(heading) * reach),
                 Axis = new(-MathF.Sin(heading), 0, MathF.Cos(heading)),
-                Spin = 2.5f + ((roll >> 32) & 0xFFFF) / 65536f * 3 + flat.Length() * .1f, Velocity = thrown,
+                Spin = (2.5f + ((roll >> 32) & 0xFFFF) / 65536f * 3) * response + flat.Length() * .1f, Velocity = thrown,
                 Flight = MathF.Sqrt(2 * MathF.Max(start.Y - session.World.Walkability.GroundHeight(start.X, start.Z, start.Y)
                     - restHeight, 0) / FallGravity), Blood = c.BloodAmounts,
                 FragmentId = fragment, HeadCut = DetachedHeadClip(c, fragment), RestHeight = restHeight,
@@ -112,21 +115,22 @@ sealed partial class GameHost
                     PartOnly = (uint)Meitou.Rendering.Characters.WoundMasks.JawGroup << 8 | 255,
                 });
         }
+        float response = Meitou.Simulation.Ragdolls.RobotRagdollWeight.Response(c.Appearance?.Race.GetBool("is robot") == true);
         foreach (var part in medical.Parts)
         {
             if (part.Limb != Meitou.Simulation.Bodies.LimbState.Stump || part.Template.LimbSlot is not (>= 0 and <= 3 and var limb) || !limbsCut.Add((c.Id, limb))) continue;
             if (c.DetachedRagdolls.Any(p => p.Part == limb)) continue;
             int level = Meitou.Simulation.Wounds.SeveredLevels.Of(c.Id, limb);
-            if (level == 0) continue;
+            if (level == 0 && !c.LimbSeverances.Any(cut => cut.LimbSlot == limb)) continue;
             string side = limb % 2 == 0 ? "L" : "R";
             long from = DrawKey(c.Id), key = from ^ (1L << 53) ^ ((long)limb << 48);
             if (characters.LastDrawn(from, $"Bip01 {side} {(limb < 2 ? "Hand" : "Foot")}") is not ({ } world, { } look, var start) || !characters.HoldPose(key, from)) continue;
             uint group = (uint)(limb < 2 ? 1 + limb : 1 + limb);
             heads.Add(new FallingHead
             {
-                Velocity = default, Key = key, From = from, Look = look, World = world, Start = start, Aside = new Vector2(start.X + MathF.Cos(from * 0.7f + limb) * 4, start.Z + MathF.Sin(from * 0.7f + limb) * 4), Axis = Vector3.Normalize(new Vector3(MathF.Sin(from * 0.7f + limb), 0.3f, -MathF.Cos(from * 0.7f + limb))), Spin = 3,
+                Velocity = default, Key = key, From = from, Look = look, World = world, Start = start, Aside = new Vector2(start.X + MathF.Cos(from * 0.7f + limb) * 4 * response, start.Z + MathF.Sin(from * 0.7f + limb) * 4 * response), Axis = Vector3.Normalize(new Vector3(MathF.Sin(from * 0.7f + limb), 0.3f, -MathF.Cos(from * 0.7f + limb))), Spin = 3 * response,
                 Flight = MathF.Sqrt(2 * MathF.Max(start.Y - session.World.Walkability.GroundHeight(start.X, start.Z, start.Y) - 0.6f, 0) / FallGravity), Blood = c.BloodAmounts,
-                PartOnly = group << 8 | (uint)(Meitou.Simulation.Wounds.SeveredLevels.Height(level, limb) * 10),
+                PartOnly = group << 8 | (uint)(Meitou.Simulation.Wounds.SeveredLevels.Height(level, limb) * 10), LimbSeverances = c.LimbSeverances,
             });
         }
     }
@@ -158,7 +162,7 @@ sealed partial class GameHost
             var world = h.World * Matrix4x4.CreateTranslation(-h.Start) * Matrix4x4.CreateFromAxisAngle(h.Axis, h.Spin * t) * Matrix4x4.CreateTranslation(at);
             list.Add(new CharacterInstance(h.Key, h.Look, at, 0, [])
             {
-                World = world, FreezeFrom = h.From, Blood = h.Blood, PartOnly = h.PartOnly, TorsoCut = h.HeadCut,
+                World = world, FreezeFrom = h.From, Blood = h.Blood, PartOnly = h.PartOnly, TorsoCut = h.HeadCut, LimbSeverances = h.LimbSeverances,
                 Wounds = h.PartOnly != 0 ? [new CharacterWoundMark("", "", 0, default, 1, 0, 1, 0)] : [],
             });
         }

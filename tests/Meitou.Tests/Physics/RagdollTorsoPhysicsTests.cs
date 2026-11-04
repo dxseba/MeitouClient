@@ -35,7 +35,7 @@ public class RagdollTorsoPhysicsTests
         public CharacterPoseSetup Setup { get; }
         public BodyOptions Options { get; }
         public RagdollDefinition SourceDefinition { get; }
-        public Scene(bool advanced = true, SavedRagdoll? restore = null, bool torso = true, TorsoBisectionState? cut = null)
+        public Scene(bool advanced = true, SavedRagdoll? restore = null, bool torso = true, TorsoBisectionState? cut = null, bool robot = false)
         {
             var skeleton = new OgreSkeleton();
             skeleton.Bones.Add(new() { Handle = 0, Name = "Bip01", Position = new(0, 11, 0) });
@@ -56,12 +56,13 @@ public class RagdollTorsoPhysicsTests
             var database = new GameDatabase();
             var file = new FcsFile();
             file.Records.Add(new() { StringId = "fragment-race", Name = "Fragment race", RecordType = FcsRecordType.RACE, Flags = 0x10 });
+            file.Records[0].Bools["is robot"] = robot;
             database.Apply(file, "fragment-tests.mod");
             var rigs = new CharacterRigs(database, _ => null, _ => null);
             Options = BodyOptions.Default with { AdvancedRagdolls = advanced };
             Physics = new(rigs, new Flat(), Options, _ => Setup, (_, _, _) => definition);
             World = new(new WorldSettings { Seed = 41, TickSeconds = 1f / 30 }, new OpenGroundWalkability((_, _) => 0), [Physics]);
-            var race = new RaceData { Anatomy = [.. Human.Anatomy.Select(entry => entry.Part.LimbSlot == 0 ? entry with { Part = entry.Part with { BoneName2 = "Bip01 L UpperArm" } } : entry)] };
+            var race = new RaceData { IsRobot = robot, Anatomy = [.. Human.Anatomy.Select(entry => entry.Part.LimbSlot == 0 ? entry with { Part = entry.Part with { BoneName2 = "Bip01 L UpperArm" } } : entry)] };
             Cold = new()
             {
                 Name = "Cut corpse", Appearance = new() { Race = database.Find("fragment-race")! }, Race = race,

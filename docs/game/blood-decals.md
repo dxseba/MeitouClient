@@ -166,12 +166,23 @@ A display-owned scene has separate terrain/building geometry caches; it never mu
 simulation's ragdoll scene. Nodes of one prop do not collide with each other, while separate
 props collide. It supports terrain and static buildings, not contact with character ragdolls.
 The original installed mesh blends its four nearest tissue nodes, with rest-local transforms
-and correct deformed normals; race blood colour is preserved. Uploads occur before rendering.
+and correct deformed normals; race blood colour is preserved. Uploads share the frame batch after current character posing.
 Up to 32 props remain for 600 game seconds, the oldest removed when capacity is needed.
-All nodes must settle before freezing, with a 12-real-second upper limit. Restored spills
-start flat and at rest without replaying an impulse. Disabling Advanced ragdolls uses the
-previous simple fall. Pause stops physical stepping; changing worlds releases the scene.
-These props and their exact poses remain transient and are not saved.
+All free nodes must settle before freezing, with a 12-real-second upper limit. Persistent
+attachments measure quiet time since their last anchor movement; frozen tissue keeps its pin,
+reuses its pose, and restores dynamics/joints when moved or released. Bounded pickup jumps
+translate retained tissue with the fragment instead of stretching it. Pause stops stepping;
+changing worlds releases the scene. The props and exact poses remain transient and are not saved.
+
+A fresh torso spill waits for the current posed cut contact and feeds its pinned edge out of the
+negative fragment over 0.5 game seconds, with a gentle initial impulse. A deterministic visual
+choice keeps about 80% attached without a timer; other spills release after three game seconds.
+Extreme jumps or strain can still tear a connection. Old retained spills attach without replaying
+an impulse; old loose spills rest on the ground. Disabling Advanced ragdolls keeps the same
+retention choice with the analytic placement. **Verified** (`BowelAttachmentTests`,
+`BowelPersistentAttachmentTests`, `GutEmergenceTests`, `GutRetentionTests`): moving anchors,
+emergence, gravity, pause, release continuity, pickup, persistent sleeping/waking, majority
+retention and bounded simultaneous rigs.
 
 Gore palettes use that same RACE value for wound runs, cut rims, muscle, organs, mouth, brain,
 and loose wet scraps/bowel. Neutral bone and fat retain their palettes. Soft-tissue red chroma
@@ -222,6 +233,20 @@ loading the first debris mesh; they share the normal character texture cache. **
 `props_atlas_regular_normal.dds`; the embedded `StaticObject` name alone does not identify this atlas.
 World changes clear the cached choices/history. Explicit `--no-particles` omits the extra burst; a Luckyren death with configured mechanical drops suppresses duplicate scrap.
 
+Mechanical rupture also emits a fixed-origin electrical explosion: a compact 0.16-second irregular white-cyan flash,
+radial sparks and up to two seconds of soot, without area damage or extra launch force. A current
+posed cut contact supplies the initial flash/spark origin. Soot starts immediately and follows
+the current cut contact on the detached head/limb, or the body section, while rising locally. Torso sections, head cuts
+and severed limbs qualify; regular hits and organic bodies do not. Hit/sever notifications share
+one marker, with 16 live sources, 256 replay markers and 384 renderer quads globally. Medical
+death retains the burst; removed identities, expiry and world reset clear it. Pause holds its age;
+saved cuts do not replay it, and `--no-particles` omits it. **Verified**
+(`RobotBreakExplosionTrackerTests`, `RobotBreakExplosionGeometryTests`): break gates, one-shot
+markers, current origin capture, pause, death/removal, expiry and crowd bounds.
+**Observed** (native Skeleton torso/head captures and 40 simultaneous sections): one burst per rupture,
+at most 16 active sources, no duplicate head notifications, and zero explosion geometry after expiry.
+Native neck-detach and split-head captures show immediate soot following the detached head instead of its original neck position.
+
 Flat sandbox/battle scenes load combat effects without weather/map placers; an explicit
 `--no-particles` still disables them.
 Luckyren robot bursts retain the race's severed-limb meshes and fluid decals, omitting organic
@@ -247,3 +272,53 @@ The `bloodsurfaces` switch (Meitou, default; Faithful: terrain only, as the game
 The item keeps its stain through draw/sheath, transfers, quantity copies and equipment refresh. Snapshots publish the exact hip/back combat items' blood; the host forwards it to the [character renderer](../character-renderer.md#weapon-blood). Native item saves use Meitou's optional Vector4 `meitou weapon blood` key: finite components clamp to 0..1, zero/nonfinite coverage loads clean; clean items omit it. Native item paths cover inventory, bags, machines and ground items; ground-zone reuse compares the typed stain. Chest/shop JSON keeps optional `B:[r,g,b,amount]`, omitted when clean and normalized through `SaveItem`. This is a Meitou extension, not an observed original-game weapon effect.
 
 **Verified** (`WeaponBloodCombatTests`, `WeaponBloodEquipmentTests`, `WeaponBloodSaveTests`): delivered damage and weapon-contact gates, independent same-record items, armour reduction, multiple victims, organic severing versus destroyed prosthetics, execution, colour accumulation and saturation; slot changes, arm-driven weapon selection, transfers and the unchanged shown snapshot pair; native FCS byte round trips, clean/legacy/invalid data, same-zone ground changes, nested chest JSON and shop-stock restoration. Fixtures are synthetic and use no personal saves.
+
+## Liquid section jets (Meitou)
+
+A fresh `BodyBisected` event emits connected fluid streams from cached cut-rim contacts on both
+halves. The root follows the posed surface; short pulsing filaments curve under ballistic gravity,
+tear away from moving pieces and break into smaller drops. New liquid inherits the posed
+cut velocity (bounded to 100 units/s), avoiding a stationary trail stretched behind a moving
+fragment. Pressure and width decrease over 3.2 shown game seconds. Each half begins with 12 spray
+particles and continues at 24 per second, alongside the connected liquid flow. RACE RGB
+supplies blood or robot oil; non-robot bloodless races emit none. Landing splashes respect the
+current ground/floor. No new assets, persistent particle units or rigid bodies are created.
+
+`LiquidBloodSimulation` caps 32 sources, 10 history samples per jet, 512 stream segments and 768
+free drops. Connected filaments span at most 4.8 units each. Rendering uses shared endpoint tangents and
+widths, rounded shading and fades only at actual ends, in two procedural alpha batches sharing
+a 768-quad ceiling. Landing marks
+are limited to eight per frame and 16 per second with a 24-mark burst allowance. Pause holds all
+positions and ages; world reset clears state. Fast-moving pieces break their stream rather than
+stretching a tether. Cut contacts sample after current character posing while frame uploads are
+open. New drops start at the current surface after older drops advance, including slow frames.
+Duplicate victim identities do not replay; saved cuts do not synthesize new section events.
+
+**Verified** (`LiquidBloodSimulationTests`, `LiquidBloodStreamTests`, `LiquidBloodFlowTests`): one-shot/two-half emission,
+late pose availability, connected moving anchors, gravity, breakup, pause, race/oil RGB, pressure
+decay, upper-floor contacts, bounded crowds, expiry and reset. Explicit `--no-particles` omits
+liquid effects in flat scenes too. `LiquidBloodStripGeometryTests` checks shared joints and
+winding across camera angles; `LiquidBloodNativeTests` renders the actual particle shader and
+checks visible, gap-free straight/curved joins with Vulkan validation enabled. Visual reference:
+[Dead Island 2 official gameplay](https://www.youtube.com/watch?v=pHOqRtA4OK8&t=198s);
+this is an adaptation of its short irregular flows, not a reconstruction of its fluid engine.
+
+## Limb section geometry (Meitou)
+
+A fresh severing hit records a normalized position along the affected arm/leg bind chain and
+an oblique tilt derived from its travel, sweep and a deterministic visual seed. High, level and
+low blows select different position ranges, with continuous seeded variation inside each range.
+Paired limbs share the swing's fraction and mirrored slant. `LimbCutGeometry` fits the same
+parameters to each race's rig for owner skin, the free piece and physical collision shapes.
+The immutable states are published and stored in the optional [`meitou limb cuts` save extension](../formats/save.md).
+NPC unloads retain them; fitted
+replacements ignore the previous stump geometry. Legacy saves keep their old level-based cuts.
+Detached pieces remain transient, as before; loading a stump does not spawn duplicate loose limbs.
+
+**Verified** (`LimbCutPolicyTests`, `LimbSeveranceGeometryTests`, `LimbCutRenderingTests`,
+`LimbCutStorageTests`): continuous position/tilt variation, paired sweep correlation, complementary
+scaled planes, actor/cap ownership, carry/picking, bounded cap geometry and exact persistence.
+**Observed** (native Samurai/Skeleton/Fog Prince and female/clothed captures): high, middle and
+low cuts retain closed flesh/bone or mechanical sections on both sides; simultaneous arm/leg
+pieces fall independently without stretched skin. Paired robot breaks each retain their own
+bounded electrical source. Existing head and torso section captures still render correctly.

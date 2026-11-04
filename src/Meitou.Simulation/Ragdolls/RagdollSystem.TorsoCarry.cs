@@ -67,10 +67,11 @@ public sealed partial class RagdollSystem
         bool entering = carried && (!wasCarried || newHolder);
         carriedBodies ??= RootComponent(piece.Definition);
         var layers = carried ? TorsoCarryLayers(piece, cold, forceCarriedPose) : [];
-        var target = carried ? AnimatedTorsoCarry(piece, placement, layers) : [];
+        var shape = carried ? ShapeForLimbCuts(piece.Setup, cold) : null;
+        var target = carried ? AnimatedTorsoCarry(piece, placement, layers, shape) : [];
         if (carried)
         {
-            RefreshCarriedOffsets(fragments, piece, side, placement, layers, target, carriedBodies);
+            RefreshCarriedOffsets(fragments, piece, side, placement, layers, target, carriedBodies, shape);
             if (palm is { } hand) AlignTorsoGrip(fragments, piece, cold, side, target, carriedBodies, hand, publicationFrame, layers, entering);
         }
         if (carried != wasCarried || release || entering)
@@ -141,13 +142,13 @@ public sealed partial class RagdollSystem
         return [.. layers];
     }
 
-    static RigidTransform[] AnimatedTorsoCarry(Ragdoll piece, Matrix4x4 placement, ActiveLayer[] layers)
+    static RigidTransform[] AnimatedTorsoCarry(Ragdoll piece, Matrix4x4 placement, ActiveLayer[] layers, BodyShapeData? shape)
     {
         var rig = piece.Setup.Rig;
         var scratch = rig.Rent();
         try
         {
-            scratch.PoseDerived(piece.Setup.Shape, layers);
+            scratch.PoseDerived(shape, layers);
             var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
             return [.. piece.Definition.Bodies.Select(body => body.BoneInBody.Inverse().Then(new RigidTransform(
                 Vector3.Transform(scratch.DerivedPosition[body.Bone], placement), Quaternion.Normalize(turn * scratch.DerivedRotation[body.Bone]))))];
@@ -156,7 +157,7 @@ public sealed partial class RagdollSystem
     }
 
     static void RefreshCarriedOffsets(TorsoFragments fragments, Ragdoll piece, int side, Matrix4x4 placement,
-        ActiveLayer[] layers, RigidTransform[] target, bool[] root)
+        ActiveLayer[] layers, RigidTransform[] target, bool[] root, BodyShapeData? shape)
     {
         var anchors = side > 0 ? fragments.PositiveAnchors : fragments.NegativeAnchors;
         var offsets = side > 0 ? fragments.PositiveOffsets : fragments.NegativeOffsets;
@@ -164,7 +165,7 @@ public sealed partial class RagdollSystem
         var scratch = rig.Rent();
         try
         {
-            scratch.PoseDerived(piece.Setup.Shape, layers);
+            scratch.PoseDerived(shape, layers);
             var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
             for (int h = 0; h < anchors.Length; h++)
             {

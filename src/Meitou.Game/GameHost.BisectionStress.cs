@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Gameplay.Combat;
 using Meitou.Simulation;
@@ -18,6 +19,21 @@ sealed partial class GameHost
         if (!IsSandbox || !g.SandboxBisect || g.Sandbox < 2)
             throw new ArgumentException("--scene bisect-stress needs --sandbox <n>=2 --sandbox-bisect");
         var characters = session.CurrentSnapshot.Characters;
+        if (g.SandboxCorpsePile)
+        {
+            int index = 0;
+            foreach (var character in characters)
+            {
+                if (character.Id == sandboxHero) continue;
+                var at = new Vector3((index % 6 - 2.5f) * 2, character.Position.Y, (index / 6 - 2.5f) * 2);
+                session.World.Commands.Enqueue(new DebugTeleport([character.Id], at) { Tick = session.World.Tick });
+                index++;
+            }
+            AdvanceScene(1);
+            characters = session.CurrentSnapshot.Characters;
+        }
+        session.World.Profile.Enabled = true;
+        session.World.Profile.Clear();
         Console.WriteLine($"bisect stress: {characters.Count} initial characters, all except the hero cut at tick 120; render timing excludes simulation and PNG output");
         bisectionStressDrawTotal = bisectionStressFillTotal = 0;
         bisectionStressAllocatedTotal = bisectionStressSamples = 0;
@@ -37,8 +53,11 @@ sealed partial class GameHost
                 || world.Characters.Cold(slot)?.Medical is not { Dead: false }) continue;
             world.Commands.Enqueue(new DebugBisect(id)
             {
-                Tick = world.Tick, Attacker = sandboxHero, VisualSeed = g.SandboxBisectVariant,
-                CutDirection = g.SandboxCutDirection ?? 2, Style = g.SandboxBisectStyle,
+                Tick = world.Tick,
+                Attacker = sandboxHero,
+                VisualSeed = g.SandboxBisectVariant,
+                CutDirection = g.SandboxCutDirection ?? 2,
+                Style = g.SandboxBisectStyle,
                 TargetBodyPart = string.Equals(g.SandboxPart, "stomach", StringComparison.OrdinalIgnoreCase)
                     ? BodyPartTemplate.StomachPartId : ArmourData.ChestPartId,
             });
@@ -84,11 +103,18 @@ sealed partial class GameHost
         string average = bisectionStressSamples == 0 ? "warming" :
             $"warm mean draw {F(bisectionStressDrawTotal / bisectionStressSamples)} ms, fill {F(bisectionStressFillTotal / bisectionStressSamples)} ms, "
             + $"allocated {bisectionStressAllocatedTotal / bisectionStressSamples} bytes ({bisectionStressSamples} samples)";
+        var profile = session.World.Profile;
+        double sim = profile.Ticks > 0 ? profile.PhaseMs.Sum() / profile.Ticks : 0;
+        double rag = profile.Ticks > 0 ? profile.Parts.FirstOrDefault(p => p.Name == "rag step").Ms / profile.Ticks : 0;
+        Console.WriteLine($"bisect stress simulation {frame}: tick {F(sim)} ms, rag step {F(rag)} ms, {profile.Ticks} ticks");
+        profile.Clear();
         Console.WriteLine($"bisect stress frame {frame}: bisected {bisected}, robots {robots}, settled {settled}; "
             + $"draw {F(draw)} ms, fill {F(fill)} ms, character update {F(renderer?.LastUpdateMs ?? 0)} ms, "
             + $"pose {F(renderer?.LastPoseMs ?? 0)} ms, allocated {allocated} bytes; "
             + $"discharges {robotDischarges.Count}, anchors {gpu.Particles?.RobotDischarges.Count ?? 0}, "
             + $"electrical quads {gpu.Particles?.DrawnRobotDischargeQuads ?? 0}, smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}, "
-            + $"scrap bursts {robotScrapBursts}, scrap pieces {robotScrapPieces}; {average}");
+            + $"explosion bursts {robotExplosionBursts}, active explosions {robotExplosions.Count}, explosion quads {gpu.Particles?.DrawnRobotExplosionQuads ?? 0}, "
+            + $"scrap bursts {robotScrapBursts}, scrap pieces {robotScrapPieces}, liquid drops {liquidBlood.Drops.Count}, liquid streams {liquidBlood.Streams.Count}, "
+            + $"liquid drawn {gpu.Particles?.DrawnLiquidBlood ?? 0}, liquid sources {liquidBlood.SourceCount}; {average}");
     }
 }

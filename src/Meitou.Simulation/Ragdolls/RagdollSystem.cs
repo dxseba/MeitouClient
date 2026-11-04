@@ -74,6 +74,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
     readonly ConcurrentDictionary<CharacterAppearance, Lazy<(PhysicsFile File, string Path)?>> files = new(ReferenceEqualityComparer.Instance);
     readonly ConcurrentDictionary<string, Lazy<PhysicsFile?>> physicsFiles = new();
     readonly ConcurrentDictionary<(string Path, SkeletonRig Rig, int Scale), Lazy<RagdollDefinition?>> definitions = new();
+    readonly ConcurrentDictionary<RagdollDefinition, RagdollDefinition> robotDefinitions = new(ReferenceEqualityComparer.Instance);
     readonly Dictionary<RagdollDefinition, (TypedIndex Shape, BodyInertia Inertia)[]> shapes = new(ReferenceEqualityComparer.Instance);
     IAnimationSource? animations;
     int nextTag = 1;
@@ -166,10 +167,16 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
 
     RagdollDefinition? DefinitionOf(CharacterAppearance look, SkeletonRig rig, float scale)
     {
-        if (definitionSource is not null) return definitionSource(look, rig, scale);
-        if (FileOf(look) is not { } file) return null;
-        int key = (int)MathF.Round(scale * 100);
-        return definitions.GetOrAdd((file.Path, rig, key), _ => new(() => RagdollDefinition.Build(file.File, rig, key / 100f, Hull))).Value;
+        RagdollDefinition? source;
+        if (definitionSource is not null) source = definitionSource(look, rig, scale);
+        else
+        {
+            if (FileOf(look) is not { } file) return null;
+            int key = (int)MathF.Round(scale * 100);
+            source = definitions.GetOrAdd((file.Path, rig, key), _ => new(() => RagdollDefinition.Build(file.File, rig, key / 100f, Hull))).Value;
+        }
+        return source is not null && options is { AdvancedRagdolls: true } && look.Race.GetBool("is robot")
+            ? robotDefinitions.GetOrAdd(source, RobotRagdollWeight.Weight) : source;
     }
 
     Vector3[]? Hull(string cooked)
@@ -232,7 +239,8 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
                 && cold.Save?.Ragdoll?.Torso is { Cut: { IsValid: true } savedCut }) cold.TorsoBisection = savedCut;
             // Meitou (BodyOptions.AdvancedRagdolls): a new whole-body ragdoll goes on as the character moved, pushed by the blow that put it down (CombatSystem.Knockdown), else as it moved last tick.
             bool advanced = options is { AdvancedRagdolls: true };
-            var (launch, push) = !advanced ? default : cold.Blow ?? (table.Previous[i].Velocity, Vector3.Zero);
+            var (launch, push) = !advanced ? default
+                : RobotRagdollWeight.Launch(cold.Race is { IsRobot: true }, cold.Blow ?? (table.Previous[i].Velocity, Vector3.Zero));
             cold.Blow = null;
             cold.CarryAttach = cold.CarriedBy.IsNone ? null : AttachOf(table, cold, cold.CarriedBy);
             cold.TorsoPositiveCarryAttach = cold.TorsoPositiveCarriedBy.IsNone ? null : AttachOf(table, cold, cold.TorsoPositiveCarriedBy);
@@ -407,8 +415,23 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             foreach (var layer in animations.Publish(animation, []))
                 if (setup.Rig.Layer(rigs.Database, layer.Name, setup.Animal) is { } def) layers.Add(new ActiveLayer(def, MathF.Max(layer.Time, 0), layer.Weight));
         foreach (var (def, time) in setup.Fixed) layers.Add(new ActiveLayer(def, time, 1));
-        scratch.PoseDerived(setup.Shape, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers));
+        scratch.PoseDerived(ShapeForLimbCuts(setup, cold), System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers));
     }
+
+    static uint LimbShapeMask(CharacterCold cold)
+    {
+        uint mask = 0;
+        for (int index = 0; index < cold.LimbSeverances.Count; index++)
+        {
+            var cut = cold.LimbSeverances[index];
+            if (cut.IsValid && cold.Medical?.LimbPart(cut.LimbSlot)?.Limb == Bodies.LimbState.Stump) mask |= 1u << cut.LimbSlot;
+        }
+        return mask;
+    }
+
+    BodyShapeData? ShapeForLimbCuts(CharacterPoseSetup setup, CharacterCold cold, BodyBuild? build = null) =>
+        LimbShapeMask(cold) is var mask && mask != 0 && cold.Appearance is { } look
+            ? rigs.ShapeForLimbCuts(look, setup.Rig, mask, build) ?? setup.Shape : setup.Shape;
 
     /// <summary>Whether a saved ragdoll belongs to this one: a pose for each body, its root where the character stands (a platoon that travelled since moves its characters).</summary>
     static bool Fits(Ragdoll r, SavedRagdoll saved, Vector3 at)

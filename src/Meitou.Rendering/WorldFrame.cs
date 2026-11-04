@@ -814,6 +814,8 @@ static partial class WorldFrame
         public FoliageRenderer? Foliage;
         /// <summary>The characters (null without <c>--crowd</c> or a host that feeds them).</summary>
         public Characters.CharacterRenderer? Characters;
+        /// <summary>Host cut effects use the current posed surfaces, with the frame's upload batch already open.</summary>
+        public Action? AfterCharacterPose;
         public TerrainStreamer? Streamer;
         /// <summary>Where the camera is about to arrive (a character flight's end view's eye; null otherwise): the object and terrain texture streaming load there too.</summary>
         public Vector3? Ahead;

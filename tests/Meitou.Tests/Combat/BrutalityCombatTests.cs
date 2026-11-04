@@ -13,7 +13,7 @@ using SimWorld = Meitou.Simulation.World;
 
 namespace Meitou.Tests.Combat;
 
-public class BrutalityCombatTests
+public partial class BrutalityCombatTests
 {
     [Theory]
     [InlineData(0, 0)] [InlineData(59.999f, 0)] [InlineData(60, .10f)] [InlineData(70, .30f)]
@@ -271,14 +271,15 @@ public class BrutalityCombatTests
         public CharacterCold Victim => World.Characters.Cold(Target.Slot)!;
         public ConcurrentQueue<CombatEvent> Events { get; } = new();
 
-        public Scene(float level = 0, float power = 1, int direction = 2, BodyPartTemplate? targetPart = null, bool armour = false)
+        public Scene(float level = 0, float power = 1, int direction = 2, BodyPartTemplate? targetPart = null, bool armour = false,
+            bool paired = false, ulong seed = 41)
         {
             targetPart ??= Chest;
             var options = BodyOptions.Default;
             options.ForcedHitPart = (targetPart.StringId, targetPart.Name);
-            Combat = new([Cut("cut left", direction: direction)], Constants, BaseGame, options, DuelFixture.Lengths,
+            Combat = new([Cut("cut left", direction: direction)], Constants, paired ? BaseGame with { ImmediateBloodLoss = 0 } : BaseGame, options, DuelFixture.Lengths,
                 new CombatOptions { RecordLog = true, TickMedical = false });
-            World = new(new WorldSettings { Seed = 41, PublishSnapshots = false },
+            World = new(new WorldSettings { Seed = seed, PublishSnapshots = false },
                 new OpenGroundWalkability((_, _) => 150), [Combat, Senses(Combat)]);
             World.CombatEvents = Events;
 
@@ -287,7 +288,9 @@ public class BrutalityCombatTests
             source.Brutality = BrutalityProgress.FromLevel(level);
             var victim = new Combatant { Armour = armour ? [BodyPlate] : [] }.MakeCold();
             victim.Faction = 2;
-            victim.Race = new() { StringId = Human.StringId, Name = Human.Name, Anatomy = [new(targetPart, 100, 100)] };
+            var opposite = targetPart.Type == BodyPartType.Leg ? RightLeg : RightArm;
+            victim.Race = new() { StringId = Human.StringId, Name = Human.Name,
+                Anatomy = paired ? [new(targetPart, 100, 100), new(opposite, 100, 100)] : [new(targetPart, 100, 100)] };
             victim.Medical = MedicalState.Create(victim.Race, 50);
             Attacker = World.Characters.Spawn(new() { Position = new(1000, 150, 1000), Yaw = MathF.PI / 2, Health = 100 }, source, 0);
             Target = World.Characters.Spawn(new() { Position = new(1014, 150, 1000), Yaw = -MathF.PI / 2, Health = 100 }, victim, 0);

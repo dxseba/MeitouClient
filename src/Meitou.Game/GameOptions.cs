@@ -28,13 +28,15 @@ sealed class GameOptions
     public bool FlatCombatParticles = true;
     /// <summary>The CHARACTER record (name or id) the sandbox spawns (null: the default new-game start's first squad member).</summary>
     public string? SandboxCharacter, SandboxPart, SandboxHitSide, SandboxHitMechanism;
-    public bool SandboxBare;
+    public bool SandboxBare, SandboxCorpsePile;
     public bool SandboxDummy, SandboxSever, SandboxClothed, SandboxTorso, SandboxFemale, SandboxBehead, SandboxSevereOnly, SandboxBisect;
     public float? SandboxYaw, SandboxPower, SandboxHitAngle;
     /// <summary>Set every stored attribute and skill of the sandbox hero before the first tick.</summary>
     public float? SandboxStats;
     public float? SandboxBrutality;
-    public string? SandboxHeadCut;
+    public string? SandboxHeadCut, SandboxLimbCut;
+    public bool SandboxLimbLow, SandboxLimbPrewounded;
+    public ulong? SandboxLimbVariant;
     public int? SandboxHeadWound, SandboxCutDirection, SandboxHitWeaponCategory;
     public ulong? SandboxBisectVariant;
     public Meitou.Simulation.Wounds.TorsoBisectionStyle SandboxBisectStyle;
@@ -116,6 +118,9 @@ sealed class GameOptions
           --sandbox-bisect-style <kind> auto (default), transverse, vertical, diagonal, or oblique; oblique crosses the trunk toward a shoulder
           --sandbox-bisect-variant <n> repeat a torso cut's angle and height from this visual seed
           --sandbox-severe-only     with --sandbox-dummy: hide generic wound marks and falling jaw to inspect permanent head state without a wound mask
+          --sandbox-limb-cut <part>  preview left-arm/right-arm/left-leg/right-leg/arms/legs with normal medical events
+          --sandbox-limb-variant <n> choose another deterministic limb position and angle
+          --sandbox-limb-low        preview a forearm/calf cut instead of the default sweep range
           --sandbox-head-cut <form>  force one lethal head cut: auto, neck, transverse, oblique, vertical, split
           --sandbox-head-wound <n>   with --sandbox-dummy: fourth heavy head hit opens 0 jaw, 1 scalp, or 2 broken skull
           --sandbox-cut-direction <n> with --sandbox-dummy: fixed blade axis 1 down, 2 left, 3 right
@@ -199,6 +204,7 @@ sealed class GameOptions
                 case "--sandbox-character": g.SandboxCharacter = Next(); break;
                 case "--sandbox-bare": g.SandboxBare = true; break;
                 case "--sandbox-yaw": g.SandboxYaw = float.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
+                case "--sandbox-corpse-pile": g.SandboxCorpsePile = true; break;
                 case "--sandbox-clothed": g.SandboxClothed = true; break;
                 case "--sandbox-torso": g.SandboxTorso = true; break;
                 case "--sandbox-female": g.SandboxFemale = true; break;
@@ -228,6 +234,15 @@ sealed class GameOptions
                     if (!float.IsFinite(g.SandboxHitDamage) || g.SandboxHitDamage <= 0) throw new ArgumentException("--sandbox-hit-damage must be positive and finite");
                     break;
                 case "--sandbox-severe-only": g.SandboxSevereOnly = true; break;
+                case "--sandbox-limb-cut":
+                    g.SandboxLimbCut = Next().ToLowerInvariant();
+                    if (g.SandboxLimbCut is not ("left-arm" or "right-arm" or "left-leg" or "right-leg" or "arms" or "legs"))
+                        throw new ArgumentException("--sandbox-limb-cut must be left-arm/right-arm/left-leg/right-leg/arms/legs");
+                    g.SandboxDummy = g.SandboxBare = true;
+                    break;
+                case "--sandbox-limb-prewounded": g.SandboxLimbPrewounded = true; break;
+                case "--sandbox-limb-low": g.SandboxLimbLow = true; break;
+                case "--sandbox-limb-variant": g.SandboxLimbVariant = ulong.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--sandbox-head-cut":
                     g.SandboxHeadCut = Next().ToLowerInvariant();
                     if (g.SandboxHeadCut is not ("auto" or "neck" or "transverse" or "oblique" or "vertical" or "split"))

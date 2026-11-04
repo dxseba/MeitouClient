@@ -17,6 +17,8 @@ static class CharacterShaders
     /// <summary>The storage buffers of set 0 after the frame's own (the order of the extra list given to <c>NativeFrame.Prepare</c>): the bone palettes, the materials, the face morph offsets, last frame's palettes (motion pass).</summary>
     /// <summary>A wounded palette reserves state/frame and 16 matrices each of spheres/cuts before its bones; state starts with the optional wound mask index.</summary>
     public const int WoundHeaderBones = 35;
+    /// <summary>The limb-plane matrix precedes the legacy header, preserving every head/sphere/cut offset.</summary>
+    public const int WoundPaletteBones = WoundHeaderBones + 1;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
     public const uint HeadReliefFlag = 1u << 4;
@@ -180,6 +182,8 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
+                    // A torso stamp reaches inward from one surface; it must never open or dent the opposite side.
+                    if (floor(c.w / 10.0) == 0.0 && abs(c.z) > 0.1 && aPosition.z * c.z < -0.01) continue;
                     if (c.w <= 0.0 || abs(floor(c.w / 10.0) - float(own)) > 0.5) continue;
                     float near = 1.0 - smoothstep(0.0, 1.6, distance(local, c.xyz));
                     dent = max(dent, near * near * 0.12);
@@ -196,6 +200,8 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
+                    // A torso stamp reaches inward from one surface; it must never open or dent the opposite side.
+                    if (floor(c.w / 10.0) == 0.0 && abs(c.z) > 0.1 && aPosition.z * c.z < -0.01) continue;
                     if (c.w <= 0.0 || abs(floor(c.w / 10.0) - float(own)) > 0.5) continue;
                     float radius = max(mod(c.w, 10.0), 0.001), near = 1.0 - clamp(distance(local, c.xyz) / radius, 0.0, 1.0);
                     dent = max(dent, near * near * (3.0 - 2.0 * near) * max(radius - 1.0, 0.0) * 0.28);
@@ -218,6 +224,7 @@ static class CharacterShaders
             bool mechanicalInterior = anatomy && aTangent.w > 33.5 && aTangent.w < 34.5;
             vHeadHair = aInstanceData.z & {{HairWoundFlag}}u;
             bool headHeader = wounded || vHeadHair != 0u;
+            uint limbPlaneMask = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][3][0]) : 0u;
             vAnatomy = anatomy ? 1u : 0u;
             vPlated = (aInstanceData.z & 8u) != 0u ? 1.0 : 0.0;
             vCuts = aInstanceData.x - 16u;
@@ -277,6 +284,8 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
+                    // A torso stamp reaches inward from one surface; it must never open or dent the opposite side.
+                    if (floor(c.w / 10.0) == 0.0 && abs(c.z) > 0.1 && aPosition.z * c.z < -0.01) continue;
                     if (c.w > 0.0 && mod(c.w, 10.0) > 0.0 && abs(floor(c.w / 10.0) - float(group)) < 0.5) vClip = max(vClip, min(mod(c.w, 10.0), 1.1) * 0.75 - distance(aPosition, c.xyz));
                 }
             }
@@ -287,11 +296,13 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
+                    // A torso stamp reaches inward from one surface; it must never open or dent the opposite side.
+                    if (floor(c.w / 10.0) == 0.0 && abs(c.z) > 0.1 && aPosition.z * c.z < -0.01) continue;
                     if (c.w > 0.0 && abs(floor(c.w / 10.0) - floor(aColour.a + 0.5)) < 0.5)
                         vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
                 }
             }
-            else if (anatomy && aTangent.w > 31.5 && aTangent.w < 32.5) vAnatomy = 5u;   // exposed torso flesh ring
+            else if (anatomy && ((aTangent.w > 31.5 && aTangent.w < 32.5) || (aTangent.w > 34.5 && aTangent.w < 35.5))) vAnatomy = 5u;   // generated torso or limb section
             else if (anatomy && aTangent.w > 7.5) vAnatomy = uint((aTangent.w - 8.0) * 0.5) == vHeadProfile && (mod(aTangent.w - 8.0, 2.0) < 0.5 ? vHeadOpen == 1u : vHeadOpen >= 2u) ? 4u : 3u;   // fitted scalp/bone relief, only its own wound variant
             else if (anatomy && aTangent.w > 5.5 && aTangent.w < 6.5) vAnatomy = vHeadOpen >= 2u || (vHeadRelief & 1u) != 0u ? 2u : 3u;   // brain exposed by a skull wound or full-body slice
             else if (anatomy && aTangent.w > 4.5 && aTangent.w < 5.5)
@@ -302,7 +313,8 @@ static class CharacterShaders
             }
             else if (anatomy && aTangent.w > 6.5) vAnatomy = 2u;   // the back wall needs no mask: only a hole in the skin reveals it
             else if (anatomy && aTangent.w > 3.5 && aTangent.w < 4.5 && aColour.a > 4.5 && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> 5u & 1u) != 0u) vAnatomy = 3u;   // loose bowel already spilled
-            else if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u && fract(aColour.a) > 0.1) vAnatomy = 2u;   // a stump: shown whatever the mask
+            else if (anatomy && (floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][0][1]) >> uint(aColour.a + 0.5) & 1u) != 0u
+                && fract(aColour.a) > 0.1 && (limbPlaneMask >> uint(max(0.0, floor(aColour.a + 0.5) - 1.0)) & 1u) == 0u) vAnatomy = 2u;   // legacy fixed stump, without an explicit limb plane
             else if (anatomy)
             {
                 vClip = 1000.0;
@@ -311,7 +323,10 @@ static class CharacterShaders
                 for (uint i = 0u; i < 64u; i++)
                 {
                     vec4 c = skin.bones[aInstanceData.x - 32u + i / 4u][i % 4u];
-                    if (c.w > 0.0 && (lost >> uint(aColour.a + 0.5) & 1u) == 0u && abs(floor(c.w / 10.0) - (aColour.a > 4.5 ? 0.0 : floor(aColour.a + 0.5))) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
+                    // A torso stamp reaches inward from one surface; it must never open or dent the opposite side.
+                    if (floor(c.w / 10.0) == 0.0 && abs(c.z) > 0.1 && aPosition.z * c.z < -0.01) continue;
+                    bool retainedLimb = aColour.a > 0.5 && aColour.a < 4.5 && (limbPlaneMask >> uint(floor(aColour.a + 0.5) - 1.0) & 1u) != 0u;
+                    if (c.w > 0.0 && ((lost >> uint(aColour.a + 0.5) & 1u) == 0u || retainedLimb) && abs(floor(c.w / 10.0) - (aColour.a > 4.5 ? 0.0 : floor(aColour.a + 0.5))) < 0.5) vClip = min(vClip, distance(aPosition, c.xyz) - mod(c.w, 10.0));
                 }
             }
             vMaterial = aInstanceData.y;
@@ -320,21 +335,33 @@ static class CharacterShaders
             // bit 18 + p it carries (the vertex's limb bits 0-3, part bits from 4: CharacterContent.MarkBody); the fragments discard where it is above 0.
             uint marks = uint(aColour.y + 0.5);
             vHidden = ((marks & (aInstanceData.z >> 12) & 15u) | ((marks >> 4) & (aInstanceData.z >> 18) & 1023u) | ((marks >> 14) & (aInstanceData.z >> 28) & 1u)) != 0u ? 1.0 : 0.0;
-            if ((aInstanceData.z & 0x8000000Cu) != 0u && (!anatomy || mechanicalInterior))
+            if ((aInstanceData.z & 0x8000000Cu) != 0u)
             {
-                // A limb cut at its own height: everything of that limb below it goes.
+                // Actual per-limb bind planes match the clipped colliders; legacy heights remain a fallback.
                 mat4 cutHeader = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
-                uint cutBone = aWeights.x >= aWeights.y ? aBones.x : aBones.y;
+                uint cutAt = 0u;
+                for (uint k = 1u; k < 4u; k++) if (aWeights[k] > aWeights[cutAt]) cutAt = k;
+                uint cutBone = aBones[cutAt];
                 uint cutGroup = (floatBitsToUint(cutHeader[1 + cutBone / 32u][cutBone / 8u % 4u]) >> (cutBone % 8u * 4u)) & 15u;
                 uint only = floatBitsToUint(cutHeader[0][3]);
-                if (only != 0u) { vHidden = (only >> 8) == 6u ? (JawVertex(cutHeader) ? 0.0 : 1.0) : cutGroup == (only >> 8) ? 0.0 : 1.0; vCutBand = float(only & 255u) * 0.1 - aPosition.y; }
+                bool exactLimb = cutGroup >= 1u && cutGroup <= 4u && (limbPlaneMask >> (cutGroup - 1u) & 1u) != 0u;
+                bool limbCap = anatomy && aTangent.w > 34.5 && aTangent.w < 35.5;
+                if (only != 0u)
+                {
+                    vHidden = (only >> 8) == 6u ? (JawVertex(cutHeader) ? 0.0 : 1.0) : cutGroup == (only >> 8) ? 0.0 : 1.0;
+                    if (exactLimb) vCutBand = -dot(skin.bones[aInstanceData.x - {{WoundPaletteBones}}u][cutGroup - 1u], vec4(aPosition, 1.0));
+                    else if (!anatomy || mechanicalInterior) vCutBand = float(only & 255u) * 0.1 - aPosition.y;
+                }
                 else if ((floatBitsToUint(cutHeader[0][1]) >> 6u & 1u) != 0u && JawVertex(cutHeader)) vJawCut = 1.0;
-                else if (cutGroup >= 1u && cutGroup <= 4u)
+                else if (exactLimb) vCutBand = dot(skin.bones[aInstanceData.x - {{WoundPaletteBones}}u][cutGroup - 1u], vec4(aPosition, 1.0));
+                else if (cutGroup >= 1u && cutGroup <= 4u && (!anatomy || mechanicalInterior))
                 {
                     uint height = (floatBitsToUint(cutHeader[0][2]) >> (8u * (cutGroup - 1u))) & 255u;
                     if (height != 0u) vCutBand = aPosition.y - float(height) * 0.1;
                     else if (mechanicalInterior && (floatBitsToUint(cutHeader[0][1]) >> cutGroup & 1u) != 0u) vHidden = 1.0;
                 }
+                if (exactLimb && anatomy && !limbCap && !mechanicalInterior && vCutBand >= 0.0 && vCutBand < 0.65) vAnatomy = 2u;
+                if (limbCap) vCutBand = 1000.0;   // its generated rim already follows the selected side; retain its tiny ragged lip
             }
             if ((aInstanceData.z & {{HeadOnly}}u) != 0u) vHidden = (marks & {{CharacterContent.HeadBit}}u) == 0u ? 1.0 : 0.0;   // a cut-off head: its vertices only
             // The part of the vertex (bits 16-19: its index + 1, CharacterContent.MarkBody) and its blood amount (the instance: part k in byte k & 1 of the w of row k / 2).
@@ -448,6 +475,9 @@ static class CharacterShaders
                 if (c.w <= 0.0) continue;
                 float len = floor(c.w) / 10000.0, depth = fract(c.w);
                 if (len <= 0.0) continue;
+                vec4 woundAt = cutMats.m[vCuts - 16u + i / 4u][i % 4u];
+                if (uv.y >= 0.0 && floor(woundAt.w / 10.0) == 0.0 && abs(woundAt.z) > 0.1
+                    && vSkinPos.z * woundAt.z < -0.01) continue;
                 if (uv.y < 0.0)
                 {
                     // The face's texture is mirrored: only the side really struck, and never over the eyes.
@@ -589,6 +619,7 @@ static class CharacterShaders
             float curvature = vCurvature;
             if (vHidden > 0.0 || (vHeadHair != 0u && vHeadOpen != 0u && headSwordHair(vSkinPos, vHeadProfile, vHeadFrame) < 1.15)) discard;
             if (vTorsoBand < 999.0 && vTorsoBand < torsoCutRagged(vSkinPos)) discard;
+            if (vCutBand < 1000.0 && vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0) < 0.0) discard;
             bool fullBodyExposed = (vHeadRelief & 1u) != 0u && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
             if ((vHeadRelief & 2u) != 0u && !fullBodyExposed) discard;
             if (vClipLayer > 5.5 && vClipLayer < 6.5 && !fullBodyExposed && !headBrainVisible(vSkinPos, vHeadProfile, vHeadFrame, vHeadOpen)) discard;
@@ -958,7 +989,7 @@ static class CharacterShaders
             }
             bool mechanicalExposed = fullBodyExposed || (vCutBand >= 0.0 && vCutBand < 0.75);
             if (vAnatomy == 6u && !mechanicalExposed && vClip > 0.0) discard;
-            if ((f & 8388608u) != 0u && vCutBand < 1000.0
+            if (vCutBand < 1000.0
                 && vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0) < 0.0) discard;
             bool cut = false;
             if (m.shading == 2u && (f & 1u) != 0u)
@@ -1016,7 +1047,7 @@ static class CharacterShaders
             }
             bool mechanicalExposed = fullBodyExposed || (vCutBand >= 0.0 && vCutBand < 0.75);
             if (vAnatomy == 6u && !mechanicalExposed && vClip > 0.0) discard;
-            if ((f & 8388608u) != 0u && vCutBand < 1000.0
+            if (vCutBand < 1000.0
                 && vCutBand + 0.05 * sin(vBlood.y * 40.0) + 0.03 * sin(vBlood.y * 97.0) < 0.0) discard;
             if (m.shading == 2u && (f & 1u) != 0u) { if (dot(tex(m.tex[0], vUv), m.alphaChannel) < m.alphaThreshold) discard; }
             else if (m.shading == 0u && (f & 512u) != 0u) { if (tex(m.tex[1], vUv).a < 0.6) discard; }

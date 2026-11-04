@@ -26,8 +26,17 @@ internal sealed partial class RagdollSkinSurface
     }
 
     internal Grip? FindGrip(CharacterAppearance look, SkeletonRig rig, Vector4 plane, int side, bool fullBody, int[] components, int root,
-        RagdollDefinition definition, Matrix4x4[] skin, Vector3 palm, float[]? limbCuts = null, Matrix4x4? boundsFrame = null, GripQuery? query = null)
+        RagdollDefinition definition, Matrix4x4[] skin, Vector3 palm, float[]? limbCuts = null, Matrix4x4? boundsFrame = null, GripQuery? query = null,
+        IReadOnlyList<LimbCutState>? limbSeverances = null)
     {
+        Vector4[]? limbPlanes = null;
+        if (limbSeverances is { Count: > 0 })
+        {
+            limbPlanes = new Vector4[4];
+            foreach (var cut in limbSeverances)
+                if (cut.IsValid && (limbCuts is null || limbCuts[cut.LimbSlot] >= 0) && limbPlanes[cut.LimbSlot] == Vector4.Zero
+                    && LimbCutGeometry.TryPlane(rig, cut, out var fitted)) limbPlanes[cut.LimbSlot] = fitted;
+        }
         var frame = boundsFrame ?? Matrix4x4.Identity;
         if (!Matrix4x4.Invert(frame, out var toBounds)) { frame = Matrix4x4.Identity; toBounds = Matrix4x4.Identity; }
         var deltas = new Dictionary<(ushort, uint), Vector3>();
@@ -59,7 +68,8 @@ internal sealed partial class RagdollSkinSurface
                     float w = original[i].Weights[k];
                     if (w <= 0 || h >= components.Length) continue;
                     int group = Group(h);
-                    if (w >= 0.5f && ((group is >= 1 and <= 4 && (look.HiddenLimbs & 1 << (group - 1)) != 0 && (limbCuts is null || limbCuts[group - 1] <= 0)) || look.Headless && IsHead(h))) hidden = true;
+                    if (w >= 0.5f && ((group is >= 1 and <= 4 && (look.HiddenLimbs & 1 << (group - 1)) != 0
+                        && (limbPlanes is null || limbPlanes[group - 1] == Vector4.Zero) && (limbCuts is null || limbCuts[group - 1] <= 0)) || look.Headless && IsHead(h))) hidden = true;
                     int at = h;
                     while (at >= 0 && (at >= definition.BodyOfBone.Length || definition.BodyOfBone[at] < 0)) at = rig.Parent[at];
                     // A lost calf/arm cannot become a torso grip merely because its missing bones fall back to the pelvis.
@@ -77,14 +87,16 @@ internal sealed partial class RagdollSkinSurface
             Clip(p => Vector3.Dot(p, new(roots[0], roots[1], roots[2])) - 0.5f);
             if (query?.PinnedBones is not null) Clip(p => Vector3.Dot(p, new(pinned[0], pinned[1], pinned[2])) - 0.5f);
             if (query?.AxialOnly == true) Clip(p => Vector3.Dot(p, new(axial[0], axial[1], axial[2])) - 0.5f);
-            if (limbCuts is not null)
+            if (limbCuts is not null || limbPlanes is not null)
             {
                 var limbBands = original.Select(p =>
                 {
                     int strongest = 0;
                     for (int k = 1; k < 4; k++) if (p.Weights[k] > p.Weights[strongest]) strongest = k;
                     int group = Group((int)(p.Bones >> (strongest * 8) & 255));
-                    return group is >= 1 and <= 4 && limbCuts[group - 1] >= 0
+                    if (group is >= 1 and <= 4 && limbPlanes is not null && limbPlanes[group - 1] is var limbPlane && limbPlane != Vector4.Zero)
+                        return Vector4.Dot(limbPlane, new(p.Position, 1));
+                    return group is >= 1 and <= 4 && limbCuts is not null && limbCuts[group - 1] >= 0
                         ? limbCuts[group - 1] == 0 ? -1000 : p.Position.Y - limbCuts[group - 1] : 1000;
                 }).ToArray();
                 Clip(p => Vector3.Dot(p, new(limbBands[0], limbBands[1], limbBands[2])));

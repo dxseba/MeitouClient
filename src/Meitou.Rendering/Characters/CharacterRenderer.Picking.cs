@@ -66,6 +66,14 @@ internal sealed partial class CharacterRenderer
         return CutContactGeometry.Pose(content.CutRim(key), state.Bones, state.World);
     }
 
+    /// <summary>The selected limb's actual cut contact, from the same cached capped contour as its rendered stump.</summary>
+    public CharacterCutContact? LimbCutContact(long key, int slot)
+    {
+        if (!states.TryGetValue(key, out var state) || state.Seen != updateStamp || !state.InWorld || state.Posed < 0
+            || !state.LimbPlanes.Has(slot + 1)) return null;
+        return CutContactGeometry.Pose(content.LimbCutRim(key, slot), state.Bones, state.World);
+    }
+
     /// <summary>The fitted torso cut's outer-rim centre; null if neither section nor spine is available.</summary>
     public Vector3? TorsoCutPosition(long key, Vector4 plane) => TorsoCutPosition(key, new CharacterTorsoCut(plane, 1));
 
@@ -167,7 +175,10 @@ internal sealed partial class CharacterRenderer
         foreach (var part in asset.Parts)
         {
             if (!part.ShowsWith(s.WeaponDrawn, s.RangedDrawn, back: s.BackDrawn) || part.PickBoxes.Length == 0) continue;
+            if (s.PartOnly != 0 && !part.Shared) continue;
             if (!part.Shared && (part.AttachIndex < 0 || part.AttachIndex >= s.Attach.Length)) continue;
+            if (!part.Shared && part.Bone >= 0 && s.LimbPlanes.Band(asset.Rig.BindPosition[part.Bone],
+                woundMasks.GroupOfBone(asset.Rig, part.Bone), s.LimbCuts, s.PartOnly) < 0) continue;
             if (!part.Shared && s.TorsoCut is { } rigidCut && part.Bone >= 0 && TorsoCutSurface.Band(asset.Rig.BindPosition[part.Bone], rigidCut.HeadOnly ? HeadCutSurface.Group(asset, part.Bone) : woundMasks.GroupOfBone(asset.Rig, part.Bone), rigidCut) < 0) continue;
             var model = part.Shared ? s.World : s.Attach[part.AttachIndex] * s.World;
             foreach (var box in part.PickBoxes)
@@ -177,8 +188,10 @@ internal sealed partial class CharacterRenderer
                 var localOrigin = Vector3.Transform(origin, inverse);
                 var localDirection = Vector3.TransformNormal(direction, inverse);
                 var min = box.Min - new Vector3(PickPadding); var max = box.Max + new Vector3(PickPadding);
-                float? hit = part.Shared && s.TorsoCut is { } cut
-                    ? TorsoCutSurface.RayBox(localOrigin, localDirection, min, max, box.Bone >= 0 ? cut.HeadOnly ? HeadCutSurface.Group(asset, box.Bone) : woundMasks.GroupOfBone(asset.Rig, box.Bone) : 0, cut)
+                int group = box.Bone >= 0 ? woundMasks.GroupOfBone(asset.Rig, box.Bone) : 0;
+                int torsoGroup = s.TorsoCut is { HeadOnly: true } && box.Bone >= 0 ? HeadCutSurface.Group(asset, box.Bone) : group;
+                float? hit = part.Shared
+                    ? s.LimbPlanes.RayBox(localOrigin, localDirection, min, max, group, s.LimbCuts, s.PartOnly, s.TorsoCut, torsoGroup)
                     : Slab(localOrigin, localDirection, min, max);
                 if (hit is { } t && t < best)
                     best = t;

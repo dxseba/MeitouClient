@@ -246,10 +246,20 @@ public static class RagdollCut
         if (!float.IsFinite(inertia.InverseMass) || inertia.InverseMass <= 0 || !float.IsFinite(t.XX) || !float.IsFinite(t.YX)
             || !float.IsFinite(t.YY) || !float.IsFinite(t.ZX) || !float.IsFinite(t.ZY) || !float.IsFinite(t.ZZ)) return false;
         double xx = t.XX, yx = t.YX, yy = t.YY, zx = t.ZX, zy = t.ZY, zz = t.ZZ;
+        // Omit compact microscopic corners with no principal radius of gyration of at least 0.02 units.
+        // A long thin actor can retain substantial inertia about other axes; keep its joints and skin anchors.
+        double limit = inertia.InverseMass * 2500;
+        return PositiveTensor(xx, yx, yy, zx, zy, zz)
+            && !PositiveTensor(xx - limit, yx, yy - limit, zx, zy, zz - limit);
+    }
+
+    static bool PositiveTensor(double xx, double yx, double yy, double zx, double zy, double zz)
+    {
         double minor = xx * yy - yx * yx;
         double determinant = xx * (yy * zz - zy * zy) - yx * (yx * zz - zx * zy) + zx * (yx * zy - zx * yy);
         return xx > 0 && minor > 0 && determinant > 0;
     }
+
     internal static Vector3[] Points(RagdollBody body)
     {
         if (body.Type == PhysicsShapeType.Mesh) return body.Hull ?? [];

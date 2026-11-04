@@ -98,7 +98,7 @@ public sealed partial class RagdollSystem
         var normal = Vector3.TransformNormal(new(cut.Plane.X, cut.Plane.Y, cut.Plane.Z), placement);
         normal = normal.LengthSquared() > 1e-8f ? Vector3.Normalize(normal) : Vector3.UnitX;
         // A small separation speed exposes the cut; each loose joint chain then falls and collides by itself.
-        float separation = start.Push.LengthSquared() > 1e-8f ? 2 : 0;
+        float separation = start.Push.LengthSquared() > 1e-8f ? 2 * RobotRagdollWeight.Response(cold.Race is { IsRobot: true }) : 0;
         var positiveReference = FromOriginal(positiveDefinition);
         var negativeReference = FromOriginal(negativeDefinition);
         var positiveStart = restore ? saved!.Torso!.Positive.Pose : positiveReference;

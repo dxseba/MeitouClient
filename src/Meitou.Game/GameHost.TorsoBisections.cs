@@ -63,7 +63,7 @@ sealed partial class GameHost
     {
         if (!world.Characters.IsAlive(hit.Victim) || world.Characters.Cold(hit.Victim.Slot)?.TorsoBisection is not { } cut) return;
         torsoCuts.Set(hit.Victim, cut);
-        torsoBirths.TryAdd(hit.Victim, (hit.Tick, hit.Direction));
+        if (torsoBirths.TryAdd(hit.Victim, (hit.Tick, hit.Direction))) BeginLiquidBlood(hit, world);
     }
 
     /// <summary>Lists two separately placed halves, preserving the original lower-half key for picking and portraits.</summary>
@@ -191,10 +191,11 @@ sealed partial class GameHost
             var rotation = Matrix4x4.CreateFromQuaternion(turn);
             var piecePivot = side > 0 ? fall.PositivePivot : fall.NegativePivot;
             float reach = cut.FullBody ? side * 4.5f : side > 0 ? 4.8f : -2.8f;
-            var at = piecePivot + delta + fall.Along * reach * ease;
+            float response = Meitou.Simulation.Ragdolls.RobotRagdollWeight.Response(c.Appearance?.Race.GetBool("is robot") == true);
+            var at = piecePivot + delta + fall.Along * reach * ease * response;
             float bottom = TorsoFragmentMotion.Bottom(side > 0 ? fall.PositiveBounds : fall.NegativeBounds, turn);
             float floor = session.World.Walkability.GroundHeight(at.X, at.Z, piecePivot.Y + delta.Y);
-            at.Y = MathF.Max(piecePivot.Y + delta.Y + 1.5f * MathF.Min(age, 0.8f) - 0.5f * FallGravity * MathF.Min(age * age, 9), floor - bottom + 0.1f);
+            at.Y = MathF.Max(piecePivot.Y + delta.Y + 1.5f * response * MathF.Min(age, 0.8f) - 0.5f * FallGravity * MathF.Min(age * age, 9), floor - bottom + 0.1f);
             var placement = fall.World * Matrix4x4.CreateTranslation(-piecePivot) * rotation * Matrix4x4.CreateTranslation(at);
             list.Add(instance with
             {
@@ -261,7 +262,7 @@ sealed partial class GameHost
             || gutFalls.ContainsKey(id) || gutsSpilled.Contains(id)) return;
         var gut = new GutFall
         {
-            Position = cutAt + along * 0.6f, Velocity = along * 2 + Vector3.UnitY,
+            Position = cutAt, Velocity = along * 2 + Vector3.UnitY, Section = true, KeepAttached = GutEmergence.KeepAttached(id),
             BloodColour = session.World.Characters.Cold(id.Slot)?.Race?.BloodColour ?? DefaultBloodColour,
             Floor = session.World.Walkability.GroundHeight(cutAt.X, cutAt.Z, cutAt.Y),
         };

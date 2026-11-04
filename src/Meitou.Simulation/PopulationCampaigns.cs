@@ -1356,6 +1356,7 @@ public sealed partial class PopulationSystem : IStateHashed
                     h.Add(m.Position.Z);
                     m.Cold.Brutality.Hash(ref h);
                     if (m.Cold.HeadCut is { } headCut) headCut.Hash(ref h);
+                    Wounds.LimbCutPolicy.Hash(ref h, m.Cold.LimbSeverances);
                 }
             }
         }

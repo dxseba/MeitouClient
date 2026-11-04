@@ -364,6 +364,7 @@ public sealed class CharacterSnapshot
     public Wounds.TorsoBisectionState? TorsoBisection { get; internal set; }
     /// <summary>A fixed lethal head separation, also published without advanced physics.</summary>
     public Wounds.HeadCutState? HeadCut { get; internal set; }
+    public IReadOnlyList<Meitou.Data.Characters.LimbCutState> LimbSeverances { get; internal set; } = [];
     /// <summary>Independent physical head/limb pieces, in this snapshot owner's drawn model space.</summary>
     public IReadOnlyList<Ragdolls.DetachedRagdollPose> DetachedRagdolls { get; internal set; } = [];
 }

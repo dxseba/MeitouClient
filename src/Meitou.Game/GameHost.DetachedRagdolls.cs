@@ -89,7 +89,7 @@ sealed partial class GameHost
                 }
                 list.Add(new CharacterInstance(key, draw.Look, position, yaw, [])
                 {
-                    Bones = bones, Scale = c.Scale, Rotation = rotation, Blood = c.BloodAmounts, PartOnly = only,
+                    Bones = bones, Scale = c.Scale, Rotation = rotation, Blood = c.BloodAmounts, PartOnly = only, LimbSeverances = c.LimbSeverances,
                     TorsoCut = part.Part == -1 ? DetachedHeadClip(c, part.FragmentId) : null,
                 });
             }

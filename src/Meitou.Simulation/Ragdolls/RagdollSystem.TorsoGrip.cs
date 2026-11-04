@@ -43,7 +43,9 @@ public sealed partial class RagdollSystem
         try
         {
             var skin = new Matrix4x4[piece.Setup.Rig.BoneCount];
-            scratch.Pose(setup.Shape, layers, skin, bones);
+            BodyBuild? build = cold is { Stats: { } stats, Medical: { } medical, Race.IsRobot: false, Appearance: { } look }
+                ? CharacterShape.BuildFromStats(look.Female, stats, static (state, stat) => state[stat], medical.Hunger) : null;
+            scratch.Pose(ShapeForLimbCuts(setup, cold, build), layers, skin, bones);
             // Absolute physics bones are published in the original setup's frame; rendering lowers that frame by the current build's ground offset.
             var delta = Vector3.TransformNormal(new(0, piece.Setup.GroundOffset - setup.GroundOffset, 0), publicationFrame);
             if (delta != Vector3.Zero)
@@ -107,7 +109,7 @@ public sealed partial class RagdollSystem
                 var surface = cold.Appearance is { } look && SkinSurfaceFor(look) is { } bodySkin
                     ? bodySkin.FindGrip(look, rig, fragments.Cut.Plane, side, fragments.Cut.FullBody,
                         bones.Components!, bones.Components![piece.Definition.Bodies[piece.Definition.Root].Bone], piece.Definition,
-                        skin, support, limbCuts, query: new(PinnedBones: pinnedBones, AreaCentre: true)) : null;
+                        skin, support, limbCuts, query: new(PinnedBones: pinnedBones, AreaCentre: true), limbSeverances: cold.LimbSeverances) : null;
                 if (surface is not null) grip = new(surface, -1, default);
                 else
                 {

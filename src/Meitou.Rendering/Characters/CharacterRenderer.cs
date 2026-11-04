@@ -273,6 +273,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public Vector4 HipWeaponBlood, BackWeaponBlood;
         /// <summary>The generic wound mask index, 0 without generic cuts; permanent wounds can still need the header.</summary>
         public uint WoundMask, LostGroups, LimbCuts, PartOnly;
+        public LimbCutPlanes LimbPlanes;
         public bool HasWounds;
         public IReadOnlyList<AssetPart> DrawParts;
         public Matrix4x4 HeadFrame;
@@ -322,6 +323,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         /// <summary>Its bones were taken from another character (<see cref="Freeze"/>) and are never posed.</summary>
         public bool Frozen;
         public CharacterTorsoCut? TorsoCut;
+        public LimbCutPlanes LimbPlanes;
+        public uint LimbCuts, PartOnly;
         /// <summary>The ragdoll bones it was last posed with: the same object again (a frozen ragdoll) needs no pose every frame.</summary>
         public BonePose? PosedRagdoll;
         /// <summary>Off screen at the last update (<see cref="Live.OffScreen"/>).</summary>
@@ -659,7 +662,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             }
 
             ref var l = ref AddLive(in inst, asset, world, centre, radius, far, eye);
-            if (l.HasWounds) boneTotal += CharacterShaders.WoundHeaderBones;
+            if (l.HasWounds) boneTotal += CharacterShaders.WoundPaletteBones;
             l.BoneBase = boneTotal;
             boneTotal += asset.Rig.BoneCount;
             l.PartBase = partTotal;
@@ -728,16 +731,19 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         l.LostGroups = inst.LostGroups;
         l.LimbCuts = inst.LimbCuts;
         l.PartOnly = inst.PartOnly;
+        l.LimbPlanes = LimbCutPlanes.Resolve(asset.Rig, inst.LimbSeverances);
         var requestedCut = inst.TorsoCut is { HeadOnly: true } headCut ? HeadCutSurface.Resolve(asset, headCut) : inst.TorsoCut;
         l.TorsoCut = requestedCut is { } torso && TorsoCutSurface.TryNormalize(torso, out var normalized) ? normalized : null;
         l.TorsoFrame = l.TorsoCut is { } cut ? cut.HeadOnly ? HeadCutSurface.Pack(asset, cut) : TorsoCutSurface.Packed(cut) : default;
-        l.HasWounds = l.WoundMask != 0 || (l.LostGroups | l.LimbCuts | l.PartOnly) != 0 || l.TorsoCut is not null;
+        l.HasWounds = l.WoundMask != 0 || (l.LostGroups | l.LimbCuts | l.PartOnly | l.LimbPlanes.Mask) != 0 || l.TorsoCut is not null;
         var head = l.HasWounds && inst.HeadWoundPlacement is { } placement
             ? content.HeadPlacement(inst.Key, asset, placement, inst.LostGroups, updateStamp)
             : CharacterHeadWoundPool.Fallback(asset, inst.LostGroups);
         l.DrawParts = l.TorsoCut is { } cap
             ? content.TorsoParts(inst.Key, asset, head.Parts, cap, cap.HeadOnly ? HeadCutSurface.Groups(asset) : woundMasks.BoneGroups(asset.Rig), updateStamp, inst.Bones?.Components)
             : head.Parts;
+        l.DrawParts = content.LimbParts(inst.Key, asset, l.DrawParts, l.LimbPlanes, l.PartOnly,
+            woundMasks.BoneGroups(asset.Rig), updateStamp, inst.Bones?.Components);
         l.HeadFrame = head.Frame;
         l.HeadReliefReady = head.ReliefReady;
     }
@@ -786,6 +792,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         if (inst.FreezeFrom is null && inst.Bones is not null) state.Frozen = false;
         l.State = state;
         state.TorsoCut = l.TorsoCut;
+        (state.LimbPlanes, state.LimbCuts, state.PartOnly) = (l.LimbPlanes, l.LimbCuts, l.PartOnly);
         l.Interior = !far && InteriorObjects?.InteriorAt(l.Centre, ref state.Interior) is not null;
 
         bool newAsset = !ReferenceEquals(state.Asset, asset);
@@ -900,11 +907,13 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     void WriteWoundHeader(in Live l, nint bonePointer)
     {
         var header = (byte*)bonePointer + (l.BoneBase - CharacterShaders.WoundHeaderBones) * 64L;
+        *(Matrix4x4*)(header - 64) = l.LimbPlanes.Packed;
         new Span<byte>(header, CharacterShaders.WoundHeaderBones * 64).Clear();
         *(uint*)header = l.WoundMask;
         ((uint*)header)[1] = l.LostGroups;
         ((uint*)header)[2] = l.LimbCuts;
         ((uint*)header)[3] = l.PartOnly;
+        ((uint*)header)[12] = l.LimbPlanes.Mask;
         woundMasks.BoneGroups(l.Asset.Rig).AsSpan().CopyTo(new Span<uint>(header + 16, 8));
         *(Matrix4x4*)(header + 64) = l.HeadFrame;
         *(Matrix4x4*)(header + 128) = l.TorsoFrame;
@@ -929,7 +938,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         state.Attach.CopyTo(state.PreviousAttach, 0);
 
         var scratch = rig.Rent();
-        scratch.Pose(asset.Shape, layers.AsSpan(l.LayerStart, l.LayerCount), state.Bones, l.Bones);
+        var shape = l.LimbPlanes.Mask == 0 ? asset.Shape
+            : content.Rigs.ShapeForLimbCuts(asset.Appearance, rig, l.LimbPlanes.Mask, asset.AppliedBuild) ?? asset.Shape;
+        scratch.Pose(shape, layers.AsSpan(l.LayerStart, l.LayerCount), state.Bones, l.Bones);
         foreach (var part in asset.Parts)
             if (part.AttachIndex >= 0) state.Attach[part.AttachIndex] = scratch.TagTransform(part.Bone, part.Offset);
         foreach (var lamp in asset.Lamps) state.Attach[lamp.AttachIndex] = lamp.Offset * scratch.BoneTransform(lamp.Bone);

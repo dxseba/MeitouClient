@@ -46,6 +46,9 @@ public sealed record DebugBisect(CharacterId Character) : DebugCommand
     public TorsoBisectionStyle Style { get; init; } = TorsoBisectionStyle.Auto;
 }
 
+/// <summary>A normal medical limb cut with forced preview slots, without skill XP.</summary>
+public sealed record DebugLimbCut(CharacterId Character, CharacterId Attacker, string Limbs, int CutDirection = 2, ulong? VisualSeed = null, bool Prewounded = false) : DebugCommand;
+
 /// <summary>One lethal head-cut preview with normal medical gates and no skill XP.</summary>
 public sealed record DebugHeadCut(CharacterId Character, CharacterId Attacker, string Style, int CutDirection = 1) : DebugCommand
 {
@@ -169,6 +172,9 @@ static class DebugCheats
                 break;
             case DebugBisect bisect when world.SystemOf<CombatSystem>() is { } combat:
                 combat.DebugBisect(world, bisect.Character, bisect.Attacker, bisect.VisualSeed, bisect.CutDirection, bisect.Style, bisect.TargetBodyPart);
+                break;
+            case DebugLimbCut cutLimb when world.SystemOf<CombatSystem>() is { } limbCombat:
+                limbCombat.DebugLimbCut(world, cutLimb.Character, cutLimb.Attacker, cutLimb.Limbs, cutLimb.CutDirection, cutLimb.VisualSeed, cutLimb.Prewounded);
                 break;
             case DebugHeadCut cutHead when world.SystemOf<CombatSystem>() is { } headCombat:
                 headCombat.DebugHeadCut(world, cutHead.Character, cutHead.Attacker, cutHead.Style, cutHead.CutDirection, cutHead.VisualSeed);

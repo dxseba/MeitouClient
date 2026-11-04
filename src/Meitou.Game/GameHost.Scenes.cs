@@ -15,7 +15,7 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>The scenes <see cref="StageScene"/> knows.</summary>
-    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "bisect-stress", "guts", "weapon-blood", "torso-carry", "carry-reference", "downed-attack", "head-cut"];
+    static readonly string[] SceneNames = ["fight", "turret", "bed", "acid", "menu", "bisect", "bisect-stress", "guts", "weapon-blood", "torso-carry", "carry-reference", "downed-attack", "head-cut", "limb-cut"];
 
     /// <summary>The menu scene's targets, one frame each.</summary>
     static readonly string[] SceneMenus = ["character", "door", "container", "cage"];
@@ -40,6 +40,9 @@ sealed partial class GameHost
         switch (scene)
         {
             case "bisect-stress": return StageBisectionStress();
+            case "limb-cut":
+                if (!IsSandbox || g.SandboxLimbCut is null) throw new ArgumentException("--scene limb-cut needs --sandbox 2 --sandbox-limb-cut <part>");
+                return session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == sandboxFoe)?.Position + Vector3.UnitY * 7;
             case "head-cut":
                 if (!IsSandbox || g.SandboxHeadCut is null) throw new ArgumentException("--scene head-cut needs --sandbox 2 --sandbox-head-cut <form>");
                 return null;
@@ -135,10 +138,10 @@ sealed partial class GameHost
             session.Tick();
             session.AdvanceSimulation(session.Ticks.TickSeconds);
             UpdateNav(wait: true);
-            if (g.SandboxBisect || g.SandboxHeadCut is not null || g.Scene == "weapon-blood")
+            if (g.SandboxBisect || g.SandboxHeadCut is not null || g.SandboxLimbCut is not null || g.Scene == "weapon-blood")
             {
                 UpdateWounds(session.World);
-                UpdateGuts(session.World, (float)session.Ticks.TickSeconds, draw: false);
+                UpdateGuts(session.World, (float)session.Ticks.TickSeconds);
             }
         }
     }
@@ -181,11 +184,18 @@ sealed partial class GameHost
             ApplyCamera(session.Camera.Current);
             if (scene is "torso-carry" or "carry-reference" or "bisect-stress" && watch is { } torsoFocus) camera.Target = torsoFocus;
             if (scene is "bisect" or "guts" or "weapon-blood") SandboxFollowCamera();
+            if (scene == "limb-cut") camera.Target = LimbCutSceneFocus();
             UpdateBuildings();
             gpu.Characters?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);
             if (scene == "bisect-stress") DrawBisectionStressFrame(w, h, f);
             else DrawWorld(w, h);
+            if (scene == "limb-cut")
+            {
+                camera.Target = LimbCutSceneFocus();
+                gpu.Characters?.Settle(camera.Eye);
+                DrawWorld(w, h);
+            }
             if (scene == "head-cut")
             {
                 camera.Target = HeadCutSceneFocus();
@@ -199,8 +209,9 @@ sealed partial class GameHost
                 DrawWorld(w, h);
                 ReportGutScene(f);
             }
+            if (scene == "limb-cut") ReportLimbCutScene(f);
             if (scene == "bisect") ReportGutScene(f);
-            if (scene is "bisect" or "head-cut") ReportRobotScene(f);
+            if (scene is "bisect" or "head-cut" or "limb-cut") ReportRobotScene(f);
             if (scene is "torso-carry" or "carry-reference") ReportTorsoGripContact(f);
             if (overlay is not null)
             {

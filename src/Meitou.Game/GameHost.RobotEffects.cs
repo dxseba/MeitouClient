@@ -18,13 +18,17 @@ sealed partial class GameHost
 
     void EmitRobotCutSparks(in CombatEvent hit, CharacterCold? victim)
     {
-        if (!RobotCutEffects.EmitsSparks(hit, victim?.Race?.IsRobot == true)
+        // A follow-through has one gameplay Hit, but each newly broken limb needs its own electrical source.
+        var contact = hit;
+        if (hit.Kind == CombatEventKind.PartSevered && !robotDischarges.Contains(hit.Victim, hit.Part))
+            contact = hit with { Kind = CombatEventKind.Hit, Damage = new(70, 0, 0) };
+        if (!RobotCutEffects.EmitsSparks(contact, victim?.Race?.IsRobot == true)
             || gpu?.Particles is null || victim?.Medical is not { } medical
-            || hit.Part < 0 || hit.Part >= medical.Parts.Count) return;
-        var part = medical.Parts[hit.Part].Template;
-        var at = gpu.Characters?.BonePosition(DrawKey(hit.Victim), RobotCutEffects.ImpactBone(part, hit.LowStrike))
-            ?? hit.Position + new Vector3(0, RobotCutEffects.FallbackHeight(part), 0);
-        if (!robotDischarges.Observe(hit, true, RobotDischargeClock, at, session.World.Seed)) return;
+            || contact.Part < 0 || contact.Part >= medical.Parts.Count) return;
+        var part = medical.Parts[contact.Part].Template;
+        var at = gpu.Characters?.BonePosition(DrawKey(contact.Victim), RobotCutEffects.ImpactBone(part, contact.LowStrike))
+            ?? contact.Position + new Vector3(0, RobotCutEffects.FallbackHeight(part), 0);
+        if (!robotDischarges.Observe(contact, true, RobotDischargeClock, at, session.World.Seed)) return;
         // The bounded analytic source supplies the impact sparks too; the legacy 4x4 burst is visibly pixelated.
         robotSparkBursts++;
     }
@@ -98,6 +102,10 @@ sealed partial class GameHost
     {
         if (gpu.Particles is not { } particles || particles.RobotDischarges.Count >= RobotDischargeGeometry.AnchorLimit) return;
         var contact = gpu.Characters?.CutContact(key);
+        var medical = session.World.Characters.Cold(discharge.Victim.Slot)?.Medical;
+        if (contact is null && medical is not null && (uint)discharge.Part < (uint)medical.Parts.Count
+            && medical.Parts[discharge.Part].Template.LimbSlot is >= 0 and <= 3 and var limb)
+            contact = gpu.Characters?.LimbCutContact(key, limb);
         var at = contact is { } surface ? surface.Position + surface.Normal * 0.06f
             : gpu.Characters?.BonePosition(key, fallbackBone) ?? discharge.FallbackPosition;
         if (!float.IsFinite(at.LengthSquared())) return;
@@ -109,6 +117,7 @@ sealed partial class GameHost
     void ClearRobotDischarges()
     {
         robotSparkBursts = 0;
+        ClearRobotBreakExplosions();
         robotDischarges.Clear();
         robotCables.Clear();
         dischargeOwners.Clear();
@@ -123,6 +132,7 @@ sealed partial class GameHost
             || session.World.Characters.Cold(sandboxFoe.Slot)?.Race?.IsRobot != true) return;
         Console.WriteLine($"robot cut frame {frame}: spark bursts {robotSparkBursts}, discharges {robotDischarges.Count}, "
             + $"anchors {gpu.Particles?.RobotDischarges.Count ?? 0}, electrical quads {gpu.Particles?.DrawnRobotDischargeQuads ?? 0}, "
+            + $"explosion bursts {robotExplosionBursts}, active explosions {robotExplosions.Count}, explosion quads {gpu.Particles?.DrawnRobotExplosionQuads ?? 0}, "
             + $"smoke puffs {gpu.Particles?.DrawnRobotSmokePuffs ?? 0}, scrap bursts {robotScrapBursts}, "
             + $"scrap pieces {robotScrapPieces}, organic bowel props {gutFalls.Count}, audible debris {characterSounds?.DebrisSounds ?? 0}, cables {robotCables.Count}, spasms {session.World.Systems.OfType<Meitou.Simulation.Ragdolls.RagdollSystem>().FirstOrDefault()?.ElectricalSpasms ?? 0}");
     }

@@ -252,6 +252,13 @@ sealed partial class GameHost
     void SandboxDummyHit()
     {
         var world = session.World;
+        if (g.SandboxLimbCut is { } limbStyle)
+        {
+            if (!sandboxFoe.IsNone && world.Tick == 120)
+                world.Commands.Enqueue(new Meitou.Simulation.DebugLimbCut(sandboxFoe, sandboxHero, limbStyle,
+                    g.SandboxLimbLow ? 9 : g.SandboxCutDirection ?? 2, g.SandboxLimbVariant, g.SandboxLimbPrewounded) { Tick = world.Tick });
+            return;
+        }
         if (g.SandboxHeadCut is { } headStyle)
         {
             if (!sandboxFoe.IsNone && world.Tick == 120)

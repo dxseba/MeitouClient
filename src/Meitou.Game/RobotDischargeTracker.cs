@@ -19,6 +19,7 @@ internal sealed class RobotDischargeTracker
     long serial;
 
     public int Count => entries.Count;
+    public bool Contains(CharacterId owner, int part) => entries.ContainsKey((owner, part));
     public IReadOnlyCollection<RobotDischarge> Active => entries.Values;
 
     /// <summary>Called for a new hit, not each displayed frame. A later hit refreshes that part without adding another entry.</summary>

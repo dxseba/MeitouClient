@@ -36,6 +36,7 @@ sealed partial class GameHost
     /// <summary>Makes the store and the renderer when the install's <c>Blood</c> setting is on (missing: on).</summary>
     void SetUpBlood(IGpuContext context)
     {
+        gpu.AfterCharacterPose = UpdatePosedCutEffects;
         // Flat arenas have no object renderer; debris still needs the ITEM records' materials before its first mesh load.
         gpu.Debris ??= new DebrisRenderer(context, gpu.Objects?.Resolver ?? new MaterialResolver(scene.Database, assets.Materials, assets), assets.Find)
         {
@@ -67,9 +68,9 @@ sealed partial class GameHost
     void UpdateBlood()
     {
         var world = session.World;
+        if (!ReferenceEquals(bloodFor, world)) BloodForNewWorld(null);
         world.Luckyren = config.LuckyrenMode;
         UpdateBlockSparks(world);
-        UpdateRobotDischarges(world);
         if (decalStore is null && !config.LuckyrenMode && pieces.Count == 0)
         {
             world.BloodMarks = null;
@@ -82,7 +83,6 @@ sealed partial class GameHost
             debrisClock = gutClock;
             return;
         }
-        if (!ReferenceEquals(bloodFor, world)) BloodForNewWorld(null);
         world.BloodMarks = bloodQueue;
         float tick = world.TickSeconds;
         while (bloodQueue.TryDequeue(out var m))
@@ -118,7 +118,6 @@ sealed partial class GameHost
         double clock = session.ShownTick + session.SimulationAlpha;   // the shown tick: one run ahead is not on screen yet
         UpdateDebris(world, (float)Math.Clamp((clock - debrisClock) * tick, 0, 0.5));
         debrisClock = clock;
-        UpdateRobotCables(world, (float)(clock * tick));
     }
 
     /// <summary>One mark as the <c>bloodsurfaces</c> switch's decals (<see cref="TerrainDecalRenderer.Surfaces"/>); the same marks and sizes as the terrain's.</summary>
@@ -205,6 +204,7 @@ sealed partial class GameHost
             bool robot = victimData?.Race?.IsRobot == true;
             EmitRobotCutSparks(e, victimData);
             EmitRobotCutDebris(e, victimData);
+            EmitRobotBreakExplosion(e, victimData);
             uint bloodColour = victimData?.Race?.BloodColour ?? DefaultBloodColour;
             // A hit throws real drops along the blow, out of the wound.
             if (!robot && !o.NoParticles && e.Kind == Meitou.Simulation.Combat.CombatEventKind.Hit && gpu?.Particles is { } drops)
@@ -423,6 +423,7 @@ sealed partial class GameHost
         pieces.Clear();
         if (gpu is not null) gpu.DebrisPieces.Clear();
         bloodQueue.Clear();
+        ClearLiquidBlood();
         bloodFor = world;
         bloodTick = world.Tick;
         debrisClock = session.ShownTick + session.SimulationAlpha;

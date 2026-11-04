@@ -25,7 +25,7 @@ public sealed class CharacterPoseSetup
 /// Skeleton rigs by file and pose setups by appearance, read once; safe from any thread. <paramref name="findMesh"/> finds a mesh the way Kenshi does (bare name
 /// through resources.cfg first), <paramref name="find"/> any other art file; both return a full path or null.
 /// </summary>
-public sealed class CharacterRigs(GameDatabase db, Func<string, string?> findMesh, Func<string, string?> find)
+public sealed partial class CharacterRigs(GameDatabase db, Func<string, string?> findMesh, Func<string, string?> find)
 {
     readonly ConcurrentDictionary<string, Lazy<SkeletonRig>> rigs = new(StringComparer.OrdinalIgnoreCase);
     readonly ConcurrentDictionary<string, Lazy<string?>> skeletonNames = new(StringComparer.OrdinalIgnoreCase);

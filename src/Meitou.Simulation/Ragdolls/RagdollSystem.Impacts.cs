@@ -75,7 +75,8 @@ public sealed partial class RagdollSystem
             // Awake may move a sleeping island; reacquire the reference before reading its inertia or applying force.
             body = physics.Simulation.Bodies[r.Bodies[hit.Actor]!.Value];
             if (body.LocalInertia.InverseMass <= 0) continue;
-            body.ApplyImpulse(hit.Push / body.LocalInertia.InverseMass, Vector3.Transform(hit.LocalOffset, body.Pose.Orientation));
+            var push = hit.Push * RobotRagdollWeight.Response(cold.Race is { IsRobot: true });
+            body.ApplyImpulse(push / body.LocalInertia.InverseMass, Vector3.Transform(hit.LocalOffset, body.Pose.Orientation));
         }
         hitImpacts.Clear();
     }

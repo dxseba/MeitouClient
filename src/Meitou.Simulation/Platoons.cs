@@ -187,6 +187,7 @@ public sealed class PlatoonRegistry
                     h.Add(m.Position);
                     m.Cold.Brutality.Hash(ref h);
                     if (m.Cold.HeadCut is { } headCut) headCut.Hash(ref h);
+                    Wounds.LimbCutPolicy.Hash(ref h, m.Cold.LimbSeverances);
                 }
                 h.Add(stored.Anchor);
                 h.Add(stored.Pinned);
@@ -211,6 +212,13 @@ public sealed class PlatoonRegistry
                     {
                         h.Add(0x42725376); h.Add(member.Slot);
                         Bodies.BrutalityProgress.HashExperience(ref h, experience);
+                    }
+                foreach (var member in saved.Members)
+                    if (member.Live.IsNone && !member.Gone
+                        && (member.LimbSeverances ?? Saving.LimbCutSave.Read(member.Source.GameState)) is { Count: > 0 } cuts)
+                    {
+                        h.Add(member.Slot);
+                        Wounds.LimbCutPolicy.Hash(ref h, cuts);
                     }
                 foreach (var member in saved.Members)
                     if (member.Live.IsNone && !member.Gone && (member.HeadCut ?? Saving.HeadCutSave.Read(member.Source.GameState)) is { } headCut)

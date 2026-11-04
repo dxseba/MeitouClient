@@ -147,7 +147,7 @@ sealed partial class GameHost
             AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses)
             {
                 TorsoCut = AttachedHeadClip(c),
-                Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
+                Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id), LimbSeverances = c.LimbSeverances,
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
                 HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Scale = c.Scale, Hidden = hiddenIndoors.Contains(c.Id), FullRateAnimation = c.IsPlayer, Rotation = rotation, Build = c.Build, Blood = c.BloodAmounts,
                 Bones = Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),
@@ -328,7 +328,7 @@ sealed partial class GameHost
             AddTorsoHalves(list, c, new CharacterInstance(DrawKey(c.Id), look, position, yaw, poses)
             {
                 TorsoCut = AttachedHeadClip(c),
-                Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id),
+                Wounds = WoundMarks(c.Id), LostGroups = LostGroups(c.Id), LimbCuts = LimbCuts(c.Id), LimbSeverances = c.LimbSeverances,
                 HeadWoundPlacement = severeHeads.Of(c.Id)?.Placement is { } headPlacement ? new CharacterHeadWoundPlacement(headPlacement.Point, headPlacement.Normal, headPlacement.Tangent, headPlacement.LengthScale, headPlacement.WidthScale) : null,
                 HipWeaponBlood = c.HipWeaponBlood, BackWeaponBlood = c.BackWeaponBlood, WeaponDrawn = c.WeaponDrawn, RangedDrawn = c.RangedDrawn, BackDrawn = c.BackDrawn, Shots = c.CrossbowShots, Bolts = BoltsOf(c), Scale = c.Scale, Hidden = inBar is null && hiddenIndoors.Contains(c.Id), FullRateAnimation = editing is not null || fullRate.Contains(c.Id) || c.Id == sandboxHero && sandboxPicker?.Current is not null,
                 Bones = !posed ? null : Blend(before is null || Reanchored(before, c) ? null : before.Ragdoll, c.Ragdoll, alpha, ref Slot(ref ragdollsBySlot, c.Id.Slot), ref Slot(ref spareRagdollsBySlot, c.Id.Slot)),

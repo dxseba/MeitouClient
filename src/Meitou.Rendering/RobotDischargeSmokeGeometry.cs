@@ -29,7 +29,7 @@ internal static class RobotDischargeSmokeGeometry
             float strength = Math.Clamp(anchor.Intensity, 0, 1);
             for (int puff = 0; puff < quota; puff++)
             {
-                float age = anchor.AgeSeconds - puff * 0.23f;
+                float age = anchor.AgeSeconds - puff * 0.04f;
                 if (age < 0) continue;
                 var value = Puff(anchor.Position, age, anchor.Seed, puff, fade * strength);
                 if (!Finite(value.Position) || !float.IsFinite(value.Rotation) || !float.IsFinite(value.Alpha)) continue;
@@ -48,13 +48,14 @@ internal static class RobotDischargeSmokeGeometry
         float phase = clock - whole;
         float elapsed = phase * life;
         uint cycle = Mix(seed ^ BitConverter.SingleToUInt32Bits(whole));
-        float speed = 1.3f + Unit(cycle + 1) * 0.35f;
+        float speed = 0.65f + Unit(cycle + 1) * 0.2f;
         var drift = new Vector3(Unit(cycle + 2) - 0.5f, 0, Unit(cycle + 3) - 0.5f) * (elapsed * 0.28f);
         var sway = new Vector3(MathF.Sin(elapsed * 1.7f), 0, MathF.Sin(elapsed * 1.3f + 1.8f)) * (0.12f * phase);
         var position = origin + drift + sway + Vector3.UnitY * (0.15f + elapsed * speed);
         float size = 1.5f + phase * 1.5f + Unit(cycle + 4) * 0.3f;
         float rotation = Unit(cycle + 5) * MathF.Tau + elapsed * (Unit(cycle + 6) - 0.5f) * 0.32f;
-        float envelope = MathF.Sin(phase * MathF.PI);
+        float tail = Math.Clamp((1 - phase) / 0.3f, 0, 1);
+        float envelope = (0.65f + 0.35f * MathF.Sin(phase * MathF.PI)) * tail;
         float alpha = (0.17f + Unit(cycle + 7) * 0.09f) * envelope * opacity;
         return new(position, size, rotation, alpha);
     }

@@ -53,6 +53,7 @@ Authority: `src/Meitou.Game/GameOptions.cs` (`Split`, `Usage`), `src/Meitou.Game
 | `--sandbox-dummy` | | off | Implies `--sandbox-bare`. Fighters are male humans. Visual-only test hits land on each of the foe's parts in turn, with no fight. |
 | `--sandbox-part <name>` | head, chest, stomach, left arm... | off | With `--sandbox-dummy`: test hits only on that body part. With `--sandbox-bisect`, `stomach` selects an abdominal cleave; default is chest. |
 | `--sandbox-bisect` | | off | With `--sandbox 2`: force one qualifying lethal torso cut at tick 120 (chest by default, or `--sandbox-part stomach`); implies dummy/bare. `--scene bisect --scene-every 30 --scene-frames 8` captures the visible impact and both falling halves. Uses the production eligibility policy with a fixed successful roll. |
+| `--sandbox-corpse-pile` | | off | With `--scene bisect-stress`: pack victims into a dense pile; report simulation and ragdoll step times as well as rendering. |
 | `--sandbox-bisect-style <kind>` | auto, transverse, vertical, diagonal, oblique | auto | With `--sandbox-bisect`: select a transverse waist cut, longitudinal body split, long/steep diagonal, or oblique trunk cut from abdomen toward the opposite shoulder. Auto follows the native blade axis. |
 | `--sandbox-bisect-variant <n>` | unsigned integer | from world/impact | With `--sandbox-bisect`: repeat one cut height and angle for visual comparison; seeds 0, 1 and 3 show distinct cuts. |
 | `--sandbox-behead` | | off | With `--sandbox-dummy`: the foe loses its head at tick 120. |
@@ -365,3 +366,10 @@ Names starting `MEITOU_` are also recorded in the benchmark JSON (`WorldApp.Benc
 - `MEITOU_FRAGMENT` (`src/Meitou.Rendering/Gpu/Shaders/GlslProgramCompiler.cs:167`) is a shader macro, not an environment variable, so it is excluded.
 - `MTL_CAPTURE_ENABLED` appears only in the game's usage text (`GameOptions.cs:120`); no project code reads it.
 - The viewer's `--class` and the impostor `--debug` semantics are not traced beyond the parse.
+
+`--sandbox-limb-cut left-arm|right-arm|left-leg|right-leg|arms|legs` forces a normal medical
+severing preview at tick120; `--sandbox-limb-variant n` varies its deterministic position/tilt.
+`--sandbox-cut-direction` selects the sweep; `--sandbox-limb-low` selects forearm/calf placement.
+`--sandbox-limb-prewounded` starts the selected limb near destruction and uses a small severing hit,
+allowing conscious arm-loss/partial-ragdoll previews. `--scene limb-cut` records the posed stump and
+detached fragments. These preview selections do not change live paired-cut odds.

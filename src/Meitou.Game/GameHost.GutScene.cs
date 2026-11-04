@@ -18,6 +18,6 @@ sealed partial class GameHost
         string Number(float value) => value.ToString("0.000", CultureInfo.InvariantCulture);
         var ranges = pieces.Select(p => gpu.Debris?.BowelBounds(p!) is { } b
             ? $"centre {Number(p!.Centre.Y)}, mesh Y {Number(b.Min.Y)}..{Number(b.Max.Y)}" : "pending upload");
-        Console.WriteLine($"bowel frame {frame}: physical {gutPhysics?.Count ?? 0}, moving {gutPhysics?.Moving ?? 0}; {string.Join("; ", ranges)}");
+        Console.WriteLine($"bowel frame {frame}: physical {gutPhysics?.Count ?? 0}, moving {gutPhysics?.Moving ?? 0}, attached {gutFalls.Values.Count(f => gutPhysics?.IsAttached(f.RigKey) == true)}; {string.Join("; ", ranges)}");
     }
 }

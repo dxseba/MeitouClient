@@ -18,6 +18,9 @@ sealed partial class GameHost
         public uint BloodColour = DefaultBloodColour;
         public long RigKey;
         public bool Physical, Resting;
+        public bool Section, Positioned, AttachmentBroken, KeepAttached;
+        public float InsideDepth;
+        public Vector3 AttachmentLocal;
     }
 
     readonly Dictionary<CharacterId, GutFall> gutFalls = [];
@@ -28,7 +31,7 @@ sealed partial class GameHost
     long nextGutKey;
 
     /// <summary>Loose tissue uses its own display-thread Bepu scene; world simulation is never mutated from rendering.</summary>
-    void UpdateGuts(World world, float dt, bool draw = true)
+    void UpdateGuts(World world, float dt)
     {
         if (gpu?.Debris is not { } debris) return;
         debris.AnatomyFile ??= Meitou.Content.GameInstall.Locate() is { } game
@@ -39,38 +42,49 @@ sealed partial class GameHost
             if (gone.Age > GutLifeSeconds || !world.Characters.IsAlive(who)) RemoveGutFall(who);
         dt = float.IsFinite(dt) ? Math.Clamp(dt, 0, 0.5f) : 0;
         UpdateGutPhysics(world, config.AdvancedRagdolls ? debris.BowelRig() : null, dt);
-        if (!draw) return;
+    }
+
+    void DrawGuts()
+    {
         foreach (var fall in gutFalls.Values)
         {
+            if (fall.Section && !fall.Positioned) continue;
             var pose = fall.Physical ? gutPhysics?.PoseOf(fall.RigKey) : null;
             gpu.DebrisPieces.Add(new DebrisPiece(DebrisRenderer.Bowel, 1, pose is null ? fall.Rotation : Quaternion.Identity,
                 pose?.Centre ?? fall.Position, BloodColour: fall.BloodColour, Bowel: pose));
         }
-        debris.PrepareBowels(CollectionsMarshal.AsSpan(gpu.DebrisPieces));
+        gpu.Debris?.PrepareBowels(CollectionsMarshal.AsSpan(gpu.DebrisPieces));
     }
 
     void UpdateGutPhysics(World world, BowelRigGeometry? geometry, float dt)
     {
         foreach (var fall in gutFalls.Values)
         {
+            if (fall.Section && !fall.Positioned) { fall.Age += dt; continue; }
+            if (fall.Section && !GutEmergence.AttachedAt(fall.KeepAttached, fall.Age))
+            {
+                gutPhysics?.ReleaseAttachment(fall.RigKey);
+                fall.AttachmentBroken = true;
+            }
             if (geometry is not null && !fall.Physical)
             {
                 gutPhysics ??= new BowelRagdollScene();
-                bool resting = fall.Age >= 1;
+                bool resting = fall.Resting || !fall.Section && fall.Age >= 1;
                 var rotation = resting ? RestingGutRotation(geometry) : fall.Rotation;
                 var position = resting ? fall.Position with { Y = fall.Floor + geometry.Radius } : fall.Position;
                 fall.Physical = gutPhysics.Add(fall.RigKey, geometry, position, rotation,
-                    resting ? Vector3.Zero : fall.Velocity, resting);
+                    resting ? Vector3.Zero : fall.Velocity, resting,
+                    pinNode: fall.Section && !fall.AttachmentBroken && GutEmergence.AttachedAt(fall.KeepAttached, fall.Age) ? 0 : -1, preserveAttachment: fall.KeepAttached);
             }
             else if (geometry is null && fall.Physical)
             {
                 if (gutPhysics?.PoseOf(fall.RigKey) is { } last) fall.Position = last.Centre;
                 gutPhysics?.Remove(fall.RigKey);
                 fall.Physical = false;
-                fall.Rotation = Quaternion.Identity;
+                if (!fall.Section || fall.AttachmentBroken) fall.Rotation = Quaternion.Identity;
                 fall.Velocity = Vector3.Zero;
             }
-            if (fall.Physical) fall.Age += dt;
+            if (fall.Physical || fall.Section && !fall.AttachmentBroken && GutEmergence.AttachedAt(fall.KeepAttached, fall.Age)) fall.Age += dt;
             else StepGut(fall, dt);
         }
         if (geometry is null && gutPhysics is not null)

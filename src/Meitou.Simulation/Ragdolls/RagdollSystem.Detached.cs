@@ -28,6 +28,7 @@ public sealed partial class RagdollSystem
     {
         public int Missing, Robotic;
         public HeadCutState? HeadCut;
+        public IReadOnlyList<LimbCutState> LimbSeverances = [];
         public RagdollDefinition? Source, Remaining;
         public readonly List<DetachedPiece> Pieces = [];
         public readonly List<RagdollDefinition> Retired = [];
@@ -106,7 +107,7 @@ public sealed partial class RagdollSystem
         }
         int previousMissing = owner!.Missing, previousRobotic = owner.Robotic;
         owner.Robotic = robotic;
-        if (missing == previousMissing && headCut == owner.HeadCut) return;
+        if (missing == previousMissing && headCut == owner.HeadCut && owner.LimbSeverances.SequenceEqual(cold.LimbSeverances)) return;
         if (SetupOf(look) is not { } setup || DefinitionOf(look, setup.Rig, 1) is not { } source) return;
         owner.Source = source;
         ragdolls.TryGetValue(id, out var before);
@@ -160,8 +161,10 @@ public sealed partial class RagdollSystem
         {
             if (part == -1 && slicedHead) continue;
             if ((missing & 1 << (part + 1)) == 0 || remaining is null) continue;
-            float height = part < 0 ? 0 : SeveredLevels.Height(SeveredLevels.Of(id, part, world.Tick), part);
-            var split = RagdollSeverance.Split(remaining, part, height);
+            var limbCut = cold.LimbSeverances.FirstOrDefault(candidate => candidate.LimbSlot == part && candidate.IsValid);
+            var split = part >= 0 && LimbCutGeometry.TryPlane(setup.Rig, limbCut, out var limbPlane)
+                ? RagdollSeverance.Split(remaining, part, limbPlane)
+                : RagdollSeverance.Split(remaining, part, part < 0 ? 0 : SeveredLevels.Height(SeveredLevels.Of(id, part, world.Tick), part));
             remaining = split.Remaining;
             if ((newlyMissing & 1 << (part + 1)) == 0 || torso || firstSeen && cold.Save is not null || split.Detached is not { } definition) continue;
             var oldPiece = owner.Pieces.Find(p => p.Part == part);
@@ -174,6 +177,7 @@ public sealed partial class RagdollSystem
         }
         owner.Missing = missing;
         owner.HeadCut = headCut;
+        owner.LimbSeverances = cold.LimbSeverances;
         var oldDefinition = owner.Remaining;
         owner.Remaining = remaining ?? source; // A humanoid retains its spine/pelvis even after every ordinary limb loss.
         // A torso cut takes the previous body itself; initial loaded stumps must leave saved-pose restoration to the normal path.
@@ -206,9 +210,10 @@ public sealed partial class RagdollSystem
             var piece = Make(definition, initialSetup);
             var initial = FromOriginal(definition);
             bool restored = part == -1 && restoredHead;
-            var motion = restored ? default : (start.Velocity + separation * 1.5f, start.Push);
+            var outward = separation * (1.5f * RobotRagdollWeight.Response(cold.Race.IsRobot));
+            var motion = restored ? default : (start.Velocity + outward, start.Push);
             Rebuild(piece, RagdollPart.Whole, initial, motion, true, world.Seed);
-            if (!restored) Inherit(piece, separation * 1.5f);
+            if (!restored) Inherit(piece, outward);
             if (!restored && piece.Bodies[piece.Definition.Root] is { } root && start.Push.LengthSquared() > 1e-8f)
             {
                 var spin = Vector3.Cross(start.Push, Vector3.UnitY) * .1f;

@@ -66,7 +66,7 @@ internal sealed partial class CharacterRenderer
                     if (h == asset.HeadBone) { head = true; break; }
                 if (asset.Appearance is { } look)
                 {
-                    int hiddenLimbs = look.HiddenLimbs & ~CutBits(limbCuts);
+                    int hiddenLimbs = look.HiddenLimbs & ~(CutBits(limbCuts) | (int)state.LimbPlanes.Mask);
                     float below = group <= 2 ? look.Female ? 14.1f : 13.83f : 8.6f;
                     // BodySource precedes MarkBody, so derive the same anatomical hide rule rather than reading absent colour marks.
                     if (look.Headless && head || group is >= 1 and <= 4 && (hiddenLimbs & (1 << (group - 1))) != 0 && skin.Position.Y < below) hidden = true;
@@ -85,8 +85,7 @@ internal sealed partial class CharacterRenderer
                         if (id == wanted) influence += weight;
                     }
                 float band = TorsoCutSurface.Band(skin.Position, group, kept);
-                uint height = group is >= 1 and <= 4 ? limbCuts >> (8 * (group - 1)) & 255 : 0;
-                float limbBand = height == 0 ? 1000 : skin.Position.Y - height * 0.1f;
+                float limbBand = state.LimbPlanes.Band(skin.Position, group, limbCuts, state.PartOnly);
                 uint slot = BitConverter.SingleToUInt32Bits(skin.Colour.X);
                 if (morphs is not null && slot > 0 && slot <= morphs.Length)
                 {

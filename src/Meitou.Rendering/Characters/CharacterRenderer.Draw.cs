@@ -301,6 +301,10 @@ internal sealed unsafe partial class CharacterRenderer
                 level = GeneratedLevel(part, value, depthPass);
             }
 
+            if (GeneratedLod && part.Anatomy && !part.IsTorsoCap && !part.IsHeadRelief && part.Mesh.Distances.Length > 1)
+                level = AnatomyMeshLod.LevelForPixels(2 * part.BoundsRadius * modelScale * viewPixelsPerRadian
+                    / MathF.Max(1, Vector3.Distance(eye - origin, centre)), part.Mesh.Distances.Length);
+
             var instance = new CharInstance
             {
                 Model = part.IsBody ? WithBlood(model, l.Blood) : model,
@@ -362,8 +366,8 @@ internal sealed unsafe partial class CharacterRenderer
     {
         uint flags = (uint)part.HideSide << 16;
         if (!part.IsBody || l.Asset.Appearance is not { } look) return flags;
-        flags |= (uint)(look.HiddenLimbs & ~CutBits(l.LimbCuts)) << 12;
-        flags |= (uint)(l.LimbCuts != 0 ? 0 : look.HiddenParts & 0x3FF) << 18;
+        flags |= (uint)(look.HiddenLimbs & ~(CutBits(l.LimbCuts) | (int)l.LimbPlanes.Mask)) << 12;
+        flags |= (uint)(l.LimbCuts != 0 || l.LimbPlanes.Mask != 0 ? 0 : look.HiddenParts & 0x3FF) << 18;
         if (look.Headless) flags |= CharacterShaders.Headless;
         if (look.HeadOnly) flags |= CharacterShaders.HeadOnly;
         return flags;
@@ -425,11 +429,12 @@ internal sealed unsafe partial class CharacterRenderer
     {
         if (!part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn) || !TorsoPartVisible(l, part)) return false;
         if (part.Anatomy && !(l.HasWounds && l.Pixels > AnatomyPixels)) return false;
-        if (l.LimbCuts != 0 && part.Label.StartsWith("LIMB_REPLACEMENT", StringComparison.Ordinal)) return false;
-        if (l.PartOnly != 0 && !(part.IsBody && l.HasWounds)) return false;
+        if (part.LimbReplacementSlot is >= 0 and < 4 and var slot
+            && ((CutBits(l.LimbCuts) | (int)l.LimbPlanes.Mask) & 1 << slot) != 0) return false;
+        if (l.PartOnly != 0 && !(l.HasWounds && (part.IsBody || l.LimbPlanes.Has((int)(l.PartOnly >> 8)) && (part.Anatomy || part.Shared)))) return false;
         if (part.Bone < 0 || l.LostGroups == 0) return true;
         int group = woundMasks.GroupOfBone(l.Asset.Rig, part.Bone);
-        return (l.LostGroups >> group & 1) == 0 || group is not (1 or 2);
+        return (l.LostGroups >> group & 1) == 0 || group is not (1 or 2) || l.LimbPlanes.Has(group);
     }
 
     /// <summary>A batch's instance as one chunk of characters gathered it: the batch's id, its place there (set in character order) and the instance.</summary>
@@ -540,6 +545,9 @@ internal sealed unsafe partial class CharacterRenderer
             ref readonly var v = ref views[k];
             if (depth && part.BoundsRadius * f.Scale < v.MinRadius) continue;
             int level = !GeneratedLod ? FileLevel(part, f.FileLod) : GeneratedLevel(part, depth ? Math.Max(lod, v.LodFloor) : lod, depth);
+            if (GeneratedLod && part.Anatomy && !part.IsTorsoCap && !part.IsHeadRelief && part.Mesh.Distances.Length > 1)
+                level = AnatomyMeshLod.LevelForPixels(2 * part.BoundsRadius * f.Scale * viewPixelsPerRadian
+                    / MathF.Max(1, f.Lod + part.BoundsRadius * f.Scale), part.Mesh.Distances.Length);
 
             var chunk = v.Batches.Chunks[c];
             chunk.Parts++;
@@ -683,6 +691,8 @@ internal sealed unsafe partial class CharacterRenderer
 
     bool TorsoPartVisible(in Live live, AssetPart part)
     {
+        if (!part.Shared && part.Bone >= 0 && part.Bone < live.Asset.Rig.BindPosition.Length
+            && live.LimbPlanes.Band(live.Asset.Rig.BindPosition[part.Bone], woundMasks.GroupOfBone(live.Asset.Rig, part.Bone), live.LimbCuts, live.PartOnly) < 0) return false;
         if (live.TorsoCut is not { } cut || part.Shared || part.Bone < 0 || part.Bone >= live.Asset.Rig.BindPosition.Length) return true;
         return TorsoCutSurface.Band(live.Asset.Rig.BindPosition[part.Bone], cut.HeadOnly ? HeadCutSurface.Group(live.Asset, part.Bone) : woundMasks.GroupOfBone(live.Asset.Rig, part.Bone), cut) >= 0;
     }

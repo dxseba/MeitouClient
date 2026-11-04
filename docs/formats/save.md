@@ -98,6 +98,16 @@ keeps a dead cut owner restorable through the existing fragment-owner path, with
 a standalone owner uses the same marker on its platoon. Loose head-piece motion remains transient,
 as for existing detached heads; the saved cut restores the body's appearance without a new hit.
 
+**Geometric limb cuts (Meitou)**: optional GAMESTATE_CHARACTER string `meitou limb cuts` stores
+`L1 slot fraction slantX slantY ...`, one entry per affected slot0..3, up to four. Invariant round-trip
+floats retain the position along the two-segment bind chain and its oblique slant; the shared
+`LimbCutGeometry` fits them to the actual race rig. Fractions must be .08–.92 and slant magnitude
+at most1.2; malformed/duplicate/unknown rows restore no cuts. Live and stored NPC paths retain
+the extension. Legacy rows without it retain their old level-based appearance. Loose limb poses
+remain transient; loading a stump does not synthesize another dropped limb. **Verified**
+(`LimbCutStorageTests`): native FCS bytes, foreign culture, invalid rows, player capture/load and
+NPC unload/capture/reload/spawn with matching medical limb bits and exact geometry.
+
 ## Compatibility exceptions
 
 Do not normalize string bytes, NaNs, zero/non-size byteSize, sparse slots or unknown key sets.

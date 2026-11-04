@@ -24,19 +24,25 @@ public sealed partial class CombatSystem
     public static float TestPower { get; set; } = 1;
 
     /// <summary>Publishes a hit and its medical events. Serial, like the hits themselves.</summary>
-    internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false, CombatWoundMechanism mechanism = CombatWoundMechanism.Unspecified, bool bodyBisected = false, float? attackerBrutality = null)
+    internal void PublishHit(World world, CombatHitSource source, CharacterId attacker, int victim, MedicalState medical, int part, in HitDamage damage, Vector2 direction, List<MedicalEvent> events, int cutDirection = -1, bool lowStrike = false, CombatWoundMechanism mechanism = CombatWoundMechanism.Unspecified, bool bodyBisected = false, float? attackerBrutality = null, ulong? limbCutSeed = null)
     {
+        var owner = world.Characters.Cold(victim);
+        var id = world.Characters.IdOf(victim);
+        float yaw = world.Characters.Previous[victim].Yaw;
+        ulong cutSeed = limbCutSeed ?? Rng.Mix(world.Seed ^ Rng.Key(id) ^ Rng.Key(attacker) ^ (ulong)world.Tick * 0x9E3779B97F4A7C15UL);
         foreach (var ev in events)
-            if (ev.Kind == MedicalEventKind.PartSevered && medical.Parts[ev.Part].Template.LimbSlot is >= 0 and <= 3 and var limb && cutDirection >= 0)
-                Wounds.SeveredLevels.Note(world.Characters.IdOf(victim), limb, cutDirection, lowStrike);
+            if (ev.Kind == MedicalEventKind.PartSevered && medical.Parts[ev.Part].Template.LimbSlot is >= 0 and <= 3 and var limb)
+            {
+                if (cutDirection >= 0) Wounds.SeveredLevels.Note(id, limb, cutDirection, lowStrike);
+                if (options.AdvancedRagdolls && Wounds.SeveredLevels.Forced is null && owner is not null)
+                    Wounds.LimbCutPolicy.Note(owner, limb, cutDirection, lowStrike, direction, yaw, cutSeed);
+            }
         if (world.CombatEvents is not { } queue) return;
         float brutality = attackerBrutality ?? (world.Characters.TryResolveNext(attacker, out int sourceSlot)
             ? world.Characters.Cold(sourceSlot)?.Brutality.Level ?? 0 : 0);
         int weaponCategory = world.Characters.TryResolveNext(attacker, out int weaponSlot)
             ? world.Characters.Cold(weaponSlot)?.Fighter?.Weapon?.Data.SkillCategory ?? -1 : -1;
-        var id = world.Characters.IdOf(victim);
         var position = world.Characters.Previous[victim].Position;
-        float yaw = world.Characters.Previous[victim].Yaw;
         Enqueue(CombatEventKind.Hit, part, damage);
         foreach (var ev in events)
         {

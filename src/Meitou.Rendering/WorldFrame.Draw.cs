@@ -194,6 +194,7 @@ static partial class WorldFrame
             shown.ShownMirror = render.Water && render.Reflections && gpu.Water is not null && gpu.Reflection is { Level: >= 2 } ? WorldWater.Height : null;
         }
         gpu.Characters?.Update(f.Eye);
+        gpu.AfterCharacterPose?.Invoke();
 
         if (gpu.Characters is { } posed && gpu.Debris is { } boltMeshes)
         {

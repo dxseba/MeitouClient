@@ -66,7 +66,8 @@ internal sealed partial class CharacterRenderer
             }
         }
         finally { rig.Return(scratch); }
-        var sampled = new CharState { Asset = asset, Bones = context.Skin, World = world, Posed = updateStamp, InWorld = true };
+        var sampled = new CharState { Asset = asset, Bones = context.Skin, World = world, Posed = updateStamp, InWorld = true,
+            LimbPlanes = LimbCutPlanes.Resolve(rig, reference.LimbSeverances), LimbCuts = reference.LimbCuts, PartOnly = reference.PartOnly };
         context.Retained ??= CentralCarryContact(sampled, cut, support, reference.LimbCuts, null, out _);
         if (context.Retained is null) return false;
         context.SupportPoint = support;

@@ -20,7 +20,7 @@ using SimWorld = Meitou.Simulation.World;
 
 namespace Meitou.Tests.Physics;
 
-public class RagdollHitReactionTests
+public partial class RagdollHitReactionTests
 {
     sealed class Flat : IRagdollEnvironment, IWalkability
     {
@@ -40,7 +40,7 @@ public class RagdollHitReactionTests
         public CharacterId Id { get; }
         public BodyOptions Options { get; }
         public CharacterPoseSetup Setup { get; }
-        public Scene(bool advanced = true, bool combat = false, bool knockout = true, bool fatal = false)
+        public Scene(bool advanced = true, bool combat = false, bool knockout = true, bool fatal = false, bool robot = false)
         {
             var skeleton = new OgreSkeleton();
             skeleton.Bones.Add(new() { Handle = 0, Name = "Bip01", Position = new(0, 11, 0) });
@@ -60,6 +60,7 @@ public class RagdollHitReactionTests
             var database = new GameDatabase();
             var file = new FcsFile();
             file.Records.Add(new() { StringId = "hit-race", Name = "Hit race", RecordType = FcsRecordType.RACE, Flags = 0x10 });
+            file.Records[0].Bools["is robot"] = robot;
             database.Apply(file, "hit-tests.mod");
             Options = BodyOptions.Default with { AdvancedRagdolls = advanced };
             Options.ForcedHitPart = fatal ? (Head.StringId, Head.Name) : (Chest.StringId, Chest.Name);
@@ -72,7 +73,7 @@ public class RagdollHitReactionTests
             Cold.Name = "Unconscious victim";
             Cold.Faction = 1;
             Cold.Appearance = new() { Race = database.Find("hit-race")! };
-            var race = new RaceData { Anatomy = [.. Human.Anatomy.Select(e => e with { Part = e.Part with { BoneName = e.Part.Type switch { BodyPartType.Head => "Bip01 Head", BodyPartType.Arm => "Bip01 L Forearm", _ => "Bip01" } } })] };
+            var race = new RaceData { IsRobot = robot, Anatomy = [.. Human.Anatomy.Select(e => e with { Part = e.Part with { BoneName = e.Part.Type switch { BodyPartType.Head => "Bip01 Head", BodyPartType.Arm => "Bip01 L Forearm", _ => "Bip01" } } })] };
             Cold.Race = race;
             Cold.Medical = Healthy(race);
             if (knockout) Cold.Medical.KnockOut(10000);

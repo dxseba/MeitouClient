@@ -32,6 +32,7 @@ public sealed class SavedMember
     public CharacterStats? Stats { get; set; }
     public BrutalityProgress? Brutality { get; set; }
     public Wounds.HeadCutState? HeadCut { get; set; }
+    public IReadOnlyList<Meitou.Data.Characters.LimbCutState>? LimbSeverances { get; set; }
     public MedicalState? Medical { get; set; }
     public Inventory? Inventory { get; set; }
     public CharacterAppearance? Look { get; set; }
@@ -163,7 +164,7 @@ public sealed class SavedPopulation
 
 /// <summary>What a saved character's records give, read without touching the world (the population's build thread does it for NPC platoons).</summary>
 internal sealed record SavedParts(SaveCharacter Source, GameRecord Record, RaceData? Race, CharacterStats? Stats, MedicalState? Medical, IReadOnlyList<SaveItem> Items,
-    Inventory? Inventory, CharacterAppearance? Look, BrutalityProgress? Brutality = null, Wounds.HeadCutState? HeadCut = null);
+    Inventory? Inventory, CharacterAppearance? Look, BrutalityProgress? Brutality = null, Wounds.HeadCutState? HeadCut = null, IReadOnlyList<Meitou.Data.Characters.LimbCutState>? LimbSeverances = null);
 
 /// <summary>Making characters from a save: the player's platoons at load (<see cref="SaveLoader"/>) and NPC platoons when their zone loads (<see cref="PopulationSystem"/>).</summary>
 internal static class SavedCharacters
@@ -210,7 +211,7 @@ internal static class SavedCharacters
                 look = again.Create(sc.RecordId, worn) ?? look;
             }
         }
-        return new SavedParts(sc, record, race, stats, medical, savedItems, null, look, BrutalitySave.Read(sc.GameState), HeadCutSave.Read(sc.GameState));
+        return new SavedParts(sc, record, race, stats, medical, savedItems, null, look, BrutalitySave.Read(sc.GameState), HeadCutSave.Read(sc.GameState), LimbCutSave.Read(sc.GameState));
     }
 
     /// <summary>A member made again after its platoon left the world: what it was then, the race and record from the data.</summary>
@@ -219,7 +220,7 @@ internal static class SavedCharacters
         var sc = m.Source;
         if (data.Db.Find(sc.RecordId) is not { } record) return null;
         return new SavedParts(sc, record, RaceOf(sc, record, data.Db, races), m.Stats, m.Medical, [], m.Inventory, m.Look,
-            m.Brutality ?? BrutalitySave.Read(sc.GameState), m.HeadCut);
+            m.Brutality ?? BrutalitySave.Read(sc.GameState), m.HeadCut, m.LimbSeverances ?? LimbCutSave.Read(sc.GameState));
     }
 
     /// <summary>
@@ -254,6 +255,7 @@ internal static class SavedCharacters
             Name = sc.Name.Length > 0 ? sc.Name : p.Record.Name,
             Brutality = p.Brutality ?? BrutalitySave.Read(sc.GameState),
             HeadCut = p.HeadCut,
+            LimbSeverances = p.LimbSeverances ?? [],
             Faction = faction,
             Appearance = p.Look,
             RecordId = sc.RecordId,
@@ -475,6 +477,7 @@ internal static class SavedCharacters
             m.Stats = cold.Stats;
             m.Brutality = cold.Brutality;
             m.HeadCut = cold.HeadCut;
+            m.LimbSeverances = cold.LimbSeverances;
             m.Medical = cold.Medical;
             m.Inventory = cold.Inventory;
             m.Look = cold.Appearance;

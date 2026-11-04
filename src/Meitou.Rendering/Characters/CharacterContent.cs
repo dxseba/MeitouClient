@@ -25,6 +25,8 @@ internal sealed class AssetPart
     public uint HeadReliefProfiles;
     public bool IsHeadRelief;
     public bool IsTorsoCap;
+    public bool IsLimbCap;
+    public int LimbReplacementSlot = -1;
     public int Bone = -1;
     public Matrix4x4 Offset = Matrix4x4.Identity;
     /// <summary>Index among the character's bone-attached parts (the matrices <see cref="CharacterRenderer"/> keeps per frame); -1 for shared parts.</summary>
@@ -212,6 +214,7 @@ internal sealed class CharacterContent : IDisposable
     readonly IGpuContext gpu;
     readonly CharacterHeadWoundPool headWoundPool;
     readonly CharacterTorsoCutPool torsoCutPool;
+    readonly CharacterLimbCutPool limbCutPool;
     readonly AssetLocator assets;
     readonly GameDatabase db;
     readonly MaterialResolver resolver;
@@ -236,6 +239,7 @@ internal sealed class CharacterContent : IDisposable
         this.gpu = gpu;
         headWoundPool = new CharacterHeadWoundPool(gpu);
         torsoCutPool = new CharacterTorsoCutPool(gpu);
+        limbCutPool = new CharacterLimbCutPool(gpu);
         this.assets = assets;
         this.db = db;
         modsDirectory = install.ModsDirectory;
@@ -256,18 +260,21 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>Frees every mesh's buffers, the textures, the morph arena and the material table. The meshes' parts must not be drawn afterwards.</summary>
     public void Dispose()
     {
+        // Organic head/body views share their geometry; release each underlying buffer once.
+        var released = new HashSet<DeviceBuffer>();
         foreach (var mesh in meshes.Values)
             if (mesh is not null)
                 foreach (var part in mesh.Gpu.Parts)
                 {
-                    part.Vertices.Dispose();
-                    part.Indices.Dispose();
+                    if (released.Add(part.Vertices)) part.Vertices.Dispose();
+                    if (released.Add(part.Indices)) part.Indices.Dispose();
                 }
         meshes.Clear();
         prepared.Clear();
         MeshBytes = 0;
         headWoundPool.Dispose();
         torsoCutPool.Dispose();
+        limbCutPool.Dispose();
         Textures.Dispose();
         Morphs.Dispose();
         Materials.Dispose();
@@ -383,17 +390,43 @@ internal sealed class CharacterContent : IDisposable
     LoadedMesh? AnatomyMesh(SkeletonRig rig, string bodyPath, WoundPoint[] skin, bool female, MeshMorphs? morphs,
         bool headless, bool headOnly, uint bloodColour)
     {
-        var headMode = headOnly ? "head" : headless ? "body" : "whole";
-        var pathKey = "anatomy@" + bodyPath.ToLowerInvariant() + "@" + headMode + "@" + bloodColour;
-        var key = (pathKey, rig.BoneCount, female, (string?)rig.Skeleton.GetHashCode().ToString());
-        if (meshes.TryGetValue(key, out var cached)) return cached;
-        var made = CharacterAnatomy.Build(rig, skin, HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [], female, morphs,
-            headless, headOnly, Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy"), bloodColour);
-        return meshes[key] = made is null ? null : UploadAnatomy(made) with
+        string bodyKey = bodyPath.ToLowerInvariant();
+        var pathKey = "anatomy@" + bodyKey + "@" + bloodColour;
+        string skeletonKey = rig.Skeleton.GetHashCode().ToString();
+        (string, int, bool, string?) Key(string mode) => (pathKey + "@" + mode, rig.BoneCount, female, skeletonKey);
+        string mode = headOnly ? "head" : headless ? "body" : "whole";
+        if (meshes.TryGetValue(Key(mode), out var cached)) return cached;
+        // Fit once before injury: decapitation only selects a pre-uploaded region, not a second body import.
+        var made = CharacterAnatomy.Build(rig, skin, HeadSurfaces.GetValueOrDefault(bodyKey) ?? [], female, morphs,
+            headless: false, headOnly: false, Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy"), bloodColour);
+        if (made is null)
         {
-            BrainSource = made.Where(v => v.Tangent.W == 6).ToArray(),
-        };
+            foreach (string region in new[] { "whole", "body", "head" }) meshes[Key(region)] = null;
+            return null;
+        }
+        var array = made.ToArray();
+        var levels = AnatomyMeshLod.Build(array);
+        var regions = AnatomyMeshRegions.Build(array, levels, rig.Handle("Bip01 Head") ?? -1, rig.Handle("Bip01 Jaw") ?? -1);
+        var brain = array.Where(v => v.Tangent.W == 6).ToArray();
+        gpu.EnsureFrame();
+        using (var uploads = gpu.Uploads.Begin())
+        {
+            var vb = DeviceBuffer.Create(gpu, (ulong)((array.Length + 1) * Vertex.Size), BufferUse.Vertex, AllocationName);
+            var ib = DeviceBuffer.Create(gpu, (ulong)(regions.Indices.Length * 4), BufferUse.Index, AllocationName);
+            uploads.Write(vb, 0, MemoryMarshal.AsBytes(array.AsSpan()));
+            uploads.Write(ib, 0, MemoryMarshal.AsBytes(regions.Indices.AsSpan()));
+            foreach (var (name, region) in new[] { ("whole", regions.Whole), ("body", regions.Body), ("head", regions.Head) })
+            {
+                var mesh = new GpuObjectMesh { Distances = Enumerable.Range(0, levels.Length).Select(i => (float)i).ToArray(),
+                    Manual = new GpuObjectMesh?[levels.Length], Centre = region.Centre, Radius = region.Radius };
+                mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "anatomy", HasTangents = false, HasColours = true,
+                    Vertices = vb, Indices = ib, Offset = region.Offsets, Count = region.Counts, Attributes = GpuVertex.FloatAttributes(vb) });
+                meshes[Key(name)] = new LoadedMesh(mesh, null, region.Centre, region.Radius, BrainSource: name == "body" ? [] : brain);
+            }
+        }
+        return meshes[Key(mode)];
     }
+
     public HeadWoundView HeadPlacement(long key, CharacterAsset asset, in CharacterHeadWoundPlacement placement, uint headState, long stamp) =>
         headWoundPool.Resolve(key, asset, placement, headState, stamp);
 
@@ -401,6 +434,11 @@ internal sealed class CharacterContent : IDisposable
         torsoCutPool.Resolve(key, asset, parts, cut, groups, stamp, components);
 
     public ReadOnlySpan<Vertex> CutRim(long key) => torsoCutPool.Rim(key);
+    public ReadOnlySpan<Vertex> LimbCutRim(long key, int slot) => limbCutPool.Rim(key, slot);
+
+    public IReadOnlyList<AssetPart> LimbParts(long key, CharacterAsset asset, IReadOnlyList<AssetPart> parts,
+        in LimbCutPlanes planes, uint partOnly, uint[] groups, long stamp, int[]? components) =>
+        limbCutPool.Resolve(key, asset, parts, planes, partOnly, groups, stamp, components);
 
     LoadedMesh? MechanicalAnatomyMesh(SkeletonRig rig, string bodyPath, CharacterAppearance appearance)
     {
@@ -411,7 +449,7 @@ internal sealed class CharacterContent : IDisposable
         var source = BodySurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [];
         var head = HeadSurfaces.GetValueOrDefault(bodyPath.ToLowerInvariant()) ?? [];
         var made = CharacterMechanicalAnatomy.Build(rig, source, head, appearance.Headless, appearance.HeadOnly);
-        return meshes[key] = made is null ? null : UploadAnatomy(made);
+        return meshes[key] = made is null ? null : UploadAnatomy(made, reduced: true);
     }
 
     LoadedMesh? HeadReliefMesh(SkeletonRig rig, string bodyPath, Vector4[]? shapeDeltas, uint morphBase, uint bloodColour)
@@ -425,13 +463,19 @@ internal sealed class CharacterContent : IDisposable
         return meshes[key] = vertices.Count == 0 ? null : UploadAnatomy(vertices) with { HeadReliefProfiles = supported };
     }
 
-    LoadedMesh UploadAnatomy(List<Vertex> vertices)
+    LoadedMesh UploadAnatomy(List<Vertex> vertices, bool reduced = false)
     {
         var array = vertices.ToArray();
-        var indices = new uint[array.Length];
-        for (uint i = 0; i < indices.Length; i++) indices[i] = i;
+        uint[][] levels = reduced ? AnatomyMeshLod.Build(array) : [Enumerable.Range(0, array.Length).Select(i => (uint)i).ToArray()];
+        var indices = levels.SelectMany(level => level).ToArray();
+        var counts = levels.Select(level => level.Length).ToArray();
+        if (SpikeLog.Enabled && reduced && counts.Length > 1)
+            Console.WriteLine("anatomy detail triangles " + string.Join(" / ", counts.Select(count => count / 3)));
+        var offsets = new int[levels.Length];
+        for (int i = 1; i < offsets.Length; i++) offsets[i] = offsets[i - 1] + counts[i - 1];
         var centre = new Vector3(0, 8, 0);
-        var mesh = new GpuObjectMesh { Distances = [0], Manual = new GpuObjectMesh?[1], Centre = centre, Radius = 12 };
+        var mesh = new GpuObjectMesh { Distances = Enumerable.Range(0, levels.Length).Select(i => (float)i).ToArray(),
+            Manual = new GpuObjectMesh?[levels.Length], Centre = centre, Radius = 12 };
         gpu.EnsureFrame();
         using (var uploads = gpu.Uploads.Begin())
         {
@@ -439,7 +483,7 @@ internal sealed class CharacterContent : IDisposable
             var ib = DeviceBuffer.Create(gpu, (ulong)(indices.Length * 4), BufferUse.Index, AllocationName);
             uploads.Write(vb, 0, MemoryMarshal.AsBytes(array.AsSpan()));
             uploads.Write(ib, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
-            mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "anatomy", HasTangents = false, HasColours = true, Vertices = vb, Indices = ib, Offset = [0], Count = [indices.Length], Attributes = GpuVertex.FloatAttributes(vb) });
+            mesh.Parts.Add(new GpuObjectPart { SubMeshIndex = 0, MaterialName = "anatomy", HasTangents = false, HasColours = true, Vertices = vb, Indices = ib, Offset = offsets, Count = counts, Attributes = GpuVertex.FloatAttributes(vb) });
         }
         return new LoadedMesh(mesh, null, centre, 12);
     }
@@ -866,6 +910,7 @@ internal sealed class CharacterContent : IDisposable
             if (loaded is null || loaded.Gpu.Parts.Count == 0) continue;
             var ap = new AssetPart
             {
+                LimbReplacementSlot = part.Record.Type == FcsRecordType.LIMB_REPLACEMENT ? part.Record.GetInt("slot") - 50 : -1,
                 Plate = part.Record.GetInt("material type") == 3, Label = $"{part.Record.Type} '{part.Record.Name}' .{part.Field}", Mesh = loaded.Gpu, Shared = shared, Material = ItemMaterial(c, part, path, loaded),
                 BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, ShownShots = part.ShownShots, Muzzle = part is { Field: "live ammo", ShownShots: 1, Shown: WeaponShown.RangedDrawn }, HideSide = part.HideSide, PickBoxes = loaded.PickBoxes ?? [],
                 FileDistances = loaded.FileDistances, FileFirst = loaded.FileFirst, FileRadius = loaded.FileRadius,

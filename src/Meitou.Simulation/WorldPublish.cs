@@ -250,6 +250,7 @@ public sealed partial class World
             s.TorsoRagdoll = ragdolls?.PublishTorso(id);
             s.TorsoBisection = cold?.TorsoBisection;
             s.HeadCut = cold?.HeadCut;
+            s.LimbSeverances = Wounds.LimbCutPolicy.Active(cold);
             s.DetachedRagdolls = ragdolls?.PublishDetached(id) ?? [];
             s.CanStealthKo = koSlot >= 0 && i != koSlot && cold is { IsPlayer: false } && Carrying.CarrySystem.CanBeKnockedOut(cold);
             s.StealthKoChance = s.CanStealthKo && shown ? Carrying.CarrySystem.StealthKoChance(table.Cold(koSlot)!, cold!, aggro?.Spotted(i, table.IdOf(koSlot)) == true) : null;

@@ -25,6 +25,8 @@ public enum CombatRoll : ulong
     KnockDown = 11,
     /// <summary>Whether a very strong chest or stomach cut bisects the victim (counter: the incoming blow).</summary>
     BodyBisection = 12,
+    /// <summary>Whether a high-skill severing sweep reaches the matching opposite limb (counter: the incoming blow).</summary>
+    PairedLimb = 13,
 }
 
 /// <summary>

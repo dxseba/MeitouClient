@@ -49,7 +49,8 @@ public sealed partial class RagdollSystem
                 body = physics.Simulation.Bodies[handle];
                 if (body.LocalInertia.InverseMass <= 0) continue;
                 float side = (seed & 1) == 0 ? 1 : -1;
-                body.ApplyImpulse(new Vector3(side * 1.2f, 1.6f, -side * 0.7f) / body.LocalInertia.InverseMass, new Vector3(0.08f, 0, 0.05f));
+                var jolt = new Vector3(side * 1.2f, 1.6f, -side * 0.7f) * RobotRagdollWeight.ImpactResponse;
+                body.ApplyImpulse(jolt / body.LocalInertia.InverseMass, new Vector3(0.08f, 0, 0.05f));
                 piece.Age = MathF.Min(piece.Age, 2);
                 budget--;
                 ElectricalSpasms++;

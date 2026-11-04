@@ -108,10 +108,16 @@ public sealed partial class MedicalState
     /// part is checked: down (a vital one knocks the character out), destroyed (vital: death; other: severed, subject to the Dismemberment setting and to the owner having a stats object).
     /// The part's <see cref="HealthPart.HitMult"/> is not touched here: <see cref="ChoosePart"/> updates it when it picks the part.
     /// </summary>
-    public void ApplyHit(int part, in HitDamage hit, in MedicalContext ctx, List<MedicalEvent>? events = null)
+    public void ApplyHit(int part, in HitDamage hit, in MedicalContext ctx, List<MedicalEvent>? events = null) =>
+        ApplyHitCore(part, hit, ctx, Standing, events);
+
+    /// <summary>A second limb reached by the same swing uses its original posture for leg-loss KO, with the normal damage and blood checks.</summary>
+    internal void ApplyFollowThroughHit(int part, in HitDamage hit, in MedicalContext ctx, bool standingBeforeHit, List<MedicalEvent> events) =>
+        ApplyHitCore(part, hit, ctx, standingBeforeHit, events);
+
+    void ApplyHitCore(int part, in HitDamage hit, in MedicalContext ctx, bool standing, List<MedicalEvent>? events)
     {
         if (Dead) return;
-        bool standing = Standing;   // the posture before the blow (a leg lost in it still counts from a standing start)
         var c = ctx.Constants;
         var race = ctx.Race;
         var p = Parts[part];

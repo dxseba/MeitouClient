@@ -28,7 +28,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         uniform mat4 uViewProjection;               // world-from-camera-relative included: the positions are relative to the eye
         uniform vec3 uCameraRight;
         uniform vec3 uCameraUp;
-        uniform int uMode;                          // 0 point, 1 oriented_common, 2 oriented_self, 3 perpendicular_common, 4 perpendicular_self
+        uniform int uMode;                          // 0 point, 1 oriented_common, 2 oriented_self, 3 perpendicular_common, 4 perpendicular_self, 6 liquid strip
         uniform vec2 uAnchor;                       // the origin of the quad as an offset from its centre, in widths and heights (bottom_center: 0, -0.5)
         uniform vec3 uCommonDirection;
         uniform vec3 uCommonUp;
@@ -42,6 +42,21 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         out vec3 vHazeMul, vHazeAdd;                // the haze and the fog volumes in front of the corner: colour * mul + add
         out vec3 vWorld;                            // the corner in the world (the sun's shadow)
         out float vGlow;                            // the light scattered forward when the sprite is seen towards the sun
+        flat out vec3 vLiquidEnds;                  // first/last endpoint flags, length in stream widths
+        vec3 liquidTangent(vec2 oct)
+        {
+            vec3 n = vec3(oct, 1.0 - abs(oct.x) - abs(oct.y));
+            float t = clamp(-n.z, 0.0, 1.0);
+            n.xy += mix(vec2(t), vec2(-t), greaterThanEqual(n.xy, vec2(0.0)));
+            return normalize(n);
+        }
+        vec3 liquidSide(vec3 tangent, vec3 point)
+        {
+            // The stored tangent runs head to tail; the existing quad up axis runs tail to head.
+            vec3 side = cross(-tangent, -point);
+            float squared = dot(side, side);
+            return squared > 1e-10 ? side * inversesqrt(squared) : uCameraRight;
+        }
         void main()
         {
             vec3 position = aPositionRotation.xyz;
@@ -77,6 +92,18 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
                 up = normalize(cross(normal, right));
             }
             vec3 world = position + right * q.x + up * q.y;
+            vLiquidEnds = vec3(0.0);
+            if (uMode == 6)
+            {
+                vec3 head = aPositionRotation.xyz, tail = aDirectionWidth.xyz;
+                float headWidth = abs(aPositionRotation.w), tailWidth = abs(aDirectionWidth.w);
+                vec3 headSide = liquidSide(liquidTangent(aHeight.xy), head);
+                vec3 tailSide = liquidSide(liquidTangent(aHeight.zw), tail);
+                float atHead = aCorner.y + 0.5;
+                world = mix(tail + tailSide * aCorner.x * tailWidth, head + headSide * aCorner.x * headWidth, atHead);
+                vLiquidEnds = vec3(aPositionRotation.w < 0.0 ? 1.0 : 0.0, aDirectionWidth.w < 0.0 ? 1.0 : 0.0,
+                    length(head - tail) / max(headWidth, max(tailWidth, 1e-5)));
+            }
             gl_Position = uViewProjection * vec4(world, 1.0);
             vDepth = gl_Position.w;
             vUv = vec2(aCorner.x + 0.5, 0.5 - aCorner.y);
@@ -107,6 +134,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         in vec3 vHazeMul, vHazeAdd;
         in vec3 vWorld;
         in float vGlow;
+        flat in vec3 vLiquidEnds;
         uniform vec4 uLitFragment;                  // x 1: lit (Meitou fog switch), y how much of the light the sun's shadow takes, z 0 alpha blend, 1 additive, 2 neither
         // The sun's visibility at a point of the air: one bilinear compare in the first cascade that holds it (1 beyond them).
         float particleSun(vec3 w)
@@ -121,7 +149,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         in float vSoft;
         out vec4 fragColour;
         uniform sampler2D uTexture;
-        uniform int uDischarge;                     // 1 arc, 2 fallback spark, 3 alpha soot, 4 high-resolution spark; 1/2/4 premultiplied additive
+        uniform int uDischarge;                     // 1 arc, 2 fallback spark, 3 soot, 4 high-resolution spark, 5/6 blood, 7 break flash; 1/2/4/7 premultiplied additive
         uniform sampler2D uSoftDepth;               // the scene's depth at this target's size (the Meitou fog switch), as a colour
         uniform vec4 uSoft;                         // x: 0 hard (the game's), 1 fade the alpha, 2 the colour and alpha (additive), 3 towards white (modulate); y, z: the depth slice's near, far; w: 1 when depth is 0..1
         uniform float uCoverageMax, uCoverageGain;
@@ -141,15 +169,76 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
             float edge = length(p) + (0.5 - cloud) * 0.36;
             return vec4(vec3(1.0), (1.0 - smoothstep(0.25, 1.0, edge)) * (0.65 + 0.35 * cloud));
         }
+        vec4 liquidDrop(vec2 uv)
+        {
+            vec2 p = uv * 2.0 - 1.0;
+            float taper = mix(0.72, 1.0, smoothstep(-1.0, 0.6, p.y));
+            float r = length(vec2(p.x / taper, p.y));
+            float alpha = 1.0 - smoothstep(0.68, 1.0, r);
+            float rim = smoothstep(0.15, 0.95, r);
+            return vec4(vec3(1.2 - rim * 0.55), alpha);
+        }
+        vec4 liquidStream(vec2 uv)
+        {
+            float across = abs(uv.x * 2.0 - 1.0);
+            float cap = 1.0;
+            if (vLiquidEnds.x > 0.5) cap = min(cap, sqrt(max(0.0, 1.0 - pow(max(0.0, 1.0 - uv.y * vLiquidEnds.z * 2.0), 2.0))));
+            if (vLiquidEnds.y > 0.5) cap = min(cap, sqrt(max(0.0, 1.0 - pow(max(0.0, 1.0 - (1.0 - uv.y) * vLiquidEnds.z * 2.0), 2.0))));
+            // World-space variation crosses internal joins without restarting an end fade or a bright highlight.
+            float variation = sootNoise(vec2(dot(vWorld, vec3(1.7, 0.8, 0.3)), dot(vWorld, vec3(-0.4, 1.1, 1.5))));
+            float radius = cap * (0.9 + variation * 0.1);
+            float feather = max(fwidth(across), 0.035);
+            float alpha = 1.0 - smoothstep(radius - feather, radius, across);
+            float normalZ = sqrt(max(0.0, 1.0 - across * across));
+            float shade = 0.45 + 0.62 * normalZ;
+            return vec4(vec3(shade), alpha);
+        }
+        float robotFlashSegment(vec2 p, vec2 a, vec2 b)
+        {
+            vec2 along = b - a;
+            float t = clamp(dot(p - a, along) / dot(along, along), 0.0, 1.0);
+            return length(p - a - along * t);
+        }
+        vec4 robotBreakFlash(vec2 uv)
+        {
+            vec2 p = uv * 2.0 - 1.0;
+            vec2 root = vec2(-0.04, 0.02);
+            // Unequal crooked paths and an offshoot keep the contact flash from becoming a radial shell or star.
+            float arc = robotFlashSegment(p, root, vec2(-0.22, 0.10));
+            arc = min(arc, robotFlashSegment(p, vec2(-0.22, 0.10), vec2(-0.40, 0.03)));
+            arc = min(arc, robotFlashSegment(p, vec2(-0.40, 0.03), vec2(-0.71, 0.34)));
+            arc = min(arc, robotFlashSegment(p, root, vec2(0.19, 0.20)));
+            arc = min(arc, robotFlashSegment(p, vec2(0.19, 0.20), vec2(0.24, 0.08)));
+            arc = min(arc, robotFlashSegment(p, vec2(0.24, 0.08), vec2(0.49, 0.40)));
+            arc = min(arc, robotFlashSegment(p, root, vec2(0.12, -0.11)));
+            arc = min(arc, robotFlashSegment(p, vec2(0.12, -0.11), vec2(0.40, -0.15)));
+            arc = min(arc, robotFlashSegment(p, vec2(0.40, -0.15), vec2(0.60, -0.08)));
+            arc = min(arc, robotFlashSegment(p, vec2(-0.22, 0.10), vec2(-0.18, 0.31)) + 0.004);
+            arc = min(arc, robotFlashSegment(p, vec2(-0.18, 0.31), vec2(-0.36, 0.47)) + 0.004);
+            float feather = max(fwidth(arc), 0.003);
+            float strand = 1.0 - smoothstep(0.009, 0.009 + feather, arc);
+            float glow = exp(-arc * 48.0) * 0.18;
+            vec2 hot = (p - root) * vec2(8.5, 11.0);
+            vec2 lobe = (p - vec2(0.075, -0.045)) * vec2(16.0, 12.0);
+            float core = max(exp(-dot(hot, hot)), exp(-dot(lobe, lobe)) * 0.7);
+            core *= 0.45 + 0.55 * sootNoise(p * 18.0 + 6.1);
+            vec3 colour = mix(vec3(0.60, 0.85, 1.0), vec3(2.2, 1.35, 1.0), core);
+            return vec4(colour, clamp(core + strand * 0.85 + glow, 0.0, 1.0));
+        }
         void main()
         {
             // basic.hlsl: texture * colour * vertex colour. A recoloured burst (negative vertex rgb, Burst's recolour) takes that colour instead of the texture's hue, keeping its brightness.
             vec2 uv = uDischarge == 1 ? vUv.yx : vUv;
             if (uDischarge == 4) uv.x = 0.34 + uv.x * 0.32;   // discard the source streak's unused side padding
-            vec4 t = uDischarge == 3 ? soot(vUv) : texture(uTexture, uv);
+            vec4 t = uDischarge == 7 ? robotBreakFlash(vUv) : uDischarge == 6 ? liquidStream(vUv) : uDischarge == 5 ? liquidDrop(vUv) : uDischarge == 3 ? soot(vUv) : texture(uTexture, uv);
             if (min(vColour.r, min(vColour.g, vColour.b)) < 0.0) t.rgb = vec3(max(t.r, max(t.g, t.b)));
             vec4 c = t * abs(vColour);
-            if (uDischarge == 1 || uDischarge == 2 || uDischarge == 4) c.rgb *= c.a;
+            if (uDischarge == 5)
+            {
+                float glint = exp(-dot((vUv - vec2(0.36, 0.30)) * vec2(12.0, 9.0), (vUv - vec2(0.36, 0.30)) * vec2(12.0, 9.0)));
+                c.rgb = mix(c.rgb, vec3(0.7), glint * 0.32);
+            }
+            if (uDischarge == 1 || uDischarge == 2 || uDischarge == 4 || uDischarge == 7) c.rgb *= c.a;
             // Meitou fog: dust and smoke lit as the scene is (the game's sprites are flat, and not fogged): darker where the sun is shadowed, brighter seen
             // towards the sun, then seen through the haze in front of them like the land behind; an additive sprite (fire) only dimmed by the haze.
             if (uLitFragment.x > 0.5 && uLitFragment.z < 1.5)
@@ -286,7 +375,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         public int Discharge;
     }
 
-    ParticleRenderer(IGpuContext gpu, Func<string, string?> findTexture, ParticleLibrary library)
+    internal ParticleRenderer(IGpuContext gpu, Func<string, string?> findTexture, ParticleLibrary library)
     {
         this.gpu = gpu;
         this.findTexture = findTexture;
@@ -645,9 +734,11 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
         drawnParticles = 0;
         DrawnRobotDischargeQuads = 0;
         DrawnRobotSmokePuffs = 0;
+        DrawnRobotExplosionQuads = 0;
+        DrawnLiquidBlood = 0;
         drawnUnits = 0;
         coveragePending = false;
-        if (!Enabled || (weatherGroups.Groups.Count == 0 && placerGroups.Count == 0 && Tracers.Count == 0 && RobotDischarges.Count == 0)) return;
+        if (!Enabled || (weatherGroups.Groups.Count == 0 && placerGroups.Count == 0 && Tracers.Count == 0 && RobotDischarges.Count == 0 && RobotBreakExplosions.Count == 0 && LiquidBlood.Count == 0 && LiquidStreams.Count == 0)) return;
         draws.Clear();
         var frame = gpu.Frame;
         var forward = -new Vector3(view.M13, view.M23, view.M33);   // the view's -Z axis in the world
@@ -708,7 +799,9 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
             }
         }
         if (Tracers.Count > 0) AddTracers(frame, eye, forward, nearPlane);
+        if (LiquidBlood.Count > 0 || LiquidStreams.Count > 0) AddLiquidBlood(frame, eye, forward, nearPlane);
         if (RobotDischarges.Count > 0) AddRobotDischarges(frame, eye, forward, nearPlane);
+        if (RobotBreakExplosions.Count > 0) AddRobotExplosions(frame, eye, forward, nearPlane);
         // A size is worth its two extra passes (the depth reduction, the composite) only when it saves enough fill: it is taken up from MinLayers and left
         // below half that (so a storm thickening or the view turning does not flip the dust between full size and low resolution, which looked
         // different, every few frames). Not after a vendor upscaler: there the low-resolution draws are kept out of what it upscales, and full-size
@@ -866,7 +959,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
                 program.Set(this.viewProjection, in matrix);
                 program.Set(cameraRight, right);
                 program.Set(cameraUp, up);
-                program.Set(mode, ModeOf(r.BillboardType));
+                program.Set(mode, d.Discharge == 6 ? 6 : ModeOf(r.BillboardType));
                 program.Set(anchor, AnchorOf(r.Origin));
                 program.Set(commonDirection, r.CommonDirection);
                 program.Set(commonUp, r.CommonUp);
@@ -875,7 +968,7 @@ public sealed unsafe partial class ParticleRenderer : IDisposable
                 program.Bind(textureSlot, d.Texture.Sampled());
                 program.Set(dischargeMode, d.Discharge);
                 // The soft fade by blend: an alpha sprite fades its alpha, an additive or colour-blended one its colour, a modulating one towards white.
-                int fade = softDepth is null || d.Discharge is 1 or 2 or 4 ? 0 : m.Blend switch
+                int fade = softDepth is null || d.Discharge is 1 or 2 or 4 or 5 or 6 or 7 ? 0 : m.Blend switch
                 {
                     ParticleBlend.Alpha => 1, ParticleBlend.Add or ParticleBlend.ColourBlend => 2, ParticleBlend.Modulate => 3, _ => 0,
                 };

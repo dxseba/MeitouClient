@@ -28,7 +28,7 @@ sealed partial class GameHost
         if (!particlesEnabled || victim is not { Race.IsRobot: true, Fighter.IsAnimal: false, Medical: { } medical }
             || (uint)hit.Part >= (uint)medical.Parts.Count || gpu?.Debris is not { } debris) return;
         var part = medical.Parts[hit.Part].Template;
-        int kind = RobotScrapKind(hit, victim, part);
+        int kind = RobotBreakExplosionTracker.Kind(hit, victim);
         if (kind < 0) return;
         // Luckyren already throws a dying race's configured mechanical part meshes.
         if (config.LuckyrenMode && medical.Dead && LimbMeshes(victim.Race!.StringId).Length > 0) return;
@@ -54,17 +54,6 @@ sealed partial class GameHost
         robotScrapOrder.Enqueue(marker);
         robotScrapBursts++;
         robotScrapPieces += count;
-    }
-
-    static int RobotScrapKind(in CombatEvent hit, CharacterCold victim, BodyPartTemplate part)
-    {
-        if (hit.Kind == CombatEventKind.BodyBisected) return 2;
-        // Head Hit and a possible later PartSevered notification share one marker.
-        if (part.Type == BodyPartType.Head)
-            return hit.Kind is CombatEventKind.Hit or CombatEventKind.PartSevered
-                && victim.Medical is { } medical
-                && (medical.Decapitated || victim.HeadCut is { IsValid: true }) ? 1 : -1;
-        return hit.Kind == CombatEventKind.PartSevered && part.LimbSlot >= 0 ? 0 : -1;
     }
 
     RobotScrapMesh[] LoadRobotScrapMeshes(DebrisRenderer debris)
