@@ -16,9 +16,9 @@ internal static class BodyWoundGeometry
     readonly record struct Mark(string A, string B, float T, Vector3 Side, WoundShape Shape, float Size, int Age, bool Abdomen = false);
     readonly record struct Frame(Vector3 Centre, Vector3 Normal, Vector3 Along, Vector3 Across, float HalfLength, float Chart, float Depth, int Group);
 
-    public static BodyWoundPlan Build(OgreMesh body, SkeletonRig rig, CharacterAppearance look, BodyWoundState state)
+    public static BodyWoundPlan Build(OgreMesh body, SkeletonRig rig, CharacterAppearance look, BodyWoundState state, bool anchorsOnly = false)
     {
-        if (!state.HasAny) return new([], [], null, []);
+        if (!state.HasAny || anchorsOnly && state.BellyHits < 10) return new([], [], null, []);
         var triangles = new List<Triangle>(); var groups = MeshCut.BoneGroups(rig);
         foreach (var part in Model.Build(body, rig.BoneCount, gameBinormals: true).Parts)
         {
@@ -37,6 +37,7 @@ internal static class BodyWoundGeometry
         bool robot = look.Race.GetBool("is robot");
         foreach (var mark in Marks(state).Take(MaximumMarks))
         {
+            if (anchorsOnly && !mark.Abdomen) continue;
             if (rig.Handle(mark.A) is not int a || rig.Handle(mark.B) is not int b) continue;
             int group = mark.B.Contains("Head", StringComparison.Ordinal) ? 7 : Group(mark.A);
             var normal = Unit(mark.Side); var target = Vector3.Lerp(rig.BindPosition[a], rig.BindPosition[b], mark.T) + normal * 1.2f;
@@ -60,6 +61,7 @@ internal static class BodyWoundGeometry
                 var right = Project(local, centre.Position + along * .1f, normal, 1) ?? centre;
                 var above = Project(local, centre.Position + side * .1f, normal, 1) ?? centre;
                 abdomenAnchor = Array.AsReadOnly(new[] { centre, right, above });
+                if (anchorsOnly) return new([], [], null, abdomenAnchor);
             }
             if (mark.Shape.Kind != WoundKind.Crush)
                 for (int section = 0; section < PocketSections; section++)

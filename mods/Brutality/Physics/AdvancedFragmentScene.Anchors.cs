@@ -20,6 +20,7 @@ internal sealed partial class AdvancedFragmentScene
                 world[piece.Definition.Bodies[b].Bone] = piece.Definition.Bodies[b].BoneInBody.Then(initial[b]);
         }
         (piece.Anchors, piece.Offsets) = FragmentAnchors(piece, rig, world, initial);
+        piece.Components = null;
     }
     static (int[] Anchors, RigidTransform[] Offsets) FragmentAnchors(Piece piece, SkeletonRig rig, RigidTransform[] world, RigidTransform[]? initial = null)
     {
@@ -62,6 +63,30 @@ internal sealed partial class AdvancedFragmentScene
             if (piece.Definition.BodyOfBone[h] is int own and >= 0) offsets[h] = piece.Definition.Bodies[own].BoneInBody;
         }
         return (anchors, offsets);
+    }
+
+    static int[] BoneComponents(RagdollDefinition definition, int[] anchors)
+    {
+        var bodyComponents = new int[definition.Bodies.Length];
+        Array.Fill(bodyComponents, -1);
+        var pending = new Stack<int>();
+        int component = 0;
+        for (int b = 0; b < bodyComponents.Length; b++)
+        {
+            if (bodyComponents[b] >= 0) continue;
+            bodyComponents[b] = component;
+            pending.Push(b);
+            while (pending.TryPop(out int body))
+                foreach (var joint in definition.Joints)
+                {
+                    int other = joint.A == body ? joint.B : joint.B == body ? joint.A : -1;
+                    if (other < 0 || bodyComponents[other] >= 0) continue;
+                    bodyComponents[other] = component;
+                    pending.Push(other);
+                }
+            component++;
+        }
+        return [.. anchors.Select(body => bodyComponents[body])];
     }
 
     static int LimbFamily(string name)

@@ -45,6 +45,7 @@ public sealed class BrutalityMod : IMod
         {
             RenderBridge.Install(context, resources);
             BodyWoundRenderBridge.Install(context, resources);
+            Meitou.Brutality.Rendering.Surface.NativeSurfaceBridge.Install(context, resources);
             EffectsBridge.Install(context, context.Folder, resources);
         }
         var builds = new ConditionalWeakTable<SystemBuildContext, BrutalityGameplaySystem>();

@@ -30,8 +30,9 @@ public sealed partial class BrutalityGameplaySystem
                 case GorePreviewKind.Torso: actor.Torso = new(new Vector4(new Vector3(.17f, 1, .08f), -12.7f) / new Vector3(.17f, 1, .08f).Length()); break;
                 case GorePreviewKind.VerticalTorso: actor.Torso = new(new Vector4(Vector3.Normalize(new Vector3(1, .18f, .12f)), -.15f), true); break;
                 case GorePreviewKind.Head:
-                    actor.Head = new(new Vector4(Vector3.Normalize(new Vector3(.6f, 1, .12f)), 0), (variant % 3) switch
-                    { 0 => HeadCutMode.AttachedSplit, 1 => HeadCutMode.DetachedSplit, _ => HeadCutMode.NeckDetach }); break;
+                    // Use the same normalized head shapes as real gameplay, including a genuinely longitudinal split and a low neck cut.
+                    actor.Head = HeadCutPolicy.Preview((variant % 3) switch { 0 => "oblique", 1 => "split", _ => "neck" });
+                    break;
                 case GorePreviewKind.Limb: actor.Limbs = Array.AsReadOnly(new[] { new LimbCutState(Math.Abs(variant) % 4, .5f, new(.25f, -.15f)) }); break;
             }
         }

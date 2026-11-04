@@ -3,6 +3,7 @@ using System.Numerics;
 using HarmonyLib;
 using Meitou.Brutality.Rendering;
 using Meitou.Data.Characters;
+using Meitou.Data;
 using Meitou.Data.Physics;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation.Combat;
@@ -31,12 +32,15 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         public required RagdollSkinSurface Skin;
         public required RagdollDefinition Source;
         public required CharacterCold Cold;
-        public required CharacterAppearance NativeLook;
+        public required FragmentAppearanceCache Presentation;
         public readonly Dictionary<int, (string Stamp, AdvancedFragmentScene.Piece Piece)> Pieces = [];
         public string StateStamp = "";
         public Matrix4x4 Placement;
         public readonly Dictionary<int, CarryState> Carries = [];
         public bool NegativePoseRestored;
+        public bool NativeClaimed;
+        public (long Tick, BonePose Pose, Matrix4x4 Placement)? ReturnFrame;
+        public bool FootDiagnosed;
     }
     readonly AdvancedFragmentScene scene = new();
     readonly Queue<CombatHit> impacts = new();
@@ -102,21 +106,25 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             {
                 if (startsLeft-- <= 0) continue;
                 var original = uncut.GetValueOrDefault(state.Character, current);
-                var natural = NaturalAppearance.Make(rigs.Database, current, PresentedParts(current, original, cold));
+                var presentation = new FragmentAppearanceCache();
+                var natural = presentation.Get(rigs.Database, current, PresentedParts(current, original, cold), state);
                 if (rigs.For(natural) is not { } setup || rigs.FindMesh(natural.BodyMesh) is not { } bodyPath) continue;
                 if (!skins.TryGetValue(bodyPath, out var surface))
                 {
                     surface = RagdollSkinSurface.Read(Meitou.Data.Ogre.OgreMeshReader.ReadFile(bodyPath)); skins[bodyPath] = surface;
                 }
                 if (Definition(natural, setup.Rig) is not { } source) continue;
-                owner = new Owner { Setup = setup, Appearance = natural, Skin = surface, Source = source, Cold = cold, NativeLook = current };
+                owner = new Owner { Setup = setup, Appearance = natural, Skin = surface, Source = source, Cold = cold, Presentation = presentation };
                 owners.Add(state.Character, owner);
             }
-            if (!ReferenceEquals(owner.NativeLook, current))
+            var presented = owner.Presentation.Get(rigs.Database, current,
+                PresentedParts(current, uncut.GetValueOrDefault(state.Character, current), cold), state);
+            if (!ReferenceEquals(owner.Appearance, presented))
             {
-                owner.Appearance = NaturalAppearance.Make(rigs.Database, current, PresentedParts(current, uncut.GetValueOrDefault(state.Character, current), cold));
-                owner.Setup = rigs.For(owner.Appearance) ?? owner.Setup;
-                owner.NativeLook = current;
+                if (rigs.For(presented) is not { } setup || Definition(presented, setup.Rig) is not { } source) continue;
+                // Definitions are cached by immutable rig, source file and robot weighting. Shape changes are applied
+                // by the refreshed setup when posing; no shaped hull is cached under an appearance-independent key.
+                owner.Appearance = presented; owner.Setup = setup; owner.Source = source;
             }
             ref var hot = ref world.Characters.Next[slot];
             bool ownBody = state.Torso is not null || cold.Medical is { Dead: true } or { Incapacitated: true };
@@ -124,21 +132,50 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             var placement = PlacementFor(owner, cold, hot);
             if (owner.StateStamp != stamp)
             {
-                var posed = BoneWorld(world, state.Character, cold, owner, placement);
                 var specs = Definitions(owner, state, ownBody);
+                Meitou.Simulation.Ragdolls.RagdollHandoff? handoff = null;
+                if (native is not null && !owner.NativeClaimed)
+                {
+                    if (ownBody)
+                    {
+                        if (!native.TryClaim(world, state.Character, this, out handoff)) continue;
+                        owner.NativeClaimed = true;
+                    }
+                    else native.TryCapture(world, state.Character, out handoff);
+                }
+                var posed = BoneWorld(world, state.Character, cold, owner, placement, handoff);
+                var previousMotion = owner.Pieces.TryGetValue(0, out var priorBody) ? scene.CaptureMotion(priorBody.Piece)
+                    : handoff?.Bodies.Select(body => new FragmentBodyMotion(body.Bone, new(body.Body.Position, body.Body.Rotation), body.Linear, body.Angular)).ToArray() ?? [];
+                var pending = handoff?.PendingLaunch;
+                var launch = pending is { } initial ? (initial.Velocity, initial.Push) : cold.Blow ?? (hot.Velocity, Vector3.Zero);
+                var start = RobotRagdollWeight.Launch(cold.Race?.IsRobot == true, launch);
+                var appliedPush = handoff?.AppliedLaunch?.Push ?? start.Push;
+                var returnedPose = !ownBody && owner.NativeClaimed && owner.Pieces.TryGetValue(0, out var returning)
+                    ? scene.Publish(returning.Piece, owner.Setup.Rig, placement) : null;
                 var keep = specs.Select(s => s.Key).ToHashSet();
                 foreach (int old in owner.Pieces.Keys.Where(k => !keep.Contains(k)).ToArray()) { scene.Remove(owner.Pieces[old].Piece); owner.Pieces.Remove(old); }
                 foreach (var spec in specs)
                 {
                     if (owner.Pieces.TryGetValue(spec.Key, out var before) && before.Stamp == spec.Stamp) continue;
                     if (before.Piece is not null) scene.Remove(before.Piece);
-                    var start = RobotRagdollWeight.Launch(cold.Race?.IsRobot == true, cold.Blow ?? (hot.Velocity, Vector3.Zero));
                     var piece = scene.Create(spec.Definition, bone => posed[bone], start.Velocity, start.Push,
                         Rng.Mix(world.Seed ^ Rng.Key(state.Character) ^ (ulong)world.Tick ^ (ulong)spec.Key), posed);
+                    Vector3 separation = default;
+                    if (state.Torso is { } torso && spec.Key is 0 or 1 && appliedPush.LengthSquared() > 1e-8f)
+                    {
+                        var normal = Vector3.TransformNormal(new(torso.Plane.X, torso.Plane.Y, torso.Plane.Z), placement);
+                        if (normal.LengthSquared() > 1e-8f) separation = Vector3.Normalize(normal) * (spec.Key == 0 ? 2 : -2) * RobotRagdollWeight.Response(cold.Race?.IsRobot == true);
+                    }
+                    scene.InheritMotion(piece, previousMotion, separation);
                     owner.Pieces[spec.Key] = (spec.Stamp, piece);
                 }
-                if (ownBody) ReleaseNative(state.Character, cold);
-                else BrutalityRuntime.ControlPhysics(cold, false);
+                if (!ownBody && owner.NativeClaimed)
+                {
+                    if (returnedPose is not null && native?.ReturnClaim(world, state.Character, this, returnedPose, placement) == true)
+                        owner.ReturnFrame = (world.Tick, CopyPose(returnedPose), placement);
+                    else native?.ReleaseClaim(state.Character, this);
+                    owner.NativeClaimed = false;
+                }
                 owner.StateStamp = stamp;
             }
             owner.Placement = placement;
@@ -150,11 +187,16 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             if (!owners.TryGetValue(hit.Victim, out var owner) || !owner.Pieces.TryGetValue(0, out var retained)) continue;
             if ((uint)hit.Part >= (uint)(owner.Cold.Medical?.Parts.Count ?? 0)) continue;
             var part = owner.Cold.Medical!.Parts[hit.Part].Template;
-            int bone = owner.Setup.Rig.Handle(part.BoneName) ?? owner.Setup.Rig.Handle(part.BoneName2) ?? -1;
-            var direction = hit.Travel; if (direction.LengthSquared() < 1e-8f) direction = Vector3.UnitZ;
-            direction = Vector3.Normalize(direction + Vector3.UnitY * direction.Length() * .1f);
-            float force = Math.Clamp(hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce, 2, 100);
-            scene.Impulse(retained.Piece, bone, direction * MathF.Min(30, force * .3f) * RobotRagdollWeight.Response(owner.Cold.Race?.IsRobot == true));
+            if (!scene.TryImpactSite(retained.Piece, owner.Setup.Rig, part, out int actor, out var offset)) continue;
+            var direction = new Vector2(hit.Travel.X, hit.Travel.Z);
+            if (world.Characters.TryResolveNext(hit.Attacker, out int attacker))
+            {
+                var at = retained.Piece.Pose[actor].Apply(offset); var from = world.Characters.Previous[attacker].Position;
+                direction = new(at.X - from.X, at.Z - from.Z);
+            }
+            var push = HitPush(direction, hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce)
+                * RobotRagdollWeight.Response(owner.Cold.Race?.IsRobot == true);
+            scene.Impact(retained.Piece, actor, offset, push);
         }
         UpdateCarries(world);
         scene.Step(RagdollPhysics.StepOf(world.TickSeconds, world.PhysicsSpeed), ground, world.Tick);
@@ -168,20 +210,40 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                 var root = remaining.Piece.Pose[remaining.Piece.Definition.Root].Position;
                 if (owner.Cold.CarriedBy.IsNone) { hot.Position = root; hot.Velocity = Vector3.Zero; }
             }
-            owner.Placement = PlacementFor(owner, owner.Cold, hot);
+            // Animation already published before this system. Keep the final external pose for this return frame;
+            // on the next tick its native replacement has begun the get-up blend.
+            var recovery = owner.ReturnFrame is { } returned && returned.Tick == world.Tick ? returned : ((long Tick, BonePose Pose, Matrix4x4 Placement)?)null;
+            if (recovery is null) owner.ReturnFrame = null;
+            owner.Placement = recovery?.Placement ?? PlacementFor(owner, owner.Cold, hot);
             TrackSavedPosition(owner, hot.Position);
-            var detached = new List<FragmentPoseSnapshot>(); BonePose? body = null;
+            var detached = new List<FragmentPoseSnapshot>(); BonePose? body = recovery?.Pose;
             foreach (var (key, entry) in owner.Pieces)
             {
                 var pose = scene.Publish(entry.Piece, owner.Setup.Rig, owner.Placement);
                 if (key == 0) body = pose;
                 else detached.Add(new(key, pose, entry.Piece.Pose[entry.Piece.Definition.Root].Position));
             }
+            if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null && !owner.FootDiagnosed && world.Tick >= 180
+                && owner.Pieces.TryGetValue(1, out var lower))
+            {
+                owner.FootDiagnosed = true;
+                var worldBones = scene.Publish(lower.Piece, owner.Setup.Rig, Matrix4x4.Identity);
+                var contactSkin = CarryContactSkin(owner.Cold, owner.Appearance, owner.Setup, [], worldBones);
+                if (owner.Skin.FootBounds(owner.Setup.Rig, contactSkin) is { } feet)
+                    Console.WriteLine($"Brutality physical foot skin: tick={world.Tick} owner={state.Character} min={feet.Min} max={feet.Max} ground={ground.GroundHeight(feet.Min.X, feet.Min.Z, feet.Min.Y)} frozen={lower.Piece.Frozen}");
+            }
             publish.Add(state.Character, new(state.Character, owner.Appearance, state, body, Array.AsReadOnly(detached.ToArray())) { Placement = owner.Placement });
         }
         history.Enqueue(new(world.Tick + 1, new ReadOnlyDictionary<CharacterId, GoreCharacterFrame>(publish)));
         while (history.Count > 64) history.Dequeue();
         frames = history.ToArray();
+    }
+
+    static BonePose CopyPose(BonePose source)
+    {
+        var result = new BonePose(source.Set.Length) { Weight = source.Weight, AbsolutePositions = source.AbsolutePositions, Components = source.Components?.ToArray() };
+        source.Set.CopyTo(result.Set, 0); source.Position.CopyTo(result.Position, 0); source.Rotation.CopyTo(result.Rotation, 0);
+        return result;
     }
 
     static IEnumerable<CharacterPart> PresentedParts(CharacterAppearance current, CharacterAppearance original, CharacterCold cold)
@@ -229,25 +291,53 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         return result;
     }
 
-    RigidTransform[] BoneWorld(World world, CharacterId id, CharacterCold cold, Owner owner, Matrix4x4 placement)
+    RigidTransform[] BoneWorld(World world, CharacterId id, CharacterCold cold, Owner owner, Matrix4x4 placement, Meitou.Simulation.Ragdolls.RagdollHandoff? handoff = null)
     {
-        var rig = owner.Setup.Rig; var scratch = rig.Rent();
+        var rig = owner.Setup.Rig;
+        var layers = new List<ActiveLayer>();
+        if (cold.Animation is { } animation && animations is not null)
+            foreach (var layer in animations.Publish(animation, []))
+                if (rig.Layer(rigs.Database, layer.Name, owner.Setup.Animal) is { } def) layers.Add(new(def, MathF.Max(layer.Time, 0), layer.Weight));
+        foreach (var (def, time) in owner.Setup.Fixed) layers.Add(new(def, time, 1));
+        // A second cut starts from every currently physical AND nonphysical bone. Replacing only the actors
+        // would leave fingers, facial bones and hair at their animation positions while their parent lies elsewhere.
+        var pose = owner.Pieces.TryGetValue(0, out var existing) ? scene.Publish(existing.Piece, rig, placement) : native?.Publish(id);
+        if (pose is null && handoff?.Bones is { } nativeBones)
+        {
+            var nativeWorld = PoseWorld(owner.Setup, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers), nativeBones, handoff.Placement);
+            pose = new(rig.BoneCount) { AbsolutePositions = true };
+            Matrix4x4.Invert(placement, out var inverse);
+            var unturn = Quaternion.Inverse(Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 })));
+            for (int bone = 0; bone < nativeWorld.Length; bone++)
+            {
+                pose.Set[bone] = true; pose.Position[bone] = Vector3.Transform(nativeWorld[bone].Position, inverse);
+                pose.Rotation[bone] = Quaternion.Normalize(unturn * nativeWorld[bone].Rotation);
+            }
+        }
+        if (pose is null && handoff is { Bodies.Count: > 0 })
+        {
+            pose = new(rig.BoneCount) { AbsolutePositions = true };
+            Matrix4x4.Invert(placement, out var inverse);
+            var unturn = Quaternion.Inverse(Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 })));
+            foreach (var body in handoff.Bodies)
+            {
+                if ((uint)body.Bone >= (uint)rig.BoneCount) continue;
+                pose.Set[body.Bone] = true; pose.Position[body.Bone] = Vector3.Transform(body.BoneWorld.Position, inverse);
+                pose.Rotation[body.Bone] = Quaternion.Normalize(unturn * body.BoneWorld.Rotation);
+            }
+        }
+        return PoseWorld(owner.Setup, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers), pose, placement);
+    }
+
+    internal static RigidTransform[] PoseWorld(CharacterPoseSetup setup, ReadOnlySpan<ActiveLayer> layers, BonePose? pose, Matrix4x4 placement)
+    {
+        var rig = setup.Rig; var scratch = rig.Rent();
         try
         {
-            var layers = new List<ActiveLayer>();
-            if (cold.Animation is { } animation && animations is not null)
-                foreach (var layer in animations.Publish(animation, []))
-                    if (rig.Layer(rigs.Database, layer.Name, owner.Setup.Animal) is { } def) layers.Add(new(def, MathF.Max(layer.Time, 0), layer.Weight));
-            foreach (var (def, time) in owner.Setup.Fixed) layers.Add(new(def, time, 1));
-            scratch.PoseDerived(owner.Setup.Shape, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers), native?.Publish(id));
-            var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement));
+            scratch.PoseDerived(setup.Shape, layers, pose);
+            var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
             var result = new RigidTransform[rig.BoneCount];
             for (int h = 0; h < result.Length; h++) result[h] = new(Vector3.Transform(scratch.DerivedPosition[h], placement), Quaternion.Normalize(turn * scratch.DerivedRotation[h]));
-            if (owner.Pieces.TryGetValue(0, out var existing))
-                for (int b = 0; b < existing.Piece.Pose.Length; b++)
-                {
-                    var body = existing.Piece.Definition.Bodies[b]; result[body.Bone] = body.BoneInBody.Then(existing.Piece.Pose[b]);
-                }
             return result;
         }
         finally { rig.Return(scratch); }
@@ -266,20 +356,19 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         return definitions[(path, rig, robot)] = definition;
     }
 
-    void ReleaseNative(CharacterId id, CharacterCold cold)
+    internal static Vector3 HitPush(Vector2 direction, float damage)
     {
-        BrutalityRuntime.ControlPhysics(cold, true);
-        if (native is null) return;
-        var map = (System.Collections.IDictionary)AccessTools.Field(typeof(NativeRagdolls), "ragdolls").GetValue(native)!;
-        if (map.Contains(id)) AccessTools.Method(typeof(NativeRagdolls), "Destroy").Invoke(native, [map[id]]);
-        ((System.Collections.IList)AccessTools.Field(typeof(NativeRagdolls), "order").GetValue(native)!).Remove(id);
+        if (!float.IsFinite(damage) || !float.IsFinite(direction.LengthSquared()) || direction.LengthSquared() <= 1e-6f) return Vector3.Zero;
+        direction = Vector2.Normalize(direction);
+        return new Vector3(direction.X, .2f, direction.Y) * Math.Clamp(damage * .4f, 10, 50);
     }
     void Remove(CharacterId id)
     {
         if (!owners.Remove(id, out var owner)) return;
         RememberRemovedOwner(id, owner);
         foreach (var item in owner.Pieces.Values) scene.Remove(item.Piece);
-        BrutalityRuntime.ControlPhysics(owner.Cold, false); uncut.Remove(id); reactionOwners.Remove(id);
+        if (owner.NativeClaimed) native?.ReleaseClaim(id, this);
+        uncut.Remove(id); reactionOwners.Remove(id);
     }
     public void Hash(ref StateHasher hash)
     {
@@ -295,7 +384,24 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
     public void Dispose()
     {
         if (disposed) return; disposed = true;
-        foreach (var owner in owners.Values) BrutalityRuntime.ControlPhysics(owner.Cold, false);
+        foreach (var (id, owner) in owners) if (owner.NativeClaimed) native?.ReleaseClaim(id, this);
         scene.Dispose(); ClearSaved(); owners.Clear(); uncut.Clear(); history.Clear(); frames = [];
+    }
+}
+
+/// <summary>The native look can stay unchanged while a second explicit cut takes over another collapsed limb.</summary>
+internal sealed class FragmentAppearanceCache
+{
+    CharacterAppearance? native, presented;
+    int restored;
+    public CharacterAppearance Get(GameDatabase data, CharacterAppearance current, IEnumerable<CharacterPart> parts, BrutalityActorView state)
+    {
+        int control = 0;
+        foreach (var cut in state.Limbs) if (cut.IsValid) control |= 1 << cut.LimbSlot;
+        if (state.Head is { IsValid: true }) control |= 1 << 4;
+        if (!current.Headless && state.SevereHead.Kind == SevereHeadWoundKind.JawLost) control |= 1 << 5;
+        if (ReferenceEquals(native, current) && restored == control && presented is not null) return presented;
+        native = current; restored = control;
+        return presented = NaturalAppearance.Make(data, current, parts, state);
     }
 }

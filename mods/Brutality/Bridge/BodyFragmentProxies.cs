@@ -16,7 +16,7 @@ public sealed record BodyFragmentProxyView(CharacterId Proxy, CharacterId Owner,
 public sealed record BodyFragmentProxyFrame(long Tick, IReadOnlyDictionary<CharacterId, BodyFragmentProxyView> Proxies);
 
 /// <summary>A native carry/loot target for the negative torso half. Only inventory is shared; medical state and carry links are independent.</summary>
-public sealed partial class BodyFragmentProxySystem(Action<CharacterCold>? refreshEquipment = null) : ITickSystem, IModSaveData, IStateHashed
+public sealed partial class BodyFragmentProxySystem(Action<CharacterCold>? refreshEquipment = null) : ITickSystem, IModSaveData, IStateHashed, IDisposable
 {
     sealed class Half
     {
@@ -26,6 +26,7 @@ public sealed partial class BodyFragmentProxySystem(Action<CharacterCold>? refre
         public BodyFragmentPlacement LastPlacement;
         public string? LastCarrier;
         public ItemStamp[] Items = [];
+        public bool NativeClaimed;
     }
     readonly record struct ItemStamp(Meitou.Simulation.Items.ItemInstance Item, string Section, int X, int Y, int Level, float Quality, string Material, string Maker, string Colour);
     readonly Dictionary<CharacterId, Half> halves = [];
@@ -100,11 +101,11 @@ public sealed partial class BodyFragmentProxySystem(Action<CharacterCold>? refre
             DiedTick = value.Tick, Orders = CharacterOrders.None,
         };
         RegisterLootOwner(cold, source);
-        BrutalityRuntime.ControlPhysics(cold, true);
         ref readonly var originalHot = ref value.Characters.Next[slot];
         var at = placement ?? new BodyFragmentPlacement(originalHot.Position, originalHot.Yaw);
         var proxy = value.Characters.Spawn(new() { Position = at.Position, Yaw = at.Yaw, Health = 0 }, cold, value.Tick);
         var half = new Half { Owner = owner, Proxy = proxy, Source = source, Cold = cold, RestoredPlacement = placement, LastPlacement = at, Items = InventoryStamp(source) };
+        half.NativeClaimed = value.Systems.OfType<Meitou.Simulation.Ragdolls.RagdollSystem>().FirstOrDefault()?.TryClaim(value, proxy, this, out _) == true;
         halves[owner] = half; return half;
     }
     static ItemStamp[] InventoryStamp(CharacterCold cold) => cold.Inventory?.Items.Select(item => new ItemStamp(item, item.Section, item.X, item.Y,
@@ -116,10 +117,10 @@ public sealed partial class BodyFragmentProxySystem(Action<CharacterCold>? refre
         foreach (var (owner, half) in halves.OrderBy(row => Rng.Key(row.Key)).ToArray())
         {
             bool ownerPresent = value.Characters.TryResolveNext(owner, out _);
-            if (!value.Characters.TryResolveNext(half.Proxy, out int proxySlot)) { Remember(half); halves.Remove(owner); continue; }
+            if (!value.Characters.TryResolveNext(half.Proxy, out int proxySlot)) { Remember(half); ReleaseNative(half); halves.Remove(owner); continue; }
             if (!ownerPresent && half.Cold.CarriedBy.IsNone)
             {
-                Remember(half); BrutalityRuntime.ControlPhysics(half.Cold, false); value.Characters.Remove(half.Proxy); halves.Remove(owner); continue;
+                Remember(half); ReleaseNative(half); value.Characters.Remove(half.Proxy); halves.Remove(owner); continue;
             }
             half.Cold.DiedTick = value.Tick; // The owner controls the shared corpse's decay; this proxy must not expire independently.
             half.Cold.Inventory = half.Source.Inventory;
@@ -138,5 +139,14 @@ public sealed partial class BodyFragmentProxySystem(Action<CharacterCold>? refre
         }
         history.Enqueue(new(value.Tick + 1, new ReadOnlyDictionary<CharacterId, BodyFragmentProxyView>(shown)));
         while (history.Count > 64) history.Dequeue(); frames = history.ToArray();
+    }
+    void ReleaseNative(Half half)
+    {
+        if (half.NativeClaimed) world?.Systems.OfType<Meitou.Simulation.Ragdolls.RagdollSystem>().FirstOrDefault()?.ReleaseClaim(half.Proxy, this);
+        half.NativeClaimed = false;
+    }
+    public void Dispose()
+    {
+        foreach (var half in halves.Values) ReleaseNative(half);
     }
 }

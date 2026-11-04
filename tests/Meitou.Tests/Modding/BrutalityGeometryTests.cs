@@ -10,7 +10,7 @@ using Meitou.Rendering;
 
 namespace Meitou.Tests.Modding;
 
-public sealed class BrutalityGeometryTests
+public sealed partial class BrutalityGeometryTests
 {
     static readonly SkeletonRig Rig = MakeRig();
 
@@ -145,37 +145,29 @@ public sealed class BrutalityGeometryTests
     [InlineData(SevereHeadWoundKind.JawLost)]
     [InlineData(SevereHeadWoundKind.Scalp)]
     [InlineData(SevereHeadWoundKind.BrokenSkull)]
-    public void Severe_head_wounds_open_the_selected_front_surface_and_add_coloured_relief_without_a_posterior_hole(SevereHeadWoundKind kind)
+    public void Severe_head_wounds_use_native_surface_fields_without_baking_pockets_into_the_skin(SevereHeadWoundKind kind)
     {
         using var scene = new Scene(withAnatomy: true);
         var severe = new SevereHeadWoundState(4, kind, kind == SevereHeadWoundKind.JawLost ? 0 : 3,
             new(new(0, 18.65f, 0), Vector3.UnitZ, Vector3.UnitX));
         var state = State() with { SevereHead = severe };
         var result = scene.Adapter.Build(scene.Appearance, Rig, scene.Body, _ => null, state);
-        var skin = Vertices(result.Retained.BodyMesh!);
-        var original = Vertices(scene.Body);
-        Assert.True(FrontArea(skin) < FrontArea(original) - .001f);
-        Assert.Equal(Posterior(original), Posterior(skin));
+        Assert.Null(result.Retained.BodyMesh);
+        Assert.NotNull(result.Retained.Shaders);
+        Assert.DoesNotContain(result.Retained.Parts!, part => part.Part.Field == "body-wound-relief");
+        var surface = Assert.IsType<Meitou.Brutality.Rendering.Surface.NativeGeometryInfo>(CharacterGeometryAdapter.SurfaceFor(result.Retained));
+        Assert.NotEmpty(surface.Skin); Assert.NotEmpty(surface.HeadSource);
         Assert.False(result.FidelityGaps.HasFlag(GeometryFidelityGap.SevereHeadRelief));
-        var relief = Assert.Single(result.Retained.Parts!, p => p.Part.Field == "head-relief");
-        var tissue = Vertices(relief.Mesh!);
-        Assert.NotEmpty(tissue);
-        Assert.True(relief.VertexColours);
-        Assert.Contains(tissue, p => p.Colour.X > p.Colour.Y * 2 && p.Colour.Y < .2f);
-        if (kind != SevereHeadWoundKind.JawLost) Assert.Contains(tissue, p => p.Colour.Y > .2f && p.Colour.Z > .15f);
-        Assert.Contains(result.Retained.Parts!, p => p.Part.Field == "anatomy");
-        Assert.Same(result, scene.Adapter.Build(scene.Appearance, Rig, scene.Body, _ => null, state with { SevereHead = severe with { HeavyHits = 7 } }));
-
-        static float FrontArea(Vertex[] vertices)
+        if (kind != SevereHeadWoundKind.JawLost)
         {
-            float area = 0;
-            for (int i = 0; i + 2 < vertices.Length; i += 3)
-                if (vertices[i].Normal.Z > .9f && vertices[i].Position.Y > 16.3f)
-                    area += Vector3.Cross(vertices[i + 1].Position - vertices[i].Position, vertices[i + 2].Position - vertices[i].Position).Length() * .5f;
-            return area;
+            Assert.True(surface.HeadReliefReady);
+            Assert.NotNull(surface.HeadFrame);
+            var relief = Assert.Single(result.Retained.Parts!, part => part.Part.Field == "head-relief");
+            Assert.True(relief.PreserveRawVertexChannels);
+            Assert.Contains(NativeVertices(relief.Mesh!), vertex => vertex.Tangent.W >= 8);
         }
-        static Vector3[] Posterior(Vertex[] vertices) => vertices.Where(p => p.Normal.Z < -.9f && p.Position.Y > 16.3f)
-            .Select(p => p.Position).OrderBy(p => p.X).ThenBy(p => p.Y).ThenBy(p => p.Z).ToArray();
+        Assert.Contains(result.Retained.Parts!, part => part.Part.Field == "anatomy" && part.PreserveRawVertexChannels);
+        Assert.Same(result, scene.Adapter.Build(scene.Appearance, Rig, scene.Body, _ => null, state with { SevereHead = severe with { HeavyHits = 7 } }));
     }
 
     [Fact]
@@ -222,7 +214,7 @@ public sealed class BrutalityGeometryTests
         public CharacterAppearance Appearance { get; }
         public CharacterGeometryAdapter Adapter { get; }
         public OgreMesh Body { get; } = MeshCut.FromTriangles(Box(new(-1.5f, 10, -1), new(1.5f, 16.4f, 1), 1)
-            .Concat(Box(new(-1, 16.4f, -.9f), new(1, 19.4f, .9f), 3))
+            .Concat(Box(new(-1, 16.4f, -.9f), new(1, 19.4f, .9f), 3).Select(vertex => vertex with { Uv = new(vertex.Uv.X, -.5f) }))
             .Concat(Box(new(-3, 9.5f, -.5f), new(-2, 16.2f, .5f), 5))
             .Concat(Box(new(2, 9.5f, -.5f), new(3, 16.2f, .5f), 8)).ToArray());
         public Scene(bool withAnatomy = false)

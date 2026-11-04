@@ -25,6 +25,7 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
         public Matrix4x4 PublishedPlacement;
         public RigidTransform[]? PublishedPose, PublishedOffsets;
         public int[]? Anchors;
+        public int[]? Components;
         public RigidTransform[]? Offsets;
         public List<ConstraintHandle> Joints = [];
         public bool Soft = true, Frozen, Carried;
@@ -87,9 +88,11 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
             {
                 if (handle is not { } h) continue;
                 var body = physics.Simulation.Bodies.GetBodyReference(h); count++;
-                if (body.Velocity.Linear.LengthSquared() < .25f && body.Velocity.Angular.LengthSquared() < .25f) still++;
+                if (body.Velocity.Linear.LengthSquared() < 2.25f && body.Velocity.Angular.LengthSquared() < 1.96f) still++;
             }
-            if (!piece.Carried && (piece.Age >= 7 || piece.Age >= 2 && (count == 0 || still >= count * .6f))) Freeze(piece);
+            // Pinned torso fragments wait for every disconnected component, rather than freezing an airborne limb
+            // as soon as most of the torso is resting (RagdollSystem.Fragments.FinishTorsoRagdolls at 3a15eeb9).
+            if (!piece.Carried && (piece.Age >= 7 || piece.Age >= 2 && (count == 0 || still >= count * .99f))) Freeze(piece);
         }
         physics.Sweep(tick);
     }
@@ -163,6 +166,7 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
         var unturn = Quaternion.Inverse(Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 })));
         var result = new BonePose(rig.BoneCount) { AbsolutePositions = true };
         EnsureAnchors(piece, rig);
+        result.Components = piece.Components ??= BoneComponents(piece.Definition, piece.Anchors!);
         for (int h = 0; h < rig.BoneCount; h++)
         {
             var bone = piece.Offsets![h].Then(piece.Pose[piece.Anchors![h]]);

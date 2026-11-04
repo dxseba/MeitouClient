@@ -10,7 +10,7 @@
     <ProjectReference Include="../../src/Meitou.Engine/Meitou.Engine.csproj" Private="false" />
   </ItemGroup>
   <ItemGroup>
-    <None Update="meitou.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="meitou.json;README.md;ASSETS.md;assets/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="Meitou.Tests" />
   </ItemGroup>
 </Project>

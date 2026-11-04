@@ -90,7 +90,6 @@ internal static class RenderBridge
     {
         resources = source;
         context.Harmony.Patch(AccessTools.Method(typeof(World), nameof(World.Dispose)), postfix: new HarmonyMethod(typeof(RenderBridge), nameof(ReleaseWorld)));
-        context.Harmony.Patch(AccessTools.Method(typeof(RagdollSystem), "Wanted"), prefix: new HarmonyMethod(AccessTools.Method(typeof(RenderBridge), nameof(WantedPrefix))));
         var host = AccessTools.TypeByName("Meitou.Game.GameHost");
         if (host is null) return; // Headless tools have no character draw list.
         sessionField = AccessTools.Field(host, "session") ?? throw new MissingFieldException(host.FullName, "session");
@@ -100,12 +99,6 @@ internal static class RenderBridge
         foreach (string name in new[] { "FillDrawListCore", "FillWorldDrawList" })
             context.Harmony.Patch(AccessTools.Method(host, name), postfix: new HarmonyMethod(AccessTools.Method(typeof(RenderBridge), nameof(FillPostfix))));
     }
-    static bool WantedPrefix(CharacterCold cold, ref RagdollPart __result)
-    {
-        if (!BrutalityRuntime.ControlsPhysics(cold)) return true;
-        __result = RagdollPart.None; return false;
-    }
-
     static void FillPostfix(object __instance, CharacterDrawList list)
     {
         if (resources is null || drawKey is null || sessionField?.GetValue(__instance) is not WorldSession session) return;
@@ -151,7 +144,8 @@ internal static class RenderBridge
             if (current is null || resources.Rigs.For(current.Appearance) is not { } setup
                 || resources.Mesh(current.Appearance.BodyMesh) is not { } body)
             { if (stableKey != 0) pendingProxies.Add(instance.Key); continue; }
-            if (!resources.Geometry.TryCached(current.Appearance, setup.Rig, body, current.State, out var geometry))
+            var physicalComponents = ComponentsOf(current);
+            if (!resources.Geometry.TryCached(current.Appearance, setup.Rig, body, current.State, out var geometry, physicalComponents))
             {
                 if (rebuilt >= 4 || rebuilt > 0 && Stopwatch.GetElapsedTime(started).TotalMilliseconds >= 5)
                 {
@@ -161,7 +155,7 @@ internal static class RenderBridge
                 }
                 else
                 {
-                    geometry = resources.Geometry.Build(current.Appearance, setup.Rig, body, resources.Mesh, current.State);
+                    geometry = resources.Geometry.Build(current.Appearance, setup.Rig, body, resources.Mesh, current.State, physicalComponents);
                     rebuilt++;
                 }
             }
@@ -180,17 +174,29 @@ internal static class RenderBridge
                 var pose = current.Detached.FirstOrDefault(piece => piece.StableKey == stableKey);
                 if (fragment is null || pose is null) { pendingProxies.Add(instance.Key); continue; }
                 var old = before?.Detached.FirstOrDefault(piece => piece.StableKey == stableKey);
+                var mixedPose = Mixed(render, (current.Character, stableKey), old?.Bones, pose.Bones, session.SimulationAlpha);
+                var placement = Placement(before, current, session.SimulationAlpha);
                 list.Items[i] = instance with
                 {
                     Appearance = current.Appearance, Geometry = fragment.Geometry,
-                    Bones = Mixed(render, (current.Character, stableKey), old?.Bones, pose.Bones, session.SimulationAlpha),
+                    Bones = mixedPose,
+                    WorldBounds = FragmentWorldBounds.For(fragment.Geometry, current.Appearance, setup.Rig, body, mixedPose, placement,
+                        resources.Mesh, setup.Shape, resources.Rigs, instance.Build),
                     Position = old is null ? pose.Position : Vector3.Lerp(old.Position, pose.Position, session.SimulationAlpha),
-                    World = Placement(before, current, session.SimulationAlpha), FreezeFrom = null, BlendFrom = null, Blend = 0,
+                    World = placement, FreezeFrom = null, BlendFrom = null, Blend = 0,
                 };
                 continue;
             }
             var retained = current.Retained is null ? instance.Bones : Mixed(render, (current.Character, 0), before?.Retained, current.Retained, session.SimulationAlpha);
-            list.Items[i] = instance with { Appearance = current.Appearance, Geometry = retainedGeometry, Bones = retained };
+            var retainedWorld = instance.World ?? (instance.Rotation is { } retainedRotation
+                ? CharacterRigs.Placement(setup, instance.Position, retainedRotation, instance.Scale)
+                : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
+            list.Items[i] = instance with
+            {
+                Appearance = current.Appearance, Geometry = retainedGeometry, Bones = retained,
+                WorldBounds = FragmentWorldBounds.For(retainedGeometry, current.Appearance, setup.Rig, body, retained, retainedWorld,
+                    resources.Mesh, setup.Shape, resources.Rigs, instance.Build),
+            };
             foreach (var fragment in geometry.Detached)
             {
                 if (fragment.StableKey == 1 && proxyKeys.Values.Any(proxy => proxy.Owner == current.Character && proxy.StableKey == 1)) continue;
@@ -203,10 +209,13 @@ internal static class RenderBridge
                     ? CharacterRigs.Placement(setup, instance.Position, rotation, instance.Scale)
                     : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
                 var position = old is null ? pose.Position : Vector3.Lerp(old.Position, pose.Position, session.SimulationAlpha);
+                var mixedPose = Mixed(render, key, old?.Bones, pose.Bones, session.SimulationAlpha);
                 list.Add(instance with
                 {
                     Key = shown, Appearance = current.Appearance, Geometry = fragment.Geometry, Position = position, World = world,
-                    Bones = Mixed(render, key, old?.Bones, pose.Bones, session.SimulationAlpha), FreezeFrom = null,
+                    Bones = mixedPose, FreezeFrom = null,
+                    WorldBounds = FragmentWorldBounds.For(fragment.Geometry, current.Appearance, setup.Rig, body, mixedPose, world,
+                        resources.Mesh, setup.Shape, resources.Rigs, instance.Build),
                     BlendFrom = null, Blend = 0,
                 });
             }
@@ -256,12 +265,30 @@ internal static class RenderBridge
             * Matrix4x4.CreateTranslation(Vector3.Lerp(at0, at1, alpha));
     }
 
+    static CharacterGeometryComponents ComponentsOf(GoreCharacterFrame frame)
+    {
+        int[]? torso = null, headPositive = null, headNegative = null, leftArm = null, rightArm = null, leftLeg = null, rightLeg = null;
+        foreach (var piece in frame.Detached)
+            switch (piece.StableKey)
+            {
+                case 1: torso = piece.Bones.Components; break;
+                case 2: headPositive = piece.Bones.Components; break;
+                case 3: headNegative = piece.Bones.Components; break;
+                case 10: leftArm = piece.Bones.Components; break;
+                case 11: rightArm = piece.Bones.Components; break;
+                case 12: leftLeg = piece.Bones.Components; break;
+                case 13: rightLeg = piece.Bones.Components; break;
+            }
+        return new(frame.Retained?.Components, torso, headPositive, headNegative, leftArm, rightArm, leftLeg, rightLeg);
+    }
+
     static BonePose Mixed(RenderState state, (CharacterId, int) key, BonePose? before, BonePose after, float alpha)
     {
-        if (before is null || ReferenceEquals(before, after) || before.Set.Length != after.Set.Length) return after;
+        if (before is null || ReferenceEquals(before, after) || before.Set.Length != after.Set.Length
+            || before.AbsolutePositions != after.AbsolutePositions || !ReferenceEquals(before.Components, after.Components)) return after;
         if (!state.Mix.TryGetValue(key, out var result) || result.Set.Length != after.Set.Length)
             state.Mix[key] = result = new(after.Set.Length);
-        result.Weight = before.Weight + (after.Weight - before.Weight) * alpha; result.AbsolutePositions = after.AbsolutePositions;
+        result.Weight = before.Weight + (after.Weight - before.Weight) * alpha; result.AbsolutePositions = after.AbsolutePositions; result.Components = after.Components;
         for (int h = 0; h < result.Set.Length; h++)
         {
             result.Set[h] = after.Set[h];

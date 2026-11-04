@@ -13,7 +13,7 @@ namespace Meitou.Brutality.Rendering;
 /// <summary>Standing wounded actors use the same immutable geometry path without allocating a fragment physics owner.</summary>
 internal static class BodyWoundRenderBridge
 {
-    sealed record Variant(CharacterAppearance Appearance, ulong Stamp, RuntimeCharacterGeometry Geometry);
+    sealed record Variant(CharacterAppearance Appearance, ulong Stamp, SevereHeadWoundState Severe, RuntimeCharacterGeometry Geometry);
     sealed class Shown
     {
         public readonly Dictionary<CharacterId, Variant> Geometry = [];
@@ -43,22 +43,24 @@ internal static class BodyWoundRenderBridge
         if (resources is null || drawKey is null) return;
         var frame = BrutalityRuntime.For(session.World)?.WoundFrameAt(session.ShownTick);
         var shown = worlds.GetValue(session.World, static _ => new());
-        var needed = frame?.Characters.Where(pair => pair.Value.Torso is null && pair.Value.Head is null && pair.Value.Limbs.Count == 0 && pair.Value.SevereHead.Kind == SevereHeadWoundKind.None)
+        var needed = frame?.Characters.Where(pair => pair.Value.Torso is null && pair.Value.Head is null && pair.Value.Limbs.Count == 0)
             .ToDictionary(pair => drawKey(host, pair.Key), pair => pair.Value) ?? [];
         var current = needed.Values.Select(state => state.Character).ToHashSet();
         foreach (var id in shown.Geometry.Keys.Where(id => !current.Contains(id)).ToArray())
         { shown.Geometry[id].Geometry.Retire(); shown.Geometry.Remove(id); }
         if (needed.Count == 0) return;
-        // CPU pockets replace the reference shader mask: defer only visual revisions, never gameplay or healing.
+        // Wounds are shader data; defer only initial mesh preparation, never gameplay or healing.
         long started = Stopwatch.GetTimestamp(); int rebuilt = 0;
         for (int i = 0; i < list.Items.Count; i++)
         {
             var instance = list.Items[i];
             if (!needed.TryGetValue(instance.Key, out var state)) continue;
+            if (instance.Geometry is { } existing && CharacterGeometryAdapter.SurfaceFor(existing) is not null) continue;
             ulong stamp = state.Wounds.StateKey();
+            var severe = state.SevereHead with { HeavyHits = 0 };
             shown.Geometry.TryGetValue(state.Character, out var previous);
             bool sameLook = previous is not null && ReferenceEquals(previous.Appearance, instance.Appearance);
-            if (sameLook && previous is { } ready && ready.Stamp == stamp && !ready.Geometry.IsRetired)
+            if (sameLook && previous is { } ready && ready.Stamp == stamp && ready.Severe == severe && !ready.Geometry.IsRetired)
             { list.Items[i] = instance with { Geometry = ready.Geometry }; continue; }
             if (rebuilt >= 4 || rebuilt > 0 && Stopwatch.GetElapsedTime(started).TotalMilliseconds >= 5)
             {
@@ -71,7 +73,7 @@ internal static class BodyWoundRenderBridge
             rebuilt++;
             RenderBridge.Track(session.World, generated.Retained);
             if (previous is not null && !ReferenceEquals(previous.Geometry, generated.Retained)) previous.Geometry.Retire();
-            shown.Geometry[state.Character] = new(instance.Appearance, stamp, generated.Retained);
+            shown.Geometry[state.Character] = new(instance.Appearance, stamp, severe, generated.Retained);
             list.Items[i] = instance with { Geometry = generated.Retained };
         }
     }

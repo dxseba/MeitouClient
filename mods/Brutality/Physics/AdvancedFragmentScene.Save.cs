@@ -54,7 +54,8 @@ internal sealed partial class AdvancedFragmentScene
             body.Velocity = new BodyVelocity(saved.Linear[b], saved.Angular[b]); body.Awake = true;
         }
         piece.Age = saved.Age; piece.Carried = saved.Carried;
-        if (saved.Anchors is not null) { piece.Anchors = saved.Anchors.ToArray(); piece.Offsets = saved.Offsets!.ToArray(); }
+        if (saved.Anchors is not null)
+        { piece.Anchors = saved.Anchors.ToArray(); piece.Offsets = saved.Offsets!.ToArray(); piece.Components = null; }
         RebuildCarryJoints(piece);
         if (saved.Frozen) Freeze(piece);
         return true;

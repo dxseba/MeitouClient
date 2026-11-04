@@ -24,9 +24,9 @@ internal static class AnatomyDetail
 
     public static IReadOnlyList<float> ScreenThresholds { get; } = Array.AsReadOnly(new[] { 650f, 400f, 260f });
 
-    public static OgreMesh WithLevels(OgreMesh mesh, SkeletonRig rig, IReadOnlyList<CutHalfspace> cuts)
+    public static OgreMesh WithLevels(OgreMesh mesh, SkeletonRig rig, IReadOnlyList<CutHalfspace> cuts, bool preserveRawVertexChannels = false)
     {
-        var model = Model.Build(mesh, rig.BoneCount, gameBinormals: true);
+        var model = Model.Build(mesh, rig.BoneCount, gameBinormals: true, preserveRawVertexChannels: preserveRawVertexChannels);
         var levels = model.Parts.Select(part => Build(part.Indices.Select(index => part.Vertices[index]).ToArray(), cuts)).ToArray();
         if (levels.All(part => part.Length == 1)) return mesh;
         // MeshCut emits triangle soup. Reindexing that exact order leaves positions, UVs, normals and bone ownership untouched.

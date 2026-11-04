@@ -95,7 +95,15 @@ internal static partial class EffectsBridge
     /// <summary>Called by the mod's render bridge after the full draw list has been assembled, including independent fragments.</summary>
     public static void Capture(object host, CharacterDrawList list, WorldSession session)
     {
-        if (resources is null || drawKey is null || hostGpu?.GetValue(host) is not { } gpu || particlesField?.GetValue(gpu) is not ParticleRenderer particles) return;
+        if (resources is null || drawKey is null || hostGpu?.GetValue(host) is not { } gpu || particlesField is null) return;
+        var particles = particlesField.GetValue(gpu) as ParticleRenderer;
+        if (particles is null && list.Context is { } context)
+        {
+            particles = ParticleRenderer.Create(context, resources.Assets);
+            particles.Enabled = Enabled(host);
+            particlesField.SetValue(gpu, particles);
+        }
+        if (particles is null) return;
         var world = session.World;
         var effects = worlds.GetValue(world, static _ => new());
         var binding = bindings.GetValue(particles, static _ => new());

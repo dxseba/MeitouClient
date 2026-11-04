@@ -92,7 +92,8 @@ internal sealed partial class AdvancedFragmentScene
     internal static BonePose CarryPose(Piece piece, SkeletonRig rig, RigidTransform[] poses)
     {
         EnsureAnchors(piece, rig);
-        var result = new BonePose(rig.BoneCount) { AbsolutePositions = true };
+        var result = new BonePose(rig.BoneCount)
+        { AbsolutePositions = true, Components = piece.Components ??= BoneComponents(piece.Definition, piece.Anchors!) };
         for (int h = 0; h < rig.BoneCount; h++)
         {
             var at = piece.Offsets![h].Then(poses[piece.Anchors![h]]);

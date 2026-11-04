@@ -204,6 +204,29 @@ public sealed class BrutalityFragmentPhysicsTests
         for (int tick = 0; tick < 240; tick++) scene.Step(1f / 30, new Flat(), tick);
         var pose = scene.Publish(piece, rig, placement);
         Assert.True(pose.AbsolutePositions);
+        var components = Assert.IsType<int[]>(pose.Components);
+        Assert.Equal(rig.BoneCount, components.Length);
+        Assert.NotEqual(components[0], components[2]);
+        Assert.Equal(components[1], components[2]);
+        Assert.Equal(components[2], components[3]);
+        var topology = components.ToArray();
+        var saved = scene.Capture(piece, 1, "detached-chain", rig);
+        var replacement = scene.Create(cut, bone => new(rig.BindPosition[bone] + new Vector3(20, 15, 20), Quaternion.Identity), Vector3.Zero, Vector3.Zero, 10);
+        Assert.True(scene.Restore(replacement, saved));
+        var restored = scene.Publish(replacement, rig, placement);
+        Assert.Equal(topology, restored.Components);
+        Assert.NotSame(components, restored.Components);
+        Assert.Equal(topology, components); // An older published snapshot stays immutable after a save roundtrip.
+        var carried = AdvancedFragmentScene.CarryPose(replacement, rig, replacement.Pose);
+        Assert.Equal(topology, carried.Components);
+        // Re-cut an existing settled piece: the nonphysical hand must keep following its actual forearm,
+        // not the upright animation whose physical actor transforms have merely been overwritten afterwards.
+        var posed = FragmentPhysicsSystem.PoseWorld(new() { Rig = rig }, [], pose, placement);
+        var second = scene.Create(cut, bone => posed[bone], Vector3.Zero, Vector3.Zero, 11, posed);
+        var secondPose = scene.Publish(second, rig, placement);
+        Assert.InRange(Vector3.Distance(Vector3.Transform(secondPose.Position[2], placement), Vector3.Transform(secondPose.Position[3], placement)), 1.99f, 2.01f);
+        Assert.InRange(Vector3.Distance(secondPose.Position[3], pose.Position[3]), 0, .0001f);
+        Assert.Equal(topology, secondPose.Components);
         var scratch = rig.Rent();
         try
         {
@@ -303,6 +326,57 @@ public sealed class BrutalityFragmentPhysicsTests
         Assert.InRange(Vector3.Distance(expected, Vector3.Transform(sample, skin[1])), 0, .0001f);
         Assert.True(scale.X > 0); Assert.NotEqual(Vector3.One, scale);
         Assert.Equal(200, Vector3.Transform(rig.BindPosition[1], skin[1]).Y, .0001f);
+    }
+
+    [Fact]
+    public void A_new_cut_preserves_actor_spin_and_centre_of_mass_motion_without_reapplying_the_launch()
+    {
+        using var scene = new AdvancedFragmentScene();
+        var definition = Definition([BoxBody("Bip01", 0, new(0, 10, 0), new(2))]);
+        var piece = scene.Create(definition, _ => new(new(2, 10, 0), Quaternion.Identity), new(100, 0, 0), Vector3.Zero, 0);
+        scene.InheritMotion(piece, [new(0, new(new(0, 10, 0), Quaternion.Identity), new(3, 4, 5), new(0, 0, 2))], new(0, 1, 0));
+        var actual = Assert.Single(scene.CaptureMotion(piece));
+        Assert.Equal(new Vector3(3, 9, 5), actual.Linear);
+        Assert.Equal(new Vector3(0, 0, 2), actual.Angular);
+    }
+
+    [Fact]
+    public void A_hit_applies_the_pinned_local_impulse_and_torque_only_to_its_struck_component()
+    {
+        Assert.Equal(new Vector3(10, 2, 0), FragmentPhysicsSystem.HitPush(Vector2.UnitX, 1));
+        Assert.Equal(new Vector3(20, 4, 0), FragmentPhysicsSystem.HitPush(Vector2.UnitX, 50));
+        Assert.Equal(new Vector3(50, 10, 0), FragmentPhysicsSystem.HitPush(Vector2.UnitX, 1000));
+        Assert.Equal(Vector3.Zero, FragmentPhysicsSystem.HitPush(Vector2.Zero, 50));
+        using var scene = new AdvancedFragmentScene();
+        var definition = Definition([BoxBody("Bip01", 0, new(0, 10, 0), new(2)), BoxBody("detached hand", 1, new(10, 10, 0), new(2))]);
+        var piece = scene.Create(definition, bone => definition.Bodies[bone].Bind, Vector3.Zero, Vector3.Zero, 0);
+        scene.Impact(piece, 0, Vector3.UnitY, new(10, 0, 0));
+        var actual = scene.CaptureMotion(piece);
+        Assert.Equal(new Vector3(10, 0, 0), actual[0].Linear);
+        Assert.True(actual[0].Angular.Z < 0);
+        Assert.Equal(Vector3.Zero, actual[1].Linear);
+        Assert.Equal(Vector3.Zero, actual[1].Angular);
+    }
+
+    [Fact]
+    public void Four_settled_components_cannot_freeze_a_fifth_component_that_is_still_falling()
+    {
+        var definition = Definition([
+            BoxBody("Bip01", 0, new(0, 1, 0), new(2)), BoxBody("settled arm", 1, new(5, 1, 0), new(2)),
+            BoxBody("settled leg", 2, new(10, 1, 0), new(2)), BoxBody("settled head", 3, new(15, 1, 0), new(2)),
+            BoxBody("airborne hand", 4, new(100, 1000, 0), new(2)),
+        ]);
+        using var scene = new AdvancedFragmentScene();
+        var piece = scene.Create(definition, bone => definition.Bodies[bone].Bind, Vector3.Zero, Vector3.Zero, 0);
+        for (int tick = 0; tick < 75; tick++) scene.Step(1f / 30, new Flat(), tick);
+        Assert.False(piece.Frozen);
+        var motion = scene.CaptureMotion(piece);
+        Assert.All(motion.Take(4), body => Assert.InRange(body.Linear.LengthSquared(), 0, 2.25f));
+        Assert.True(motion[4].Linear.Y < -10);
+        Assert.True(piece.Pose[4].Position.Y > 100);
+        // The native seven-second upper bound still releases the simulation budget for pathological fragments.
+        for (int tick = 75; tick < 215; tick++) scene.Step(1f / 30, new Flat(), tick);
+        Assert.True(piece.Frozen);
     }
 
 }

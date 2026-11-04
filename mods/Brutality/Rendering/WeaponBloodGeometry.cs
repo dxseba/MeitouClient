@@ -52,7 +52,8 @@ public sealed class WeaponBloodGeometry(RgbaImage? splatter = null)
             result.Add(supplied with { Mesh = painted, VertexColours = true }); changed = true;
         }
         if (!changed) return existing;
-        var geometry = new RuntimeCharacterGeometry(existing?.BodyMesh, result);
+        var geometry = new RuntimeCharacterGeometry(existing?.BodyMesh, result, existing?.Shaders, existing?.PreserveRawBodyVertexChannels ?? false, existing?.BodyFlags ?? 0, existing?.BodyMaterialFlags ?? 0, existing?.BodyDoubleSided);
+        if (existing is not null) CharacterGeometryAdapter.AliasSurface(existing, geometry);
         originals.Add(geometry, new(existing));
         if (existing is null) cache.Plain = geometry; else cache.Variants.Add(existing, geometry);
         return geometry;

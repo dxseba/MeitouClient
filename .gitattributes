@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.sln text eol=crlf
+
+# Licensed anatomy geometry is binary; preserve the manifest hashes across platforms.
+mods/Brutality/assets/anatomy/*.anatomy binary

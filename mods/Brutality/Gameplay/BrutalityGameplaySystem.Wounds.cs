@@ -43,7 +43,9 @@ public sealed partial class BrutalityGameplaySystem
     }
     void PublishBodyWounds(World world)
     {
-        var states = ActorViews.Where(view => view.Wounds.HasAny).ToDictionary(view => view.Character);
+        var states = ActorViews.Where(view => view.Wounds.HasAny || view.Wounds.BellyHits > 0
+            || view.SevereHead.Kind != SevereHeadWoundKind.None || view.Head is not null || view.Torso is not null || view.Limbs.Count > 0)
+            .ToDictionary(view => view.Character);
         if (states.Count == 0 && woundHistory.Count == 0) return;
         woundHistory.Enqueue(new(world.Tick + 1, new ReadOnlyDictionary<CharacterId, BrutalityActorView>(states)));
         while (woundHistory.Count > 64) woundHistory.Dequeue();

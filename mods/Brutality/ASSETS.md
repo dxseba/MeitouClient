@@ -1,21 +1,24 @@
-# Local anatomy assets
+# Bundled assets
 
-`AnatomyAssets` resolves optional `assets/anatomy/Ecorche.anatomy`, `Brain.anatomy` and
-`Mouth.anatomy` relative to `ModContext.Folder`; it does not depend on another installed mod.
-Missing assets return null; `Require(name)` reports a required missing file.
+`AnatomyAssets` resolves `assets/anatomy/Ecorche.anatomy`, `Brain.anatomy` and `Mouth.anatomy`
+relative to `ModContext.Folder`; it does not read another installed mod. Missing optional files
+return null; `Require(name)` reports a required missing file. The licensed three-file bundle is
+committed with [attribution, licence notices and source hashes](assets/anatomy/README.md).
 
-`tools/scripts/package-gore-mod.ps1 -OutputDirectory <package> -AnatomyDirectory <source>`
-copies the three local files and records byte sizes and SHA256 in `assets/anatomy/manifest.json`.
-Without an explicit source it reads `KENSHI_PATH`, `-GameDirectory` or `meitou.local.json`.
-`-AssemblyPath <built mod DLL>` optionally includes the mod assembly; the script never builds.
-It copies an authored `Brutality.mod`, or writes a valid empty V17 data mod for code-mod discovery.
+After building the DLL, package it without a Kenshi install or downloads:
 
-**Observed** (local source folder): `Ecorche-LICENSE.md` declares the model CC BY-SA 4.0
-and names BodyParts3D and Z-Anatomy. The package copies that declaration when present.
-**Unknown**: the declaration's byte-level provenance, full attribution and the Brain/Mouth
-files' redistribution terms. The manifest therefore marks these local copies unconfirmed.
-Anatomy binaries stay outside Git; public distribution requires a separate provenance review.
+```powershell
+pwsh -File tools/scripts/package-gore-mod.ps1 -OutputDirectory <package>/Brutality -AssemblyPath mods/Brutality/bin/Release/net10.0/Brutality.dll
+```
 
-Robot effects are bundled under `assets/effects/`: wreaderror's CC0 lightning and Kenney's CC0 particle streak,
-unchanged from the pinned reference. [Credits and source hashes](assets/effects/CREDITS.md) travel with the package;
-the packager verifies all three copied files. These textures have separate confirmed CC0 notices from the unconfirmed anatomy assets.
+The script uses the committed anatomy by default, verifies its manifest hashes, and preserves all
+listed notices and provenance. `-AnatomyDirectory <source>` or `-GameDirectory <Kenshi>` explicitly
+selects a local override (the latter uses `mods/Gauntlet of Crowns`; `KENSHI_PATH`/`meitou.local.json`
+can supply its install path). Byte-identical overrides retain the verified bundle's notices;
+different bytes receive an unconfirmed local-override manifest rather than inherited permission.
+The script never builds. It copies an authored `Brutality.mod`, or writes an empty valid V17 data
+mod for discovery, and includes the code's GPL licence without replacement engine DLLs.
+
+Robot effects under `assets/effects/` are wreaderror's CC0 lightning and Kenney's CC0 particle
+streak, unchanged from the gameplay reference. [Credits and source hashes](assets/effects/CREDITS.md)
+travel with the package; copied effects and anatomy metadata are checksum-verified.

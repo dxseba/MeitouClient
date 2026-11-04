@@ -42,11 +42,11 @@ internal static class MeshCut
         public readonly int Source = source;
         public readonly List<Sample> Vertices = [];
     }
-    readonly record struct Edge(Sample A, Sample B);
+    readonly record struct Edge(Sample A, Sample B, SurfaceOwner Owner);
 
     public static CutMeshResult Clip(OgreMesh source, SkeletonRig rig, IReadOnlyList<CutHalfspace> cuts,
         IReadOnlyDictionary<string, float>? poseWeights = null, bool cutHorns = false, Vector4? capColour = null,
-        IReadOnlyList<CutVolume>? removeVolumes = null)
+        IReadOnlyList<CutVolume>? removeVolumes = null, int[]? components = null, bool ownedSurface = false, bool rawCaps = false, bool buildCaps = true)
     {
         if (cuts.Count > 31) throw new ArgumentOutOfRangeException(nameof(cuts));
         var model = Model.Build(source, rig.BoneCount, gameBinormals: true);
@@ -65,6 +65,15 @@ internal static class MeshCut
                 uint ia = part.Indices[triangle], ib = part.Indices[triangle + 1], ic = part.Indices[triangle + 2];
                 if (ia >= part.Vertices.Length || ib >= part.Vertices.Length || ic >= part.Vertices.Length) continue;
                 var a = part.Vertices[ia]; var b = part.Vertices[ib]; var c = part.Vertices[ic];
+                if (ownedSurface && components is not null)
+                {
+                    var owner = Owner(a, b, c, components);
+                    // Relief grid cells cannot bridge independently falling physical islands.
+                    if (owner.Component < 0 || DominantComponent(a, components) != owner.Component
+                        || DominantComponent(b, components) != owner.Component || DominantComponent(c, components) != owner.Component) continue;
+                    a = Owned(a, owner, components); b = Owned(b, owner, components); c = Owned(c, owner, components);
+                }
+                SurfaceOwner? sectionOwner = null;
                 int group = TriangleGroup(a, b, c, groups);
                 var polygon = new List<Sample>(6)
                 {
@@ -95,9 +104,12 @@ internal static class MeshCut
                 {
                     var p = polygon[i]; var q = polygon[(i + 1) % polygon.Count];
                     uint mask = p.CutMask & q.CutMask;
-                    for (int cutIndex = 0; cutIndex < cuts.Count; cutIndex++)
+                    for (int cutIndex = 0; buildCaps && cutIndex < cuts.Count; cutIndex++)
                         if ((mask & (1u << cutIndex)) != 0 && Vector3.DistanceSquared(p.Vertex.Position + p.Morph, q.Vertex.Position + q.Morph) > Epsilon * Epsilon)
-                            edges[cutIndex].Add(new(p, q));
+                        {
+                            sectionOwner ??= components is null ? new(-1, 0) : Owner(a, b, c, components);
+                            edges[cutIndex].Add(new(p, q, sectionOwner.Value));
+                        }
                 }
                 for (int i = 1; i + 1 < polygon.Count; i++)
                 {
@@ -117,8 +129,8 @@ internal static class MeshCut
         }
         var skin = Encode(source, surfaces);
         var wound = new List<Vertex>();
-        for (int i = 0; i < cuts.Count; i++) AppendCaps(edges[i], cuts[i], wound, capColour);
-        return new(skin, wound.Count == 0 ? null : FromTriangles(wound, source.SkeletonName),
+        for (int i = 0; buildCaps && i < cuts.Count; i++) AppendCaps(edges[i], cuts[i], wound, capColour, rig, components);
+        return new(skin, wound.Count == 0 ? null : FromTriangles(wound, source.SkeletonName, preserveRawVertexChannels: rawCaps),
             total == 0 ? Vector3.Zero : min, total == 0 ? Vector3.Zero : max, total != 0);
     }
 
@@ -278,22 +290,22 @@ internal static class MeshCut
         return mesh;
     }
 
-    internal static OgreMesh FromTriangles(IReadOnlyList<Vertex> vertices, string? skeleton = null)
+    internal static OgreMesh FromTriangles(IReadOnlyList<Vertex> vertices, string? skeleton = null, bool preserveRawVertexChannels = false)
     {
         var mesh = new OgreMesh { Version = "[MeshSerializer_v1.100]", SkeletonName = skeleton, SkeletallyAnimated = true };
-        mesh.SubMeshes.Add(EncodePart(vertices, "brutality-generated"));
+        mesh.SubMeshes.Add(EncodePart(vertices, "brutality-generated", preserveRawVertexChannels));
         SetBounds(mesh);
         return mesh;
     }
 
-    static OgreSubMesh EncodePart(IReadOnlyList<Vertex> vertices, string material)
+    static OgreSubMesh EncodePart(IReadOnlyList<Vertex> vertices, string material, bool preserveRawVertexChannels = false)
     {
-        const ushort stride = 52;
+        ushort stride = preserveRawVertexChannels ? (ushort)64 : (ushort)52;
         var bytes = new byte[vertices.Count * stride];
         var data = new OgreVertexData { VertexCount = checked((uint)vertices.Count) };
         data.Elements.AddRange([new(0, OgreVertexElementType.Float3, OgreVertexSemantic.Position, 0, 0),
             new(0, OgreVertexElementType.Float3, OgreVertexSemantic.Normal, 12, 0), new(0, OgreVertexElementType.Float2, OgreVertexSemantic.TextureCoordinates, 24, 0),
-            new(0, OgreVertexElementType.Float4, OgreVertexSemantic.Tangent, 32, 0), new(0, OgreVertexElementType.ColourAbgr, OgreVertexSemantic.Diffuse, 48, 0)]);
+            new(0, OgreVertexElementType.Float4, OgreVertexSemantic.Tangent, 32, 0), new(0, preserveRawVertexChannels ? OgreVertexElementType.Float4 : OgreVertexElementType.ColourAbgr, OgreVertexSemantic.Diffuse, 48, 0)]);
         var sub = new OgreSubMesh { MaterialName = material, VertexData = data, Indices = new(true, Enumerable.Range(0, vertices.Count).Select(i => (uint)i).ToArray()) };
         for (int i = 0; i < vertices.Count; i++)
         {
@@ -305,7 +317,8 @@ internal static class MeshCut
             floats[8] = v.Tangent.X; floats[9] = v.Tangent.Y; floats[10] = v.Tangent.Z; floats[11] = v.Tangent.W;
             for (int k = 0; k < 4; k++)
             {
-                bytes[i * stride + 48 + k] = (byte)Math.Clamp((int)MathF.Round(v.Colour[k] * 255), 0, 255);
+                if (preserveRawVertexChannels) MemoryMarshal.Cast<byte, float>(bytes.AsSpan(i * stride + 48, 16))[k] = v.Colour[k];
+                else bytes[i * stride + 48 + k] = (byte)Math.Clamp((int)MathF.Round(v.Colour[k] * 255), 0, 255);
                 if (v.Weights[k] > 0) sub.BoneAssignments.Add(new((uint)i, (ushort)(v.Bones >> (k * 8) & 255), v.Weights[k]));
             }
         }
@@ -322,22 +335,83 @@ internal static class MeshCut
         mesh.Bounds = any ? new(min, max, Math.Max(Vector3.Distance(min, max) * .5f, .001f)) : new(Vector3.Zero, Vector3.Zero, .001f);
     }
 
-    static void AppendCaps(List<Edge> edges, in CutHalfspace cut, List<Vertex> output, Vector4? colour)
+    readonly record struct SurfaceOwner(int Component, uint Bone);
+
+    // Match the pinned cap builder: choose one physical island, then discard influences from other islands.
+    static SurfaceOwner Owner(in Vertex a, in Vertex b, in Vertex c, int[] components)
+    {
+        var votes = new Dictionary<int, float>();
+        foreach (var vertex in new[] { a, b, c })
+            for (int k = 0; k < 4; k++)
+            {
+                int bone = (int)(vertex.Bones >> (8 * k) & 255);
+                if (vertex.Weights[k] <= 0 || bone >= components.Length || components[bone] < 0) continue;
+                int component = components[bone];
+                votes[component] = votes.GetValueOrDefault(component) + vertex.Weights[k];
+            }
+        if (votes.Count == 0) return new(-1, 0);
+        int selected = votes.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key).First().Key;
+        uint fallback = 0; float strongest = -1;
+        foreach (var vertex in new[] { a, b, c })
+            for (int k = 0; k < 4; k++)
+            {
+                uint bone = vertex.Bones >> (8 * k) & 255;
+                if (bone < components.Length && components[bone] == selected && vertex.Weights[k] > strongest)
+                    (fallback, strongest) = (bone, vertex.Weights[k]);
+            }
+        return new(selected, fallback);
+    }
+
+    static int DominantComponent(in Vertex vertex, int[] components)
+    {
+        int at = 0;
+        for (int k = 1; k < 4; k++) if (vertex.Weights[k] > vertex.Weights[at]) at = k;
+        int bone = (int)(vertex.Bones >> (8 * at) & 255);
+        return bone < components.Length && vertex.Weights[at] > 0 ? components[bone] : -1;
+    }
+
+    static Vertex Owned(in Vertex vertex, SurfaceOwner owner, int[]? components)
+    {
+        if (owner.Component < 0 || components is null) return vertex;
+        var weights = vertex.Weights;
+        for (int k = 0; k < 4; k++)
+        {
+            uint bone = vertex.Bones >> (8 * k) & 255;
+            if (bone >= components.Length || components[bone] != owner.Component) weights[k] = 0;
+        }
+        float sum = weights.X + weights.Y + weights.Z + weights.W;
+        return sum > Epsilon ? vertex with { Weights = weights / sum }
+            : vertex with { Bones = owner.Bone, Weights = Vector4.UnitX };
+    }
+
+    internal static int SectionBone(SkeletonRig rig, in CutHalfspace cut)
+    {
+        if (cut.Group is < 1 or > 4) return -1;
+        string side = cut.Group % 2 == 1 ? "L" : "R";
+        string proximal = cut.Group <= 2 ? "UpperArm" : "Thigh", middle = cut.Group <= 2 ? "Forearm" : "Calf";
+        if (rig.Handle($"Bip01 {side} {proximal}") is not int upper) return -1;
+        if (rig.Handle($"Bip01 {side} {middle}") is not int lower) return upper;
+        return Vector4.Dot(cut.Plane, new(rig.BindPosition[lower], 1)) >= 0 ? lower : upper;
+    }
+
+    static void AppendCaps(List<Edge> edges, in CutHalfspace cut, List<Vertex> output, Vector4? colour, SkeletonRig rig, int[]? components)
     {
         if (edges.Count == 0) return;
         var points = new List<Sample>();
-        var byPoint = new Dictionary<(int X, int Y, int Z), int>();
+        int outputStart = output.Count;
+        var byPoint = new Dictionary<(int X, int Y, int Z, int Component), int>();
         var links = new Dictionary<int, HashSet<int>>();
-        int Add(Sample sample)
+        int Add(Sample sample, SurfaceOwner owner)
         {
+            sample = sample with { Vertex = Owned(sample.Vertex, owner, components) };
             var p = sample.Vertex.Position + sample.Morph;
-            var key = ((int)MathF.Round(p.X * 10000), (int)MathF.Round(p.Y * 10000), (int)MathF.Round(p.Z * 10000));
+            var key = ((int)MathF.Round(p.X * 10000), (int)MathF.Round(p.Y * 10000), (int)MathF.Round(p.Z * 10000), owner.Component);
             if (byPoint.TryGetValue(key, out int found)) return found;
             int index = points.Count; points.Add(sample); byPoint.Add(key, index); links.Add(index, []); return index;
         }
         foreach (var edge in edges)
         {
-            int a = Add(edge.A), b = Add(edge.B);
+            int a = Add(edge.A, edge.Owner), b = Add(edge.B, edge.Owner);
             if (a != b) { links[a].Add(b); links[b].Add(a); }
         }
         var seen = new HashSet<(int, int)>();
@@ -363,6 +437,10 @@ internal static class MeshCut
                 var ring = loop.Select(index => points[index].Vertex with { Position = points[index].Vertex.Position + points[index].Morph }).ToArray();
                 AppendRing(ring, kept, u, v, colour, output);
             }
+        // As in the pinned LimbCutSurface, a complete limb section follows its actual cut segment.
+        int anchor = SectionBone(rig, cut);
+        if (anchor >= 0)
+            for (int i = outputStart; i < output.Count; i++) output[i] = output[i] with { Bones = (uint)anchor, Weights = Vector4.UnitX };
     }
 
     static void AppendRing(Vertex[] ring, Vector3 kept, Vector3 u, Vector3 v, Vector4? colour, List<Vertex> output)

@@ -312,6 +312,15 @@ Meitou adds GAMESTATE_CHARACTER string `meitou ragdoll` for a whole-body (not ca
 position x y z and rotation x y z w, invariant floats; absent otherwise (a world without ragdolls keeps the loaded key); the original ignores it. **Observed** (headless, real data, a knocked-out
 human frozen after 61 ticks): save → load gives the same 13 body poses (offset 0), frozen flag and age; without the key it falls again from the clip.
 
+## Cut-fragment collision approximation
+
+**Observed** against the installed `hu_m_ragdoll_5.phs`: its 13 actors include calf capsules but
+no foot/toe actors. The DLL fragment solver preserves those definitions; floor support tests
+actor centres rather than the rendered skin. An isolated DLL preview showed foot skin below
+the ground while the calf actors were supported. **Unknown**: visual equivalence to the pinned
+integrated runtime in the same scene; no matched integrated capture has been made. A skin-only
+floor correction would change the reference collision approximation.
+
 ## Unknowns
 
 - Meaning of groups 1, 2, 7, 28–31 and the terrain's group (0: the click hulls, [combat](combat.md#line-of-fire-and-the-hit-shape)).

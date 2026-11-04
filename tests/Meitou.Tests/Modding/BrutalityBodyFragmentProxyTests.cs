@@ -4,6 +4,9 @@ using System.Text.Json.Nodes;
 using HarmonyLib;
 using Meitou.Brutality;
 using Meitou.Data.Fcs;
+using Meitou.Data;
+using Meitou.Data.Characters;
+using Meitou.Simulation.Ragdolls;
 using Meitou.Data.Save;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -25,13 +28,14 @@ public sealed class BrutalityBodyFragmentProxyTests
     {
         public BrutalityGameplaySystem Gameplay { get; } = new(null, BaseGame, BodyOptions.Default, (RngPurpose)0xB17A1171);
         public CarrySystem Carry { get; } = new(BaseGame, BodyOptions.Default, .1f, new() { AutoEveryTicks = 0 });
+        public RagdollSystem Native { get; } = new(new CharacterRigs(new GameDatabase(), _ => null, _ => null));
         public BodyFragmentProxySystem Proxies { get; }
         public SimWorld World { get; }
         public CharacterId Owner { get; }
         public CharacterCold Source { get; } = new Combatant().MakeCold("corpse");
         public Scene(int padding = 0, Action<CharacterCold>? refresh = null, bool body = false)
         {
-            Proxies = new(refresh); World = new(new WorldSettings { Seed = 29, PublishSnapshots = false }, new OpenGroundWalkability((_, _) => 0), body ? [new BodySystem(BaseGame, BodyOptions.Default), Carry, Gameplay, Proxies] : [Carry, Gameplay, Proxies]);
+            Proxies = new(refresh); World = new(new WorldSettings { Seed = 29, PublishSnapshots = false }, new OpenGroundWalkability((_, _) => 0), body ? [new BodySystem(BaseGame, BodyOptions.Default), Native, Carry, Gameplay, Proxies] : [Native, Carry, Gameplay, Proxies]);
             for (int i = 0; i < padding; i++) World.Characters.Spawn(new(), new(), 0);
             Source.Faction = 2; Source.Inventory = new();
             Source.Race = new() { StringId = Human.StringId, Name = Human.Name, StatMultipliers = Human.StatMultipliers, Anatomy = Human.Anatomy, Carriable = true };
@@ -51,7 +55,7 @@ public sealed class BrutalityBodyFragmentProxyTests
             if (hand is { } key) Gameplay.CaptureSaveIdentity(World, cold, id, key);
             return id;
         }
-        public void Dispose() => World.Dispose();
+        public void Dispose() { Proxies.Dispose(); Native.Dispose(); World.Dispose(); }
     }
     static byte[] Write(BodyFragmentProxySystem system) { using var stream = new MemoryStream(); system.Write(stream); return stream.ToArray(); }
 
@@ -78,7 +82,7 @@ public sealed class BrutalityBodyFragmentProxyTests
         scene.World.RunTicks(2); Assert.True(scene.Proxies.TryProxy(scene.Owner, 1, out var lower, out var proxy));
         Assert.Same(scene.Source.Inventory, proxy.Inventory); Assert.NotSame(scene.Source.Medical, proxy.Medical); Assert.NotSame(scene.Source.Stats, proxy.Stats);
         Assert.True(proxy.Medical!.Dead); Assert.Null(proxy.Ai); Assert.False(proxy.IsPlayer); Assert.Equal(-1, proxy.SquadId); Assert.Null(proxy.Save);
-        Assert.True(BrutalityRuntime.ControlsPhysics(proxy)); Assert.Null(proxy.Fighter!.Weapon);
+        Assert.False(scene.Native.TryClaim(scene.World, lower, new object(), out _)); Assert.Null(proxy.Fighter!.Weapon);
         float before = scene.Source.Medical!.Parts[0].Flesh; proxy.Medical.Parts[0].Flesh = -1000; Assert.Equal(before, scene.Source.Medical.Parts[0].Flesh);
         proxy.Inventory!.Items.Remove(item); scene.World.RunTick(); Assert.Empty(scene.Source.Inventory.Items); Assert.Same(scene.Source, refreshed);
         var frame = scene.Proxies.FrameAt(scene.World.Tick)!; Assert.Equal(scene.Owner, frame.Proxies[lower].Owner); Assert.Equal(1, frame.Proxies[lower].StableKey);
@@ -104,7 +108,7 @@ public sealed class BrutalityBodyFragmentProxyTests
         using var scene = new Scene(); scene.Cut(); scene.World.RunTicks(2); Assert.True(scene.Proxies.TryProxy(scene.Owner, 1, out var proxy, out var cold));
         var bytes = Write(scene.Proxies); var pending = new BodyFragmentProxySystem(); pending.Read(new MemoryStream(bytes)); Assert.Equal(bytes, Write(pending));
         Assert.True(scene.World.Characters.Remove(scene.Owner)); scene.World.RunTick();
-        Assert.False(scene.World.Characters.IsAlive(proxy)); Assert.False(BrutalityRuntime.ControlsPhysics(cold)); Assert.False(scene.Proxies.TryProxy(scene.Owner, 1, out _));
+        Assert.False(scene.World.Characters.IsAlive(proxy)); Assert.False(scene.Native.TryCapture(scene.World, proxy, out _)); Assert.False(scene.Proxies.TryProxy(scene.Owner, 1, out _));
         Assert.Contains(SaveIdentityAdapter.KeyFor(OwnerHand)!, System.Text.Encoding.UTF8.GetString(Write(scene.Proxies)));
     }
     [Fact]
