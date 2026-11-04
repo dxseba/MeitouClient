@@ -55,6 +55,8 @@ public sealed record RuntimeCharacterPart(CharacterPart Part, OgreMesh? Mesh = n
     public uint DrawFlags { get; init; }
     /// <summary>Whether this generated part appears in ordinary portraits, which use the host's standard shader.</summary>
     public bool ShowInPortrait { get; init; } = true;
+    /// <summary>Whether this part contributes to shadow depth passes; colour, motion and portraits are unchanged.</summary>
+    public bool CastsShadows { get; init; } = true;
     float minimumScreenPixels;
     /// <summary>Hide the part below this projected actor diameter in world passes; zero keeps ordinary visibility. Portraits use ShowInPortrait separately.</summary>
     public float MinimumScreenPixels

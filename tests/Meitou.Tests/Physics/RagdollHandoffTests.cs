@@ -10,6 +10,8 @@ using Meitou.Data.Physics;
 using Meitou.Simulation;
 using Meitou.Simulation.Ragdolls;
 using SimWorld = Meitou.Simulation.World;
+using ModRobotWeight = Meitou.Brutality.Physics.RobotRagdollWeight;
+using ModPhysics = Meitou.Brutality.Physics;
 
 namespace Meitou.Tests.Physics;
 
@@ -125,6 +127,94 @@ public sealed class RagdollHandoffTests
         world.RunTicks(60);
         Assert.Null(native.Publish(id)); Assert.Equal(0, native.Count);
         Assert.True(native.TryClaim(world, id, new object(), out _));
+    }
+
+    [Fact]
+    public void Robot_transfer_replaces_only_a_newly_assigned_launch_before_clamp_and_preserves_kept_and_later_motion()
+    {
+        using var native = Native(); using var world = Empty(native);
+        var id = world.Characters.Spawn(new() { Position = new(10, 20, 30), Yaw = .4f }, new(), 0);
+        var (physics, oldHandle, _) = SeedNativeBody(native, id, world.Tick);
+        var body = ((IDictionary)AccessTools.Field(typeof(RagdollSystem), "ragdolls").GetValue(native)!)[id]!;
+        var type = body.GetType();
+        void Set(string field, object value) => AccessTools.Field(type, field).SetValue(body, value);
+        var original = (RagdollDefinition)AccessTools.Field(type, "Definition").GetValue(body)!;
+        var added = new RagdollBody { Bone = 1, Name = "Bip01 L UpperArm", Type = PhysicsShapeType.Box, Size = new(2), Mass = 10,
+            Bind = new(new(20, 20, 20), Quaternion.Identity), BoneInBody = RigidTransform.Identity };
+        var definition = new RagdollDefinition { Bodies = [original.Bodies[0], added], Joints = [], BodyOfBone = [0, 1], Joined = [0, 0] };
+        var at = (RigidTransform[])AccessTools.Field(type, "Pose").GetValue(body)!;
+        Set("Definition", definition); Set("Bodies", new BodyHandle?[] { oldHandle, null }); Set("Dynamic", new[] { true, false });
+        Set("Pose", new[] { at[0], added.Bind });
+        var priorMovement = new Vector3(80, 3, 4); var push = new Vector3(50, 10, 0);
+        var raw = new RagdollLaunch(priorMovement + push, push);
+        AccessTools.Method(typeof(RagdollSystem), "Rebuild").Invoke(native,
+            [body, RagdollPart.Whole, new[] { at[0], added.Bind }, (raw.Velocity, raw.Push), true, world.Seed]);
+        Set("LaunchTick", world.Tick); Set("AppliedLaunch", raw);
+        var actors = (BodyHandle?[])AccessTools.Field(type, "Bodies").GetValue(body)!;
+        Assert.True(native.TryCapture(world, id, out var initial));
+        Assert.Null(initial.Bodies[0].AssignedLaunch);
+        var assigned = Assert.IsType<RagdollAssignedLaunch>(initial.Bodies[1].AssignedLaunch);
+        Assert.InRange(assigned.Linear.Length(), 99.999f, 100.001f); // Native clamps the complete movement + push.
+        var contact = new Vector3(-3, -4, 2); var angularContact = new Vector3(.1f, .2f, -.3f);
+        var launched = physics.Simulation.Bodies[actors[1]!.Value];
+        launched.Velocity = new BodyVelocity(assigned.Linear + contact, assigned.Angular + angularContact);
+        Assert.True(native.TryCapture(world, id, out var captured));
+        var robot = ModRobotWeight.CaptureMotion(true, captured);
+        var human = ModRobotWeight.CaptureMotion(false, captured);
+        Assert.Equal(new Vector3(4, 5, 6), robot[0].Linear); Assert.Equal(new Vector3(1, 2, 3), robot[0].Angular);
+        Assert.Equal(captured.Bodies[1].Linear, human[1].Linear); Assert.Equal(captured.Bodies[1].Angular, human[1].Angular);
+        Assert.InRange(Vector3.Distance(priorMovement + push * .35f + contact, robot[1].Linear), 0, .00002f);
+        // Raw spin saturates at6; the attenuated push gives2.625 before the same deterministic roll.
+        Assert.InRange(Vector3.Distance(assigned.Angular * (2.625f / 6) + angularContact, robot[1].Angular), 0, .00001f);
+        world.RunTick();
+        Assert.True(native.TryCapture(world, id, out var later));
+        Assert.All(later.Bodies, actor => Assert.Null(actor.AssignedLaunch));
+    }
+
+    [Fact]
+    public void Partial_ragdoll_virtual_and_pinned_entries_keep_skin_positions_but_do_not_zero_a_running_severed_limb()
+    {
+        using var native = Native(); using var world = Empty(native);
+        var id = world.Characters.Spawn(new() { Position = new(10, 20, 30), Yaw = .4f }, new(), 0);
+        var (physics, handle, _) = SeedNativeBody(native, id, world.Tick);
+        var body = ((IDictionary)AccessTools.Field(typeof(RagdollSystem), "ragdolls").GetValue(native)!)[id]!;
+        var type = body.GetType();
+        void Set(string field, object value) => AccessTools.Field(type, field).SetValue(body, value);
+        var original = (RagdollDefinition)AccessTools.Field(type, "Definition").GetValue(body)!;
+        var virtualBody = new RagdollBody { Bone = 1, Name = "Bip01 L Forearm", Type = PhysicsShapeType.Box, Size = new(2), Mass = 10,
+            Bind = new(new(20, 10, 0), Quaternion.Identity), BoneInBody = RigidTransform.Identity };
+        var pin = new RagdollBody { Bone = 2, Name = "Bip01 Spine1", Type = PhysicsShapeType.Box, Size = new(2), Mass = 10,
+            Bind = new(new(40, 10, 0), Quaternion.Identity), BoneInBody = RigidTransform.Identity };
+        var box = new Box(2, 2, 2); var shape = physics.Simulation.Shapes.Add(box);
+        var pinned = physics.AddBody(BodyDescription.CreateKinematic(new RigidPose(pin.Bind.Position), RagdollPhysics.Collidable(shape), new BodyActivityDescription(.01f)), new BodyTag { Ragdoll = 1, Index = 2 });
+        var definition = new RagdollDefinition { Bodies = [original.Bodies[0], virtualBody, pin], Joints = [], BodyOfBone = [0, 1, 2], Joined = [0, 0, 0] };
+        var oldPose = (RigidTransform[])AccessTools.Field(type, "Pose").GetValue(body)!;
+        Set("Definition", definition); Set("Bodies", new BodyHandle?[] { handle, null, pinned }); Set("Dynamic", new[] { true, false, false });
+        Set("Pose", new[] { oldPose[0], virtualBody.Bind, pin.Bind });
+        var skeleton = new OgreSkeleton();
+        skeleton.Bones.Add(new() { Handle = 0, Name = "Bip01", Position = Vector3.Zero });
+        skeleton.Bones.Add(new() { Handle = 1, Parent = 0, Name = virtualBody.Name, Position = virtualBody.Bind.Position });
+        skeleton.Bones.Add(new() { Handle = 2, Parent = 0, Name = pin.Name, Position = pin.Bind.Position });
+        Set("Setup", new CharacterPoseSetup { Rig = new(skeleton) }); Set("Published", new BonePose(3));
+        Assert.True(native.TryCapture(world, id, out var captured));
+        Assert.True(captured.Bodies[0].HasMotion); Assert.False(captured.Bodies[1].HasMotion); Assert.False(captured.Bodies[2].HasMotion);
+        Assert.Equal(virtualBody.Bind.Position, captured.Bodies[1].BoneWorld.Position); Assert.Equal(pin.Bind.Position, captured.Bodies[2].BoneWorld.Position);
+        Assert.True(new RagdollBodyMotion(0, RigidTransform.Identity, RigidTransform.Identity, Vector3.Zero, Vector3.Zero).HasMotion);
+        var source = new ModPhysics.RagdollDefinition
+        {
+            Bodies = definition.Bodies.Select(actor => new ModPhysics.RagdollBody { Bone = actor.Bone, Name = actor.Name, Type = actor.Type, Size = actor.Size, Mass = actor.Mass,
+                Bind = new(actor.Bind.Position, actor.Bind.Rotation), BoneInBody = new(actor.BoneInBody.Position, actor.BoneInBody.Rotation) }).ToArray(),
+            Joints = [], BodyOfBone = [0, 1, 2], Joined = [0, 0, 0],
+        };
+        var running = new Vector3(12, 0, -4);
+        using var fragments = new ModPhysics.AdvancedFragmentScene();
+        var piece = fragments.Create(source, bone => new(captured.Bodies[bone].BoneWorld.Position, captured.Bodies[bone].BoneWorld.Rotation), running, Vector3.Zero, 0);
+        var inherited = ModRobotWeight.CaptureMotion(false, captured); Assert.Single(inherited);
+        fragments.InheritMotion(piece, inherited);
+        var motion = fragments.CaptureMotion(piece);
+        Assert.InRange(Vector3.Distance(new(4, 5, 6), motion[0].Linear), 0, .00001f);
+        Assert.Equal(new Vector3(1, 2, 3), motion[0].Angular);
+        Assert.Equal(running, motion[1].Linear); Assert.Equal(running, motion[2].Linear);
     }
 
     static (RagdollPhysics Physics, BodyHandle Handle, BonePose Published) SeedNativeBody(RagdollSystem native, CharacterId id, long tick)

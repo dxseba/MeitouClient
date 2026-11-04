@@ -37,6 +37,31 @@ public class CharacterWorldBoundsTests
         Assert.Equal((actor.Position, 0f), CharacterRenderer.LoadingBounds(in actor));
     }
 
+    [Fact]
+    public void A_large_posed_actor_sphere_does_not_inflate_small_parts_or_move_their_bone_attachments()
+    {
+        var actor = Actor() with { WorldBounds = new CharacterWorldBounds(new(20, 502, 17), 80) };
+        var actorBounds = CharacterRenderer.BoundsOf(in actor, height: 36, radius: 4, scale: 3);
+        Assert.Equal(80, actorBounds.Radius);
+        var part = new AssetPart
+        {
+            Label = "small part", Mesh = null!, Shared = true, Material = new(),
+            BoundsCentre = new(0, 16, 0), BoundsRadius = 2, FileRadius = 3,
+        };
+        var model = Matrix4x4.CreateScale(2) * Matrix4x4.CreateTranslation(1, 500, 2);
+        var shared = CharacterRenderer.PartBounds(part, in model, 2, actorBounds.Centre, customBounds: true);
+        Assert.Equal(actorBounds.Centre, shared.Centre);
+        Assert.Equal(4, shared.Radius);
+        Assert.Equal(6, shared.FileRadius);
+        Assert.True(shared.Radius < 5); // A five-unit shadow texel can omit it despite the much larger actor sphere.
+        var ordinary = CharacterRenderer.PartBounds(part, in model, 2, actorBounds.Centre, customBounds: false);
+        Assert.Equal(new Vector3(1, 532, 2), ordinary.Centre);
+        Assert.Equal(shared.Radius, ordinary.Radius);
+        part.Shared = false;
+        var attached = CharacterRenderer.PartBounds(part, in model, 2, actorBounds.Centre, customBounds: true);
+        Assert.Equal(ordinary, attached);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

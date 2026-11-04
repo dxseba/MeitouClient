@@ -79,8 +79,10 @@ internal sealed class AssetPart
     public RuntimeCharacterShaderSet? Shaders;
     public uint DrawFlags;
     public bool ShowInPortrait = true;
+    public bool CastsShadows = true;
     public float MinimumScreenPixels;
-    public bool ShownAt(float pixels, bool portrait = false) => portrait ? ShowInPortrait : MinimumScreenPixels <= 0 || pixels >= MinimumScreenPixels;
+    public bool ShownAt(float pixels, bool portrait = false, bool depth = false) =>
+        (!depth || CastsShadows) && (portrait ? ShowInPortrait : MinimumScreenPixels <= 0 || pixels >= MinimumScreenPixels);
     float uvScale;
     /// <summary>World length of a texture-coordinate unit on the part (the largest of the mesh's parts; infinity: unknown, every mip kept).</summary>
     public float UvScale
@@ -855,6 +857,7 @@ internal sealed class CharacterContent : IDisposable
             if (supplied is { Mesh: not null, VertexColours: true }) ap.Material.VertexColoured = true;
             ap.DrawFlags = supplied?.DrawFlags ?? 0;
             ap.ShowInPortrait = supplied?.ShowInPortrait ?? true;
+            ap.CastsShadows = supplied?.CastsShadows ?? true;
             ap.MinimumScreenPixels = supplied?.MinimumScreenPixels ?? 0;
             ap.Material.AdditionalFlags = supplied?.MaterialFlags ?? 0;
             if (supplied?.DoubleSided is { } doubleSided) ap.Material.DoubleSided = doubleSided;

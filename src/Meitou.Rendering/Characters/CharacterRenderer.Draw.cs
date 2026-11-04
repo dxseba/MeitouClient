@@ -288,17 +288,14 @@ internal sealed unsafe partial class CharacterRenderer
         for (int p = 0; p < parts.Count; p++)
         {
             var part = parts[p];
-            if (!part.ShownAt(l.Pixels, portraitPass)) continue;
+            if (!part.ShownAt(l.Pixels, portraitPass, depthPass)) continue;
             if (!part.ShowsWith(l.WeaponDrawn, l.RangedDrawn, l.Shots, l.BackDrawn)) continue;
             var model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             float modelScale = part.Shared ? worldScale : model.ScaleLength();
-            bool customBounds = l.CustomBounds && !portraitPass;
-            float radius = customBounds ? l.Radius : part.BoundsRadius * modelScale;
-            float fileRadius = customBounds ? l.Radius : part.FileRadius * modelScale;
+            var (centre, radius, fileRadius) = PartBounds(part, in model, modelScale,
+                l.Centre - origin, l.CustomBounds && !portraitPass);
             if (depthPass && radius < minRadius) continue;
 
-            // Supplied bounds already follow posed fragments; bind-space part centres can be far from the physical head/limb.
-            var centre = customBounds ? l.Centre - origin : Vector3.Transform(part.BoundsCentre, model);
             int level;
             if (!GeneratedLod) level = FileLevel(part, MeshLod.Value(eye - origin, centre, fileRadius));
             else
@@ -423,10 +420,10 @@ internal sealed unsafe partial class CharacterRenderer
             if (!f.Shows) continue;
             f.Model = part.Shared ? world : attach[l.AttachBase + part.AttachIndex] * world;
             f.Scale = part.Shared ? worldScale : f.Model.ScaleLength();
-            var centre = l.CustomBounds ? l.Centre - origin : Vector3.Transform(part.BoundsCentre, f.Model);
-            f.Radius = l.CustomBounds ? l.Radius : part.BoundsRadius * f.Scale;
-            f.Lod = MeshLod.Value(Vector3.Zero, centre, f.Radius);
-            f.FileLod = MeshLod.Value(Vector3.Zero, centre, l.CustomBounds ? l.Radius : part.FileRadius * f.Scale);
+            var bounds = PartBounds(part, in f.Model, f.Scale, l.Centre - origin, l.CustomBounds);
+            f.Radius = bounds.Radius;
+            f.Lod = MeshLod.Value(Vector3.Zero, bounds.Centre, bounds.Radius);
+            f.FileLod = MeshLod.Value(Vector3.Zero, bounds.Centre, bounds.FileRadius);
             if (motion) f.PreviousModel = part.Shared ? previousWorld : l.State.PreviousAttach[part.AttachIndex] * previousWorld;
         }
     }
@@ -517,6 +514,7 @@ internal sealed unsafe partial class CharacterRenderer
     /// <summary>One placed part's instance, added to the chunk of every view in <paramref name="seen"/> at the level that view chooses.</summary>
     void GatherPart(in Live l, AssetPart part, in PartFrame f, int c, uint seen, GatherView[] views, int viewCount, bool depth, bool motion, float bias)
     {
+        if (depth && !part.ShownAt(l.Pixels, depth: true)) return;
         var instance = new CharInstance
         {
             Model = part.IsBody ? WithBlood(f.Model, l.Blood) : f.Model,

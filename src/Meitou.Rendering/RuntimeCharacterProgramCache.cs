@@ -7,6 +7,7 @@ internal sealed class RuntimeCharacterProgramCache<T>(Func<RuntimeCharacterShade
 {
     readonly Dictionary<RuntimeCharacterShaderSet, T> entries = new(ReferenceEqualityComparer.Instance);
     public IEnumerable<T> Values => entries.Values;
+    public bool Contains(RuntimeCharacterShaderSet source) => entries.ContainsKey(source);
     public T Get(RuntimeCharacterShaderSet source)
     {
         if (!entries.TryGetValue(source, out var value)) entries.Add(source, value = create(source));

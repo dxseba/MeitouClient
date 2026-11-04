@@ -87,6 +87,8 @@ public sealed class CharacterDrawList
 
     /// <summary>The characters that may be drawn or posed this frame: emptied by the renderer (<see cref="Clear"/>) and filled again each frame.</summary>
     public List<CharacterInstance> Items { get; } = [];
+    /// <summary>Asset/program preparation requests only: never posed, picked or drawn. Processed after visible work under the shared build budget; refilled each frame.</summary>
+    public List<CharacterInstance> Preparations { get; } = [];
     /// <summary>
     /// The characters beyond the renderer's reach (<see cref="Characters.CharacterRenderer.InReach"/>), with only their look, place and what loading reads: kept across
     /// frames and filled again by the host when its simulation snapshot changes (<see cref="BeginDistant"/>), as nothing in them moves between ticks. Read only to build
@@ -95,10 +97,18 @@ public sealed class CharacterDrawList
     public List<CharacterInstance> Distant { get; } = [];
     /// <summary>Counts the refills of <see cref="Distant"/>.</summary>
     public int DistantVersion { get; private set; }
-    public void Clear() => Items.Clear();
+    public void Clear() { Items.Clear(); Preparations.Clear(); }
     public void Add(in CharacterInstance instance) => Items.Add(instance);
     /// <summary>Empties <see cref="Distant"/> to be filled again.</summary>
     public void BeginDistant() { Distant.Clear(); DistantVersion++; }
+
+    internal void CollectRuntimeGeometry(ISet<RuntimeCharacterGeometry> into)
+    {
+        foreach (var item in Items) if (item.Geometry is { } geometry) into.Add(geometry);
+        foreach (var item in Distant) if (item.Geometry is { } geometry) into.Add(geometry);
+        foreach (var item in Preparations) if (item.Geometry is { } geometry) into.Add(geometry);
+    }
+
 }
 
 /// <summary>A bolt stuck in a character: its mesh, the bone it is on and its flight direction in the character's frame (its yaw taken off) when it struck.</summary>

@@ -613,6 +613,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         }
 
         UpdateDistant(eye, reach, ref built, ref buildMs);
+        if (Draws.Preparations.Count > 0) PrepareAssets(eye, reach, ref built, ref buildMs);
         return (boneTotal, partTotal);
     }
 
@@ -621,8 +622,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     {
         if (runtimeAssets.Count == 0 || !runtimeAssets.Keys.Any(key => key.Geometry.IsRetired)) return;
         var current = new HashSet<RuntimeCharacterGeometry>(ReferenceEqualityComparer.Instance);
-        foreach (var item in Draws.Items) if (item.Geometry is { } geometry) current.Add(geometry);
-        foreach (var item in Draws.Distant) if (item.Geometry is { } geometry) current.Add(geometry);
+        Draws.CollectRuntimeGeometry(current);
         bool removed = false;
         foreach (var key in runtimeAssets.Keys.Where(key => key.Geometry.IsRetired && !current.Contains(key.Geometry)).ToArray())
             removed |= runtimeAssets.Remove(key);
@@ -634,7 +634,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     }
 
     /// <summary>The character's asset, built when missing and wanted within the frame's load budget.</summary>
-    CharacterAsset? AssetFor(in CharacterInstance inst, Vector3 eye, float reach, ref int built, ref double buildMs)
+    CharacterAsset? AssetFor(in CharacterInstance inst, Vector3 eye, float reach, ref int built, ref double buildMs, bool preparation = false)
     {
         CharacterAsset? asset;
         if (inst.Geometry is { } geometry)
@@ -643,7 +643,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         }
         else if (assets.TryGetValue(inst.Appearance, out asset)) return asset;
         if (Deferred(inst)) return null;
-        if (!portraitKeys.Contains(inst.Key) && !WantsAsset(inst, eye, reach)) return null;
+        if (!preparation && !portraitKeys.Contains(inst.Key) && !WantsAsset(inst, eye, reach)) return null;
 
         // Interactive: the files are read and the meshes prepared on a worker first (CharacterContent.Fetched), then a few a frame are uploaded.
         bool overBudget = !Covered && built >= LoadBudget || buildMs >= (Covered ? CoveredBudgetMs : BuildBudgetMs);

@@ -5,7 +5,14 @@ using Meitou.Data.Characters;
 namespace Meitou.Simulation.Ragdolls;
 
 /// <summary>One actor at a physics handoff: its original bone handle, world transforms and centre-of-mass velocities.</summary>
-public readonly record struct RagdollBodyMotion(int Bone, RigidTransform Body, RigidTransform BoneWorld, Vector3 Linear, Vector3 Angular);
+public readonly record struct RagdollBodyMotion(int Bone, RigidTransform Body, RigidTransform BoneWorld, Vector3 Linear, Vector3 Angular)
+{
+    /// <summary>Velocity assigned by this tick's new-body launch, before the physics step. Null for actors carrying on with prior motion.</summary>
+    public RagdollAssignedLaunch? AssignedLaunch { get; init; }
+    /// <summary>False for a virtual or pinned body without simulated velocity. Its pose remains useful for skinning, not velocity inheritance.</summary>
+    public bool HasMotion { get; init; } = true;
+}
+public readonly record struct RagdollAssignedLaunch(Vector3 Linear, Vector3 Angular);
 public readonly record struct RagdollLaunch(Vector3 Velocity, Vector3 Push);
 
 /// <summary>A detached copy of a native ragdoll. Bones are in Placement's model space; body transforms are in world space.
@@ -43,7 +50,11 @@ public sealed partial class RagdollSystem
                     var velocity = physics.Simulation.Bodies[handle].Velocity;
                     linear = velocity.Linear; angular = velocity.Angular;
                 }
-                actors.Add(new(actor.Bone, body.Pose[b], actor.BoneInBody.Then(body.Pose[b]), linear, angular));
+                actors.Add(new(actor.Bone, body.Pose[b], actor.BoneInBody.Then(body.Pose[b]), linear, angular)
+                {
+                    HasMotion = b < body.Bodies.Length && body.Bodies[b] is not null && b < body.Dynamic.Length && body.Dynamic[b],
+                    AssignedLaunch = body.LaunchTick == world.Tick && body.AppliedLaunch is not null && b < body.AssignedLaunch.Length ? body.AssignedLaunch[b] : null,
+                });
             }
             if ((body.PublishedIn == placement ? body.Published ?? Build(body, placement) : Build(body, placement)) is { } pose) bones = CopyPose(pose);
         }

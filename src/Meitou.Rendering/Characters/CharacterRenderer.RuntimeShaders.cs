@@ -50,7 +50,7 @@ internal sealed unsafe partial class CharacterRenderer
         if (runtimePrograms is null) return;
         var live = new HashSet<RuntimeCharacterShaderSet>(ReferenceEqualityComparer.Instance);
         foreach (var key in runtimeAssets.Keys) if (key.Geometry.Shaders is { } shaders) live.Add(shaders);
-        foreach (var instance in Draws.Items.Concat(Draws.Distant)) if (instance.Geometry?.Shaders is { } shaders) live.Add(shaders);
+        foreach (var instance in Draws.Items.Concat(Draws.Distant).Concat(Draws.Preparations)) if (instance.Geometry?.Shaders is { } shaders) live.Add(shaders);
         if (!runtimePrograms.Retain(live)) return;
         var programs = runtimePrograms.Values.SelectMany(value => value.All).ToHashSet();
         runtimeNatives.RetainPrograms(programs);

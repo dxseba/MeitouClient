@@ -141,6 +141,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
         public float Age;
         public long LaunchTick = -1;
         public RagdollLaunch? AppliedLaunch;
+        public RagdollAssignedLaunch?[] AssignedLaunch = [];
         /// <summary>Seconds of the get-up blend left (0: none), and the bones it blends from, in world space.</summary>
         public float BlendLeft;
         // Only an external ownership return supplies a complete world-space pose, including nonphysical child bones.
@@ -507,6 +508,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
         r.Tag = nextTag++;
         r.Bodies = new BodyHandle?[bodies.Length];
         r.Dynamic = dynamic;
+        r.AssignedLaunch = new RagdollAssignedLaunch?[bodies.Length];
         for (int b = 0; b < bodies.Length; b++)
         {
             // A simulated body carries on from where it was simulated (a body dropped from the shoulder falls from there); anything else starts from the animation,
@@ -515,6 +517,8 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             var pose = keep ? r.Pose[b] : lift > 0 ? animated[b] with { Position = animated[b].Position + new Vector3(0, lift, 0) } : animated[b];
             var velocity = keep ? velocities[b] : new BodyVelocity(launch, Spin(r, bodies[b].Name, b, start.Push, seed));
             if (!needed[b]) { r.Pose[b] = pose; continue; }
+            if (dynamic[b] && !keep && (mask & RagdollPart.Whole) != 0 && (mask & RagdollPart.CarryMode) == 0)
+                r.AssignedLaunch[b] = new(velocity.Linear, velocity.Angular);
             r.Pose[b] = pose;
             var rigid = new RigidPose(pose.Position, pose.Rotation);
             var collidable = RagdollPhysics.Collidable(kinds[b].Shape);
@@ -873,6 +877,7 @@ public sealed partial class RagdollSystem : ITickSystem, IStateHashed, IRagdollS
             if (r.Bodies[b] is { } handle) physics.Simulation.Bodies.Remove(handle);
         r.Bodies = [];
         r.Dynamic = [];
+        r.AssignedLaunch = [];
     }
 
     void Destroy(Ragdoll r)

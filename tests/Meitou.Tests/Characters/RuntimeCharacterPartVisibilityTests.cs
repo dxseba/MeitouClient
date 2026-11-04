@@ -25,6 +25,27 @@ public class RuntimeCharacterPartVisibilityTests
         Assert.True(part.ShownAt(float.NaN));
     }
 
+    [Fact]
+    public void An_interior_can_skip_shadow_depth_without_disappearing_from_the_picture_motion_or_portraits()
+    {
+        Assert.True(new RuntimeCharacterPart(null!).CastsShadows);
+        var part = new AssetPart
+        {
+            Label = "interior", Mesh = null!, Shared = true, Material = new(), BoundsCentre = default, BoundsRadius = 1,
+            MinimumScreenPixels = 180,
+        };
+        Assert.True(part.ShownAt(180, depth: true));
+        part.CastsShadows = false;
+        Assert.True(part.ShownAt(180));
+        Assert.True(part.ShownAt(0, portrait: true));
+        Assert.False(part.ShownAt(180, depth: true));
+        Assert.False(part.ShownAt(float.PositiveInfinity, depth: true));
+        Assert.False(part.ShownAt(179));
+        part.CastsShadows = true;
+        Assert.True(part.ShownAt(180, depth: true));
+        Assert.False(part.ShownAt(179, depth: true));
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(float.NaN)]

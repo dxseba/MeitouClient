@@ -176,33 +176,49 @@ public sealed class Model
         bool skinned = boneCount is not null && assignments.Count > 0;
         if (skinned)
         {
-            int dropped = 0;
-            foreach (var group in assignments.GroupBy(a => a.VertexIndex))
+            // Dense generated raw surfaces are rigid: validate the complete ordered map before bypassing the general compiler.
+            bool rigid = preserveRawVertexChannels && assignments.Count == n;
+            for (int i = 0; rigid && i < n; i++)
             {
-                if (group.Key >= n) { dropped++; continue; }
-                var top = group.Where(a => a.BoneIndex < boneCount!.Value && a.BoneIndex < 256 && a.Weight > 0)
-                    .OrderByDescending(a => a.Weight).Take(4).ToArray();
-                dropped += group.Count(a => a.BoneIndex >= boneCount!.Value);
-                float sum = top.Sum(a => a.Weight);
-                if (sum <= 0) continue;
-                ref var v = ref verts[group.Key];
-                uint packed = 0;
-                var w = new float[4];
-                for (int k = 0; k < top.Length; k++)
-                {
-                    packed |= (uint)top[k].BoneIndex << (8 * k);
-                    w[k] = top[k].Weight / sum;
-                }
-                v.Bones = packed;
-                v.Weights = new Vector4(w[0], w[1], w[2], w[3]);
+                var assignment = assignments[i];
+                rigid = assignment.VertexIndex == (uint)i && assignment.BoneIndex < boneCount!.Value
+                    && assignment.BoneIndex < 256 && float.IsFinite(assignment.Weight) && assignment.Weight > 0;
             }
-            if (dropped > 0) warnings.Add($"submesh {s}: {dropped} bone assignments name bones past the skeleton's {boneCount} and were dropped");
-            // A vertex without assignments follows blend index 0 fully (Ogre's Mesh::compileBoneAssignments): the lowest bone the vertex data's assignments use
-            // (docs/formats/ogre-mesh.md "Bone assignments"), so a hair's unweighted cards move with its head.
-            int lowest = assignments.Where(a => a.BoneIndex < boneCount!.Value && a.BoneIndex < 256).Select(a => (int)a.BoneIndex).DefaultIfEmpty(-1).Min();
-            if (lowest >= 0)
+            if (rigid)
+            {
                 for (int i = 0; i < n; i++)
-                    if (verts[i].Weights == Vector4.Zero) (verts[i].Bones, verts[i].Weights) = ((uint)lowest, new Vector4(1, 0, 0, 0));
+                    (verts[i].Bones, verts[i].Weights) = ((uint)assignments[i].BoneIndex, new Vector4(1, 0, 0, 0));
+            }
+            else
+            {
+                int dropped = 0;
+                foreach (var group in assignments.GroupBy(a => a.VertexIndex))
+                {
+                    if (group.Key >= n) { dropped++; continue; }
+                    var top = group.Where(a => a.BoneIndex < boneCount!.Value && a.BoneIndex < 256 && a.Weight > 0)
+                        .OrderByDescending(a => a.Weight).Take(4).ToArray();
+                    dropped += group.Count(a => a.BoneIndex >= boneCount!.Value);
+                    float sum = top.Sum(a => a.Weight);
+                    if (sum <= 0) continue;
+                    ref var v = ref verts[group.Key];
+                    uint packed = 0;
+                    var w = new float[4];
+                    for (int k = 0; k < top.Length; k++)
+                    {
+                        packed |= (uint)top[k].BoneIndex << (8 * k);
+                        w[k] = top[k].Weight / sum;
+                    }
+                    v.Bones = packed;
+                    v.Weights = new Vector4(w[0], w[1], w[2], w[3]);
+                }
+                if (dropped > 0) warnings.Add($"submesh {s}: {dropped} bone assignments name bones past the skeleton's {boneCount} and were dropped");
+                // A vertex without assignments follows blend index 0 fully (Ogre's Mesh::compileBoneAssignments): the lowest bone the vertex data's assignments use
+                // (docs/formats/ogre-mesh.md "Bone assignments"), so a hair's unweighted cards move with its head.
+                int lowest = assignments.Where(a => a.BoneIndex < boneCount!.Value && a.BoneIndex < 256).Select(a => (int)a.BoneIndex).DefaultIfEmpty(-1).Min();
+                if (lowest >= 0)
+                    for (int i = 0; i < n; i++)
+                        if (verts[i].Weights == Vector4.Zero) (verts[i].Bones, verts[i].Weights) = ((uint)lowest, new Vector4(1, 0, 0, 0));
+            }
         }
 
         return new ModelPart

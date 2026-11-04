@@ -172,11 +172,22 @@ simulation/background threads.
 `Disposing` notifies resource owners once on the render thread before the context is released,
 including worlds without particle effects. Cleanup handlers are isolated and subscriptions cleared.
 
+`CharacterDrawList.Preparations` queues asset and shader preparation without visible actors, poses or
+picking state. Refill it each frame; `Clear()` empties it with `Items`. This is best-effort background
+work: existing `ContentPending`/`IsPrepared` report native appearance loading, not these requests.
+Actual actors, distant loads and missing live custom programs use the build budget first; preparation
+uses the remainder, including shader creation by identity. If a live program cannot fit, speculative
+work waits; actual draws retain their lazy compilation fallback. A single asset/program preparation
+completes atomically and may exceed the time budget; another waits. Prepared generated resources remain
+cached until retired, and current preparation requests protect geometry/programs from retirement exactly
+like draw requests. Ordinary empty lists add no work.
+
 `CharacterInstance.WorldBounds` optionally supplies a validated `CharacterWorldBounds` sphere for
 posed/deformed geometry. Centre and radius are already world-space: the host adds no bind height or
-scale. Loading/reach, view/fog culling, picking and projected LOD use it consistently. Null or the
-invalid default struct preserves ordinary character bounds; explicit nonfinite/nonpositive values
-are rejected by the bounds constructor.
+scale. Loading/reach, view/fog culling, picking and actor projected-size cutoffs use it. Mesh LOD and
+shadow size cutoffs retain each part's own radius; posed shared parts use the supplied centre, while
+bone-attached parts use their actual attachment transform. Null or the invalid default struct preserves
+ordinary character bounds; explicit nonfinite/nonpositive values are rejected by the bounds constructor.
 
 `CharacterInstance.Geometry` accepts immutable `RuntimeCharacterGeometry` variants; call `Retire()`
 once a variant is no longer published. Generated GPU meshes and shader programs retire after frames
@@ -192,6 +203,7 @@ is active only with supplied shader data (an empty prefix is valid). Native acto
 Instance bits 0 and 12–29 are host-owned; `BodyFlags`/part `DrawFlags` cannot overwrite them. Part
 `MaterialFlags`/`BodyMaterialFlags` add raw material bits without clearing ordinary material flags.
 Nullable part `DoubleSided` and geometry `BodyDoubleSided` override material culling; null inherits it.
+Part `CastsShadows` defaults to true; false omits only its shadow depth passes, retaining colour, motion and portraits.
 `PreserveRawVertexChannels` (or `PreserveRawBodyVertexChannels`) opts a supplied mesh into full-float
 tangent/colour channels without native curvature/visibility rewriting; the producer owns that metadata.
 Portraits use the standard shader without producer flags; set a generated part's `ShowInPortrait=false`
@@ -209,6 +221,12 @@ ids identify a connected piece within that pose. Interpolation keeps the destina
 `RagdollSystem.TryCapture(world, id, out handoff)` copies native body/bone world transforms,
 velocities, a model-space pose and its placement without changing ownership. Pending and
 already-applied launches are distinguished; do not apply an already-consumed velocity twice.
+A body's optional `AssignedLaunch` records its initial clamped linear/angular velocity only when
+this tick's rebuild actually launched that actor. It is absent for previously dynamic actors whose
+motion was kept. `HasMotion` is false for virtual/null-handle or kinematic pinned bodies; keep
+their pose data, but do not inherit their placeholder velocity. Manually constructed body snapshots
+default to `HasMotion=true` for compatibility. A replacement launch can add replacement-minus-assigned velocity without scaling
+unrelated captured motion; subsequent gravity/contact effects remain in the captured velocity.
 `TryClaim(world, id, owner, out handoff)` atomically captures/removes native actors and suppresses
 native re-creation. Owner identity is by reference: another owner is refused, while a repeated
 claim by the same owner returns its original handoff. `ReleaseClaim(id, owner)` resumes native
