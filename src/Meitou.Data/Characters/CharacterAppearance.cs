@@ -125,7 +125,7 @@ public sealed class CharacterAppearance
     public Vector3 HairColour { get; private init; } = new(0.3f, 0.22f, 0.15f);
 
     /// <summary>Visible meshes besides the body, in attach order.</summary>
-    public List<CharacterPart> Parts { get; } = [];
+    public List<CharacterPart> Parts { get; private set; } = [];
     public List<BodyLayer> BodyLayers { get; } = [];
     /// <summary>The lanterns it carries (<see cref="CarriedLights"/>): worn clothing, backpacks and belt items, or an animal's backpack.</summary>
     public List<CarriedLight> Lights { get; } = [];
@@ -134,6 +134,15 @@ public sealed class CharacterAppearance
     /// <summary>Pose weights from the body file, keyed by pose name (only non-zero values).</summary>
     public Dictionary<string, float> PoseWeights { get; } = new(StringComparer.Ordinal);
     public List<string> Notes { get; } = [];
+
+    /// <summary>A presentation copy with a different complete part list; the original appearance and its parts remain unchanged.</summary>
+    public CharacterAppearance WithParts(IEnumerable<CharacterPart> parts)
+    {
+        ArgumentNullException.ThrowIfNull(parts);
+        var result = (CharacterAppearance)MemberwiseClone();
+        result.Parts = parts.ToList();
+        return result;
+    }
 
     /// <summary>Finds a record by string id, else by exact name (case-insensitive; the shown name or the data files' English one) among <paramref name="types"/>.</summary>
     public static GameRecord? Find(GameDatabase db, string nameOrId, params FcsRecordType[] types)

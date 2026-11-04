@@ -5,6 +5,20 @@ Motion previous state; Portraits offscreen portraits; Stats diagnostic rings. In
 interpolated simulation snapshots and data appearances, not simulation-owned GPU resources.
 Game assembly rules: [characters](characters.md), [animation](animation.md).
 
+## Generated character geometry
+
+**Observed** (source inspection): a host may set `CharacterInstance.Geometry` to a stable `RuntimeCharacterGeometry`.
+Its optional body mesh uses the appearance's existing rig, body materials and morphs. A null parts list
+keeps the appearance's parts; a supplied list replaces them and may include generated meshes with
+ordinary attachment/material metadata and vertex colours. Supplied meshes are immutable after publication.
+Each variant has a separate asset/morph cache identity; reuse it while unchanged. Generated meshes use
+full-detail upload without file welding or disk LOD caches. They remain cached until renderer disposal.
+The code-mod registration API does not yet supply a character draw-list callback.
+
+`BonePose.AbsolutePositions` opts into model-space positions for every overridden bone; the default
+keeps the existing parent-relative offsets. **Verified** by `RagdollFragmentPoseTests` for a detached
+chain and the default pose behavior. Generated geometry has not yet been verified in game.
+
 ## GPU layout and shading
 
 Instance bones/material offsets index shared storage buffers; group compatible mesh parts.
@@ -123,3 +137,12 @@ region shows the skin constant and a flat normal until the head maps are residen
 GPU culling, merged far shadow casters (one skinning per frame for every cascade), tail-mip texture stand-ins and
 original animation-update budgets remain incomplete. The `charlod` switch picks the files' own levels instead (Faithful; [characters](characters.md#lod-of-character-meshes)). Tests pin layouts/data; visual parity requires named screenshots across
 races, bodies, gear, animals, attachments, motion and shadow views. [bench](bench.md).
+
+## Runtime character geometry
+
+**Verified** (Brutality geometry/resource-lifetime tests): `CharacterInstance.Geometry` can supply
+immutable replacement body/part meshes while retaining the native rig/material path. Parts may
+supply explicit index LOD and projected pixel thresholds. `BonePose.AbsolutePositions` allows
+independent joint chains; unset preserves native root-position-only overrides. Producers retire
+superseded geometry with `Retire`; uploads/morph ranges are reclaimed after active draws/fences,
+keeping shared live dependencies. These are generic host contracts; gore state lives in the mod.

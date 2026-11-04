@@ -57,9 +57,9 @@ public static class HitResolver
 
     /// <summary><see cref="Land{TCover}"/> that also reports what the armour stopped.</summary>
     public static (int Part, HitDamage Damage, ArmourAbsorbed Absorbed) LandDetailed<TCover>(MedicalState medical, in MedicalContext ctx, in DamagePacket packet, ReadOnlySpan<ArmourPiece> armour,
-        TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events) where TCover : struct, ICoverRoll
+        TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events, int? targetPart = null) where TCover : struct, ICoverRoll
     {
-        int part = medical.ChoosePart(ctx, lowStrike, directionSix);
+        int part = medical.ChoosePart(ctx, lowStrike, directionSix, targetPart);
         if (part < 0) return (-1, default, default);
         string partId = medical.Parts[part].Template.StringId;
         Span<bool> covering = armour.Length <= 32 ? stackalloc bool[armour.Length] : new bool[armour.Length];

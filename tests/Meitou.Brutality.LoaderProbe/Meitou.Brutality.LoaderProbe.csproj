@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/Meitou.Modding/Meitou.Modding.csproj" /><ProjectReference Include="../../src/Meitou.Rendering/Meitou.Rendering.csproj" />
+    <ProjectReference Include="../../src/Meitou.Engine/Meitou.Engine.csproj" />
+  </ItemGroup>
+</Project>

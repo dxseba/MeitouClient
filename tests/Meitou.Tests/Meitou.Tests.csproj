@@ -22,6 +22,8 @@
     <ProjectReference Include="../../src/Meitou.Ui/Meitou.Ui.csproj" />
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" />
     <ProjectReference Include="../../src/Meitou.Modding/Meitou.Modding.csproj" />
+    <ProjectReference Include="../../mods/Brutality/Meitou.Brutality.csproj" />
+    <ProjectReference Include="../Meitou.Brutality.LoaderProbe/Meitou.Brutality.LoaderProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Meitou.Engine\Meitou.Engine.csproj" />
     <ProjectReference Include="..\..\src\Meitou.Rendering\Meitou.Rendering.csproj" />
     <ProjectReference Include="..\..\src\Meitou.Simulation\Meitou.Simulation.csproj" />
@@ -36,4 +38,8 @@
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
+  <Target Name="CopyBrutalityLoaderProbe" AfterTargets="Build">
+    <ItemGroup><_LoaderProbe Include="../Meitou.Brutality.LoaderProbe/bin/$(Configuration)/$(TargetFramework)/**/*" /></ItemGroup>
+    <Copy SourceFiles="@(_LoaderProbe)" DestinationFiles="@(_LoaderProbe->'$(OutDir)loader-probe/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

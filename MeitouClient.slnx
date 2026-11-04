@@ -5,6 +5,9 @@
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
   </Folder>
+  <Folder Name="/mods/">
+    <Project Path="mods/Brutality/Meitou.Brutality.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Meitou.Audio/Meitou.Audio.csproj" />
     <Project Path="src/Meitou.Core/Meitou.Core.csproj" />
@@ -22,6 +25,7 @@
     <Project Path="src/Meitou.Ui/Meitou.Ui.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Meitou.Brutality.LoaderProbe/Meitou.Brutality.LoaderProbe.csproj" />
     <Project Path="tests/Meitou.Tests/Meitou.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">

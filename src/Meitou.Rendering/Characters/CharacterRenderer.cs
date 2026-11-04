@@ -41,6 +41,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     readonly CharacterContent content;
     readonly PassTimer colourTimer, depthTimer;
     readonly Dictionary<CharacterAppearance, CharacterAsset?> assets = new(ReferenceEqualityComparer.Instance);
+    readonly Dictionary<(CharacterAppearance Appearance, RuntimeCharacterGeometry Geometry), CharacterAsset?> runtimeAssets = [];
 
     /// <summary>The characters of this frame: filled by <see cref="Source"/> inside <see cref="Update"/>, or by the host before it.</summary>
     public CharacterDrawList Draws { get; } = new();
@@ -528,6 +529,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
 
         // 1. Assets and the characters in range, with their layers resolved (the rig's caches are filled here, on this thread), and which to pose.
         var (boneTotal, partTotal) = GatherLive(eye);
+        EvictRetiredRuntimeAssets();
         ChooseReposes();
         Posed = 0;
         for (int i = 0; i < liveCount; i++) if (live[i].Repose) Posed++;
@@ -610,13 +612,31 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         return (boneTotal, partTotal);
     }
 
-    /// <summary>
-    /// The character's asset, built now when it is missing and wanted (at most <see cref="LoadBudget"/> a frame, within the build budget); null when it is
-    /// not built (deferred, not wanted, over budget, or a failed build).
-    /// </summary>
+    /// <summary>Retires generated variants only after this frame has acquired every live shared mesh/morph dependency.</summary>
+    void EvictRetiredRuntimeAssets()
+    {
+        if (runtimeAssets.Count == 0 || !runtimeAssets.Keys.Any(key => key.Geometry.IsRetired)) return;
+        var current = new HashSet<RuntimeCharacterGeometry>(ReferenceEqualityComparer.Instance);
+        foreach (var item in Draws.Items) if (item.Geometry is { } geometry) current.Add(geometry);
+        foreach (var item in Draws.Distant) if (item.Geometry is { } geometry) current.Add(geometry);
+        bool removed = false;
+        foreach (var key in runtimeAssets.Keys.Where(key => key.Geometry.IsRetired && !current.Contains(key.Geometry)).ToArray())
+            removed |= runtimeAssets.Remove(key);
+        if (!removed) return;
+        var liveGeometry = runtimeAssets.Keys.Select(key => key.Geometry).Concat(current).Distinct().ToArray();
+        var morphs = runtimeAssets.Values.Concat(assets.Values).Where(asset => asset is not null).Select(asset => asset!.MorphBase).ToHashSet();
+        content.SweepRuntime(liveGeometry, morphs);
+    }
+
+    /// <summary>The character's asset, built when missing and wanted within the frame's load budget.</summary>
     CharacterAsset? AssetFor(in CharacterInstance inst, Vector3 eye, float reach, ref int built, ref double buildMs)
     {
-        if (assets.TryGetValue(inst.Appearance, out var asset)) return asset;
+        CharacterAsset? asset;
+        if (inst.Geometry is { } geometry)
+        {
+            if (runtimeAssets.TryGetValue((inst.Appearance, geometry), out asset)) return asset;
+        }
+        else if (assets.TryGetValue(inst.Appearance, out asset)) return asset;
         if (Deferred(inst)) return null;
         if (!portraitKeys.Contains(inst.Key) && !WantsAsset(inst, eye, reach)) return null;
 
@@ -625,9 +645,10 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         if (LoadBudget > 0 && (!content.Fetched(inst.Appearance) || overBudget)) return null;
 
         long buildStart = Stopwatch.GetTimestamp();
-        asset = content.Build(inst.Appearance);
+        asset = content.Build(inst.Appearance, inst.Geometry);
         buildMs += Stopwatch.GetElapsedTime(buildStart).TotalMilliseconds;
-        assets[inst.Appearance] = asset;
+        if (inst.Geometry is { } runtime) runtimeAssets[(inst.Appearance, runtime)] = asset;
+        else assets[inst.Appearance] = asset;
         built++;
         return asset;
     }

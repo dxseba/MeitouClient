@@ -13,6 +13,9 @@ public readonly record struct CharacterPose(string Animation, float Time, float 
 /// </summary>
 public readonly record struct CharacterInstance(long Key, CharacterAppearance Appearance, Vector3 Position, float Yaw, IReadOnlyList<CharacterPose> Poses)
 {
+    /// <summary>Optional generated body/part geometry, cached by its stable identity; null uses the appearance's files.</summary>
+    public RuntimeCharacterGeometry? Geometry { get; init; }
+
     /// <summary>Show the weapon in hand (the parts tagged <see cref="WeaponShown.Drawn"/>) instead of sheathed.</summary>
     public bool WeaponDrawn { get; init; }
     /// <summary>The weapon in hand is the crossbow: its in-hand parts (<see cref="WeaponShown.RangedDrawn"/>) show, the melee weapon's sheathed ones.</summary>

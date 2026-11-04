@@ -300,6 +300,10 @@ internal sealed unsafe partial class CharacterRenderer
                 level = GeneratedLevel(part, value, depthPass);
             }
 
+            if (GeneratedLod && part.ScreenLodThresholds is not null)
+                level = ScreenLevel(part, 2 * part.BoundsRadius * modelScale * viewPixelsPerRadian
+                    / MathF.Max(1, Vector3.Distance(eye - origin, centre)));
+
             var instance = new CharInstance
             {
                 Model = part.IsBody ? WithBlood(model, l.Blood) : model,
@@ -330,6 +334,14 @@ internal sealed unsafe partial class CharacterRenderer
     /// Faithful: the file's own level for its distance_sphere value (its stored radius, bias 1), the shadow passes as the picture (docs/characters.md
     /// "LOD of character meshes").
     /// </summary>
+    internal static int ScreenLevel(AssetPart part, float pixels)
+    {
+        int level = 0;
+        if (part.ScreenLodThresholds is { } thresholds)
+            foreach (float threshold in thresholds) { if (pixels >= threshold) break; level++; }
+        return Math.Min(level, part.Mesh.Distances.Length - 1);
+    }
+
     static int FileLevel(AssetPart part, float fileLod) =>
         part.FileDistances is { } fileLevels && MeshLod.Select(fileLevels, fileLod) is int f && f > 0 ? part.FileFirst + f - 1 : 0;
 
@@ -516,6 +528,9 @@ internal sealed unsafe partial class CharacterRenderer
             ref readonly var v = ref views[k];
             if (depth && part.BoundsRadius * f.Scale < v.MinRadius) continue;
             int level = !GeneratedLod ? FileLevel(part, f.FileLod) : GeneratedLevel(part, depth ? Math.Max(lod, v.LodFloor) : lod, depth);
+            if (GeneratedLod && part.ScreenLodThresholds is not null)
+                level = ScreenLevel(part, 2 * part.BoundsRadius * f.Scale * viewPixelsPerRadian
+                    / MathF.Max(1, f.Lod + part.BoundsRadius * f.Scale));
 
             var chunk = v.Batches.Chunks[c];
             chunk.Parts++;
