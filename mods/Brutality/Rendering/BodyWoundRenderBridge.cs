@@ -38,6 +38,9 @@ internal static class BodyWoundRenderBridge
         foreach (var variant in shown.Geometry.Values) { variant.Geometry.Retire(); resources?.Geometry.Forget(variant.Appearance); }
         worlds.Remove(world);
     }
+    internal static RuntimeCharacterGeometry? PendingGeometry(CharacterAppearance look, CharacterAppearance? previousLook,
+        RuntimeCharacterGeometry? previous) => ReferenceEquals(look, previousLook) && previous is { IsRetired: false } ? previous : null;
+
     static void Fill(object host, WorldSession session, CharacterDrawList list)
     {
         if (resources is null || drawKey is null) return;
@@ -65,10 +68,17 @@ internal static class BodyWoundRenderBridge
             if (rebuilt >= 4 || rebuilt > 0 && Stopwatch.GetElapsedTime(started).TotalMilliseconds >= 5)
             {
                 // A different appearance must use its native meshes until ready: never draw an old race, gender or outfit.
-                if (sameLook && previous is { } pending && !pending.Geometry.IsRetired) list.Items[i] = instance with { Geometry = pending.Geometry };
+                if (PendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry) is { } fallback)
+                    list.Items[i] = instance with { Geometry = fallback };
                 continue;
             }
             if (resources.Rigs.For(instance.Appearance) is not { } setup || resources.Mesh(instance.Appearance.BodyMesh) is not { } body) continue;
+            if (GeometryPreparations.ShouldDefer(session.World, instance.Appearance, setup.Rig, body))
+            {
+                if (PendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry) is { } fallback)
+                    list.Items[i] = instance with { Geometry = fallback };
+                continue;
+            }
             var generated = resources.Geometry.Build(instance.Appearance, setup.Rig, body, resources.Mesh, state);
             rebuilt++;
             RenderBridge.Track(session.World, generated.Retained);

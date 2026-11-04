@@ -27,6 +27,16 @@ internal static class GeometryPreparations
         if (worlds.TryGetValue(world, out var state)) { state.Cache.Dispose(); worlds.Remove(world); }
     }
 
+    internal static bool CanPrepare(BrutalityActorView state) => state.Torso is null && state.Head is null && state.Limbs.Count == 0;
+
+    internal static bool ShouldDefer(World world, CharacterAppearance look, SkeletonRig rig, OgreMesh body)
+    {
+        if (look.Animal is not null || look.Headless || look.HeadOnly || !worlds.TryGetValue(world, out var state)) return false;
+        var key = new Key(body, rig, look.Female, unchecked((uint)look.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF,
+            look.Race.GetBool("is robot"));
+        return state.Cache.ShouldDefer(key);
+    }
+
     internal static void Capture(object host, CharacterDrawList list, WorldSession session, RenderResources resources)
     {
         if (list.Context is not { } gpu) return;
@@ -34,8 +44,7 @@ internal static class GeometryPreparations
         var cache = worldState.Cache;
         long frame = gpu.Frame.Number;
         var wounded = BrutalityRuntime.For(session.World)?.WoundFrameAt(session.ShownTick)?.Characters.Values
-            .Where(state => state.Torso is not null || state.Head is not null || state.Limbs.Count != 0
-                || state.SevereHead.Kind != SevereHeadWoundKind.None || state.Wounds.HasAny)
+            .Where(state => !CanPrepare(state))
             .Select(state => RenderBridge.NativeDrawKey(host, state.Character)).ToHashSet();
         foreach (var instance in list.Items)
         {
@@ -107,6 +116,11 @@ internal sealed class GeometryPreparationCache<TKey>(long byteBudget = 192L * 10
     internal int Count => entries.Count;
     internal long Bytes => bytes;
     internal void Touch(TKey key, long frame) { if (entries.TryGetValue(key, out var entry)) entry.Touched = frame; }
+    // A successful task becomes visible only when the next capture publishes its result; render fills never wait for it.
+    internal bool IsPending(TKey key) => !disposed && entries.TryGetValue(key, out var entry) && entry.Ready is null
+        && !entry.Task.IsFaulted && !entry.Task.IsCanceled;
+    internal bool ShouldDefer(TKey key) => !disposed && (IsPending(key)
+        || !attempted.Contains(key) && attempted.Count < 128);
     internal bool CanStartAt(long frame) => !disposed && startedFrame != frame && attempted.Count < 128
         && entries.Values.All(entry => entry.Task.IsCompleted);
     internal bool CanRequest(TKey key, long frame) => !attempted.Contains(key) && CanStartAt(frame);

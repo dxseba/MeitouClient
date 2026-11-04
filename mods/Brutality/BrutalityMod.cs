@@ -29,6 +29,8 @@ public sealed class BrutalityMod : IMod
             : new BrutalitySettings();
         Enabled = settings.Enabled;
         if (!Enabled) { context.Log("disabled in brutality.json"); return; }
+        SandboxProfileAdapter.Install(context, settings.DeveloperTools);
+        DeveloperCombatDiagnostics.Configure(settings.DeveloperTools, Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS"));
         Anatomy = new AnatomyLibrary(new AnatomyAssets(context.Folder));
         Meitou.Brutality.Physics.RagdollPhysics.WarmUpOnce();
         CombatAdapter.Install(context);

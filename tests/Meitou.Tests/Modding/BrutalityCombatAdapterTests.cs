@@ -212,4 +212,88 @@ public sealed class BrutalityCombatAdapterTests
         Assert.Empty(scene.Observer.Hits);
         Assert.Empty(scene.Gameplay.CutRequests);
     }
+    [Theory]
+    [InlineData(false, "1", false)]
+    [InlineData(true, null, false)]
+    [InlineData(true, "0", false)]
+    [InlineData(true, "true", false)]
+    [InlineData(true, "1", true)]
+    public void Actual_contact_tracing_requires_both_developer_tools_and_the_explicit_environment_flag(bool developerTools, string? request, bool expected) =>
+        Assert.Equal(expected, DeveloperCombatDiagnostics.EnabledBy(developerTools, request));
+
+    [Fact]
+    public void Actual_contact_trace_joins_native_medical_events_with_delivered_damage_and_respects_its_world_limit()
+    {
+        using var patches = new Patches();
+        using var scene = new Scene(BodyOptions.Default with { ForcedHitPart = (LeftArm.StringId, LeftArm.Name), GlobalDamageMultiplier = .1f });
+        var lines = new List<string>();
+        DeveloperCombatDiagnostics.EnableForTest(scene.World, lines.Add, limit: 2);
+        scene.Apply(); scene.Apply(); scene.Apply();
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, line =>
+        {
+            Assert.Contains("Brutality real hit:", line);
+            Assert.Contains("actualCut=", line); Assert.Contains("usefulBefore=", line);
+            Assert.Contains("brutality=", line); Assert.Contains("torsoAccepted=False", line);
+            Assert.DoesNotContain("nativeEvents=-1", line);
+        });
+        Assert.Contains("brutality=0.000", lines[0]);
+        Assert.Equal(3, scene.Observer.Hits.Count);
+        Assert.False(DeveloperCombatDiagnostics.Active(scene.World));
+    }
+
+    static CharacterCold CanonicalTorsoVictim(string partId)
+    {
+        var victim = new Combatant().MakeCold();
+        victim.Race = new RaceData { Anatomy = Human.Anatomy.Select(entry => entry.Part == Chest
+            ? entry with { Part = Chest with { StringId = partId } } : entry).ToArray() };
+        victim.Medical = Healthy(victim.Race);
+        return victim;
+    }
+
+    [Theory]
+    [InlineData(0, ArmourData.ChestPartId, false)]
+    [InlineData(59.9f, ArmourData.ChestPartId, false)]
+    [InlineData(100, ArmourData.ChestPartId, true)]
+    [InlineData(100, GorePartIds.Stomach, true)]
+    public void Real_committed_chest_and_stomach_blows_bisect_only_after_the_skill_gate_with_actual_lethal_delivered_cut(float level, string partId, bool expected)
+    {
+        using var patches = new Patches();
+        ulong counter = CombatRolls.BlowCounter(0, 1, 1, 0), seed = 0;
+        while (Rng.Float(Rng.Hash(seed, Rng.Key(new CharacterId(1, 0)) ^ 0x424953454354UL, Purpose, counter)) >= .95f) seed++;
+        using var scene = new Scene(BodyOptions.Default with { ForcedHitPart = (partId, Chest.Name), GlobalDamageMultiplier = 10 },
+            seed: seed, victim: CanonicalTorsoVictim(partId));
+        Assert.True(scene.Gameplay.SetLevel(scene.World, scene.SourceId, level));
+        var lines = new List<string>(); DeveloperCombatDiagnostics.EnableForTest(scene.World, lines.Add);
+        scene.Apply();
+        var hit = Assert.Single(scene.Observer.Hits);
+        var part = scene.Victim.Medical!.Parts[hit.Part];
+        Assert.Equal(partId, part.Template.StringId); Assert.True(scene.Victim.Medical.Dead);
+        Assert.True(hit.Damage.Cut >= MathF.Max(70, part.MaxHp * .75f));
+        Assert.Equal(expected, scene.View(scene.VictimId).Torso is not null);
+        Assert.Equal(expected, scene.Gameplay.CutRequests.Any(request => request.Kind == GoreCutKind.Torso));
+        var line = Assert.Single(lines);
+        Assert.Contains(expected ? "torsoGate=eligible" : "torsoGate=brutality-locked", line);
+        Assert.Contains($"torsoAccepted={expected}", line);
+        Assert.DoesNotContain("nativeEvents=-1", line);
+        Assert.Equal(GoreIntegrationGap.None, scene.Gameplay.Gaps);
+    }
+
+    [Fact]
+    public void A_real_lethal_low_cut_does_not_bypass_the_single_blow_threshold_even_at_mastery()
+    {
+        using var patches = new Patches();
+        using var scene = new Scene(BodyOptions.Default with { ForcedHitPart = (ArmourData.ChestPartId, Chest.Name), GlobalDamageMultiplier = .1f },
+            victim: CanonicalTorsoVictim(ArmourData.ChestPartId));
+        Assert.True(scene.Gameplay.SetLevel(scene.World, scene.SourceId, 100));
+        var chest = scene.Victim.Medical!.Parts.Single(part => part.Template.StringId == ArmourData.ChestPartId);
+        chest.Flesh = -chest.MaxHp + .001f;
+        var lines = new List<string>(); DeveloperCombatDiagnostics.EnableForTest(scene.World, lines.Add);
+        scene.Apply();
+        var hit = Assert.Single(scene.Observer.Hits);
+        Assert.True(scene.Victim.Medical.Dead); Assert.InRange(hit.Damage.Cut, .001f, 69.99f);
+        Assert.Null(scene.View(scene.VictimId).Torso);
+        Assert.Contains("torsoGate=cut-below-threshold", Assert.Single(lines));
+    }
+
 }

@@ -53,7 +53,10 @@ internal static partial class EffectsBridge
                     if (effects.Impacts.Active.Count >= 128) effects.Impacts.Active.Remove(effects.Impacts.Active.Keys.First());
                     effects.Impacts.Active[(hit.Victim, hit.Part)] = impact;
                 }
-                if (enabled && (impact.Effects & ImpactEffectKind.OrganicSpray) != 0) Spray(particles, impact);
+                if (bindings.TryGetValue(particles, out var binding))
+                    LegacyBloodSprites.Emit(impact, born, now, !ReadBool(Member(host, "o"), "NoParticles"), binding.Sprites,
+                        burst => particles.Burst(burst.System, burst.Position, burst.Orientation, seconds: burst.Seconds,
+                            size: burst.Size, lifeScale: burst.LifeScale, recolour: burst.Recolour));
                 if ((impact.Effects & ImpactEffectKind.OrganicSplinters) != 0) Splinters(host, impact);
             }
         foreach (var (key, impact) in effects.Impacts.Active.ToArray())
@@ -70,26 +73,10 @@ internal static partial class EffectsBridge
         if (resources is null || drawKey is null || !effects.Drawn.TryGetValue(drawKey(host, impact.Hit.Victim), out var instance)
             || resources.Rigs.For(instance.Appearance) is not { } setup || setup.Rig.Handle(impact.ImpactBone) is not { } bone) return null;
         var skin = Skin(effects, instance, setup);
-        var world = instance.World ?? (instance.Rotation is { } q ? CharacterRigs.Placement(setup, instance.Position, q, instance.Scale)
-            : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
+        var world = SkinWorld(effects, instance, setup);
         var at = Vector3.Transform(Vector3.Transform(setup.Rig.BindPosition[bone], skin[bone]), world);
         var direction = impact.Hit.Travel.LengthSquared() > 1e-6f ? Vector3.Normalize(impact.Hit.Travel) : Vector3.UnitY;
         return new(at, direction);
-    }
-
-    static void Spray(ParticleRenderer particles, in ImpactEffectEvent impact)
-    {
-        var random = new Random(unchecked((int)(impact.Seed ^ impact.Seed >> 32)));
-        float force = MathF.Min((impact.Hit.Damage.Cut + impact.Hit.Damage.Pierce) / 20, 1);
-        var flat = new Vector2(impact.Hit.Travel.X, impact.Hit.Travel.Z);
-        var along = flat.LengthSquared() > 1e-6f ? Vector2.Normalize(flat) : Vector2.UnitX;
-        var from = impact.Hit.VictimPosition + new Vector3(0, 7 + random.NextSingle() * 7, 0);
-        Vector3? recolour = impact.BloodColour == 0x800000 ? null : new Vector3(impact.BloodColour >> 16 & 255, impact.BloodColour >> 8 & 255, impact.BloodColour & 255) / 128;
-        for (int i = 0; i < 1 + (int)(force * 3); i++)
-        {
-            var spray = Vector3.Normalize(new Vector3(along.X + random.NextSingle() - .5f, .3f + random.NextSingle() * .6f, along.Y + random.NextSingle() - .5f));
-            particles.Burst("HackBlood-system", from, Turn(Vector3.UnitZ, spray), .1f + force * .2f, 1, 1.8f, recolour);
-        }
     }
 
     static void Splinters(object host, in ImpactEffectEvent impact)

@@ -177,7 +177,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         }
         var componentMaps = state.Components;
         bool detachedHead = state.Head is { Mode: HeadCutMode.NeckDetach or HeadCutMode.DetachedSplit };
-        float originalRadius = Model.Build(body, rig.BoneCount).Radius;
+        float originalRadius = MeshCut.SourceModel(body, rig.BoneCount).Radius;
         (RuntimeCharacterGeometry Geometry, CutMeshResult Skin) Piece(IReadOnlyList<CutHalfspace> rules, int stableKey)
         {
             var physicalComponents = componentMaps.For(stableKey);
@@ -221,7 +221,8 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
                     | (hair ? NativeSurfaceShaders.HairWoundFlag : 0) });
                 // The character skin supplies the section; capping each cloth shell would conceal its anatomy.
             }
-            AddInside(NativeGeometry.SectionCaps(appearance, rig, body, rules, physicalComponents, blood, mechanical, pieceInside), mechanical ? "mechanical-section" : "wound-section");
+            if (rules.Count > 0)
+                AddInside(NativeGeometry.SectionCaps(appearance, rig, body, rules, physicalComponents, blood, mechanical, pieceInside), mechanical ? "mechanical-section" : "wound-section");
             // Keep every fitted layer. The original shader masks exposure per pixel and shares the same planes in all passes.
             if (pieceInside is not null && !AnatomyExposure.Hidden) AddInside(pieceInside, "anatomy");
             if (nativeRelief is not null && (!detachedHead || headOnly)) AddInside(nativeRelief, "head-relief");

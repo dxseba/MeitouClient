@@ -21,13 +21,15 @@ internal sealed class CutAnchorGeometry
         if (normal.LengthSquared() < 1e-10f)
             foreach (var part in geometry.Parts ?? [])
                 if (part.Mesh is not null && part.Part.Field == "head-relief")
-                    candidates.AddRange(Model.Build(part.Mesh, rig.BoneCount).Parts.SelectMany(p => p.Vertices));
+                    candidates.AddRange(Model.Build(part.Mesh, rig.BoneCount, preserveRawVertexChannels: true).Parts.SelectMany(p => p.Vertices));
         foreach (var part in geometry.Parts ?? [])
         {
             if (part.Mesh is null || part.Part.Field is not ("wound-section" or "mechanical-section")) continue;
-            foreach (var vertex in Model.Build(part.Mesh, rig.BoneCount).Parts.SelectMany(p => p.Vertices))
-                if (MathF.Abs(Vector4.Dot(plane, new(vertex.Position, 1))) < .09f && Vector3.Dot(vertex.Normal, normal) > .5f)
-                    candidates.Add(vertex);
+            foreach (var vertex in Model.Build(part.Mesh, rig.BoneCount, preserveRawVertexChannels: true).Parts.SelectMany(p => p.Vertices))
+                // Exact pinned CutContactGeometry rim: backing/brain bands must never bias the emission centre.
+                if (vertex.Tangent.W is 32 or 35 && vertex.Uv.X <= .5f && vertex.Uv.Y <= .5f
+                    && MathF.Abs(Vector4.Dot(plane, new(vertex.Position, 1))) < .09f
+                    && float.IsFinite(vertex.Position.LengthSquared())) candidates.Add(vertex);
         }
         if (candidates.Count == 0 && geometry.BodyMesh is { } body)
             foreach (var part in Model.Build(body, rig.BoneCount).Parts)

@@ -44,9 +44,10 @@ internal static class GeneratedExteriorLod
         IReadOnlyDictionary<string, float>? poseWeights = null, bool cutHorns = false, Vector4? capColour = null,
         int[]? components = null, float lodScale = 1)
     {
+        if (cuts.Count == 0) return MeshCut.Uncut(source, rig, poseWeights, cutHorns);
         var model = MeshCut.SourceModel(source, rig.BoneCount);
         var full = MeshCut.Clip(source, rig, cuts, poseWeights, cutHorns, capColour, components: components, buildCaps: false, preparedModel: model);
-        if (!full.HasTriangles || cuts.Count == 0 || LevelsFor(source, rig, lodScale) is not { Count: > 1 } levels) return full;
+        if (!full.HasTriangles || LevelsFor(source, rig, lodScale) is not { Count: > 1 } levels) return full;
         var meshes = new List<OgreMesh> { full.Skin };
         for (int level = 1; level < levels.Count; level++)
         {

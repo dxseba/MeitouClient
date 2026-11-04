@@ -62,6 +62,35 @@ internal static class MeshCut
     }
     readonly record struct Edge(Sample A, Sample B, SurfaceOwner Owner);
 
+    // Ordinary shader wounds keep native exteriors. Match the clipping result's posed bounds without encoding an unused copy.
+    internal static CutMeshResult Uncut(OgreMesh source, SkeletonRig rig,
+        IReadOnlyDictionary<string, float>? poseWeights = null, bool cutHorns = false)
+    {
+        var model = SourceModel(source, rig.BoneCount);
+        var minimum = new Vector3(float.MaxValue); var maximum = new Vector3(float.MinValue);
+        bool any = false;
+        foreach (var part in model.Parts)
+        {
+            var morphs = poseWeights is not null && source.Poses.Count > 0
+                ? MorphDeltas(source, part.SubMeshIndex, part.Vertices.Length, poseWeights, cutHorns) : null;
+            for (int triangle = 0; triangle + 2 < part.Indices.Length; triangle += 3)
+            {
+                uint a = part.Indices[triangle], b = part.Indices[triangle + 1], c = part.Indices[triangle + 2];
+                if (a >= part.Vertices.Length || b >= part.Vertices.Length || c >= part.Vertices.Length) continue;
+                if (Vector3.Cross(part.Vertices[b].Position - part.Vertices[a].Position,
+                    part.Vertices[c].Position - part.Vertices[a].Position).LengthSquared() < 1e-14f) continue;
+                for (int corner = 0; corner < 3; corner++)
+                {
+                    uint index = part.Indices[triangle + corner];
+                    var point = part.Vertices[index].Position + (morphs is null ? Vector3.Zero : morphs[index]);
+                    minimum = Vector3.Min(minimum, point); maximum = Vector3.Max(maximum, point);
+                }
+                any = true;
+            }
+        }
+        return new(source, null, any ? minimum : Vector3.Zero, any ? maximum : Vector3.Zero, any);
+    }
+
     public static CutMeshResult Clip(OgreMesh source, SkeletonRig rig, IReadOnlyList<CutHalfspace> cuts,
         IReadOnlyDictionary<string, float>? poseWeights = null, bool cutHorns = false, Vector4? capColour = null,
         IReadOnlyList<CutVolume>? removeVolumes = null, int[]? components = null, bool ownedSurface = false, bool rawCaps = false, bool buildCaps = true,

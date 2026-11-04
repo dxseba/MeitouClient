@@ -22,12 +22,15 @@ weapon stains/drops, body-part targeting and labels. Torso halves have independe
 carry targets and shared loot. Saves use complete native character/item identities; migration
 reads the integrated version's wound, cut, carried-corpse and weapon-blood records.
 Transient blood/electrical effects do not replay after loading; bowel props reconstruct.
+Legacy hit sprites follow native weather/placer ownership; a DLL-only effect container does not
+enable them in otherwise empty scenes. Liquid and robot effects use their own bounded lifecycle.
 
 Surface rendering uses the ported colour, depth and motion shaders with projected wound masks,
 raw anatomy layer channels and the original 36-matrix prefix layout. It includes layered cut
 sections, fitted brain geometry/sections, cavity backing and mouth/tongue fitting and filtering.
 Generated interiors use explicit sidedness and projected-size limits. Masks and unchanged
-payloads and source exterior LOD plans are reused. Hidden organic interiors do not cast shadows;
+payloads and source exterior LOD plans are reused. Ordinary wounds keep native exterior meshes;
+new variants wait for pending CPU fits instead of blocking a render frame. Hidden organic interiors do not cast shadows;
 part LOD budgets keep their own radius. Healthy fits and exterior LOD plans prepare on one background
 worker per world, with 16 entries/192 MiB of fit residency (one oversized fit alone); GPU preparation
 uses the remaining frame budget for shaders/exteriors; full anatomy uploads only for actual cuts.
@@ -61,3 +64,9 @@ vertical, head:0..2, limb:0..3, severe:0..2; optional :carry or :carry-negative 
 `:after=120` delays a preview until that tick to measure cuts after healthy asset preparation.
 `MEITOU_BRUTALITY_FOCUS=1` centres isolated sandbox captures. Bowel trace/hide and anatomy-hide
 switches are opt-in visual diagnostics, with no gameplay/save changes.
+
+With developer tools enabled, `MEITOU_BRUTALITY_SANDBOX_LEVEL=100` sets the primary sandbox
+hero’s stored stats and Brutality to 100, matching `--sandbox-stats 100 --sandbox-brutality 100`
+in the integrated client. It does not equip stronger weapons or change NPCs/new games.
+`MEITOU_BRUTALITY_TRACE_HITS=1` logs at most 256 real contacts per world, including post-armour
+damage, the skill/lethal/damage gates and accepted cuts; it is off outside developer tools.

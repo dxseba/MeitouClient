@@ -197,6 +197,7 @@ public static partial class CombatAdapter
         int rupture = contact.Medical.Decapitated && contact.Medical.Parts[contact.Part].Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head ? 1
             : events?.Any(e => e.Kind == MedicalEventKind.PartSevered && e.Part == contact.Part) == true ? 0 : -1;
         ImpactEffects.ForWorld(contact.World)?.Capture(contact.World, contact.Hit, before.Mechanism, contact.Execution, rupture);
+        DeveloperCombatDiagnostics.CaptureNative(contact.World, contact.Hit, events?.Count ?? 0);
         contact.Gameplay.RecordHitBridge(GoreHitKey.From(contact.Hit), before with
         {
             HeadSeveranceAccepted = contact.HeadGate, SeveredLimbSlots = limbs, CounterpartResolved = true,

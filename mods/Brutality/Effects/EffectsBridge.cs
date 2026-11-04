@@ -7,6 +7,7 @@ using HarmonyLib;
 using Meitou.Brutality.Physics;
 using Meitou.Brutality.Rendering;
 using Meitou.Data.Characters;
+using Meitou.Data.Particles;
 using Meitou.Engine;
 using Meitou.Modding;
 using Meitou.Rendering;
@@ -34,7 +35,7 @@ internal static partial class EffectsBridge
         public readonly Dictionary<(CharacterId, int), (GoreEffectCut Cut, double Born)> Recent = [];
         public readonly Dictionary<(CharacterId, int, int), CutFluidContact> Contacts = [];
         public readonly Dictionary<long, CharacterInstance> Drawn = [];
-        public readonly Dictionary<long, Matrix4x4[]> Skin = [];
+        public readonly Dictionary<long, EffectSkinPose> Skin = [];
         public readonly HashSet<long> Posed = [];
         public readonly List<ActiveLayer> Layers = [];
         public long Sequence;
@@ -46,6 +47,7 @@ internal static partial class EffectsBridge
         public FxWorld? World;
         public GoreEffectRenderer? Renderer;
         public bool OpaqueOnly;
+        public readonly NativeSpriteEligibility Sprites = new();
     }
     static readonly ConditionalWeakTable<World, FxWorld> worlds = new();
     static readonly ConditionalWeakTable<ParticleRenderer, Binding> bindings = new();
@@ -67,6 +69,9 @@ internal static partial class EffectsBridge
         Patch(nameof(ParticleRenderer.CountFor), nameof(CountPostfix));
         Patch(nameof(ParticleRenderer.DrawCoverage), nameof(CoveragePostfix));
         Patch(nameof(ParticleRenderer.Dispose), nameof(DisposePostfix));
+        Patch(nameof(ParticleRenderer.SetWeather), nameof(WeatherRequestPostfix));
+        Patch(nameof(ParticleRenderer.SetPlacers), nameof(PlacerRequestPostfix));
+        Patch(nameof(ParticleRenderer.SetBuildingEffects), nameof(BuildingRequestPostfix));
         context.Harmony.Patch(AccessTools.PropertyGetter(type, nameof(ParticleRenderer.FullCount)), postfix: new(AccessTools.Method(typeof(EffectsBridge), nameof(FullCountPostfix))));
         context.Harmony.Patch(AccessTools.PropertyGetter(type, nameof(ParticleRenderer.HasCoverage)), postfix: new(AccessTools.Method(typeof(EffectsBridge), nameof(HasCoveragePostfix))));
         var host = AccessTools.TypeByName("Meitou.Game.GameHost");
@@ -88,9 +93,21 @@ internal static partial class EffectsBridge
             // The host still calls Prepare/Record for this empty container. Disabled native sprites stay disabled; opaque tissue reuses its pass.
             var renderer = ParticleRenderer.Create(context, resources.Assets);
             renderer.Enabled = Enabled(__instance);
+            bindings.GetValue(renderer, static _ => new()).Sprites.MarkModOnly();
             particlesField.SetValue(gpu, renderer);
         }
     }
+
+    static void PrepareNativeSprites(ParticleRenderer renderer, Binding binding) => binding.Sprites.PrepareOnce(
+        () => renderer.PrepareBursts("Bloodsplash01", "HackBlood-system", "kenshi_sparks"));
+    static void NativeSpriteRequest(ParticleRenderer renderer, bool requested)
+    {
+        var binding = bindings.GetValue(renderer, static _ => new());
+        binding.Sprites.RequestNative(requested); PrepareNativeSprites(renderer, binding);
+    }
+    static void WeatherRequestPostfix(ParticleRenderer __instance, WeatherEffectInput weather) => NativeSpriteRequest(__instance, weather.Effects.Count > 0);
+    static void PlacerRequestPostfix(ParticleRenderer __instance) => NativeSpriteRequest(__instance, true);
+    static void BuildingRequestPostfix(ParticleRenderer __instance, IReadOnlyList<Meitou.Data.World.PlacedEffect> effects) => NativeSpriteRequest(__instance, effects.Count > 0);
 
     /// <summary>Called by the mod's render bridge after the full draw list has been assembled, including independent fragments.</summary>
     public static void Capture(object host, CharacterDrawList list, WorldSession session)
@@ -101,12 +118,14 @@ internal static partial class EffectsBridge
         {
             particles = ParticleRenderer.Create(context, resources.Assets);
             particles.Enabled = Enabled(host);
+            bindings.GetValue(particles, static _ => new()).Sprites.MarkModOnly();
             particlesField.SetValue(gpu, particles);
         }
         if (particles is null) return;
         var world = session.World;
         var effects = worlds.GetValue(world, static _ => new());
         var binding = bindings.GetValue(particles, static _ => new());
+        PrepareNativeSprites(particles, binding);
         binding.World = effects;
         bool particlesEnabled = Enabled(host);
         binding.OpaqueOnly = !particlesEnabled;
@@ -201,8 +220,7 @@ internal static partial class EffectsBridge
                 if (!effects.Drawn.TryGetValue(key, out var instance)) return;
                 var samples = effects.Samples.Samples(shape, plane, side, setup.Rig, actor.Appearance);
                 var skin = Skin(effects, instance, setup);
-                var matrix = instance.World ?? (instance.Rotation is { } q ? CharacterRigs.Placement(setup, instance.Position, q, instance.Scale)
-                    : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
+                var matrix = SkinWorld(effects, instance, setup);
                 if (CutAnchorGeometry.Pose(samples, skin, matrix) is { } contact) effects.Contacts[(cut.Owner, cut.Part, half)] = contact;
             }
         }
@@ -223,8 +241,7 @@ internal static partial class EffectsBridge
                     {
                         if (!effects.Cables.Accepts(key, effects.CableContacts.Count) || !effects.Drawn.TryGetValue(key, out var instance)) return;
                         var samples = effects.Samples.Samples(shape, fragment.CutPlane, keepSide, setup.Rig, actor.Appearance);
-                        var matrix = instance.World ?? (instance.Rotation is { } q ? CharacterRigs.Placement(setup, instance.Position, q, instance.Scale)
-                            : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
+                        var matrix = SkinWorld(effects, instance, setup);
                         if (CutAnchorGeometry.Pose(samples, Skin(effects, instance, setup), matrix) is { } contact)
                             effects.CableContacts.Add(new(key, contact));
                     }
@@ -255,8 +272,7 @@ internal static partial class EffectsBridge
                     || resources.Rigs.For(instance.Appearance) is not { } setup || resources.Mesh(instance.Appearance.BodyMesh) is not { } body) continue;
                 if (!resources.Geometry.TryCached(instance.Appearance, setup.Rig, body, state, out var geometry)
                     || geometry.AbdomenAnchor.Count == 0) continue;
-                var matrix = instance.World ?? (instance.Rotation is { } q ? CharacterRigs.Placement(setup, instance.Position, q, instance.Scale)
-                    : CharacterRigs.Placement(setup, instance.Position, instance.Yaw, instance.Scale));
+                var matrix = SkinWorld(effects, instance, setup);
                 if (CutAnchorGeometry.Pose(geometry.AbdomenAnchor.ToArray(), Skin(effects, instance, setup), matrix) is not { } contact) continue;
                 effects.Bowels ??= new(resources.Geometry.Anatomy);
                 effects.BowelGround ??= new Meitou.Simulation.Ragdolls.WalkabilityEnvironment(world.Walkability);
@@ -344,16 +360,24 @@ internal static partial class EffectsBridge
 
     static Matrix4x4[] Skin(FxWorld world, CharacterInstance instance, CharacterPoseSetup setup)
     {
-        if (!world.Skin.TryGetValue(instance.Key, out var skin) || skin.Length != setup.Rig.BoneCount) world.Skin[instance.Key] = skin = new Matrix4x4[setup.Rig.BoneCount];
-        if (!world.Posed.Add(instance.Key)) return skin;
+        if (!world.Skin.TryGetValue(instance.Key, out var pose) || pose.Bones.Length != setup.Rig.BoneCount)
+            world.Skin[instance.Key] = pose = new(setup.Rig, resources!.Rigs.Reshape);
+        if (!world.Posed.Add(instance.Key)) return pose.Bones;
+        pose.Update(instance, setup);
         world.Layers.Clear();
-        foreach (var pose in instance.Poses)
-            if (resources is not null && setup.Rig.Layer(resources.Rigs.Database, pose.Animation, setup.Animal) is { } layer) world.Layers.Add(new(layer, pose.Time, pose.Weight));
+        foreach (var animation in instance.Poses)
+            if (resources is not null && setup.Rig.Layer(resources.Rigs.Database, animation.Animation, setup.Animal) is { } layer) world.Layers.Add(new(layer, animation.Time, animation.Weight));
         foreach (var (layer, time) in setup.Fixed) world.Layers.Add(new(layer, time, 1));
         var scratch = setup.Rig.Rent();
-        try { scratch.Pose(setup.Shape, CollectionsMarshal.AsSpan(world.Layers), skin, instance.Bones); }
+        try { scratch.Pose(pose.Shape, CollectionsMarshal.AsSpan(world.Layers), pose.Bones, instance.Bones); }
         finally { setup.Rig.Return(scratch); }
-        return skin;
+        return pose.Bones;
+    }
+
+    static Matrix4x4 SkinWorld(FxWorld world, CharacterInstance instance, CharacterPoseSetup setup)
+    {
+        Skin(world, instance, setup);
+        return world.Skin[instance.Key].World;
     }
 
     static ulong VisualSeed(in GoreCutRequest request, ulong worldSeed)

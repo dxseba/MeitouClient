@@ -155,7 +155,15 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
         var hit = work.Hit; var context = work.Bridge; float brutality = work.Brutality;
         if (Find(world, hit.Victim) is not { } actor || work.Part is not { } part
             || !world.Characters.TryResolveNext(hit.Victim, out int victimSlot) || world.Characters.Cold(victimSlot) is not { } cold) return;
-        if (context is null || context.Mechanism == CombatWoundMechanism.Unspecified) { Gaps |= GoreIntegrationGap.PreHitContext; return; }
+        if (context is null || context.Mechanism == CombatWoundMechanism.Unspecified)
+        {
+            Gaps |= GoreIntegrationGap.PreHitContext;
+            var missing = new TorsoBisectionInput(hit.Source, CombatWoundMechanism.Unspecified, part, hit.CutDirection, hit.Damage.Cut,
+                work.Maximum, hit.VictimWasAlive, actor.Torso is not null, work.Robot, work.Animal) { Brutality = brutality, Lethal = work.VictimDead };
+            TraceDecisions(world, work, missing, nextRequest);
+            return;
+        }
+        long requestBefore = nextRequest;
         var mechanism = context.Mechanism;
         changed |= actor.Wounds.Apply(hit, part, context.PartMaximumBeforeHit ?? work.Maximum, mechanism, context.WeaponCategory);
         var travel = new Vector2(hit.Travel.X, hit.Travel.Z);
@@ -189,6 +197,7 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
                 TorsoBisectionPolicy.VisualSeedFor(world.Seed, hit.Victim, hit.Attacker, counter), travel, hit.VictimYaw);
             if (torso.IsValid) { actor.Torso = torso; Add(hit, GoreCutKind.Torso, torso: torso); }
         }
+        TraceDecisions(world, work, input, requestBefore);
         if (!options.AdvancedRagdolls || !hit.VictimWasAlive) return;
         foreach (int limb in context.SeveredLimbSlots)
             RecordLimbSeverance(hit, limb, Rng.Mix(world.Seed ^ Rng.Key(hit.Victim) ^ Rng.Key(hit.Attacker) ^ (ulong)hit.Tick * 0x9E3779B97F4A7C15UL));
@@ -197,6 +206,17 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
             && medical.LimbPart(context.SeveredLimbSlots[0] ^ 1) is { Limb: LimbState.Original or LimbState.Crushed, Template.Severance: true } counterpart
             && counterpart.Template.Type == part.Type && PairedLimbPolicy.ShouldFollowThrough(brutality, mechanism, hit.CutDirection, hit.Damage.Cut, counterpart.MaxHp, Roll(0x504149524544UL)))
         { Gaps |= GoreIntegrationGap.CounterpartDamage; Add(hit, GoreCutKind.PairedLimbAttempt, limbSlot: context.SeveredLimbSlots[0] ^ 1, bridge: context); }
+    }
+
+    void TraceDecisions(World world, in HitWork work, in TorsoBisectionInput torso, long requestBefore)
+    {
+        if (!DeveloperCombatDiagnostics.Active(world)) return;
+        var kinds = history.Where(request => request.Sequence > requestBefore).Select(request => request.Kind.ToString()).ToList();
+        if (work.Bridge?.SeveredLimbSlots.Count > 0) kinds.Add("NativeLimbLoss");
+        DeveloperCombatDiagnostics.Trace(world, work.Hit, work.Bridge, work.Brutality,
+            work.Bridge?.PartMaximumBeforeHit ?? work.Maximum, torso,
+            history.Any(request => request.Sequence > requestBefore && request.Kind == GoreCutKind.Torso),
+            kinds.Count == 0 ? "none" : string.Join(',', kinds));
     }
 
     public bool RecordLimbSeverance(in CombatHit hit, int limb, ulong seed)
