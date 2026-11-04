@@ -428,7 +428,7 @@ public sealed unsafe partial class DebrisRenderer : IDisposable
 
     /// <summary>The built-in name of the bowel of <see cref="AnatomyFile"/>: one loose body, as the GTA V FLESH port's guts prop.</summary>
     public const string Bowel = "@bowel";
-    /// <summary>The user's <c>Ecorche.anatomy</c>, or null.</summary>
+    /// <summary>The selected anatomical bundle's <c>Ecorche.anatomy</c>, or null.</summary>
     public string? AnatomyFile { get; set; }
 
     Mesh? BuildBowel()

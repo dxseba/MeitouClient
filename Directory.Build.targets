@@ -20,4 +20,11 @@
     <None Include="$(StreamlineRuntimePath)/libnvidia-ngx-dlss.so.*;$(StreamlineRuntimePath)/libmeitou_ngx*.so;$(StreamlineRuntimePath)/libamd_fidelityfx_vk*.so;$(StreamlineRuntimePath)/LICENSE-FidelityFX*.txt" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
+  <!-- Third-party anatomy geometry and its notices are packaged together; never read from a developer's game install at build time. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Meitou.Game' or '$(MSBuildProjectName)' == 'Meitou.ModelViewer' or '$(MSBuildProjectName)' == 'Meitou.Tools' or '$(MSBuildProjectName)' == 'Meitou.Tests'">
+    <Content Include="$(MSBuildThisFileDirectory)assets/anatomy/**/*"
+             Link="assets/anatomy/%(RecursiveDir)%(Filename)%(Extension)" TargetPath="assets/anatomy/%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

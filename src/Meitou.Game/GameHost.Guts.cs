@@ -35,8 +35,7 @@ sealed partial class GameHost
     {
         if (!GoreEnabled) return;
         if (gpu?.Debris is not { } debris) return;
-        debris.AnatomyFile ??= Meitou.Content.GameInstall.Locate() is { } game
-            ? Path.Combine(game.ModsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy") : null;
+        debris.AnatomyFile ??= Meitou.Content.AnatomyAssets.FindBody(install.ModsDirectory);
         if (debris.Extent(DebrisRenderer.Bowel) is null) return;
         SpawnWoundGuts(world);
         foreach (var (who, gone) in gutFalls.ToArray())

@@ -3,6 +3,19 @@
 MeitouClient is licensed under GPL-3.0-or-later (see [LICENSE](LICENSE)). Parts of it are derived
 from the following projects, whose licenses require these notices.
 
+## Anatomy geometry
+
+`assets/anatomy` contains ECR1 anatomy mesh adaptations, packaged with their own licences rather
+than the code's GPL licence. The retained notices credit [Écorché](https://github.com/Charleeh/ecorche)
+(CC BY-SA 4.0), BodyParts3D, © The Database Center for Life Science (CC BY 4.0), and Z-Anatomy
+by Gauthier Kervyn (CC BY-SA 4.0). See the [asset README](assets/anatomy/README.md) for file
+provenance, the [full attribution and adaptation details](assets/anatomy/ATTRIBUTION.md), and
+the [licence notice](assets/anatomy/LICENSE.md). Brain geometry additionally credits Brain for
+Blender by Anderson M. Winkler (originally CC BY-SA 3.0, adapted data CC BY-SA 4.0); the
+[supplemental attribution](assets/anatomy/SUPPLEMENTAL-ATTRIBUTION.md) retains its source and
+original licence links. Full CC BY-SA 4.0 and upstream MIT texts travel with the assets.
+Preserve these files when redistributing the anatomy bundle.
+
 ## OGRE
 
 `src/Meitou.Data/Ogre/` reads Ogre file formats following the structure of OGRE's serializers

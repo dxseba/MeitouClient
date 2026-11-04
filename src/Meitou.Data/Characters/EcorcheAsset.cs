@@ -10,8 +10,7 @@ public readonly record struct EcorcheVertex(Vector3 Position, Vector3 Normal, Ve
 public sealed record EcorcheBatch(string Bone, int Layer, EcorcheVertex[] Vertices);
 
 /// <summary>
-/// Reads Kenshi Gore Lab's <c>Ecorche.anatomy</c> (magic <c>ECR1</c>; per batch: name length, layer, vertex count, name, then 8 floats a vertex). The file is CC BY-SA 4.0 data
-/// the user installs with that mod; Meitou ships none of it.
+/// Reads <c>Ecorche.anatomy</c> and its companion meshes (magic <c>ECR1</c>; per batch: name length, layer, vertex count, name, then 8 floats a vertex).
 /// </summary>
 public static class EcorcheAsset
 {

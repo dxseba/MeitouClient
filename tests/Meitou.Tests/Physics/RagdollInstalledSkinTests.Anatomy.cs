@@ -23,8 +23,8 @@ public partial class RagdollInstalledSkinTests
     {
         var install = GameInstall.Locate();
         Assert.SkipWhen(install is null, "Kenshi install not found");
-        string anatomyPath = GameFiles.Resolve(Path.Combine(install.ModsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy"));
-        Assert.SkipWhen(!File.Exists(anatomyPath), "Locally installed Ecorche.anatomy not found");
+        string anatomyPath = AnatomyAssets.FindBody(install.ModsDirectory) ?? string.Empty;
+        Assert.SkipWhen(!File.Exists(anatomyPath), "Bundled or locally installed Ecorche.anatomy not found");
         var (rig, definition, model, setup, rigs, look) = Installed();
         var skin = model.Parts.SelectMany(part => part.Vertices).Where((_, index) => index % 2 == 0)
             .Select(vertex => new WoundPoint(vertex.Position, vertex.Normal, vertex.Uv, (int)(vertex.Bones & 255), vertex.Bones, vertex.Weights)).ToArray();

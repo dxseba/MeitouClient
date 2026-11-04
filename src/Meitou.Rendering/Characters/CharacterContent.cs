@@ -401,8 +401,9 @@ internal sealed class CharacterContent : IDisposable
         string mode = headOnly ? "head" : headless ? "body" : "whole";
         if (meshes.TryGetValue(Key(mode), out var cached)) return cached;
         // Fit once before injury: decapitation only selects a pre-uploaded region, not a second body import.
-        var made = CharacterAnatomy.Build(rig, skin, HeadSurfaces.GetValueOrDefault(bodyKey) ?? [], female, morphs,
-            headless: false, headOnly: false, Path.Combine(modsDirectory, "Gauntlet of Crowns", "Ecorche.anatomy"), bloodColour);
+        var anatomyPath = AnatomyAssets.FindBody(modsDirectory);
+        var made = anatomyPath is null ? null : CharacterAnatomy.Build(rig, skin, HeadSurfaces.GetValueOrDefault(bodyKey) ?? [], female, morphs,
+            headless: false, headOnly: false, anatomyPath, bloodColour);
         if (made is null)
         {
             foreach (string region in new[] { "whole", "body", "head" }) meshes[Key(region)] = null;

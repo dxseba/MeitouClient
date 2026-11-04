@@ -17,9 +17,13 @@ remove saved skill XP, wounds, cuts, item stains or pending corpse/carry records
 loading/binding and the existing codecs still run so a later enabled launch can read them.
 Old queued visual events must not become new bursts after loading.
 
-The anatomy files remain optional local dependencies in `mods/Gauntlet of Crowns` under
-the selected install: `Ecorche.anatomy`, `Brain.anatomy`, `Mouth.anatomy`. They are not
-included in Git or the game package. A normal disabled session does not import them.
+The bundled `assets/anatomy` folder contains `Ecorche.anatomy`, `Brain.anatomy`,
+`Mouth.anatomy`, their licence notices and a SHA-256 manifest. Builds and publishes copy the
+complete folder beside the game, viewer, tools and test executable. Runtime resolution prefers
+this packaged folder; the selected install's `mods/Gauntlet of Crowns` remains a legacy
+fallback. Brain and mouth files come only from beside the selected Ecorche file; bundles
+are not mixed. A normal disabled session does not import anatomy. See the
+[asset README](../../assets/anatomy/README.md) for provenance and redistribution notices.
 
 Validation: configuration/default/restart and off/on gameplay/render/save regression
 coverage is in `Meitou.Tests`. Native screenshots are needed to assess visual quality;

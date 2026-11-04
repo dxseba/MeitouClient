@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.sln text eol=crlf
+
+# Anatomy geometry is binary; preserve the published SHA-256 across platforms.
+assets/anatomy/*.anatomy binary

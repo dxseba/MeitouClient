@@ -5,7 +5,7 @@
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/martinvlcek)
 
 C#/.NET10 reimplementation of [Kenshi](https://lofigames.com/), aiming to run original content,
-mods and saves unchanged. **No game assets are shipped; an installed legal copy is required.**
+mods and saves unchanged. **No Kenshi game assets are shipped; an installed legal copy is required.**
 Architecture/research: [docs index](docs/README.md). Website: [meitou.kenshi.wiki](https://meitou.kenshi.wiki/).
 
 [![Contributors](assets/branding/contributors.png?v=3a8c527b)](https://github.com/VlcekM/MeitouClient/graphs/contributors)
@@ -55,8 +55,14 @@ show statistics/profiler. Game F5 saves/F9 loads; F2..F4 select1/2/5 speed, Spac
 F6 cinematic camera, F7 hides UI. [Viewer guide](docs/viewer.md), [simulation](docs/simulation.md),
 [UI compatibility](docs/faithful-ui-parity.md).
 
+Optional [Brutality gore](docs/game/gore.md) is off by default. Enable **Brutality gore (restart required)**
+in Gameplay settings, then restart the application. The third-party anatomy files and their notices
+are included under `assets/anatomy` and copied automatically by builds and publishes; a separate
+Gauntlet of Crowns installation is not required.
+
 ## Releases and license
 
 GPL-3.0-or-later, with [license exception](LICENSE-EXCEPTION.md). Readers and game logic use
-interoperability facts; proprietary SDKs/original content/decompiled code are not distributed.
+interoperability facts; proprietary SDKs, original Kenshi content and decompiled code are not distributed.
+Bundled third-party anatomy uses separate asset licences; see [third-party notices](THIRD_PARTY_NOTICES.md#anatomy-geometry).
 Contribution rules: [AGENTS.md](AGENTS.md); current choices: [DECISIONS.md](DECISIONS.md).

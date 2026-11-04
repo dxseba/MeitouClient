@@ -4,7 +4,7 @@ using Meitou.Data.Characters;
 
 namespace Meitou.Rendering.Characters;
 
-/// <summary>CPU anatomy preparation shared by uploads and deformation checks; no source assets are shipped.</summary>
+/// <summary>CPU anatomy preparation shared by uploads and deformation checks.</summary>
 static class CharacterAnatomy
 {
     /// <summary>World units kept between anatomy and the skin above it (1 unit = 100 mm: 20 mm, the deep end of the GTA V FLESH fit).</summary>
@@ -147,10 +147,10 @@ static class CharacterAnatomy
                     // One local quad follows one axial body; a spine/arm split cannot pull its corners into different fragments.
                     foreach (var point in new[] { a, b, c, b, d, c }) vertices.Add(AnatomyTriangles.FollowBone(point, wallBone));
                 }
-        // The mouth behind a lost jaw (Z-Anatomy, the user's Mouth.anatomy): placed as one piece, box to box, in the head's lower part. Rigid on the head bone.
-        if (!headless && headSupported && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy")) && rig.Handle("Bip01 Head") is { } mouthBone)
+        // The mouth behind a lost jaw (the selected bundle's Mouth.anatomy): placed as one piece, box to box, in the head's lower part. Rigid on the head bone.
+        if (!headless && headSupported && AnatomyAssets.Companion(path, "Mouth.anatomy") is { } mouthPath && rig.Handle("Bip01 Head") is { } mouthBone)
         {
-            using var mouthStream = File.OpenRead(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy"));
+            using var mouthStream = File.OpenRead(mouthPath);
             var mouth = Meitou.Data.Characters.EcorcheAsset.Read(mouthStream);
             var (min, max) = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
             foreach (var part in mouth) foreach (var v in part.Vertices) (min, max) = (Vector3.Min(min, v.Position), Vector3.Max(max, v.Position));
@@ -175,10 +175,10 @@ static class CharacterAnatomy
                 }
             }
         }
-        // The brain behind a broken skull (Z-Anatomy, the user's Brain.anatomy): box to box inside the skull. Rigid on the head bone.
-        if (!headless && headSupported && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Brain.anatomy")) && rig.Handle("Bip01 Head") is { } brainBone)
+        // The brain behind a broken skull (the selected bundle's Brain.anatomy): box to box inside the skull. Rigid on the head bone.
+        if (!headless && headSupported && AnatomyAssets.Companion(path, "Brain.anatomy") is { } brainPath && rig.Handle("Bip01 Head") is { } brainBone)
         {
-            using var brainStream = File.OpenRead(Path.Combine(Path.GetDirectoryName(path)!, "Brain.anatomy"));
+            using var brainStream = File.OpenRead(brainPath);
             var brain = Meitou.Data.Characters.EcorcheAsset.Read(brainStream);
             var (min, max) = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
             foreach (var part in brain) foreach (var v in part.Vertices) (min, max) = (Vector3.Min(min, v.Position), Vector3.Max(max, v.Position));
