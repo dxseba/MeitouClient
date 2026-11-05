@@ -27,8 +27,10 @@ public sealed class BrutalityMod : IMod
             ? JsonSerializer.Deserialize<BrutalitySettings>(File.ReadAllText(path), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                 ?? throw new InvalidDataException("Empty Brutality settings")
             : new BrutalitySettings();
-        Enabled = settings.Enabled;
-        if (!Enabled) { context.Log("disabled in brutality.json"); return; }
+        var menu = new BrutalityMenuSettings { GoreEnabled = settings.Enabled };
+        context.AddSettings(menu);
+        Enabled = menu.GoreEnabled;
+        if (!Enabled) { context.Log("gore disabled at startup"); return; }
         SandboxProfileAdapter.Install(context, settings.DeveloperTools);
         DeveloperCombatDiagnostics.Configure(settings.DeveloperTools, Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS"));
         Anatomy = new AnatomyLibrary(new AnatomyAssets(context.Folder));
@@ -66,6 +68,12 @@ public sealed class BrutalityMod : IMod
         }
         context.Log("Brutality DLL initialized; anatomy is resolved from this mod folder");
     }
+}
+
+sealed class BrutalityMenuSettings
+{
+    [Setting("Brutality gore (restart required)", Hint = "Enables Brutality progression, advanced wounds and extra combat effects. Restart to apply.")]
+    public bool GoreEnabled { get; set; }
 }
 
 public sealed record BrutalitySettings

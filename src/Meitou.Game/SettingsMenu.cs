@@ -11,7 +11,8 @@ namespace Meitou.Game;
 /// <summary>Shared settings layout and interaction; the current UI mode selects only its presentation.</summary>
 sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBindings bindings, Action save, Slider frameLimit, UserConfig config)
 {
-    static readonly string[] Pages = ["Display", "Graphics", "Interface", "Controls", "Advanced", "Audio", "Gameplay", "Fixes"];
+    static readonly string[] Pages = ["Display", "Graphics", "Interface", "Controls", "Advanced", "Audio", "Gameplay", "Fixes", "Mod settings"];
+    const int ModSettingsPage = 8;
     /// <summary>The Graphics tabs: the look tabs, then the quality tabs (SettingsMenu.Looks.cs).</summary>
     internal static readonly string[] GraphicsPages = ["Lighting", "Sky & weather", "Colour", "World", "Characters"];
     /// <summary>The Metal-only preset row (Native / MetalFX quality, balanced, performance / TAA), edited by the Metal settings panel.</summary>
@@ -246,6 +247,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
 
     List<Entry> Entries()
     {
+        if (page == ModSettingsPage) return ModSettingsEntries();
         string section = page == 1 ? GraphicsPages[graphicsPage] : Pages[page];
         // In the catalogue's order, the launcher's (LauncherSchema.Order).
         var result = values.Sliders.Where(s => s.Label is not ("Time of day" or "Time speed") && Section(s.Label) == section && ReliefSliderShown(s.Label))
@@ -531,7 +533,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         {
             var hit = hits[focus];
             if (hit.Slider is { } slider && key is Key.Left or Key.Right)
-                slider.SetFraction(slider.Fraction + (key == Key.Left ? -1 : 1) * (slider.Max - slider.Min <= 4 ? 1 / (slider.Max - slider.Min) : 0.02f));
+                slider.SetFraction(slider.Fraction + (key == Key.Left ? -1 : 1) * slider.KeyStep);
             else if (key is Key.Enter or Key.Space) hit.Activate();
         }
         return true;
@@ -650,6 +652,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         for (int i = 0; i < values.Toggles.Count; i++)
             if (values.Toggles[i].Get() != toggleDefaults[i]) values.Toggles[i].Set(toggleDefaults[i]);
         frameLimit.Set(240);
+        ResetModSettings();
         config.SplashScreens = false;
         config.MainMenuTransitions = true;
         config.InGameTransitions = true;

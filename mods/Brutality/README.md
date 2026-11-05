@@ -14,7 +14,10 @@ Install the packaged `Brutality` folder as a trusted code mod and enable `Brutal
 The package contains `Brutality.dll`, metadata, effect sprites and licensed bundled anatomy;
 it never ships replacement engine DLLs. See [ASSETS](ASSETS.md) for packaging and provenance.
 The anatomy and its notices are committed; no Gauntlet of Crowns installation is required.
-`brutality.json` with `{ "enabled": false }` disables registration and anatomy loading.
+Use **Settings → Mod settings → Brutality** to switch **Brutality gore (restart required)**.
+The saved menu choice applies on the next launch. With Gore off, the DLL registers its settings
+page and skips gameplay and anatomy loading. Keep the code mod enabled in the launcher to use
+the switch. Before a menu choice is saved, `brutality.json` supplies the `enabled` default.
 
 The DLL owns Brutality progression, head/torso/limb decisions, ordinary wounds, articulated
 fragments and bowel tissue, robot interiors/cables/discharges/smoke/scrap, liquid blood,
