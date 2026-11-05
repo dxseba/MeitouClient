@@ -153,6 +153,9 @@ break golden hashes and any future replay. Nothing in the API can stop a patch; 
 
 ### Determinism check
 
+The tools host shares `Meitou.Rendering` and its engine contracts with code mods, including CPU model helpers.
+`mod-check` remains headless and does not initialize a GPU.
+
 `meitou-tools mod-check <save folder> [--ticks n] [--threads n] [--mod <mod folder>]...` (`tools/Meitou.Tools/ModCheck.cs`, shipped in
 the release zips beside the game) loads a save
 headless with the enabled code mods, or only the `--mod` folders (their code; their records join the data only when enabled), and runs
