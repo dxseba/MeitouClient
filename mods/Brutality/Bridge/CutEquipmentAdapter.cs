@@ -5,7 +5,6 @@ using Meitou.Brutality.Physics;
 using Meitou.Data.Characters;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
-using Meitou.Data.Ogre;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -19,7 +18,7 @@ public sealed partial class CutEquipmentAdapter(CharacterRigs? rigs, Action<Char
     readonly record struct Stamp(TorsoBisectionState? Torso, int Missing, string Limbs);
     readonly Dictionary<CharacterCold, Stamp> checkedCuts = new(ReferenceEqualityComparer.Instance);
     readonly Dictionary<CharacterCold, (Meitou.Simulation.Items.ItemInstance? Item, bool Bow)> heldBefore = new(ReferenceEqualityComparer.Instance);
-    readonly Dictionary<string, RagdollSkinSurface> skins = new(StringComparer.OrdinalIgnoreCase);
+    readonly FragmentAssets? assets = rigs is null ? null : FragmentAssets.For(rigs);
     public static void Install(ModContext context, CharacterRigs? rigs = null)
     {
         InstallPersistence(context.Harmony);
@@ -58,11 +57,8 @@ public sealed partial class CutEquipmentAdapter(CharacterRigs? rigs, Action<Char
             bool changed = false;
             var look = cold.Appearance;
             var setup = rigs is not null && look is { Animal: null } ? rigs.For(look) : null;
-            RagdollSkinSurface? skin = null;
-            if (setup is not null && rigs!.FindMesh(look!.BodyMesh) is { } bodyPath)
-            {
-                if (!skins.TryGetValue(bodyPath, out skin)) skins[bodyPath] = skin = RagdollSkinSurface.Read(OgreMeshReader.ReadFile(bodyPath));
-            }
+            var skin = setup is not null && rigs!.FindMesh(look!.BodyMesh) is { } bodyPath
+                ? assets!.Skin(bodyPath) : null;
             bool bowDrawn = cold.DrawnWeapon == HandHold.OfCategory((int)Meitou.Data.Gameplay.Combat.WeaponCategory.Bow).Weapon;
             foreach (var item in inventory.Items.ToArray())
             {

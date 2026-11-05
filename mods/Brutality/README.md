@@ -43,12 +43,13 @@ new variants wait for pending CPU fits instead of blocking a render frame. Hidde
 part LOD budgets keep their own radius. Healthy fits and exterior LOD plans prepare on one background
 worker per world, with 16 entries/192 MiB of fit residency (one oversized fit alone); GPU preparation
 uses the remaining frame budget for shaders/exteriors; full anatomy uploads only for actual cuts.
-Active cut geometry retains its fitted source across cache eviction. Actual head, limb and torso
-cuts prepare on one shared background worker, with at most one job per world and 128 queued owners.
-New cuts hold the last complete copied presentation while the exact captured geometry and every
-replacement GPU asset/program prepare. First-seen live cuts can use the complete unsplit birth
-pose; restored unseen cuts remain hidden until ready. A family switches together, with a 120 ms
-presentation-only blend into its current physical poses; fluid anchors use those drawn poses.
+Active cut geometry retains its fitted source across cache eviction. One shared background worker
+prepares cut and wound geometry, with priority for queued cuts and up to 128 owners per queue.
+Ordinary wounds use the native or compatible mesh while preparation runs.
+While replacement geometry and GPU assets prepare, the last complete mesh follows the live
+ragdoll with its original joint lengths. First-seen live cuts can use the complete unsplit birth
+pose. Restored unseen cuts remain hidden until ready. A family switches together and blends from
+the last drawn pose into its current physical poses over 120 ms. Fluid anchors use the drawn poses.
 A newer cut supersedes queued work, and world disposal cancels pending work. Preparation and
 uploads use the host's background and frame budgets. Lower LOD cuts share the original decoded vertices. Frozen fragment scenes skip solver
 steps while keeping kinematic collision obstacles. Render resources

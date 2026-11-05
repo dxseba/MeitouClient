@@ -132,7 +132,7 @@ internal sealed class CutGeometryQueue<TOwner, TKey>(int capacity = 128,
         {
             if (current) active.Entry.Failed = true;
             if (active.Task.Exception is { } error && error.GetBaseException() is not OperationCanceledException)
-                Console.Error.WriteLine("Brutality cut geometry: " + error.GetBaseException().Message);
+                Console.Error.WriteLine("Brutality geometry preparation: " + error.GetBaseException().Message);
         }
     }
 
@@ -162,13 +162,16 @@ internal sealed class CutGeometryQueue<TOwner, TKey>(int capacity = 128,
 internal static class CutGeometryWorker
 {
     sealed record Job(Func<CharacterGeometryResult> Work, TaskCompletionSource<CharacterGeometryResult> Result);
-    static readonly ConcurrentQueue<Job> jobs = new();
+    static readonly ConcurrentQueue<Job> cuts = new(), wounds = new();
     static int running;
 
-    internal static Task<CharacterGeometryResult> Start(Func<CharacterGeometryResult> work)
+    internal static Task<CharacterGeometryResult> Start(Func<CharacterGeometryResult> work) => Enqueue(cuts, work);
+    internal static Task<CharacterGeometryResult> StartWound(Func<CharacterGeometryResult> work) => Enqueue(wounds, work);
+
+    static Task<CharacterGeometryResult> Enqueue(ConcurrentQueue<Job> queue, Func<CharacterGeometryResult> work)
     {
         var result = new TaskCompletionSource<CharacterGeometryResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        jobs.Enqueue(new(work, result));
+        queue.Enqueue(new(work, result));
         StartDrain();
         return result.Task;
     }
@@ -185,7 +188,7 @@ internal static class CutGeometryWorker
         Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
         do
         {
-            while (jobs.TryDequeue(out var job))
+            while (cuts.TryDequeue(out var job) || wounds.TryDequeue(out job))
             {
                 try { job.Result.TrySetResult(job.Work()); }
                 catch (OperationCanceledException error) { job.Result.TrySetCanceled(error.CancellationToken); }
@@ -193,6 +196,6 @@ internal static class CutGeometryWorker
             }
             Volatile.Write(ref running, 0);
             // A producer racing the empty queue either starts another drain or hands its job to this one.
-        } while (!jobs.IsEmpty && Interlocked.CompareExchange(ref running, 1, 0) == 0);
+        } while ((!cuts.IsEmpty || !wounds.IsEmpty) && Interlocked.CompareExchange(ref running, 1, 0) == 0);
     }
 }

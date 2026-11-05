@@ -24,14 +24,19 @@ namespace Meitou.Brutality.Rendering;
 internal sealed class RenderResources
 {
     readonly AssetLocator assets;
-    readonly Dictionary<string, OgreMesh?> meshes = new(StringComparer.OrdinalIgnoreCase);
+    readonly Lazy<MaterialResolver> materials;
+    readonly ConcurrentDictionary<string, OgreMesh?> meshes = new(StringComparer.OrdinalIgnoreCase);
     public AssetLocator Assets => assets;
+    public MaterialResolver Materials => materials.Value;
+    public string InstallRoot { get; }
     public CharacterRigs Rigs { get; }
     public CharacterGeometryAdapter Geometry { get; }
     public WeaponBloodGeometry WeaponBlood { get; }
     public RenderResources(GameInstall install, GameDatabase data, AnatomyLibrary anatomy)
     {
         assets = new(install);
+        materials = new(() => new(data, assets.Materials, assets));
+        InstallRoot = install.Root;
         Rigs = new(data, name => assets.Find(name), name => assets.Find(name));
         Geometry = new(anatomy);
         RgbaImage? splatter = null;
@@ -45,10 +50,13 @@ internal sealed class RenderResources
     public OgreMesh? Mesh(string name)
     {
         if (assets.Find(name) is not { } path) return null;
-        if (meshes.TryGetValue(path, out var known)) return known;
-        try { return meshes[path] = OgreMeshReader.ReadFile(path); }
-        catch (Exception error) when (error is IOException or InvalidDataException or OgreFormatException)
-        { Console.Error.WriteLine($"Brutality mesh {name}: {error.Message}"); return meshes[path] = null; }
+        // Share only completed reads. A render lookup never waits on a worker decoding this mesh.
+        return meshes.GetOrAdd(path, static (file, meshName) =>
+        {
+            try { return OgreMeshReader.ReadFile(file); }
+            catch (Exception error) when (error is IOException or InvalidDataException or OgreFormatException)
+            { Console.Error.WriteLine($"Brutality mesh {meshName}: {error.Message}"); return null; }
+        }, name);
     }
 }
 
@@ -163,6 +171,7 @@ internal static class RenderBridge
     static void FillPostfix(object __instance, CharacterDrawList list)
     {
         if (resources is null || drawKey is null || sessionField?.GetValue(__instance) is not WorldSession session) return;
+        long started = RenderPhaseTrace.Begin();
         var sourceResources = resources;
         var render = states.GetValue(session.World, static _ => new());
         render.HeldKeys.Clear();
@@ -179,7 +188,7 @@ internal static class RenderBridge
                 var hidden = proxyFrame.Proxies.Keys.Select(proxy => drawKey(__instance, proxy)).ToHashSet();
                 list.Items.RemoveAll(instance => hidden.Contains(instance.Key));
             }
-            FinishPresentation(__instance, session, list, render);
+            FinishPresentation(__instance, session, list, render, started);
             return;
         }
         var previous = physics!.FrameAt(session.PreviousSnapshot.Tick);
@@ -211,6 +220,7 @@ internal static class RenderBridge
             if (hasRoot) removed.Add(rootKey);
             foreach (var pair in proxyKeys) if (pair.Value.Owner == current.Character) removed.Add(pair.Key);
             if (!render.Families.TryGetValue(current.Character, out var family)) render.Families[current.Character] = family = new();
+            GoreCharacterFrame? before = previous?.Characters.GetValueOrDefault(current.Character);
             if (sourceResources.Rigs.For(current.Appearance) is not { } setup || sourceResources.Mesh(current.Appearance.BodyMesh) is not { } body)
             { Hold(); continue; }
             var physicalComponents = ComponentsOf(current);
@@ -223,7 +233,7 @@ internal static class RenderBridge
                 {
                     if (render.CutQueue.NeedsRequest(current.Character, request))
                     {
-                        var input = CharacterGeometryAdapter.Capture(request, current.State, sourceResources.Mesh);
+                        var input = CharacterGeometryAdapter.Capture(request, current.State, sourceResources.Mesh, deferMeshReads: true);
                         var adapter = sourceResources.Geometry;
                         render.CutQueue.Request(current.Character, request, cancellation => adapter.BuildUnpublished(input, cancellation));
                     }
@@ -255,7 +265,6 @@ internal static class RenderBridge
             render.Cuts[current.Character] = (current.Appearance, geometry, request);
             family.Accept(now);
             if (current.State.Head is not null) replacedHeads.Add(rootKey);
-            GoreCharacterFrame? before = previous?.Characters.GetValueOrDefault(current.Character);
             var retained = current.Retained is null ? rootSource.Bones : Mixed(render, (current.Character, 0), before?.Retained, current.Retained, session.SimulationAlpha);
             var retainedInstance = WithPhysicalPlacement(rootSource, before, current, session.SimulationAlpha);
             var retainedWorld = retainedInstance.World ?? (rootSource.Rotation is { } retainedRotation
@@ -307,6 +316,18 @@ internal static class RenderBridge
                 foreach (var row in family.Pieces)
                 {
                     var shown = row.Instance;
+                    if (sourceResources.Rigs.For(shown.Appearance) is { } heldSetup)
+                    {
+                        if (row.StableKey == 0 && current.Retained is null && hasRoot)
+                            shown = family.FollowAnimation(row, rootSource, heldSetup, sourceResources.Rigs);
+                        else
+                        {
+                            var driver = PiecePose(current, row.StableKey);
+                            if (driver is not null)
+                                driver = Mixed(render, (current.Character, row.StableKey), PiecePose(before, row.StableKey), driver, session.SimulationAlpha);
+                            shown = family.AdvanceHeld(row, heldSetup.Rig, driver, Placement(before, current, session.SimulationAlpha));
+                        }
+                    }
                     if (row.StableKey == 0 && !hasRoot) shown = shown with { Hidden = true };
                     output.Add(shown); render.HeldKeys.Add(shown.Key);
                 }
@@ -316,12 +337,19 @@ internal static class RenderBridge
         render.CutQueue.StartNext();
         list.Items.RemoveAll(instance => removed.Contains(instance.Key) || instance.FreezeFrom is { } from && replacedHeads.Contains(from));
         list.Items.AddRange(output);
-        FinishPresentation(__instance, session, list, render);
+        FinishPresentation(__instance, session, list, render, started);
     }
 
-    static void FinishPresentation(object host, WorldSession session, CharacterDrawList list, RenderState render)
+    static void FinishPresentation(object host, WorldSession session, CharacterDrawList list, RenderState render, long started)
     {
-        BeforeEffects?.Invoke(host, session, list); TintWeapons(host, list, session); AfterFill?.Invoke(host, list, session);
+        RenderPhaseTrace.End(RenderPhase.Geometry, started);
+        BeforeEffects?.Invoke(host, session, list);
+        long weaponsStarted = RenderPhaseTrace.Start();
+        TintWeapons(host, list, session);
+        RenderPhaseTrace.End(RenderPhase.Weapons, weaponsStarted);
+        long effectsStarted = RenderPhaseTrace.Start();
+        AfterFill?.Invoke(host, list, session);
+        RenderPhaseTrace.End(RenderPhase.Effects, effectsStarted);
         if (drawKey is null) return;
         var keys = new Dictionary<long, (CharacterId Owner, int Piece)>();
         foreach (var actor in session.CurrentSnapshot.Characters) keys[drawKey(host, actor.Id)] = (actor.Id, 0);
@@ -340,6 +368,7 @@ internal static class RenderBridge
             family.Capture(pair.Value);
         }
         foreach (var owner in render.Families.Keys.Where(owner => !groups.ContainsKey(owner)).ToArray()) render.Families.Remove(owner);
+        RenderPhaseTrace.Report(session.ShownTick, started);
     }
 
     static void TintWeapons(object host, CharacterDrawList list, WorldSession session)
@@ -389,6 +418,9 @@ internal static class RenderBridge
             * Matrix4x4.CreateFromQuaternion(Quaternion.Slerp(turn0, turn1, alpha))
             * Matrix4x4.CreateTranslation(Vector3.Lerp(at0, at1, alpha));
     }
+
+    static BonePose? PiecePose(GoreCharacterFrame? frame, int stableKey) => stableKey == 0
+        ? frame?.Retained : frame?.Detached.FirstOrDefault(piece => piece.StableKey == stableKey)?.Bones;
 
     static CharacterGeometryComponents ComponentsOf(GoreCharacterFrame frame)
     {

@@ -1,10 +1,10 @@
+using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.Numerics;
 using HarmonyLib;
 using Meitou.Brutality.Rendering;
 using Meitou.Data.Characters;
 using Meitou.Data;
-using Meitou.Data.Physics;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation.Combat;
 using Meitou.Simulation;
@@ -13,11 +13,15 @@ using NativeRagdolls = Meitou.Simulation.Ragdolls.RagdollSystem;
 
 namespace Meitou.Brutality.Physics;
 
-public sealed record FragmentPoseSnapshot(int StableKey, BonePose Bones, Vector3 Position);
+public sealed record FragmentPoseSnapshot(int StableKey, BonePose Bones, Vector3 Position)
+{
+    internal RagdollDefinition? Definition { get; init; }
+}
 public sealed record GoreCharacterFrame(CharacterId Character, CharacterAppearance Appearance, BrutalityActorView State,
     BonePose? Retained, IReadOnlyList<FragmentPoseSnapshot> Detached)
 {
     public Matrix4x4 Placement { get; init; } = Matrix4x4.Identity;
+    internal RagdollDefinition? RetainedDefinition { get; init; }
     public FragmentBirthPresentation? BirthPresentation { get; init; }
 }
 public sealed record GorePresentationFrame(long Tick, IReadOnlyDictionary<CharacterId, GoreCharacterFrame> Characters);
@@ -45,6 +49,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         public bool FootDiagnosed;
         public FragmentBirthPresentation? BirthPresentation;
     }
+    static readonly bool TracePhases = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PHASES") == "1";
     readonly AdvancedFragmentScene scene = new();
     readonly Queue<CombatHit> impacts = new();
     readonly HashSet<CharacterId> reactionOwners = [];
@@ -52,6 +57,11 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
     {
         if (hit.VictimWasAlive && hit.VictimWasIncapacitated) impacts.Enqueue(hit);
     }
+    internal bool OwnsLimbDrop(CharacterId id, CharacterCold cold, LimbCutState cut) =>
+        owners.TryGetValue(id, out var owner) && ReferenceEquals(cold, owner.Cold)
+        && owner.Pieces.TryGetValue(10 + cut.LimbSlot, out var detached) && detached.Stamp == cut.ToString()
+        && detached.Piece.Bodies.Any(body => body.HasValue);
+
     public bool TryPartPosition(CharacterId id, BodyPartTemplate part, out Vector3 position)
     {
         position = default;
@@ -64,8 +74,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
     }
     readonly Dictionary<CharacterId, CharacterAppearance> uncut = [];
     readonly Dictionary<CharacterId, Owner> owners = [];
-    readonly Dictionary<string, RagdollSkinSurface> skins = new(StringComparer.OrdinalIgnoreCase);
-    readonly Dictionary<(string, SkeletonRig, bool), RagdollDefinition?> definitions = [];
+    readonly FragmentAssets assets = FragmentAssets.For(rigs);
     readonly Queue<GorePresentationFrame> history = [];
     volatile GorePresentationFrame[] frames = [];
     IRagdollEnvironment? ground = environment;
@@ -99,12 +108,14 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         animations ??= world.Systems.OfType<IAnimationSource>().FirstOrDefault();
         native ??= world.Systems.OfType<NativeRagdolls>().FirstOrDefault();
         foreach (var hit in impacts) reactionOwners.Add(hit.Victim);
-        int startsLeft = 4;
+        int startsLeft = 4, changed = 0;
+        long setupTime = 0, definitionsTime = 0, poseTime = 0, createTime = 0;
         foreach (var state in gameplay.ActorViews)
         {
             if (state.Torso is null && state.Head is null && state.Limbs.Count == 0 && state.SevereHead.Kind == SevereHeadWoundKind.None
                 && !reactionOwners.Contains(state.Character) && !HasSavedOwner(world, state.Character)) continue;
             if (!world.Characters.TryResolveNext(state.Character, out int slot) || world.Characters.Cold(slot) is not { Appearance: { } current } cold) continue;
+            long setupStarted = TracePhases ? Stopwatch.GetTimestamp() : 0;
             if (!owners.TryGetValue(state.Character, out var owner))
             {
                 if (startsLeft-- <= 0) continue;
@@ -112,10 +123,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                 var presentation = new FragmentAppearanceCache();
                 var natural = presentation.Get(rigs.Database, current, PresentedParts(current, original, cold), state);
                 if (rigs.For(natural) is not { } setup || rigs.FindMesh(natural.BodyMesh) is not { } bodyPath) continue;
-                if (!skins.TryGetValue(bodyPath, out var surface))
-                {
-                    surface = RagdollSkinSurface.Read(Meitou.Data.Ogre.OgreMeshReader.ReadFile(bodyPath)); skins[bodyPath] = surface;
-                }
+                var surface = assets.Skin(bodyPath);
                 if (Definition(natural, setup.Rig) is not { } source) continue;
                 owner = new Owner { Setup = setup, Appearance = natural, Skin = surface, Source = source, Cold = cold, Presentation = presentation };
                 owners.Add(state.Character, owner);
@@ -136,7 +144,15 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             var placement = PlacementFor(owner, cold, hot);
             if (owner.StateStamp != stamp)
             {
+                long definitionsStarted = TracePhases ? Stopwatch.GetTimestamp() : 0;
                 var specs = Definitions(owner, state, ownBody);
+                long poseStarted = TracePhases ? Stopwatch.GetTimestamp() : 0;
+                if (TracePhases)
+                {
+                    changed++;
+                    setupTime += definitionsStarted - setupStarted;
+                    definitionsTime += poseStarted - definitionsStarted;
+                }
                 Meitou.Simulation.Ragdolls.RagdollHandoff? handoff = null;
                 if (native is not null && !owner.NativeClaimed)
                 {
@@ -157,6 +173,8 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                 var appliedPush = handoff?.AppliedLaunch?.Push ?? start.Push;
                 var returnedPose = !ownBody && owner.NativeClaimed && owner.Pieces.TryGetValue(0, out var returning)
                     ? scene.Publish(returning.Piece, owner.Setup.Rig, placement) : null;
+                long createStarted = TracePhases ? Stopwatch.GetTimestamp() : 0;
+                if (TracePhases) poseTime += createStarted - poseStarted;
                 var keep = specs.Select(s => s.Key).ToHashSet();
                 foreach (int old in owner.Pieces.Keys.Where(k => !keep.Contains(k)).ToArray()) { scene.Remove(owner.Pieces[old].Piece); owner.Pieces.Remove(old); }
                 foreach (var spec in specs)
@@ -182,6 +200,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                     owner.NativeClaimed = false;
                 }
                 owner.StateStamp = stamp;
+                if (TracePhases) createTime += Stopwatch.GetTimestamp() - createStarted;
             }
             owner.Placement = placement;
             RestoreSavedOwner(world, state.Character, owner, state, hot.Position);
@@ -204,7 +223,9 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             scene.Impact(retained.Piece, actor, offset, push);
         }
         UpdateCarries(world);
+        long stepStarted = changed > 0 ? Stopwatch.GetTimestamp() : 0;
         scene.Step(RagdollPhysics.StepOf(world.TickSeconds, world.PhysicsSpeed), ground, world.Tick, world.TickSeconds, world.Settings.Threads);
+        long publishStarted = changed > 0 ? Stopwatch.GetTimestamp() : 0;
         var publish = new Dictionary<CharacterId, GoreCharacterFrame>();
         foreach (var state in gameplay.ActorViews)
         {
@@ -222,11 +243,12 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
             owner.Placement = recovery?.Placement ?? PlacementFor(owner, owner.Cold, hot);
             TrackSavedPosition(owner, hot.Position);
             var detached = new List<FragmentPoseSnapshot>(); BonePose? body = recovery?.Pose;
+            RagdollDefinition? retainedDefinition = null;
             foreach (var (key, entry) in owner.Pieces)
             {
                 var pose = scene.Publish(entry.Piece, owner.Setup.Rig, owner.Placement);
-                if (key == 0) body = pose;
-                else detached.Add(new(key, pose, entry.Piece.Pose[entry.Piece.Definition.Root].Position));
+                if (key == 0) { body = pose; retainedDefinition = entry.Piece.Definition; }
+                else detached.Add(new(key, pose, entry.Piece.Pose[entry.Piece.Definition.Root].Position) { Definition = entry.Piece.Definition });
             }
             if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null && !owner.FootDiagnosed && world.Tick >= 180
                 && owner.Pieces.TryGetValue(1, out var lower))
@@ -238,11 +260,16 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                     Console.WriteLine($"Brutality physical foot skin: tick={world.Tick} owner={state.Character} min={feet.Min} max={feet.Max} ground={ground.GroundHeight(feet.Min.X, feet.Min.Z, feet.Min.Y)} frozen={lower.Piece.Frozen}");
             }
             publish.Add(state.Character, new(state.Character, owner.Appearance, state, body, Array.AsReadOnly(detached.ToArray()))
-            { Placement = owner.Placement, BirthPresentation = owner.BirthPresentation });
+            { Placement = owner.Placement, BirthPresentation = owner.BirthPresentation, RetainedDefinition = retainedDefinition });
         }
         history.Enqueue(new(world.Tick + 1, new ReadOnlyDictionary<CharacterId, GoreCharacterFrame>(publish)));
         while (history.Count > 64) history.Dequeue();
         frames = history.ToArray();
+        if (changed > 0)
+        {
+            double Ms(long ticks) => ticks * 1000d / Stopwatch.Frequency;
+            Console.WriteLine($"Brutality fragment phases: tick={world.Tick} changed={changed} setup={Ms(setupTime):F2} definitions={Ms(definitionsTime):F2} pose={Ms(poseTime):F2} create={Ms(createTime):F2} step={Ms(publishStarted - stepStarted):F2} publish={Ms(Stopwatch.GetTimestamp() - publishStarted):F2} ms");
+        }
     }
 
     static BonePose CopyPose(BonePose source)
@@ -349,18 +376,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         finally { rig.Return(scratch); }
     }
 
-    RagdollDefinition? Definition(CharacterAppearance look, SkeletonRig rig)
-    {
-        string file = look.Race.GetPath(look.Female ? "female ragdoll" : "male ragdoll");
-        if (string.IsNullOrEmpty(file)) file = look.Race.GetPath("male ragdoll");
-        if (rigs.Find(file) is not { } path) return null;
-        bool robot = look.Race.GetBool("is robot");
-        if (definitions.TryGetValue((path, rig, robot), out var known)) return known;
-        var definition = RagdollDefinition.Build(PhysicsFile.ReadFile(path), rig, 1, cooked =>
-            rigs.Find(cooked) is { } hull ? CookedMeshReader.ReadConvex(File.ReadAllBytes(hull)).Vertices : null);
-        if (robot && definition is not null) definition = RobotRagdollWeight.Weight(definition);
-        return definitions[(path, rig, robot)] = definition;
-    }
+    RagdollDefinition? Definition(CharacterAppearance look, SkeletonRig rig) => assets.Definition(look, rig);
 
     internal static Vector3 HitPush(Vector2 direction, float damage)
     {

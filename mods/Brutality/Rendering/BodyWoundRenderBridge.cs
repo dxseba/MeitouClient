@@ -17,6 +17,7 @@ internal static class BodyWoundRenderBridge
     sealed class Shown
     {
         public readonly Dictionary<CharacterId, Variant> Geometry = [];
+        public readonly CutGeometryQueue<CharacterId, CharacterGeometryAdapter.BuildKey> Queue = new(start: CutGeometryWorker.StartWound);
     }
     static readonly ConditionalWeakTable<World, Shown> worlds = new();
     static RenderResources? resources;
@@ -35,6 +36,7 @@ internal static class BodyWoundRenderBridge
     internal static void ReleaseWorld(World world)
     {
         if (!worlds.TryGetValue(world, out var shown)) return;
+        shown.Queue.Dispose();
         foreach (var variant in shown.Geometry.Values) { variant.Geometry.Retire(); resources?.Geometry.Forget(variant.Appearance); }
         worlds.Remove(world);
     }
@@ -48,58 +50,74 @@ internal static class BodyWoundRenderBridge
 
     static void Fill(object host, WorldSession session, CharacterDrawList list)
     {
-        if (resources is null || drawKey is null) return;
+        long started = RenderPhaseTrace.Start();
+        try { FillWounds(host, session, list); }
+        finally { RenderPhaseTrace.End(RenderPhase.Wounds, started); }
+    }
+
+    static void FillWounds(object host, WorldSession session, CharacterDrawList list)
+    {
+        if (resources is not { } source || drawKey is null) return;
         var frame = BrutalityRuntime.For(session.World)?.WoundFrameAt(session.ShownTick);
         var shown = worlds.GetValue(session.World, static _ => new());
         var needed = frame?.Characters.Where(pair => pair.Value.Torso is null && pair.Value.Head is null && pair.Value.Limbs.Count == 0)
             .ToDictionary(pair => drawKey(host, pair.Key), pair => pair.Value) ?? [];
         var current = needed.Values.Select(state => state.Character).ToHashSet();
+        shown.Queue.Retain(current);
         foreach (var id in shown.Geometry.Keys.Where(id => !current.Contains(id)).ToArray())
         { shown.Geometry[id].Geometry.Retire(); shown.Geometry.Remove(id); }
         if (needed.Count == 0) return;
-        // Wounds are shader data; defer only initial mesh preparation, never gameplay or healing.
-        long started = Stopwatch.GetTimestamp(); int rebuilt = 0;
+
+        // CPU geometry uses captured snapshots. Continue drawing the native look or a compatible mesh while it prepares.
+        long captureStarted = Stopwatch.GetTimestamp(); int queued = 0;
         for (int i = 0; i < list.Items.Count; i++)
         {
             var instance = list.Items[i];
-            if (RenderBridge.IsPresentationHeld(session.World, instance.Key)) continue;
-            if (!needed.TryGetValue(instance.Key, out var state)) continue;
+            if (RenderBridge.IsPresentationHeld(session.World, instance.Key) || !needed.TryGetValue(instance.Key, out var state)) continue;
             if (instance.Geometry is { } existing && CharacterGeometryAdapter.SurfaceFor(existing) is not null) continue;
             ulong stamp = state.Wounds.StateKey();
             var severe = state.SevereHead with { HeavyHits = 0 };
+            bool deepAbdomen = state.Wounds.BellyHits >= 10;
             shown.Geometry.TryGetValue(state.Character, out var previous);
-            bool sameLook = previous is not null && ReferenceEquals(previous.Appearance, instance.Appearance);
-            if (sameLook && previous is { } ready && ready.Stamp == stamp && ready.Severe == severe && !ready.Geometry.IsRetired)
+            if (previous is { } ready && ReferenceEquals(ready.Appearance, instance.Appearance)
+                && ready.Stamp == stamp && ready.Severe == severe && !ready.Geometry.IsRetired)
             { list.Items[i] = instance with { Geometry = ready.Geometry }; continue; }
+
+            CharacterGeometryResult? generated = null;
             if (RenderBridge.IsCurrentCutPending(session.World, state.Character, instance.Appearance, state))
+                shown.Queue.Remove(state.Character);
+            else if (source.Rigs.For(instance.Appearance) is { } setup && source.Mesh(instance.Appearance.BodyMesh) is { } body
+                && !GeometryPreparations.ShouldDefer(session.World, instance.Appearance, setup.Rig, body))
+            {
+                var request = CharacterGeometryAdapter.RequestKey(instance.Appearance, setup.Rig, body, state, default);
+                if (!source.Geometry.TryCached(instance.Appearance, setup.Rig, body, state, out generated, default(CharacterGeometryComponents)))
+                {
+                    if (shown.Queue.TryTake(state.Character, request, out var completed))
+                        generated = source.Geometry.Publish(request, completed);
+                    else if (queued < 4 && (queued == 0 || Stopwatch.GetElapsedTime(captureStarted).TotalMilliseconds < 5)
+                        && shown.Queue.NeedsRequest(state.Character, request))
+                    {
+                        var input = CharacterGeometryAdapter.Capture(request, state, source.Mesh, deferMeshReads: true);
+                        var adapter = source.Geometry;
+                        if (shown.Queue.Request(state.Character, request, cancellation => adapter.BuildUnpublished(input, cancellation, prepareFragments: false))) queued++;
+                    }
+                    else if (shown.Queue.TryPendingKey(state.Character, out var pending) && pending != request)
+                        shown.Queue.Remove(state.Character);
+                }
+            }
+            if (generated is null)
             {
                 if (CompatiblePendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry, previous?.Severe, severe,
-                    previous?.DeepAbdomen == true, state.Wounds.BellyHits >= 10) is { } fallback)
+                    previous?.DeepAbdomen == true, deepAbdomen) is { } fallback)
                     list.Items[i] = instance with { Geometry = fallback };
                 continue;
             }
-            if (rebuilt >= 4 || rebuilt > 0 && Stopwatch.GetElapsedTime(started).TotalMilliseconds >= 5)
-            {
-                // A different appearance must use its native meshes until ready: never draw an old race, gender or outfit.
-                if (CompatiblePendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry, previous?.Severe, severe,
-                    previous?.DeepAbdomen == true, state.Wounds.BellyHits >= 10) is { } fallback)
-                    list.Items[i] = instance with { Geometry = fallback };
-                continue;
-            }
-            if (resources.Rigs.For(instance.Appearance) is not { } setup || resources.Mesh(instance.Appearance.BodyMesh) is not { } body) continue;
-            if (GeometryPreparations.ShouldDefer(session.World, instance.Appearance, setup.Rig, body))
-            {
-                if (CompatiblePendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry, previous?.Severe, severe,
-                    previous?.DeepAbdomen == true, state.Wounds.BellyHits >= 10) is { } fallback)
-                    list.Items[i] = instance with { Geometry = fallback };
-                continue;
-            }
-            var generated = resources.Geometry.Build(instance.Appearance, setup.Rig, body, resources.Mesh, state);
-            rebuilt++;
+            shown.Queue.Remove(state.Character);
             RenderBridge.Track(session.World, generated.Retained);
             if (previous is not null && !ReferenceEquals(previous.Geometry, generated.Retained)) previous.Geometry.Retire();
-            shown.Geometry[state.Character] = new(instance.Appearance, stamp, severe, generated.Retained, state.Wounds.BellyHits >= 10);
+            shown.Geometry[state.Character] = new(instance.Appearance, stamp, severe, generated.Retained, deepAbdomen);
             list.Items[i] = instance with { Geometry = generated.Retained };
         }
+        shown.Queue.StartNext();
     }
 }

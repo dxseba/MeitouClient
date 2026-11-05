@@ -9,7 +9,8 @@ internal sealed partial class RagdollSkinSurface
 {
     internal readonly record struct Point(Vector3 Position, uint Bones, Vector4 Weights, uint Vertex = 0, ushort Target = 0, float UvY = 0);
     internal readonly record struct Triangle(Point A, Point B, Point C);
-    readonly record struct BridgePoint(Vector3 Position, float[] Votes);
+    readonly record struct BridgePoint(float[] Votes, int Dominant);
+    readonly record struct BridgeVertex(Vector3 Position, int Dominant);
     readonly Triangle[] triangles;
 
     readonly OgrePose[] morphs;
@@ -73,46 +74,64 @@ internal sealed partial class RagdollSkinSurface
         }
         var converted = new Dictionary<Point, BridgePoint>();
         var proved = new HashSet<(int, int)>();
+        Span<Point> original = stackalloc Point[3];
+        Span<float> distances = stackalloc float[3];
+        Span<BridgeVertex> polygon = stackalloc BridgeVertex[4];
+        Span<int> dominant = stackalloc int[4];
+        var vertices = new BridgePoint[3];
+        var crossingVotes = new float[definition.Bodies.Length];
         foreach (var triangle in triangles)
         {
-            Point[] original = [triangle.A, triangle.B, triangle.C];
-            if (original.Any(point => !Finite(point.Position))) continue;
-            var source = original.Select(Convert).ToArray();
-            var polygon = new List<BridgePoint>(4);
-            for (int k = 0; k < source.Length; k++)
+            original[0] = triangle.A;
+            original[1] = triangle.B;
+            original[2] = triangle.C;
+            if (!Finite(triangle.A.Position) || !Finite(triangle.B.Position) || !Finite(triangle.C.Position)) continue;
+            for (int k = 0; k < original.Length; k++)
+                distances[k] = Vector3.Dot(normal, original[k].Position) + offset;
+            if (distances[0] < 0 && distances[1] < 0 && distances[2] < 0) continue;
+
+            for (int k = 0; k < original.Length; k++)
+                vertices[k] = Convert(original[k]);
+            int count = 0;
+            for (int k = 0; k < original.Length; k++)
             {
-                var a = source[k]; var b = source[(k + 1) % source.Length];
-                float da = Distance(a.Position), db = Distance(b.Position);
-                if (da >= 0) polygon.Add(a);
+                int next = (k + 1) % original.Length;
+                var a = original[k].Position;
+                var b = original[next].Position;
+                float da = distances[k], db = distances[next];
+                if (da >= 0) polygon[count++] = new(a, vertices[k].Dominant);
                 if ((da < 0) != (db < 0))
                 {
                     float t = da / (da - db);
-                    var votes = new float[definition.Bodies.Length];
-                    for (int body = 0; body < votes.Length; body++) votes[body] = a.Votes[body] + (b.Votes[body] - a.Votes[body]) * t;
-                    polygon.Add(new(Vector3.Lerp(a.Position, b.Position, t), votes));
+                    var from = vertices[k].Votes;
+                    var to = vertices[next].Votes;
+                    for (int body = 0; body < crossingVotes.Length; body++)
+                        crossingVotes[body] = from[body] + (to[body] - from[body]) * t;
+                    polygon[count++] = new(Vector3.Lerp(a, b, t), DominantBody(crossingVotes));
                 }
             }
-            if (polygon.Count < 3) continue;
-            var areaVector = Vector3.Zero;
-            for (int k = 1; k + 1 < polygon.Count; k++) areaVector += Vector3.Cross(polygon[k].Position - polygon[0].Position, polygon[k + 1].Position - polygon[0].Position);
-            if (!Finite(areaVector) || areaVector.LengthSquared() < 1e-8f) continue;
-            var dominant = new HashSet<int>();
-            foreach (var vertex in polygon)
+            if (count < 3) continue;
+
+            int bodies = 0;
+            for (int k = 0; k < count; k++)
             {
-                int strongest = 0;
-                for (int body = 1; body < vertex.Votes.Length; body++)
-                    if (vertex.Votes[body] > vertex.Votes[strongest]) strongest = body;
-                if (vertex.Votes[strongest] >= 0.25f) dominant.Add(strongest);
+                int body = polygon[k].Dominant;
+                if (body >= 0 && !dominant[..bodies].Contains(body)) dominant[bodies++] = body;
             }
-            foreach (int a in dominant)
-                foreach (int b in dominant)
-                    if (a < b) proved.Add((a, b));
+            if (bodies < 2) continue;
+            var areaVector = Vector3.Zero;
+            for (int k = 1; k + 1 < count; k++)
+                areaVector += Vector3.Cross(polygon[k].Position - polygon[0].Position, polygon[k + 1].Position - polygon[0].Position);
+            if (!Finite(areaVector) || areaVector.LengthSquared() < 1e-8f) continue;
+
+            for (int a = 0; a < bodies; a++)
+                for (int b = a + 1; b < bodies; b++)
+                    proved.Add((Math.Min(dominant[a], dominant[b]), Math.Max(dominant[a], dominant[b])));
         }
         return (a, b) => (uint)a < (uint)definition.BodyOfBone.Length && (uint)b < (uint)definition.BodyOfBone.Length
             && definition.BodyOfBone[a] is int ba and >= 0 && definition.BodyOfBone[b] is int bb and >= 0
             && proved.Contains(ba < bb ? (ba, bb) : (bb, ba));
 
-        float Distance(Vector3 point) => Vector3.Dot(normal, point) + offset;
         BridgePoint Convert(Point point)
         {
             if (converted.TryGetValue(point, out var found)) return found;
@@ -123,8 +142,16 @@ internal sealed partial class RagdollSkinSurface
                 if (point.Weights[k] <= 0 || bone >= bodyForBone.Length || bodyForBone[bone] is not (var body and >= 0)) continue;
                 votes[body] += point.Weights[k];
             }
-            return converted[point] = new(point.Position, votes);
+            return converted[point] = new(votes, DominantBody(votes));
         }
+    }
+
+    static int DominantBody(ReadOnlySpan<float> votes)
+    {
+        int strongest = 0;
+        for (int body = 1; body < votes.Length; body++)
+            if (votes[body] > votes[strongest]) strongest = body;
+        return votes[strongest] >= 0.25f ? strongest : -1;
     }
 
     static bool Finite(Vector3 point) => float.IsFinite(point.X) && float.IsFinite(point.Y) && float.IsFinite(point.Z);

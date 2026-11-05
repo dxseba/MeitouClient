@@ -25,7 +25,8 @@ internal sealed class RobotScrapSimulation
     double clock;
     bool clockSet;
     public int Count => pieces.Count;
-    public IEnumerable<DebrisPiece> Drawn => pieces.Select(p => new DebrisPiece(p.Mesh.Path, p.Scale, p.Rotation, p.Position));
+    static readonly Vector3 SteelTint = new(.27f, .31f, .35f);
+    public IEnumerable<DebrisPiece> Drawn => pieces.Select(p => new DebrisPiece(p.Mesh.Path, p.Scale, p.Rotation, p.Position) { AlbedoTint = SteelTint });
 
     public bool Begin(in GoreEffectCut cut, Vector3 at, float floor, double now, ulong worldSeed, IReadOnlyList<RobotScrapMesh> choices)
     {

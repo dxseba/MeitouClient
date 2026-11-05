@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Meitou.Brutality.Physics;
 using Meitou.Brutality.Rendering.Surface;
 using Meitou.Data;
 using Meitou.Data.Characters;
@@ -13,7 +14,7 @@ namespace Meitou.Brutality.Rendering;
 internal static class GeometryPreparations
 {
     readonly record struct Key(OgreMesh Body, SkeletonRig Rig, bool Female, uint Blood, bool Mechanical);
-    sealed record Resolved(Key? Value);
+    sealed record Resolved(Key? Value, string? BodyPath);
     sealed class WorldState
     {
         public readonly GeometryPreparationCache<Key> Cache = new();
@@ -58,9 +59,9 @@ internal static class GeometryPreparations
                 Key? value = resources.Rigs.For(look) is { } setup && resources.Mesh(look.BodyMesh) is { } body
                     ? new(body, setup.Rig, look.Female, unchecked((uint)look.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF,
                         look.Race.GetBool("is robot")) : null;
-                resolved = new(value); worldState.Looks.Add(look, resolved);
+                resolved = new(value, value is null ? null : resources.Rigs.FindMesh(look.BodyMesh)); worldState.Looks.Add(look, resolved);
             }
-            if (resolved.Value is not { } key) continue;
+            if (resolved is not { Value: { } key, BodyPath: { } bodyPath }) continue;
             cache.Touch(key, frame);
             if (!cache.CanRequest(key, frame)) continue;
             // Resolve host dictionaries and snapshot records on this render thread. The worker sees immutable meshes/rig/values only.
@@ -69,8 +70,14 @@ internal static class GeometryPreparations
                 .Select(part => (Mesh: resources.Mesh(part.Mesh), Scale: part.Record.Type == Meitou.Data.Fcs.FcsRecordType.ATTACHMENT ? 4f : 1f)).ToArray();
             var library = resources.Geometry.Anatomy;
             var race = look.Race;
-            cache.Request(key, instance, frame, () => Prepare(library, key.Rig, key.Body, race, parts, exteriors,
-                key.Female, key.Blood, key.Mechanical));
+            var fragmentAssets = FragmentAssets.For(resources.Rigs);
+            var indexed = resources.Assets.Configured;
+            var installRoot = resources.InstallRoot;
+            cache.Request(key, instance, frame, () =>
+            {
+                fragmentAssets.Prepare(bodyPath, key.Body, race, key.Female, key.Rig, indexed, installRoot);
+                return Prepare(library, key.Rig, key.Body, race, parts, exteriors, key.Female, key.Blood, key.Mechanical);
+            });
         }
         cache.Publish(list.Preparations);
     }

@@ -228,6 +228,25 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
         Add(hit, GoreCutKind.Limb, limb: cut, limbSlot: limb); return true;
     }
 
+    internal LimbCutState? NativeLimbCut(CharacterId id, int limb, long tick)
+    {
+        if (!options.AdvancedRagdolls || !actors.TryGetValue(id, out var actor)) return null;
+        for (int i = history.Count - 1; i >= 0; i--)
+        {
+            var request = history[i];
+            if (request.Tick == tick && request.Victim == id && request.Kind == GoreCutKind.Limb
+                && request.Limb is { IsValid: true } cut && cut.LimbSlot == limb && actor.Limbs.Contains(cut)) return cut;
+        }
+        return null;
+    }
+
+    internal void KeepNativeLimb(CharacterId id, LimbCutState cut)
+    {
+        if (!actors.TryGetValue(id, out var actor) || !actor.Limbs.Contains(cut)) return;
+        actor.Limbs = Array.AsReadOnly(actor.Limbs.Where(value => value != cut).ToArray());
+        changed = true;
+    }
+
     void Add(in CombatHit hit, GoreCutKind kind, SevereHeadWoundState? severe = null, HeadCutState? head = null,
         TorsoBisectionState? torso = null, LimbCutState? limb = null, int limbSlot = -1, GoreHitBridge? bridge = null)
     {

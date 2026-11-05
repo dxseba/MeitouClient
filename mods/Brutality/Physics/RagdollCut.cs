@@ -21,30 +21,35 @@ public static class RagdollCut
         float length = normal.Length();
         if (side is not (-1 or 1) || !float.IsFinite(length) || length < Epsilon || !float.IsFinite(plane.W)) return null;
         plane *= side / length;
-        return Filter(source, body =>
+        BufferPool? scratch = null;
+        try
         {
-            int wholeSide = fullBody ? 0 : WholeSide(body.Name);
-            return wholeSide == side ? body : wholeSide != 0 ? null : Clip(body, plane);
-        }, joint =>
-        {
-            var oldA = source.Bodies[joint.A];
-            var oldB = source.Bodies[joint.B];
-            bool wholeChain = !fullBody && WholeSide(oldA.Name) == side && WholeSide(oldB.Name) == side;
-            // A diagonal can retain a connected side of the trunk after removing the joint's original centre anchor.
-            // Keep that axial chain, but sever out-of-half shoulder/elbow/hip anchors normally.
-            return wholeChain || Axial(oldA.Name) && Axial(oldB.Name) || skinBridge?.Invoke(oldA.Bone, oldB.Bone) == true
-                || Distance(plane, oldA.Bind.Apply(joint.OffsetA)) >= -Epsilon && Distance(plane, oldB.Bind.Apply(joint.OffsetB)) >= -Epsilon;
-        }, joint =>
-        {
-            var a = source.Bodies[joint.A];
-            var b = source.Bodies[joint.B];
-            if (!(Axial(a.Name) && Axial(b.Name)) && skinBridge?.Invoke(a.Bone, b.Bone) != true) return null;
-            var anchorA = a.Bind.Apply(joint.OffsetA);
-            var anchorB = b.Bind.Apply(joint.OffsetB);
-            if (Distance(plane, anchorA) >= -Epsilon && Distance(plane, anchorB) >= -Epsilon) return null;
-            var anchor = (anchorA + anchorB) * 0.5f;
-            return anchor + new Vector3(plane.X, plane.Y, plane.Z) * MathF.Max(0, Epsilon - Distance(plane, anchor));
-        });
+            return Filter(source, body =>
+            {
+                int wholeSide = fullBody ? 0 : WholeSide(body.Name);
+                return wholeSide == side ? body : wholeSide != 0 ? null : Clip(body, plane, ref scratch);
+            }, joint =>
+            {
+                var oldA = source.Bodies[joint.A];
+                var oldB = source.Bodies[joint.B];
+                bool wholeChain = !fullBody && WholeSide(oldA.Name) == side && WholeSide(oldB.Name) == side;
+                // A diagonal can retain a connected side of the trunk after removing the joint's original centre anchor.
+                // Keep that axial chain, but sever out-of-half shoulder/elbow/hip anchors normally.
+                return wholeChain || Axial(oldA.Name) && Axial(oldB.Name) || skinBridge?.Invoke(oldA.Bone, oldB.Bone) == true
+                    || Distance(plane, oldA.Bind.Apply(joint.OffsetA)) >= -Epsilon && Distance(plane, oldB.Bind.Apply(joint.OffsetB)) >= -Epsilon;
+            }, joint =>
+            {
+                var a = source.Bodies[joint.A];
+                var b = source.Bodies[joint.B];
+                if (!(Axial(a.Name) && Axial(b.Name)) && skinBridge?.Invoke(a.Bone, b.Bone) != true) return null;
+                var anchorA = a.Bind.Apply(joint.OffsetA);
+                var anchorB = b.Bind.Apply(joint.OffsetB);
+                if (Distance(plane, anchorA) >= -Epsilon && Distance(plane, anchorB) >= -Epsilon) return null;
+                var anchor = (anchorA + anchorB) * 0.5f;
+                return anchor + new Vector3(plane.X, plane.Y, plane.Z) * MathF.Max(0, Epsilon - Distance(plane, anchor));
+            });
+        }
+        finally { scratch?.Clear(); }
     }
 
     /// <summary>Rebinds selected or clipped actors without changing original bone handles or source data.</summary>
@@ -114,6 +119,13 @@ public static class RagdollCut
 
     internal static RagdollBody? Clip(RagdollBody body, Vector4 plane)
     {
+        BufferPool? scratch = null;
+        try { return Clip(body, plane, ref scratch); }
+        finally { scratch?.Clear(); }
+    }
+
+    static RagdollBody? Clip(RagdollBody body, Vector4 plane, ref BufferPool? scratch)
+    {
         var points = Points(body);
         if (points.Length < 4 || points.Any(p => !Finite(p))) return null;
         var normal = new Vector3(plane.X, plane.Y, plane.Z);
@@ -148,7 +160,7 @@ public static class RagdollCut
         // Span along the normal gives a stable mass estimate; the hull provides the actual centre and inertia geometry.
         float share = Math.Clamp(maximum / (maximum - minimum), 0.01f, 1);
         float mass = MathF.Max(body.Mass * share, 0.001f);
-        if (!MakeStableHull(kept, localNormal, offset, mass, out var hullPoints, out var centre)) return null;
+        if (!MakeStableHull(kept, localNormal, offset, mass, scratch ??= new BufferPool(), out var hullPoints, out var centre)) return null;
         var bind = body.Bind with { Position = body.Bind.Apply(centre) };
         var boneBind = body.BoneInBody.Then(body.Bind);
         return new RagdollBody
@@ -159,9 +171,9 @@ public static class RagdollCut
         };
     }
 
-    static bool MakeStableHull(List<Vector3> points, Vector3 normal, float offset, float mass, out Vector3[] hull, out Vector3 centre)
+    static bool MakeStableHull(List<Vector3> points, Vector3 normal, float offset, float mass, BufferPool pool, out Vector3[] hull, out Vector3 centre)
     {
-        if (CheckHull(points.ToArray(), mass, out hull, out centre)) return true;
+        if (CheckHull(points.ToArray(), mass, pool, out hull, out centre)) return true;
         var min = points.Aggregate(new Vector3(float.MaxValue), Vector3.Min);
         var max = points.Aggregate(new Vector3(float.MinValue), Vector3.Max);
         var origin = (min + max) * 0.5f;
@@ -184,7 +196,7 @@ public static class RagdollCut
                 if (!welded.Any(p => Vector3.DistanceSquared(p, snapped) < grid * grid * 0.01f)) welded.Add(snapped);
             }
             var candidate = welded.OrderBy(p => p.X).ThenBy(p => p.Y).ThenBy(p => p.Z).ToArray();
-            if (!CheckHull(candidate, mass, out hull, out centre)) continue;
+            if (!CheckHull(candidate, mass, pool, out hull, out centre)) continue;
             centre += origin;
             return true;
         }
@@ -197,17 +209,17 @@ public static class RagdollCut
             var direction = new Vector3(x, y, z);
             AddUnique(supports, centred.MaxBy(p => Vector3.Dot(p, direction)));
         }
-        if (CheckHull(supports.ToArray(), mass, out hull, out centre)) { centre += origin; return true; }
+        if (CheckHull(supports.ToArray(), mass, pool, out hull, out centre)) { centre += origin; return true; }
         var a = centred[0];
         var b = centred.MaxBy(p => Vector3.DistanceSquared(p, a));
         var c = centred.MaxBy(p => Vector3.Cross(b - a, p - a).LengthSquared());
         var face = Vector3.Cross(b - a, c - a);
         var d = centred.MaxBy(p => MathF.Abs(Vector3.Dot(face, p - a)));
-        if (CheckHull([a, b, c, d], mass, out hull, out centre)) { centre += origin; return true; }
+        if (CheckHull([a, b, c, d], mass, pool, out hull, out centre)) { centre += origin; return true; }
         return false;
     }
 
-    static bool CheckHull(Vector3[] points, float mass, out Vector3[] centred, out Vector3 centre)
+    static bool CheckHull(Vector3[] points, float mass, BufferPool pool, out Vector3[] centred, out Vector3 centre)
     {
         centred = [];
         centre = default;
@@ -215,29 +227,24 @@ public static class RagdollCut
         var min = points.Aggregate(new Vector3(float.MaxValue), Vector3.Min);
         var max = points.Aggregate(new Vector3(float.MinValue), Vector3.Max);
         float tolerance = MathF.Max(0.000001f, Vector3.Distance(min, max) * 0.00001f);
-        var pool = new BufferPool();
+        if (!RagdollHull.TryCreate(points, pool, out var first, out var firstCentre)) return false;
         try
         {
-            if (!RagdollHull.TryCreate(points, pool, out var first, out var firstCentre)) return false;
+            if (!Finite(firstCentre) || !Positive(first.ComputeInertia(mass)) || firstCentre.X < min.X - tolerance || firstCentre.X > max.X + tolerance
+                || firstCentre.Y < min.Y - tolerance || firstCentre.Y > max.Y + tolerance || firstCentre.Z < min.Z - tolerance || firstCentre.Z > max.Z + tolerance) return false;
+            var moved = points.Select(p => p - firstCentre).ToArray();
+            if (!RagdollHull.TryCreate(moved, pool, out var repeat, out var repeatCentre)) return false;
             try
             {
-                if (!Finite(firstCentre) || !Positive(first.ComputeInertia(mass)) || firstCentre.X < min.X - tolerance || firstCentre.X > max.X + tolerance
-                    || firstCentre.Y < min.Y - tolerance || firstCentre.Y > max.Y + tolerance || firstCentre.Z < min.Z - tolerance || firstCentre.Z > max.Z + tolerance) return false;
-                var moved = points.Select(p => p - firstCentre).ToArray();
-                if (!RagdollHull.TryCreate(moved, pool, out var repeat, out var repeatCentre)) return false;
-                try
-                {
-                    // Shapes() constructs this same centred point cloud again: validate that exact operation before publishing it.
-                    if (!Finite(repeatCentre) || repeatCentre.Length() > tolerance || !Positive(repeat.ComputeInertia(mass))) return false;
-                    centred = moved;
-                    centre = firstCentre;
-                    return true;
-                }
-                finally { repeat.Dispose(pool); }
+                // Shapes() constructs this same centred point cloud again: validate that exact operation before publishing it.
+                if (!Finite(repeatCentre) || repeatCentre.Length() > tolerance || !Positive(repeat.ComputeInertia(mass))) return false;
+                centred = moved;
+                centre = firstCentre;
+                return true;
             }
-            finally { first.Dispose(pool); }
+            finally { repeat.Dispose(pool); }
         }
-        finally { pool.Clear(); }
+        finally { first.Dispose(pool); }
     }
 
     static bool Positive(BepuPhysics.BodyInertia inertia)

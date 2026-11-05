@@ -47,6 +47,7 @@ public sealed class BrutalityMod : IMod
         CutEquipmentAdapter.Install(context, resources?.Rigs);
         if (resources is not null)
         {
+            LimbDropAdapter.Install(context);
             RenderBridge.Install(context, resources);
             BodyWoundRenderBridge.Install(context, resources);
             Meitou.Brutality.Rendering.Surface.NativeSurfaceBridge.Install(context, resources);

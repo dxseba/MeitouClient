@@ -77,7 +77,9 @@ internal static partial class NativeSurfaceBridge
             used.Add(item.Key);
             bool ordinary=HasOrdinaryMarks(owner.Piece);
             var marks=ordinary ? Marks(owner.State.Wounds,item.Appearance,session.ShownTick,session.World.TickSeconds) : Array.Empty<NativeWoundMark>();
+            long maskStarted = RenderPhaseTrace.Start();
             uint index=ordinary ? masks.Update(item.Key,setup.Rig,info.Skin,marks) : 0;
+            RenderPhaseTrace.End(RenderPhase.Masks, maskStarted);
             Pack(setup.Rig,owner.State,owner.Piece,index,ordinary ? masks.Spheres(item.Key) : null,ordinary ? masks.Cuts(item.Key) : null,info.HeadFrame?.Packed ?? default,prefix);
             SetBloodColour(prefix, unchecked((uint)item.Appearance.Race.GetInt("blood colour", 0x800000)));
             var words=MemoryMarshal.Cast<Matrix4x4,uint>(prefix);

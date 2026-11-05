@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Meitou.Brutality.Anatomy;
+using Meitou.Brutality.Effects;
 using Meitou.Brutality.Rendering.Surface;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
@@ -32,6 +33,7 @@ public sealed record CharacterGeometryResult(RuntimeCharacterGeometry Retained, 
     /// <summary>Original bind-space surface samples, including bone weights, at the opened abdomen wound.</summary>
     public IReadOnlyList<Vertex> AbdomenAnchor { get; init; } = [];
     internal NativeGeometryInfo? Surface { get; init; }
+    internal CutAnchorGeometry? CutAnchors { get; init; }
 }
 
 /// <summary>
@@ -57,42 +59,57 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
 
     internal readonly record struct BuildKey(CharacterAppearance Appearance, StateKey State);
     internal sealed record BuildInput(BuildKey Key, CharacterAppearance Appearance, BrutalityActorView State,
-        IReadOnlyDictionary<string, OgreMesh?> Meshes);
+        Func<string, OgreMesh?> LoadPartMesh);
 
     internal static BuildKey RequestKey(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,
         BrutalityActorView state, CharacterGeometryComponents components) => new(appearance, Key(body, rig, state, components));
 
-    /// <summary>Resolve host-owned caches on the render thread; the CPU worker only sees captured collections and immutable content.</summary>
-    internal static BuildInput Capture(BuildKey key, BrutalityActorView state, Func<string, OgreMesh?> loadPartMesh)
+    /// <summary>Capture the look and state. A concurrent asset reader can resolve part meshes on the worker.</summary>
+    internal static BuildInput Capture(BuildKey key, BrutalityActorView state, Func<string, OgreMesh?> loadPartMesh, bool deferMeshReads = false)
     {
         var appearance = key.Appearance.Snapshot();
-        var meshes = new Dictionary<string, OgreMesh?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var part in appearance.Parts)
-            if (!meshes.ContainsKey(part.Mesh)) meshes.Add(part.Mesh, loadPartMesh(part.Mesh));
+        if (!deferMeshReads)
+        {
+            var meshes = new Dictionary<string, OgreMesh?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var part in appearance.Parts)
+                if (!meshes.ContainsKey(part.Mesh)) meshes.Add(part.Mesh, loadPartMesh(part.Mesh));
+            loadPartMesh = name => meshes.GetValueOrDefault(name);
+        }
         var saved = state with { Limbs = Array.AsReadOnly(state.Limbs.ToArray()),
             Wounds = state.Wounds with { Entries = Array.AsReadOnly(state.Wounds.Entries.ToArray()) } };
-        return new(key, appearance, saved, meshes);
+        return new(key, appearance, saved, loadPartMesh);
     }
 
     /// <summary>CPU-only and unpublished: cancellation or a newer cut can discard the result without retiring a live variant.</summary>
-    internal CharacterGeometryResult BuildUnpublished(BuildInput input, CancellationToken cancellation)
+    internal CharacterGeometryResult BuildUnpublished(BuildInput input, CancellationToken cancellation, bool prepareFragments = true)
     {
         cancellation.ThrowIfCancellationRequested();
         var key = input.Key.State;
         var native = NativeGeometry.Build(anatomy, input.Appearance, key.Rig, key.Body, key.Severe);
         cancellation.ThrowIfCancellationRequested();
-        var result = BuildCore(input.Appearance, key.Rig, key.Body, name => input.Meshes.GetValueOrDefault(name),
+        var result = BuildCore(input.Appearance, key.Rig, key.Body, input.LoadPartMesh,
             key, native.Anatomy, native.Relief, native.Info, input.State.Wounds, cancellation);
         surfaceInfos.Add(result.Retained, native.Info);
         foreach (var fragment in result.Detached) surfaceInfos.Add(fragment.Geometry, native.Info);
-        FragmentWorldBounds.Prepare(result.Retained, input.Appearance, key.Rig, key.Body, name => input.Meshes.GetValueOrDefault(name));
+        if (!prepareFragments) return result;
+        FragmentWorldBounds.Prepare(result.Retained, input.Appearance, key.Rig, key.Body, input.LoadPartMesh);
         foreach (var fragment in result.Detached)
         {
             cancellation.ThrowIfCancellationRequested();
-            FragmentWorldBounds.Prepare(fragment.Geometry, input.Appearance, key.Rig, key.Body, name => input.Meshes.GetValueOrDefault(name));
+            FragmentWorldBounds.Prepare(fragment.Geometry, input.Appearance, key.Rig, key.Body, input.LoadPartMesh);
         }
         cancellation.ThrowIfCancellationRequested();
-        return result;
+        // Prepare bind-space rim samples with the cut meshes, before their first visible frame.
+        var anchors = new CutAnchorGeometry();
+        foreach (var fragment in result.Detached)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            int detachedSide = fragment.Kind == GeometryFragmentKind.HeadPositive ? 1 : -1;
+            anchors.Samples(fragment.Geometry, fragment.CutPlane, detachedSide, key.Rig, input.Appearance);
+            if (fragment.Kind != GeometryFragmentKind.HeadNegative)
+                anchors.Samples(result.Retained, fragment.CutPlane, -detachedSide, key.Rig, input.Appearance);
+        }
+        return result with { CutAnchors = anchors };
     }
 
     /// <summary>Publish only after the producer has checked the world's current request; the original look remains the cache identity.</summary>

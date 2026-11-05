@@ -3,6 +3,8 @@ using System.Numerics;
 using System.Reflection;
 using HarmonyLib;
 using Meitou.Brutality.Physics;
+using Meitou.Brutality.Rendering;
+using Meitou.Data.Characters;
 using Meitou.Data.Ui;
 using Meitou.Engine;
 using Meitou.Modding;
@@ -83,8 +85,11 @@ public static partial class BrutalityUiAdapter
             foreach (var character in frame.Characters.Values)
             {
                 if (!characters.TryGetValue(character.Character, out var owner)) continue;
+                var oldCharacter = before?.Characters.GetValueOrDefault(owner.Id);
+                RenderBridge.TryAcceptedGeometry(session.World, character, out var drawn);
                 if (character.State.Torso is { } torso)
-                    parts.Add(new(owner.Id, 0, TorsoName(torso, positive: true), owner.Position));
+                    AddPiece(0, TorsoName(torso, positive: true), owner.Position, character.RetainedDefinition, character.Retained,
+                        oldCharacter?.RetainedDefinition, oldCharacter?.Retained);
                 else if (owner.Body is { Dead: true }) parts.Add(new(owner.Id, 0, "Body", owner.Position));
                 foreach (var piece in character.Detached)
                 {
@@ -95,8 +100,35 @@ public static partial class BrutalityUiAdapter
                         2 => "Head fragment 1", 3 => "Head fragment 2",
                         10 => "Left arm", 11 => "Right arm", 12 => "Left leg", 13 => "Right leg", _ => "Body fragment",
                     };
-                    var previous = before?.Characters.GetValueOrDefault(owner.Id)?.Detached.FirstOrDefault(p => p.StableKey == piece.StableKey);
-                    parts.Add(new(owner.Id, piece.StableKey, name, previous is null ? piece.Position : Vector3.Lerp(previous.Position, piece.Position, session.SimulationAlpha)));
+                    var previous = oldCharacter?.Detached.FirstOrDefault(p => p.StableKey == piece.StableKey);
+                    var position = previous is null ? piece.Position : Vector3.Lerp(previous.Position, piece.Position, session.SimulationAlpha);
+                    if (piece.StableKey is 1 or >= 10 and <= 13)
+                    {
+                        if (drawn?.Detached.Any(fragment => fragment.StableKey == piece.StableKey) != true) continue;
+                        AddPiece(piece.StableKey, name, position, piece.Definition, piece.Bones, previous?.Definition, previous?.Bones);
+                    }
+                    else parts.Add(new(owner.Id, piece.StableKey, name, position));
+                }
+
+                void AddPiece(int key, string name, Vector3 position, RagdollDefinition? definition, BonePose? pose,
+                    RagdollDefinition? oldDefinition, BonePose? oldPose)
+                {
+                    bool rootNamed = false;
+                    if (drawn is not null && definition is not null && pose is { Components: { } components })
+                    {
+                        foreach (var limb in FragmentLimbLabels.For(definition, components))
+                        {
+                            if (limb.Position(pose, character.Placement) is not { } at) continue;
+                            if (oldCharacter is not null && ReferenceEquals(definition, oldDefinition) && oldPose is not null
+                                && limb.Position(oldPose, oldCharacter.Placement) is { } previous)
+                                at = Vector3.Lerp(previous, at, session.SimulationAlpha);
+                            // A torso half can contain disconnected limbs. Its root retains the original label key.
+                            int labelKey = limb.Root ? key : 200 + limb.Bone * 16 + key;
+                            parts.Add(new(owner.Id, labelKey, limb.Name, at));
+                            rootNamed |= limb.Root;
+                        }
+                    }
+                    if (!rootNamed) parts.Add(new(owner.Id, key, name, position));
                 }
             }
         foreach (var source in session.World.Systems.OfType<IBrutalityPartLabels>()) parts.AddRange(source.LabelsAt(snapshot.Tick));

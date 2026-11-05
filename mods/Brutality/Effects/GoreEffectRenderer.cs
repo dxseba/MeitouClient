@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Meitou.Data.Textures;
+using Meitou.Rendering;
 using Meitou.Rendering.Gpu;
 
 namespace Meitou.Brutality.Effects;
@@ -47,6 +48,7 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
     readonly IGpuContext gpu;
     readonly LegacyProgram program;
     readonly UniformHandle viewProjection, eyeUniform, kindUniform, coverageUniform, centreUniform, sunUniform;
+    readonly UniformHandle bowelSun, bowelSky, bowelGround, atmosphereParams;
     readonly SamplerSlot imageUniform;
     readonly VertexArrayBindings attributes;
     readonly Dictionary<(AttachmentFormats, BlendState, ColorMask), GpuPipeline> pipelines = [];
@@ -74,6 +76,8 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
         viewProjection = program.Uniform("uViewProjection"); eyeUniform = program.Uniform("uEye");
         kindUniform = program.Uniform("uDischarge"); coverageUniform = program.Uniform("uCoverage"); imageUniform = program.Sampler("uTexture");
         centreUniform = program.Uniform("uCentre"); sunUniform = program.Uniform("uSunDirection");
+        bowelSun = program.Uniform("uBowelSun"); bowelSky = program.Uniform("uBowelSky"); bowelGround = program.Uniform("uBowelGround");
+        atmosphereParams = program.Uniform("uAtmoParams");
         white = new(gpu, new(1, 1, [255, 255, 255, 255]), "Brutality white");
         arc = Load("robot-electric-arc.png"); spark = Load("robot-spark.png");
         smoke = new(3, white); stream = new(6, white); drops = new(5, white); arcs = new(1, arc); sparks = new(4, spark); flashes = new(7, white);
@@ -220,6 +224,13 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
         program.Set(viewProjection, vp); program.Set(eyeUniform, eye);
         program.Set(sunUniform, sun);
         program.Set(coverageUniform, coverageMask is null ? 0 : coverageMask == ColorMask.A ? 2 : 1);
+        if (coverageMask is null && tissues.Values.Any(slot => !slot.Mechanical))
+        {
+            program.Set(atmosphereParams, Vector4.Zero);
+            program.ApplyGlobals();
+            var simple = SkyColours.For(sun).Lighting(0);
+            program.Set(bowelSun, simple.SunColour); program.Set(bowelSky, simple.AmbientSky); program.Set(bowelGround, simple.AmbientGround);
+        }
         if (tissues.Count > 0)
         {
             var state = baseState with { Cull = CullMode.Back, Front = FrontFaceDirection.Ccw, DepthTest = depthTest && targets.Formats.Depth != InternalFormat.None,

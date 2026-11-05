@@ -249,7 +249,7 @@ internal static partial class EffectsBridge
             void CapturePiece(int half, RuntimeCharacterGeometry shape, int side, long key)
             {
                 if (!effects.Drawn.TryGetValue(key, out var instance)) return;
-                var samples = effects.Samples.Samples(shape, plane, side, setup.Rig, actor.Appearance);
+                var samples = (geometry.CutAnchors ?? effects.Samples).Samples(shape, plane, side, setup.Rig, actor.Appearance);
                 var skin = Skin(effects, instance, setup);
                 var matrix = SkinWorld(effects, instance, setup);
                 if (CutAnchorGeometry.Pose(samples, skin, matrix) is { } contact) effects.Contacts[(cut.Owner, cut.Part, half)] = contact;
@@ -270,7 +270,7 @@ internal static partial class EffectsBridge
                     void AddCable(RuntimeCharacterGeometry shape, int keepSide, long key)
                     {
                         if (!effects.Cables.Accepts(key, effects.CableContacts.Count) || !effects.Drawn.TryGetValue(key, out var instance)) return;
-                        var samples = effects.Samples.Samples(shape, fragment.CutPlane, keepSide, setup.Rig, actor.Appearance);
+                        var samples = (geometry.CutAnchors ?? effects.Samples).Samples(shape, fragment.CutPlane, keepSide, setup.Rig, actor.Appearance);
                         var matrix = SkinWorld(effects, instance, setup);
                         if (CutAnchorGeometry.Pose(samples, Skin(effects, instance, setup), matrix) is { } contact)
                             effects.CableContacts.Add(new(key, contact));
@@ -279,7 +279,12 @@ internal static partial class EffectsBridge
             }
         effects.Cables.Advance(now, effects.CableContacts, at => world.Walkability.GroundHeight(at.X, at.Z, at.Y), particlesEnabled);
         effects.Scene.Cables = effects.Cables.Rendered;
-        CaptureImpacts(host, session, particles, effects, now, particlesEnabled);
+        long impactsStarted = RenderPhaseTrace.Start();
+        bool organicHit = CaptureImpacts(host, session, particles, effects, now, particlesEnabled);
+        RenderPhaseTrace.End(RenderPhase.Impacts, impactsStarted);
+        long splintersStarted = RenderPhaseTrace.Start();
+        PrepareSplinters(host, list.Context, effects.Impacts, now, world.TickSeconds, organicHit);
+        RenderPhaseTrace.End(RenderPhase.SplinterPrep, splintersStarted);
         effects.Scene.Advance(now, (owner, half) =>
         {
             foreach (var entry in effects.Recent.Values)
@@ -289,6 +294,7 @@ internal static partial class EffectsBridge
         }, (cut, half) => effects.Contacts.TryGetValue((cut.Owner, cut.Part, half), out var point) ? point : null,
             world.Characters.IsAlive, at => world.Walkability.GroundHeight(at.X, at.Z, at.Y));
         if (!ReadBool(Member(host, "o"), "MeitouBlood", true)) effects.Scene.Blood.Clear();
+        long bowelsStarted = RenderPhaseTrace.Start();
         foreach (var key in effects.BowelCuts.Where(p => now - p.Value.Born >= BowelPresentation.Lifetime || !world.Characters.IsAlive(p.Key.Item1)).Select(p => p.Key).ToArray())
             effects.BowelCuts.Remove(key);
         // Ordinary wounds do not allocate a fragment-physics owner. Pose the projected wound samples with the exact live draw-list skin instead.
@@ -337,6 +343,7 @@ internal static partial class EffectsBridge
             }
             world.Systems.OfType<BowelLabelSystem>().FirstOrDefault()?.Publish(session.CurrentSnapshot.Tick, effects.Bowels.Labels);
         }
+        RenderPhaseTrace.End(RenderPhase.Bowels, bowelsStarted);
         if (AccessTools.Field(gpu.GetType(), "Debris")?.GetValue(gpu) is DebrisRenderer debris
             && AccessTools.Field(gpu.GetType(), "DebrisPieces")?.GetValue(gpu) is List<DebrisPiece> drawnScrap)
         {
@@ -373,17 +380,15 @@ internal static partial class EffectsBridge
     {
         if (resources is null) return [];
         var result = new List<RobotScrapMesh>();
-        var resolver = new MaterialResolver(resources.Rigs.Database, resources.Assets.Materials, resources.Assets);
         foreach (string id in new[] { "42159-gamedata.base", "43397-changes_otto.mod", "43396-changes_otto.mod" })
         {
             if (resources.Rigs.Database.Find(id) is not { } item) continue;
             string context = item.GetPath("mesh");
             string name = item.GetPath("ground mesh") is { Length: > 0 } ground ? ground : context;
-            if (resources.Assets.Find(name) is not { } path || resources.Mesh(name) is not { } mesh || mesh.SubMeshes.Count == 0) continue;
-            if (context.Length == 0) context = path;
-            // Loading under the item's own material context avoids the untextured white ground-mesh fallback.
-            if (!resolver.Candidates(context, mesh.SubMeshes[0]).Any(m => m.Diffuse is { } diffuse && resources.Assets.Find(diffuse) is not null)) continue;
-            if (debris.Extent(path, context) is not { } extent || !float.IsFinite(extent.LengthSquared()) || extent.LengthSquared() < 1e-10f) continue;
+            if (resources.Assets.Find(name) is not { } path) continue;
+            // Preserve the item atlas where available. The scrap tint also covers a missing or streaming texture.
+            if (debris.Extent(path, context.Length > 0 ? context : path) is not { } extent
+                || !float.IsFinite(extent.LengthSquared()) || extent.LengthSquared() < 1e-10f) continue;
             result.Add(new(path, extent));
         }
         return result.ToArray();

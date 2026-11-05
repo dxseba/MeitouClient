@@ -238,8 +238,7 @@ public sealed partial class FragmentPhysicsSystem
     RagdollSkinSurface? SkinFor(CharacterAppearance look)
     {
         if (rigs.FindMesh(look.BodyMesh) is not { } path) return null;
-        if (skins.TryGetValue(path, out var surface)) return surface;
-        try { surface = RagdollSkinSurface.Read(OgreMeshReader.ReadFile(path)); skins[path] = surface; return surface; }
+        try { return assets.Skin(path); }
         catch (Exception error) when (error is IOException or InvalidDataException or OgreFormatException) { return null; }
     }
     static (int Body, Vector3 Local) ColliderContact(RagdollDefinition definition, RigidTransform[] target, bool[] pinned, Vector3 point)
