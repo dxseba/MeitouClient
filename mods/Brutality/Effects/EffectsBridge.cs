@@ -47,13 +47,14 @@ internal static partial class EffectsBridge
         public FxWorld? World;
         public GoreEffectRenderer? Renderer;
         public bool OpaqueOnly;
+        public object? Host;
         public readonly NativeSpriteEligibility Sprites = new();
     }
     static readonly ConditionalWeakTable<World, FxWorld> worlds = new();
     static readonly ConditionalWeakTable<ParticleRenderer, Binding> bindings = new();
     static RenderResources? resources;
     static string folder = "";
-    static FieldInfo? hostGpu, particlesField;
+    static FieldInfo? hostGpu, particlesField, hostSession;
     static readonly FieldInfo particleGpu = AccessTools.Field(typeof(ParticleRenderer), "gpu");
     static Func<object, CharacterId, long>? drawKey;
 
@@ -69,6 +70,8 @@ internal static partial class EffectsBridge
         Patch(nameof(ParticleRenderer.CountFor), nameof(CountPostfix));
         Patch(nameof(ParticleRenderer.DrawCoverage), nameof(CoveragePostfix));
         Patch(nameof(ParticleRenderer.Dispose), nameof(DisposePostfix));
+        context.Harmony.Patch(AccessTools.Method(type, nameof(ParticleRenderer.Burst)),
+            prefix: new(AccessTools.Method(typeof(EffectsBridge), nameof(NativeBloodBurstPrefix))));
         Patch(nameof(ParticleRenderer.SetWeather), nameof(WeatherRequestPostfix));
         Patch(nameof(ParticleRenderer.SetPlacers), nameof(PlacerRequestPostfix));
         Patch(nameof(ParticleRenderer.SetBuildingEffects), nameof(BuildingRequestPostfix));
@@ -77,12 +80,17 @@ internal static partial class EffectsBridge
         var host = AccessTools.TypeByName("Meitou.Game.GameHost");
         if (host is null) return;
         hostGpu = AccessTools.Field(host, "gpu") ?? throw new MissingFieldException(host.FullName, "gpu");
+        hostSession = AccessTools.Field(host, "session") ?? throw new MissingFieldException(host.FullName, "session");
         particlesField = AccessTools.Field(hostGpu.FieldType, "Particles") ?? throw new MissingFieldException(hostGpu.FieldType.FullName, "Particles");
         var keyMethod = AccessTools.Method(host, "DrawKey") ?? throw new MissingMethodException(host.FullName, "DrawKey");
         var target = Expression.Parameter(typeof(object)); var id = Expression.Parameter(typeof(CharacterId));
         drawKey = Expression.Lambda<Func<object, CharacterId, long>>(Expression.Call(Expression.Convert(target, host), keyMethod, id), target, id).Compile();
         context.Harmony.Patch(AccessTools.Method(host, "UpdateDebris"), postfix: new(AccessTools.Method(typeof(EffectsBridge), nameof(StyleOrganicDebris))));
         context.Harmony.Patch(AccessTools.Method(host, "SetUpBlood"), postfix: new(AccessTools.Method(typeof(EffectsBridge), nameof(BloodSetupPostfix))));
+        context.Harmony.Patch(AccessTools.Method(host, "Spurt"), prefix: new(AccessTools.Method(typeof(EffectsBridge), nameof(NeckSpurtPrefix))));
+        context.Harmony.Patch(AccessTools.Method(host, "CutHead"),
+            prefix: new(AccessTools.Method(typeof(EffectsBridge), nameof(OwnedHeadPrefix))),
+            finalizer: new(AccessTools.Method(typeof(EffectsBridge), nameof(OwnedHeadFinalizer))));
     }
 
     static void BloodSetupPostfix(object __instance, IGpuContext context)
@@ -96,6 +104,29 @@ internal static partial class EffectsBridge
             bindings.GetValue(renderer, static _ => new()).Sprites.MarkModOnly();
             particlesField.SetValue(gpu, renderer);
         }
+        if (particlesField.GetValue(gpu) is ParticleRenderer particles) bindings.GetValue(particles, static _ => new()).Host = __instance;
+    }
+
+    static bool NativeBloodBurstPrefix(ParticleRenderer __instance, string system)
+    {
+        if (!bindings.TryGetValue(__instance, out var binding)) return true;
+        return LegacyBloodSprites.AllowNativeBurst(system, binding.Sprites, ReadBool(Member(binding.Host, "o"), "NoParticles"));
+    }
+    static bool NeckSpurtPrefix(CharacterAppearance look) => LegacyBloodSprites.AllowNeckSpurt(look);
+    static bool OwnedHeadPrefix(object __instance, CharacterSnapshot c, out bool __state)
+    {
+        __state = LegacyBloodSprites.NeckSpurtSuppressed;
+        if (hostSession?.GetValue(__instance) is not WorldSession session) return true;
+        bool advanced = session.World.Systems.OfType<BodySystem>().FirstOrDefault()?.Options.AdvancedRagdolls == true;
+        var frame = session.World.Systems.OfType<FragmentPhysicsSystem>().FirstOrDefault()?.FrameAt(session.ShownTick);
+        bool owned = LegacyBloodSprites.OwnsShownHead(frame, c.Id, session.ShownTick, advanced);
+        bool published = owned && RenderBridge.HasPublishedHead(session.World, frame!.Characters[c.Id]);
+        return LegacyBloodSprites.BeginHeadCut(owned, published, out __state);
+    }
+    static Exception? OwnedHeadFinalizer(Exception? __exception, bool __state)
+    {
+        LegacyBloodSprites.EndHeadCut(__state);
+        return __exception;
     }
 
     static void PrepareNativeSprites(ParticleRenderer renderer, Binding binding) => binding.Sprites.PrepareOnce(
@@ -125,6 +156,7 @@ internal static partial class EffectsBridge
         var world = session.World;
         var effects = worlds.GetValue(world, static _ => new());
         var binding = bindings.GetValue(particles, static _ => new());
+        binding.Host = host;
         PrepareNativeSprites(particles, binding);
         binding.World = effects;
         bool particlesEnabled = Enabled(host);
@@ -206,8 +238,7 @@ internal static partial class EffectsBridge
         foreach (var cut in effects.CaptureCuts.Values)
         {
             if (frame?.Characters.GetValueOrDefault(cut.Owner) is not { } actor || resources.Rigs.For(actor.Appearance) is not { } setup
-                || resources.Mesh(actor.Appearance.BodyMesh) is not { } body) continue;
-            if (!resources.Geometry.TryCached(actor.Appearance, setup.Rig, body, actor.State, out var geometry)) continue;
+                || !RenderBridge.TryAcceptedGeometry(world, actor, out var geometry)) continue;
             var detached = geometry.Detached.FirstOrDefault(p => p.StableKey == cut.StableKey);
             Vector4 plane = detached?.CutPlane ?? default;
             int retainedSide = cut.Kind == 1 ? -1 : 1;
@@ -229,8 +260,7 @@ internal static partial class EffectsBridge
             foreach (var actor in frame.Characters.Values)
             {
                 if (!actor.Appearance.Race.GetBool("is robot") || resources.Rigs.For(actor.Appearance) is not { } setup
-                    || resources.Mesh(actor.Appearance.BodyMesh) is not { } body
-                    || !resources.Geometry.TryCached(actor.Appearance, setup.Rig, body, actor.State, out var geometry)) continue;
+                    || !RenderBridge.TryAcceptedGeometry(world, actor, out var geometry)) continue;
                 foreach (var fragment in geometry.Detached)
                 {
                     int side = fragment.Kind is GeometryFragmentKind.HeadPositive ? -1 : 1;
@@ -268,6 +298,7 @@ internal static partial class EffectsBridge
                 if (!HasDeepAbdomen(state) || effects.Bowels?.HasSpilled(state.Character) == true
                     || !world.Characters.IsAlive(state.Character)
                     || !effects.Drawn.TryGetValue(drawKey(host, state.Character), out var instance)
+                    || RenderBridge.IsPresentationHeld(world, instance.Key)
                     || instance.Appearance.Race.Name is not ("Greenlander" or "Scorchlander")
                     || resources.Rigs.For(instance.Appearance) is not { } setup || resources.Mesh(instance.Appearance.BodyMesh) is not { } body) continue;
                 if (!resources.Geometry.TryCached(instance.Appearance, setup.Rig, body, state, out var geometry)

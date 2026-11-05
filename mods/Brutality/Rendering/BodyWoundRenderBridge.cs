@@ -13,7 +13,7 @@ namespace Meitou.Brutality.Rendering;
 /// <summary>Standing wounded actors use the same immutable geometry path without allocating a fragment physics owner.</summary>
 internal static class BodyWoundRenderBridge
 {
-    sealed record Variant(CharacterAppearance Appearance, ulong Stamp, SevereHeadWoundState Severe, RuntimeCharacterGeometry Geometry);
+    sealed record Variant(CharacterAppearance Appearance, ulong Stamp, SevereHeadWoundState Severe, RuntimeCharacterGeometry Geometry, bool DeepAbdomen);
     sealed class Shown
     {
         public readonly Dictionary<CharacterId, Variant> Geometry = [];
@@ -41,6 +41,11 @@ internal static class BodyWoundRenderBridge
     internal static RuntimeCharacterGeometry? PendingGeometry(CharacterAppearance look, CharacterAppearance? previousLook,
         RuntimeCharacterGeometry? previous) => ReferenceEquals(look, previousLook) && previous is { IsRetired: false } ? previous : null;
 
+    internal static RuntimeCharacterGeometry? CompatiblePendingGeometry(CharacterAppearance look, CharacterAppearance? previousLook,
+        RuntimeCharacterGeometry? previous, SevereHeadWoundState? previousSevere, SevereHeadWoundState currentSevere,
+        bool previousDeepAbdomen, bool currentDeepAbdomen) => previousSevere == currentSevere && previousDeepAbdomen == currentDeepAbdomen
+            ? PendingGeometry(look, previousLook, previous) : null;
+
     static void Fill(object host, WorldSession session, CharacterDrawList list)
     {
         if (resources is null || drawKey is null) return;
@@ -57,6 +62,7 @@ internal static class BodyWoundRenderBridge
         for (int i = 0; i < list.Items.Count; i++)
         {
             var instance = list.Items[i];
+            if (RenderBridge.IsPresentationHeld(session.World, instance.Key)) continue;
             if (!needed.TryGetValue(instance.Key, out var state)) continue;
             if (instance.Geometry is { } existing && CharacterGeometryAdapter.SurfaceFor(existing) is not null) continue;
             ulong stamp = state.Wounds.StateKey();
@@ -65,17 +71,26 @@ internal static class BodyWoundRenderBridge
             bool sameLook = previous is not null && ReferenceEquals(previous.Appearance, instance.Appearance);
             if (sameLook && previous is { } ready && ready.Stamp == stamp && ready.Severe == severe && !ready.Geometry.IsRetired)
             { list.Items[i] = instance with { Geometry = ready.Geometry }; continue; }
+            if (RenderBridge.IsCurrentCutPending(session.World, state.Character, instance.Appearance, state))
+            {
+                if (CompatiblePendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry, previous?.Severe, severe,
+                    previous?.DeepAbdomen == true, state.Wounds.BellyHits >= 10) is { } fallback)
+                    list.Items[i] = instance with { Geometry = fallback };
+                continue;
+            }
             if (rebuilt >= 4 || rebuilt > 0 && Stopwatch.GetElapsedTime(started).TotalMilliseconds >= 5)
             {
                 // A different appearance must use its native meshes until ready: never draw an old race, gender or outfit.
-                if (PendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry) is { } fallback)
+                if (CompatiblePendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry, previous?.Severe, severe,
+                    previous?.DeepAbdomen == true, state.Wounds.BellyHits >= 10) is { } fallback)
                     list.Items[i] = instance with { Geometry = fallback };
                 continue;
             }
             if (resources.Rigs.For(instance.Appearance) is not { } setup || resources.Mesh(instance.Appearance.BodyMesh) is not { } body) continue;
             if (GeometryPreparations.ShouldDefer(session.World, instance.Appearance, setup.Rig, body))
             {
-                if (PendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry) is { } fallback)
+                if (CompatiblePendingGeometry(instance.Appearance, previous?.Appearance, previous?.Geometry, previous?.Severe, severe,
+                    previous?.DeepAbdomen == true, state.Wounds.BellyHits >= 10) is { } fallback)
                     list.Items[i] = instance with { Geometry = fallback };
                 continue;
             }
@@ -83,7 +98,7 @@ internal static class BodyWoundRenderBridge
             rebuilt++;
             RenderBridge.Track(session.World, generated.Retained);
             if (previous is not null && !ReferenceEquals(previous.Geometry, generated.Retained)) previous.Geometry.Retire();
-            shown.Geometry[state.Character] = new(instance.Appearance, stamp, severe, generated.Retained);
+            shown.Geometry[state.Character] = new(instance.Appearance, stamp, severe, generated.Retained, state.Wounds.BellyHits >= 10);
             list.Items[i] = instance with { Geometry = generated.Retained };
         }
     }

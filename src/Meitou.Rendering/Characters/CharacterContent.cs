@@ -199,7 +199,7 @@ internal sealed class AssetRest
 /// (shared between appearances; hair, armour and weapons share naturally), skeleton rigs by file, textures through one cache.
 /// Render thread only; uploads need an open frame (<see cref="IGpuContext.EnsureFrame"/>).
 /// </summary>
-internal sealed class CharacterContent : IDisposable
+internal sealed partial class CharacterContent : IDisposable
 {
     const string AllocationName = "character meshes";
     readonly IGpuContext gpu;
@@ -249,6 +249,7 @@ internal sealed class CharacterContent : IDisposable
             if (geometry.BodyMesh is { } body) meshesInUse.Add(body);
             if (geometry.Parts is { } parts) foreach (var part in parts) if (part.Mesh is { } mesh) meshesInUse.Add(mesh);
         }
+        SweepRuntimePreparations(new HashSet<RuntimeCharacterGeometry>(live, ReferenceEqualityComparer.Instance));
         foreach (var (key, mesh) in runtimeMeshes.ToArray())
         {
             if (meshesInUse.Contains(key.Mesh)) continue;
@@ -276,6 +277,8 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>Frees every mesh's buffers, the textures, the morph arena and the material table. The meshes' parts must not be drawn afterwards.</summary>
     public void Dispose()
     {
+        runtimePreparing.Dispose();
+        runtimeDemand.Clear();
         foreach (var mesh in meshes.Values.Concat(runtimeMeshes.Values))
             if (mesh is not null)
                 foreach (var part in mesh.Gpu.Parts)
@@ -310,7 +313,7 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>What a worker makes of a mesh file (<see cref="PrepareMesh"/>): everything but the GPU buffers.</summary>
     sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst, PickBox[] PickBoxes,
-        float[]? FileDistances, int FileFirst, float FileRadius, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null, bool RawChannels = false);
+        float[]? FileDistances, int FileFirst, float FileRadius, PreparedMesh? NeckCap = null, PreparedMesh? HeadCap = null, bool RawChannels = false, byte[][]? PackedVertices = null);
     /// <summary>A prepared mesh (null: it could not be read) and the messages its reading left.</summary>
     sealed record Prepared(PreparedMesh? Mesh, List<string> Messages);
     static readonly Prepared Uploaded = new(null, []);
@@ -376,7 +379,8 @@ internal sealed class CharacterContent : IDisposable
             var parts = model.Parts.Select(part => ObjectMeshCache.PreparePart(decoded, part, keepLevels: false)).ToArray();
             return new(new PreparedMesh(parts, [.. levels.Select(l => l.Distance)], mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst,
                 PickBox.From(model), fileDistances, fileFirst, fileRadius,
-                limbs is not null && !close && !icon ? CapMesh(model, head: false) : null, limbs is not null && !close && !icon ? CapMesh(model, head: true) : null, RawChannels: rawChannels), messages);
+                limbs is not null && !close && !icon ? CapMesh(model, head: false) : null, limbs is not null && !close && !icon ? CapMesh(model, head: true) : null, RawChannels: rawChannels,
+                PackedVertices: runtime is null ? null : parts.Select(part => GpuVertex.PackCharacter(part.Part.Vertices, rawChannels)).ToArray()), messages);
         }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException)
         {
@@ -394,7 +398,8 @@ internal sealed class CharacterContent : IDisposable
             var runtimeKey = (runtime, boneCount ?? -1, partMap?.ToLowerInvariant(), vertexColours, limbs, close, rawChannels);
             if (runtimeMeshes.TryGetValue(runtimeKey, out var known)) return known;
             RuntimeMeshId(runtime);
-            var made = PrepareMesh(path, boneCount, lodScale, false, LodPixelsPerRadian, limbs, close, partMap: partMap,
+            var cpuKey = new RuntimeMeshKey(runtime, boneCount ?? -1, partMap?.ToLowerInvariant(), vertexColours, limbs, close, rawChannels);
+            var made = buildingRuntime?.Meshes.GetValueOrDefault(cpuKey) ?? PrepareMesh(path, boneCount, lodScale, false, LodPixelsPerRadian, limbs, close, partMap: partMap,
                 runtime: runtime, vertexColours: vertexColours, rawChannels: rawChannels);
             Messages.AddRange(made.Messages);
             return runtimeMeshes[runtimeKey] = made.Mesh is null ? null : Upload(made.Mesh);
@@ -412,10 +417,11 @@ internal sealed class CharacterContent : IDisposable
         var gpuMesh = new GpuObjectMesh { Distances = ready.Distances, Manual = new GpuObjectMesh?[ready.Distances.Length], Centre = ready.Centre, Radius = ready.Radius };
         gpu.EnsureFrame();
         using var uploads = gpu.Uploads.Begin();
-        foreach (var made in ready.Parts)
+        for (int partIndex = 0; partIndex < ready.Parts.Length; partIndex++)
         {
+            var made = ready.Parts[partIndex];
             var part = made.Part;
-            var packed = GpuVertex.PackCharacter(part.Vertices, ready.RawChannels);
+            var packed = ready.PackedVertices is { } packedParts ? packedParts[partIndex] : GpuVertex.PackCharacter(part.Vertices, ready.RawChannels);
             int vertexBytes = packed.Length, indexBytes = made.All.Length * 4;
             // One vertex of slack: each attribute is bound at its own offset, and AMD reads the last vertex of an exactly sized buffer as zeros, a spike from its bind pose (VlcekM/MeitouClient#168).
             var vertices = DeviceBuffer.Create(gpu, (ulong)(vertexBytes + Vertex.Size), BufferUse.Vertex, AllocationName);
@@ -781,7 +787,7 @@ internal sealed class CharacterContent : IDisposable
     }
 
     /// <summary>Assembles the asset for <paramref name="c"/>; null when its body mesh or skeleton cannot be found.</summary>
-    public CharacterAsset? Build(CharacterAppearance c, RuntimeCharacterGeometry? geometry = null)
+    CharacterAsset? BuildCore(CharacterAppearance c, RuntimeCharacterGeometry? geometry)
     {
         fetching.Remove(c);
         bool close = closeUp.Remove(c);

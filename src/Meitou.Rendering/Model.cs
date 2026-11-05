@@ -77,6 +77,9 @@ public sealed class Model
     /// tangent has three components; character.hlsl, skin.hlsl's skinning; docs/characters.md "Shading, poses and LOD"). Otherwise the stored w is kept (objects).</param>
     /// <param name="tangentSign">Inventory icons (rtticons.hlsl): the tangent's own w, 1 when it has three components, the stored binormals ignored (the shader takes
     /// cross(tangent, normal) x w).</param>
+    public static Model Build(OgreMesh mesh, int? boneCount, bool gameBinormals, bool tangentSign) =>
+        Build(mesh, boneCount, gameBinormals, tangentSign, preserveRawVertexChannels: false);
+
     public static Model Build(OgreMesh mesh, int? boneCount, bool gameBinormals = false, bool tangentSign = false, bool preserveRawVertexChannels = false)
     {
         var model = new Model();

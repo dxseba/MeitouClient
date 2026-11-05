@@ -1,4 +1,7 @@
 using System.Numerics;
+using Meitou.Data.Characters;
+using Meitou.Brutality.Physics;
+using Meitou.Simulation;
 
 namespace Meitou.Brutality.Effects;
 
@@ -21,6 +24,35 @@ internal readonly record struct LegacyBloodBurst(string System, Vector3 Position
 
 internal static class LegacyBloodSprites
 {
+    /// <summary>Every legacy blood caller, including native neck pulses and debris landings, shares the same container eligibility.</summary>
+    internal static bool AllowNativeBurst(string system, NativeSpriteEligibility? eligibility, bool noParticles)
+    {
+        bool blood = system.Equals("HackBlood-system", StringComparison.OrdinalIgnoreCase)
+            || system.Equals("Bloodsplash01", StringComparison.OrdinalIgnoreCase);
+        return !blood || !noParticles && eligibility?.NativeRequested != false;
+    }
+    [ThreadStatic] static bool suppressNeckSpurt;
+    internal static bool NeckSpurtSuppressed => suppressNeckSpurt;
+    internal static bool AllowNeckSpurt(CharacterAppearance appearance) => !suppressNeckSpurt && !appearance.Race.GetBool("is robot");
+
+    /// <summary>Pending physical heads keep the native fallback visual, without starting a second neck effect. Restore from a Harmony finalizer.</summary>
+    internal static bool BeginHeadCut(bool ownsPhysicalHead, bool publishedGeometry, out bool previousSuppression)
+    {
+        previousSuppression = suppressNeckSpurt;
+        suppressNeckSpurt |= ownsPhysicalHead;
+        return !ownsPhysicalHead || !publishedGeometry;
+    }
+    internal static void EndHeadCut(bool previousSuppression) => suppressNeckSpurt = previousSuppression;
+
+    /// <summary>The pinned host skips its old head/spurt path only after the shown advanced physics snapshot owns a head fragment.</summary>
+    internal static bool OwnsShownHead(GorePresentationFrame? frame, CharacterId owner, long shownTick, bool advanced)
+    {
+        if (!advanced || frame is null || frame.Tick > shownTick || !frame.Characters.TryGetValue(owner, out var actor)
+            || actor.Character != owner || actor.State.Head is not { IsValid: true }) return false;
+        return actor.Detached.Any(piece => piece.StableKey is 2 or 3 && piece.Bones.AbsolutePositions
+            && piece.Bones.Position.Length > 0 && piece.Bones.Rotation.Length == piece.Bones.Position.Length);
+    }
+
     internal static void Emit(in ImpactEffectEvent impact, double born, double now, bool particlesEnabled,
         NativeSpriteEligibility eligibility, Action<LegacyBloodBurst> emit)
     {

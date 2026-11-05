@@ -22,6 +22,12 @@ weapon stains/drops, body-part targeting and labels. Torso halves have independe
 carry targets and shared loot. Saves use complete native character/item identities; migration
 reads the integrated version's wound, cut, carried-corpse and weapon-blood records.
 Transient blood/electrical effects do not replay after loading; bowel props reconstruct.
+Weapon stains participate in the state hash; new opaque item namespaces derive from the world
+seed and registered mod RNG purpose, while loaded namespaces retain their original identity.
+A native load reserves saved container namespaces before choosing a replacement for a missing sidecar.
+Unresolved cosmetic items hash as a sorted record/colour multiset until they have a stable path.
+**Observed** (win-x64): the packaged DLL passes `mod-check` on a 536-character save for 600 ticks,
+both repeated one-thread runs and 1-versus-4-thread comparison; rendering remains a separate check.
 Legacy hit sprites follow native weather/placer ownership; a DLL-only effect container does not
 enable them in otherwise empty scenes. Liquid and robot effects use their own bounded lifecycle.
 
@@ -34,9 +40,14 @@ new variants wait for pending CPU fits instead of blocking a render frame. Hidde
 part LOD budgets keep their own radius. Healthy fits and exterior LOD plans prepare on one background
 worker per world, with 16 entries/192 MiB of fit residency (one oversized fit alone); GPU preparation
 uses the remaining frame budget for shaders/exteriors; full anatomy uploads only for actual cuts.
-Active cut geometry retains its fitted source across cache eviction. Preparation is best-effort:
-an immediate or uncached cut can still require
-CPU work. Lower LOD cuts share the original decoded vertices. Frozen fragment scenes skip solver
+Active cut geometry retains its fitted source across cache eviction. Actual head, limb and torso
+cuts prepare on one shared background worker, with at most one job per world and 128 queued owners.
+New cuts hold the last complete copied presentation while the exact captured geometry and every
+replacement GPU asset/program prepare. First-seen live cuts can use the complete unsplit birth
+pose; restored unseen cuts remain hidden until ready. A family switches together, with a 120 ms
+presentation-only blend into its current physical poses; fluid anchors use those drawn poses.
+A newer cut supersedes queued work, and world disposal cancels pending work. Preparation and
+uploads use the host's background and frame budgets. Lower LOD cuts share the original decoded vertices. Frozen fragment scenes skip solver
 steps while keeping kinematic collision obstacles. Render resources
 retire after submitted draws finish. Active visible
 fragments still need separate geometry memory; an unlimited crowd is not a bounded-memory case.

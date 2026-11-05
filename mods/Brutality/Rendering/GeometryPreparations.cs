@@ -79,6 +79,7 @@ internal static class GeometryPreparations
         CharacterPart[] sourceParts, (OgreMesh? Mesh, float Scale)[] exteriors, bool female, uint blood, bool mechanical)
     {
         var fit = NativeGeometry.Prepare(library, rig, body, female, blood, mechanical);
+        if (!mechanical) Meitou.Brutality.Effects.BowelPresentation.Prepare(library, rig);
         GeneratedExteriorLod.LevelsFor(body, rig);
         foreach (var (mesh, scale) in exteriors) if (mesh is not null) GeneratedExteriorLod.LevelsFor(mesh, rig, scale);
         var parts = sourceParts.Select(part => new RuntimeCharacterPart(part)

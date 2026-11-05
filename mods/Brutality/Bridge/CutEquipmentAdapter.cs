@@ -26,7 +26,7 @@ public sealed partial class CutEquipmentAdapter(CharacterRigs? rigs, Action<Char
         var type = typeof(World).Assembly.GetType("Meitou.Simulation.CharacterAssembly", throwOnError: true)!;
         var assembly = Activator.CreateInstance(type, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context.Population], null)!;
         var method = AccessTools.Method(type, "RefreshEquipment", [typeof(CharacterCold)]);
-        context.AddSystem("weapon-blood", _ => new WeaponBloodState(), SystemAnchor.AfterPart(StandardParts.Combat));
+        context.AddSystem("weapon-blood", _ => new WeaponBloodState(context.RngPurpose), SystemAnchor.AfterPart(StandardParts.Combat));
         context.AddSystem("cut-equipment", _ => new CutEquipmentAdapter(rigs, cold => method.Invoke(assembly, [cold]), context.Population.BodyOptions.AdvancedRagdolls), SystemAnchor.AfterPart(StandardParts.Animation));
     }
     public void Schedule(World world)

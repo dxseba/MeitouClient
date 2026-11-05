@@ -19,7 +19,7 @@ internal sealed record BowelRenderPiece(long Key, Vector3 Centre, Vertex[] Verti
 }
 
 /// <summary>Two anatomical bowel sections feed from independently posed cut faces and retain the pin's attachment/sleep policy.</summary>
-internal sealed class BowelPresentation(AnatomyLibrary anatomy) : IDisposable
+internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPreparation? preparation = null) : IDisposable
 {
     public const float Lifetime = 600;
     sealed class Piece
@@ -42,7 +42,7 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy) : IDisposable
     readonly Dictionary<(CharacterId, int), Piece> pieces = [];
     readonly HashSet<CharacterId> spilled = [];
     readonly Queue<CharacterId> history = [];
-    readonly Dictionary<float, BowelAssetSet> assets = [];
+    readonly BowelAssetPreparation prepared = preparation ?? BowelAssetPreparation.Shared(anatomy);
     readonly List<BowelRenderPiece> rendered = [];
     readonly List<BrutalityPartLabel> labels = [];
     static long nextKey;
@@ -61,8 +61,9 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy) : IDisposable
     {
         if (disposed || owner.IsNone || spilled.Contains(owner) || !double.IsFinite(born) || !double.IsFinite(now) || now - born >= Lifetime) return false;
         if (contacts(0) is null || contacts(1) is null) return false; // An unseen cut never creates an organ at an inferred world position.
-        var source = Assets(rig).Halves;
-        if (source.Length == 0 || appearance.Race.GetBool("is robot")) return false;
+        if (appearance.Race.GetBool("is robot")) return false;
+        var source = Assets(rig)?.Halves;
+        if (source is null || source.Length == 0) return false;
         while (pieces.Count + source.Length > BowelRagdollScene.Capacity)
         {
             var oldest = pieces.MinBy(p => p.Value.Born);
@@ -110,7 +111,7 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy) : IDisposable
             || appearance.Race.Name is not ("Greenlander" or "Scorchlander")
             || !double.IsFinite(born) || !double.IsFinite(now) || now < born || now - born >= Lifetime
             || !float.IsFinite(contact.Position.LengthSquared()) || !float.IsFinite(contact.Normal.LengthSquared())
-            || contact.Normal.LengthSquared() < 1e-8f || Assets(rig).Whole is not { } asset) return false;
+            || contact.Normal.LengthSquared() < 1e-8f || Assets(rig)?.Whole is not { } asset) return false;
         while (pieces.Count >= BowelRagdollScene.Capacity) Remove(pieces.MinBy(p => p.Value.Born).Key);
         var normal = Vector3.Normalize(contact.Normal);
         var sourceNormal = Vector3.Cross(asset.Skinning.Geometry.RestNodes[1] - asset.Skinning.Geometry.RestNodes[0],
@@ -139,13 +140,14 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy) : IDisposable
         spilled.Add(owner); history.Enqueue(owner);
     }
 
-    BowelAssetSet Assets(SkeletonRig rig)
+    internal static void Prepare(AnatomyLibrary anatomy, SkeletonRig rig) => BowelAssetPreparation.Shared(anatomy).TryGet(Scale(rig), out _);
+    BowelAssetSet? Assets(SkeletonRig rig) => prepared.TryGet(Scale(rig), out var source) ? source : null;
+    static float Scale(SkeletonRig rig)
     {
         float scale = rig.Handle("Bip01 Pelvis") is { } hip && rig.Handle("Bip01 Neck") is { } neck
             ? Vector3.Distance(rig.BindPosition[hip], rig.BindPosition[neck]) / 6.1649f : 1;
         if (!float.IsFinite(scale) || scale is < .5f or > 2) scale = 1;
-        if (!assets.TryGetValue(scale, out var source)) assets[scale] = source = BowelAssets(scale);
-        return source;
+        return scale;
     }
 
     public void Advance(double now, Func<CharacterId, int, CutFluidContact?> contacts, Func<CharacterId, bool> validOwner,
@@ -186,7 +188,7 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy) : IDisposable
         }
     }
 
-    BowelAssetSet BowelAssets(float scale)
+    internal static BowelAssetSet BuildBowelAssets(AnatomyLibrary anatomy, float scale)
     {
         var source = anatomy.Get(AnatomyKind.Body).Where(batch => batch.Layer == 4).SelectMany(batch => batch.Vertices.Chunk(3))
             .Where(triangle => triangle.Length == 3 && triangle.All(v => (int)MathF.Floor(v.Uv.X / 10) == 5)).SelectMany(v => v).ToArray();
@@ -232,7 +234,7 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy) : IDisposable
     }
     static Quaternion RestingRotation(BowelRigGeometry geometry) => Turn(Vector3.Cross(geometry.RestNodes[1] - geometry.RestNodes[0], geometry.RestNodes[3] - geometry.RestNodes[0]), Vector3.UnitY);
     public void Clear() { physics.Clear(); pieces.Clear(); spilled.Clear(); history.Clear(); rendered.Clear(); labels.Clear(); clockSet = false; }
-    public void Dispose() { if (disposed) return; Clear(); physics.Dispose(); disposed = true; }
+    public void Dispose() { if (disposed) return; Clear(); physics.Dispose(); preparation?.Dispose(); disposed = true; }
 }
 
 /// <summary>Immutable render-published organ labels; this system never steps cosmetic physics on the simulation thread.</summary>

@@ -23,12 +23,34 @@ public sealed class BrutalityBowelTests
         public bool Buildings(Vector3 min, Vector3 max, List<Vector3> triangles) => true;
     }
     static readonly Ground Floor = new();
+    static BowelPresentation Ready(AnatomyLibrary library) => new(library, new BowelAssetPreparation(
+        scale => BowelPresentation.BuildBowelAssets(library, scale), start: work => Task.FromResult(work())));
+
+    [Fact]
+    public void A_pending_first_plan_retries_current_cut_contacts_and_keeps_the_original_cut_age()
+    {
+        using var data = new AnatomyFixture();
+        Func<BowelAssetSet>? build = null;
+        var pending = new TaskCompletionSource<BowelAssetSet>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var preparation = new BowelAssetPreparation(scale => BowelPresentation.BuildBowelAssets(data.Library, scale),
+            start: work => { build = work; return pending.Task; });
+        using var bowel = new BowelPresentation(data.Library, preparation);
+        var owner = Owner(keep: false); float x = 0;
+        CutFluidContact? Contact(int half) => new(new(x + half * 4, 8, 0), Vector3.UnitY);
+        Assert.False(bowel.Begin(owner, data.Appearance, data.Rig, 0, 0, Contact, Vector2.UnitX, 0x800000, Floor));
+        Assert.False(bowel.HasSpilled(owner)); Assert.Equal(0, bowel.Count);
+        x = 20; pending.SetResult(Assert.IsType<Func<BowelAssetSet>>(build)());
+        Assert.True(bowel.Begin(owner, data.Appearance, data.Rig, 0, 4, Contact, Vector2.UnitX, 0x800000, Floor));
+        bowel.Advance(4, (_, half) => Contact(half), _ => true, Floor, 120);
+        Assert.Equal(2, bowel.Count); Assert.Equal(0, bowel.Attached); Assert.Equal(0, bowel.Moving);
+        Assert.All(bowel.Rendered, piece => Assert.True(piece.Centre.X > 15));
+    }
 
     [Fact]
     public void Actual_organ_five_triangles_start_inside_both_cut_faces_then_feed_out_and_publish_distinct_labels()
     {
         using var data = new AnatomyFixture();
-        using var bowel = new BowelPresentation(data.Library);
+        using var bowel = Ready(data.Library);
         var owner = Owner(keep: true);
         CutFluidContact? Contact(int half) => new(new(half * 4, 8, 0), half == 0 ? -Vector3.UnitY : Vector3.UnitY);
         Assert.True(bowel.Begin(owner, data.Appearance, data.Rig, 0, 0, Contact, Vector2.UnitX, 0x800000, Floor));
@@ -62,7 +84,7 @@ public sealed class BrutalityBowelTests
     public void A_late_picture_keeps_original_cut_age_and_already_torn_tissue_rests_on_the_floor_without_replaying_emergence()
     {
         using var data = new AnatomyFixture();
-        using var bowel = new BowelPresentation(data.Library);
+        using var bowel = Ready(data.Library);
         CutFluidContact? Contact(int half) => new(new(half * 4, 8, 0), Vector3.UnitY);
         Assert.True(bowel.Begin(Owner(keep: false), data.Appearance, data.Rig, 0, 4, Contact, Vector2.UnitX, 0x800000, Floor));
         bowel.Advance(4, (_, half) => Contact(half), _ => true, Floor, 120);
@@ -98,7 +120,7 @@ public sealed class BrutalityBowelTests
     public void A_crowd_is_limited_to_thirty_two_physical_pieces_and_alt_labels_are_immutable_and_expire_with_the_snapshot()
     {
         using var data = new AnatomyFixture();
-        using var bowel = new BowelPresentation(data.Library);
+        using var bowel = Ready(data.Library);
         for (int i = 0; i < 24; i++)
         {
             int index = i;
@@ -116,11 +138,11 @@ public sealed class BrutalityBowelTests
     public void Missing_bowel_anatomy_or_missing_cut_contacts_never_spawn_a_placeholder_organ_in_midair()
     {
         using var data = new AnatomyFixture(includeOrgan: false);
-        using var bowel = new BowelPresentation(data.Library);
+        using var bowel = Ready(data.Library);
         Assert.False(bowel.Begin(new(1, 0), data.Appearance, data.Rig, 0, 0, _ => new(new(0, 8, 0), Vector3.UnitY), Vector2.UnitX, 0x800000, Floor));
         Assert.Equal(0, bowel.Count);
         using var supplied = new AnatomyFixture();
-        using var hidden = new BowelPresentation(supplied.Library);
+        using var hidden = Ready(supplied.Library);
         Assert.False(hidden.Begin(new(1, 0), supplied.Appearance, supplied.Rig, 0, 0, _ => null, Vector2.UnitX, 0x800000, Floor));
         Assert.Equal(0, hidden.Count);
     }
@@ -129,7 +151,7 @@ public sealed class BrutalityBowelTests
     public void An_ordinary_deep_abdomen_spills_one_complete_imported_organ_at_the_posed_skin_and_never_replays_it()
     {
         using var data = new AnatomyFixture(raceName: "Greenlander");
-        using var bowel = new BowelPresentation(data.Library);
+        using var bowel = Ready(data.Library);
         var contact = new CutFluidContact(new(12, 8, -4), Vector3.UnitZ);
         var owner = Owner(keep: true);
         Assert.True(bowel.BeginWound(owner, data.Appearance, data.Rig, 2, 2, contact, 0x800000, Floor));
@@ -141,7 +163,7 @@ public sealed class BrutalityBowelTests
         Assert.False(bowel.BeginWound(owner, data.Appearance, data.Rig, 2, 2, contact, 0x800000, Floor));
         Assert.False(bowel.Begin(owner, data.Appearance, data.Rig, 2, 2, _ => contact, Vector2.UnitX, 0x800000, Floor));
         Assert.Equal(100, Assert.Single(bowel.Labels).Piece);
-        using var delayed = new BowelPresentation(data.Library);
+        using var delayed = Ready(data.Library);
         Assert.True(delayed.BeginWound(new(50, 2), data.Appearance, data.Rig, 2, 4, contact, 0x800000, Floor));
         delayed.Advance(4, (_, _) => null, _ => true, Floor, 120);
         Assert.Equal(0, delayed.Moving);
@@ -159,9 +181,9 @@ public sealed class BrutalityBowelTests
         Assert.False(EffectsBridge.HasDeepAbdomen(state with { Wounds = state.Wounds with { BellyHits = 9 } }));
         Assert.False(EffectsBridge.HasDeepAbdomen(state with { Wounds = new([new(-1, chest)], 10) }));
         Assert.False(EffectsBridge.HasDeepAbdomen(state with { Wounds = new([new(-1, abdomen with { Shape = abdomen.Shape with { Kind = WoundKind.Crush } })], 10) }));
-        using var absent = new AnatomyFixture(includeOrgan: false, raceName: "Greenlander"); using var bowel = new BowelPresentation(absent.Library);
+        using var absent = new AnatomyFixture(includeOrgan: false, raceName: "Greenlander"); using var bowel = Ready(absent.Library);
         Assert.False(bowel.BeginWound(new(1, 0), absent.Appearance, absent.Rig, 0, 0, new(new(0, 8, 0), Vector3.UnitZ), 0x800000, Floor));
-        using var otherRace = new AnatomyFixture(raceName: "Hive Prince"); using var hive = new BowelPresentation(otherRace.Library);
+        using var otherRace = new AnatomyFixture(raceName: "Hive Prince"); using var hive = Ready(otherRace.Library);
         Assert.False(hive.BeginWound(new(1, 0), otherRace.Appearance, otherRace.Rig, 0, 0, new(new(0, 8, 0), Vector3.UnitZ), 0x800000, Floor));
     }
 

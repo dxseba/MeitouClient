@@ -1,7 +1,12 @@
 using System.Numerics;
 using Meitou.Brutality;
+using Meitou.Brutality.Physics;
+using Meitou.Simulation;
 using Meitou.Brutality.Effects;
 using Meitou.Data.Particles;
+using Meitou.Data;
+using Meitou.Data.Characters;
+using Meitou.Data.Fcs;
 using Meitou.Simulation.Combat;
 
 namespace Meitou.Tests.Modding;
@@ -72,6 +77,104 @@ public sealed class BrutalityLegacyBloodSpriteTests
         Assert.True(group.ParticleCount > 0);
         for (int i = 0; i < 40; i++) { group.Update(.05f, camera, WeatherEffectInput.None); group.Simulate(); }
         Assert.Equal(0, group.ParticleCount); Assert.Empty(group.Units);
+    }
+
+    [Theory]
+    [InlineData(false, false, "HackBlood-system", false)]
+    [InlineData(false, false, "Bloodsplash01", false)]
+    [InlineData(true, false, "HackBlood-system", true)]
+    [InlineData(true, false, "Bloodsplash01", true)]
+    [InlineData(true, true, "HackBlood-system", false)]
+    [InlineData(true, true, "bLoOdSpLaSh01", false)]
+    [InlineData(false, false, "kenshi_sparks", true)]
+    [InlineData(false, true, "another-mod-electricity", true)]
+    public void Direct_native_neck_and_landing_bursts_obey_blood_eligibility_without_filtering_unrelated_effects(
+        bool native, bool noParticles, string system, bool expected)
+    {
+        var owner = new NativeSpriteEligibility(); if (!native) owner.MarkModOnly();
+        Assert.Equal(expected, LegacyBloodSprites.AllowNativeBurst(system, owner, noParticles));
+        // An ordinary renderer not owned by this DLL keeps its existing call path.
+        Assert.True(LegacyBloodSprites.AllowNativeBurst("HackBlood-system", null, false));
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void Native_neck_spurts_keep_the_pinned_robot_exclusion(bool robot, bool allowed)
+    {
+        var file = new FcsFile(); var race = new FcsRecord
+        { StringId = "neck-race", Name = "neck race", Flags = 0x10, RecordType = FcsRecordType.RACE };
+        race.Bools["is robot"] = robot; file.Records.Add(race);
+        var database = new GameDatabase(); database.Apply(file, "neck.mod");
+        var look = new CharacterAppearance { Race = database.Find("neck-race")! };
+        Assert.Equal(allowed, LegacyBloodSprites.AllowNeckSpurt(look));
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    public void A_shown_owned_head_replaces_native_whole_head_and_neck_spurts_for_all_modes_and_races(int mode, bool robot)
+    {
+        var (owner, frame) = HeadFrame((HeadCutMode)mode, robot);
+        Assert.True(LegacyBloodSprites.OwnsShownHead(frame, owner, 180, true));
+    }
+
+    [Fact]
+    public void Pending_missing_future_wrong_generation_and_nonphysical_heads_keep_native_fallback()
+    {
+        var (owner, frame) = HeadFrame(HeadCutMode.DetachedSplit, false);
+        var actor = frame.Characters[owner];
+        GorePresentationFrame Changed(GoreCharacterFrame value) => new(180, new Dictionary<CharacterId, GoreCharacterFrame> { [owner] = value });
+        Assert.False(LegacyBloodSprites.OwnsShownHead(null, owner, 180, true));
+        Assert.False(LegacyBloodSprites.OwnsShownHead(frame, owner, 180, false));
+        Assert.False(LegacyBloodSprites.OwnsShownHead(frame with { Tick = 181 }, owner, 180, true));
+        Assert.False(LegacyBloodSprites.OwnsShownHead(frame, new(owner.Slot, owner.Generation + 1), 180, true));
+        Assert.False(LegacyBloodSprites.OwnsShownHead(Changed(actor with { Detached = [] }), owner, 180, true));
+        Assert.False(LegacyBloodSprites.OwnsShownHead(Changed(actor with { State = actor.State with { Head = null } }), owner, 180, true));
+        Assert.False(LegacyBloodSprites.OwnsShownHead(Changed(actor with { Detached = [actor.Detached[0] with { StableKey = 10 }] }), owner, 180, true));
+        Assert.False(LegacyBloodSprites.OwnsShownHead(Changed(actor with { Detached = [new(2, new BonePose(1), Vector3.Zero)] }), owner, 180, true));
+    }
+
+    [Fact]
+    public void A_pending_physical_head_keeps_native_visual_fallback_but_accepted_geometry_skips_it_and_nested_failure_restores_spurts()
+    {
+        Assert.False(LegacyBloodSprites.NeckSpurtSuppressed);
+        Assert.True(LegacyBloodSprites.BeginHeadCut(true, false, out bool beforePending));
+        try
+        {
+            Assert.True(LegacyBloodSprites.NeckSpurtSuppressed);
+            Assert.True(LegacyBloodSprites.BeginHeadCut(false, false, out bool beforeNested));
+            try { Assert.True(LegacyBloodSprites.NeckSpurtSuppressed); throw new InvalidOperationException("Native head fallback failed."); }
+            catch (InvalidOperationException) { }
+            finally { LegacyBloodSprites.EndHeadCut(beforeNested); }
+            Assert.True(LegacyBloodSprites.NeckSpurtSuppressed);
+        }
+        finally { LegacyBloodSprites.EndHeadCut(beforePending); }
+        Assert.False(LegacyBloodSprites.NeckSpurtSuppressed);
+        Assert.False(LegacyBloodSprites.BeginHeadCut(true, true, out bool beforeAccepted));
+        try { Assert.True(LegacyBloodSprites.NeckSpurtSuppressed); }
+        finally { LegacyBloodSprites.EndHeadCut(beforeAccepted); }
+        Assert.False(LegacyBloodSprites.NeckSpurtSuppressed);
+        Assert.True(LegacyBloodSprites.BeginHeadCut(false, true, out bool beforeOrdinary));
+        try { Assert.False(LegacyBloodSprites.NeckSpurtSuppressed); }
+        finally { LegacyBloodSprites.EndHeadCut(beforeOrdinary); }
+    }
+
+    static (CharacterId Owner, GorePresentationFrame Frame) HeadFrame(HeadCutMode mode, bool robot)
+    {
+        var file = new FcsFile(); var race = new FcsRecord
+        { StringId = "head-race", Name = "head race", Flags = 0x10, RecordType = FcsRecordType.RACE };
+        race.Bools["is robot"] = robot; file.Records.Add(race);
+        var database = new GameDatabase(); database.Apply(file, "head.mod");
+        var look = new CharacterAppearance { Race = database.Find("head-race")! };
+        var owner = new CharacterId(4, 7);
+        var state = new BrutalityActorView(owner, 0, 100, 0, default, new(new(1, 0, 0, 0), mode), null, []);
+        var actor = new GoreCharacterFrame(owner, look, state, null, [new(2, new BonePose(1) { AbsolutePositions = true }, Vector3.Zero)]);
+        return (owner, new(180, new Dictionary<CharacterId, GoreCharacterFrame> { [owner] = actor }));
     }
 
     static ImpactEffectEvent Impact()

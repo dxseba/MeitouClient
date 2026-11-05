@@ -21,6 +21,11 @@ internal static class FragmentWorldBounds
     }
     static readonly ConditionalWeakTable<RuntimeCharacterGeometry, Support> support = new();
 
+    /// <summary>Prepare bind support alongside the CPU cut, before its first posed frame reaches the renderer.</summary>
+    internal static void Prepare(RuntimeCharacterGeometry geometry, CharacterAppearance appearance, SkeletonRig rig,
+        OgreMesh originalBody, Func<string, OgreMesh?> loadPart) =>
+        support.GetValue(geometry, _ => Make(geometry, appearance, rig, originalBody, loadPart));
+
     public static CharacterWorldBounds? For(RuntimeCharacterGeometry geometry, CharacterAppearance appearance, SkeletonRig rig,
         OgreMesh originalBody, BonePose? pose, Matrix4x4 placement, Func<string, OgreMesh?> loadPart,
         BodyShapeData? shape = null, CharacterRigs? rigs = null, BodyBuild? build = null)

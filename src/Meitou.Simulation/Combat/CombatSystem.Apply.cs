@@ -40,8 +40,11 @@ public sealed partial class CombatSystem
         var ac = table.Cold(a);
         var dc = table.Cold(d);
         if (ac is null || dc is null || ac.Fighter is null || dc.Fighter is null || ac.Stats is null || dc.Stats is null || ac.Medical is null || dc.Medical is null || ac.Race is null || dc.Race is null) return;
-        if (world.HasCombatTargetRules && world.TryCombatTarget(table.IdOf(a), table.IdOf(d), A.Picked, out _)
-            && !TargetAllowed(world, a, d, A.Picked, native: true)) return;
+        // The emitted victim can differ from the fighter's current target when another effect retargeted it.
+        // Resolve this contact's policy once, against its actual recipient, including the exact medical index.
+        CombatTargetOverride targetRule = default;
+        bool targetClaimed = world.HasCombatTargetRules && world.TryCombatTarget(table.IdOf(a), table.IdOf(d), A.Picked, out targetRule);
+        if (targetClaimed && !TargetAllowed(dc, targetRule)) return;
         var tech = techniques[A.AttackTech];
         var prev = table.Previous;
         int direction = HitOutcomes.Facing(tech.DirectionOf(blow), HitOutcomes.Behind(table.Previous[a].Position, table.Previous[d].Position, table.Previous[d].Yaw));
@@ -105,7 +108,7 @@ public sealed partial class CombatSystem
         bool wasAlive = observe && !dc.Medical.Dead, wasIncapacitated = observe && dc.Medical.Incapacitated;
         bool intended = observe && d == A.TargetSlot && prev[d].Generation == A.TargetGeneration;
         var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events,
-            TargetOverride(world, a, A, out var targetRule) ? targetRule.Part : null);
+            targetClaimed ? targetRule.Part : null);
         FloatHit(world, d, dc, ac.IsPlayer, part, damage, absorbed);
         A.Landed++;
         D.Taken++;

@@ -126,13 +126,17 @@ public sealed class BrutalityWeaponContainerSaveTests
     public void Restored_allocators_do_not_reuse_pending_tokens_and_a_missing_sidecar_cannot_alias_an_old_container()
     {
         using var patches = new Patches(); var data = Data(); var original = new WeaponBloodState();
+        using var originalWorld = World(original); original.Schedule(originalWorld);
         var a = data.Items.Create("brutality-blade")!; var chest = new Inventory(); chest.Items.Add(a); Stain(original, a, 0xFF0000, 20);
         string oldText = ContainerSave.Write(chest)!; string oldKey = Token(JsonNode.Parse(oldText)![0]!); var bytes = Write(original);
         var restored = new WeaponBloodState(); restored.Read(new MemoryStream(bytes));
         var b = data.Items.Create("brutality-blade")!; var next = new Inventory(); next.Items.Add(b); Stain(restored, b, 0x00FF00, 40);
         string nextKey = Token(JsonNode.Parse(ContainerSave.Write(next)!)![0]!); Assert.NotEqual(oldKey, nextKey);
         Assert.Contains(oldKey, System.Text.Encoding.UTF8.GetString(Write(restored))); // The old chest has not materialized yet.
-        var missingSidecar = new WeaponBloodState(); var c = data.Items.Create("brutality-blade")!; var fresh = new Inventory(); fresh.Items.Add(c);
+        var missingSidecar = new WeaponBloodState();
+        missingSidecar.ReserveContainerNamespaces(oldText); // The native load scans tokens before creating a replacement namespace.
+        using var missingWorld = World(missingSidecar); missingSidecar.Schedule(missingWorld);
+        var c = data.Items.Create("brutality-blade")!; var fresh = new Inventory(); fresh.Items.Add(c);
         Stain(missingSidecar, c, 0x00FF00, 40); string freshKey = Token(JsonNode.Parse(ContainerSave.Write(fresh)!)![0]!);
         Assert.NotEqual(oldKey, freshKey);
         var loadedOld = new Inventory(); ContainerSave.Read(oldText, loadedOld, data.Items);

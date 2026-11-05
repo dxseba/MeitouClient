@@ -140,6 +140,9 @@ break golden hashes and any future replay. Nothing in the API can stop a patch; 
 
 ### Determinism check
 
+The tools host shares `Meitou.Rendering` and its engine contracts with code mods, including CPU model helpers.
+`mod-check` remains headless and does not initialize a GPU.
+
 `meitou-tools mod-check <save folder> [--ticks n] [--threads n] [--mod <mod folder>]...` (`tools/Meitou.Tools/ModCheck.cs`, shipped in
 the release zips beside the game) loads a save
 headless with the enabled code mods, or only the `--mod` folders (their code; their records join the data only when enabled), and runs
@@ -174,7 +177,12 @@ including worlds without particle effects. Cleanup handlers are isolated and sub
 
 `CharacterDrawList.Preparations` queues asset and shader preparation without visible actors, poses or
 picking state. Refill it each frame; `Clear()` empties it with `Items`. This is best-effort background
-work: existing `ContentPending`/`IsPrepared` report native appearance loading, not these requests.
+work: existing renderer `ContentPending`/`IsPrepared` retain their loading-screen completion semantics.
+`CharacterDrawList.IsPrepared(appearance, geometry)` instead checks one exact uploaded appearance/geometry
+identity and its compiled custom programs (when supplied); null geometry checks the native appearance.
+This render-thread query neither starts nor waits for work; pending, failed, retired and unattached
+requests return false. Use it to keep a previous presentation until every member of a replacement
+family is ready. It does not promise full texture residency. Disposal clears the renderer callback.
 Actual actors, distant loads and missing live custom programs use the build budget first; preparation
 uses the remainder, including shader creation by identity. If a live program cannot fit, speculative
 work waits; actual draws retain their lazy compilation fallback. A single asset/program preparation
@@ -188,6 +196,10 @@ scale. Loading/reach, view/fog culling, picking and actor projected-size cutoffs
 shadow size cutoffs retain each part's own radius; posed shared parts use the supplied centre, while
 bone-attached parts use their actual attachment transform. Null or the invalid default struct preserves
 ordinary character bounds; explicit nonfinite/nonpositive values are rejected by the bounds constructor.
+
+`CharacterAppearance.Snapshot()` copies its mutable parts, layers, lights, attachment-point,
+pose-weight and notes collections. Content records remain shared; treat loaded content as read-only.
+Use the original appearance as a cache identity when worker code reads a detached snapshot.
 
 `CharacterInstance.Geometry` accepts immutable `RuntimeCharacterGeometry` variants; call `Retire()`
 once a variant is no longer published. Generated GPU meshes and shader programs retire after frames

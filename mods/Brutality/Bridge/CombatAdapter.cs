@@ -54,8 +54,7 @@ public static partial class CombatAdapter
         Patch(harmony, AccessTools.Method(typeof(CombatSystem), nameof(CombatSystem.Execute)), nameof(ExecutionPrefix), nameof(ExecutionPostfix), nameof(ContactFinalizer));
         // These are the actual value-type instantiations called by native melee/execution and projectile contacts.
         // Patching the non-generic Resolve helper would rely on it not having been inlined into an earlier JIT caller.
-        var land = typeof(HitResolver).GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .Single(m => m.Name == nameof(HitResolver.LandDetailed) && m.IsGenericMethodDefinition);
+        var land = typeof(HitResolver).GetMethods(BindingFlags.Public | BindingFlags.Static).Single(IsLandCore);
         foreach (string cover in new[] { "CoverRoll", "BoltCover" })
         {
             var type = typeof(CombatSystem).GetNestedType(cover, BindingFlags.NonPublic)
@@ -64,6 +63,17 @@ public static partial class CombatAdapter
         }
         Patch(harmony, AccessTools.Method(typeof(MedicalState), nameof(MedicalState.ApplyHit)), nameof(MedicalPrefix), nameof(MedicalPostfix), nameof(MedicalFinalizer));
         Patch(harmony, AccessTools.Method(typeof(MedicalState), nameof(MedicalState.Decapitate)), nameof(DecapitationPrefix));
+    }
+
+    // Patch only the exact-part core. The original CLR overload forwards here, so patching both would observe one contact twice.
+    static bool IsLandCore(MethodInfo method)
+    {
+        if (method.Name != nameof(HitResolver.LandDetailed) || !method.IsGenericMethodDefinition
+            || method.GetGenericArguments().Length != 1) return false;
+        Type[] parameters = [typeof(MedicalState), typeof(MedicalContext).MakeByRefType(), typeof(DamagePacket).MakeByRefType(),
+            typeof(ReadOnlySpan<ArmourPiece>), method.GetGenericArguments()[0], typeof(float), typeof(bool), typeof(bool),
+            typeof(CombatConstants), typeof(List<MedicalEvent>), typeof(int?)];
+        return method.GetParameters().Select(parameter => parameter.ParameterType).SequenceEqual(parameters);
     }
 
     static void Patch(Harmony harmony, MethodInfo original, string? prefix = null, string? postfix = null, string? finalizer = null) =>

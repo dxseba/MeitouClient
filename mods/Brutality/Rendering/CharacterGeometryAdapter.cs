@@ -52,8 +52,77 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
     {
         public readonly Dictionary<StateKey, CharacterGeometryResult> Results = [];
     }
-    readonly record struct StateKey(OgreMesh Body, SkeletonRig Rig, TorsoBisectionState? Torso, HeadCutState? Head,
+    internal readonly record struct StateKey(OgreMesh Body, SkeletonRig Rig, TorsoBisectionState? Torso, HeadCutState? Head,
         LimbCutState? LeftArm, LimbCutState? RightArm, LimbCutState? LeftLeg, LimbCutState? RightLeg, SevereHeadWoundState Severe, ulong Wounds, CharacterGeometryComponents Components);
+
+    internal readonly record struct BuildKey(CharacterAppearance Appearance, StateKey State);
+    internal sealed record BuildInput(BuildKey Key, CharacterAppearance Appearance, BrutalityActorView State,
+        IReadOnlyDictionary<string, OgreMesh?> Meshes);
+
+    internal static BuildKey RequestKey(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,
+        BrutalityActorView state, CharacterGeometryComponents components) => new(appearance, Key(body, rig, state, components));
+
+    /// <summary>Resolve host-owned caches on the render thread; the CPU worker only sees captured collections and immutable content.</summary>
+    internal static BuildInput Capture(BuildKey key, BrutalityActorView state, Func<string, OgreMesh?> loadPartMesh)
+    {
+        var appearance = key.Appearance.Snapshot();
+        var meshes = new Dictionary<string, OgreMesh?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var part in appearance.Parts)
+            if (!meshes.ContainsKey(part.Mesh)) meshes.Add(part.Mesh, loadPartMesh(part.Mesh));
+        var saved = state with { Limbs = Array.AsReadOnly(state.Limbs.ToArray()),
+            Wounds = state.Wounds with { Entries = Array.AsReadOnly(state.Wounds.Entries.ToArray()) } };
+        return new(key, appearance, saved, meshes);
+    }
+
+    /// <summary>CPU-only and unpublished: cancellation or a newer cut can discard the result without retiring a live variant.</summary>
+    internal CharacterGeometryResult BuildUnpublished(BuildInput input, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        var key = input.Key.State;
+        var native = NativeGeometry.Build(anatomy, input.Appearance, key.Rig, key.Body, key.Severe);
+        cancellation.ThrowIfCancellationRequested();
+        var result = BuildCore(input.Appearance, key.Rig, key.Body, name => input.Meshes.GetValueOrDefault(name),
+            key, native.Anatomy, native.Relief, native.Info, input.State.Wounds, cancellation);
+        surfaceInfos.Add(result.Retained, native.Info);
+        foreach (var fragment in result.Detached) surfaceInfos.Add(fragment.Geometry, native.Info);
+        FragmentWorldBounds.Prepare(result.Retained, input.Appearance, key.Rig, key.Body, name => input.Meshes.GetValueOrDefault(name));
+        foreach (var fragment in result.Detached)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            FragmentWorldBounds.Prepare(fragment.Geometry, input.Appearance, key.Rig, key.Body, name => input.Meshes.GetValueOrDefault(name));
+        }
+        cancellation.ThrowIfCancellationRequested();
+        return result;
+    }
+
+    /// <summary>Publish only after the producer has checked the world's current request; the original look remains the cache identity.</summary>
+    internal CharacterGeometryResult Publish(BuildKey key, CharacterGeometryResult result)
+    {
+        var look = looks.GetOrCreateValue(key.Appearance);
+        lock (look)
+        {
+            if (look.Results.TryGetValue(key.State, out var existing) && !existing.Retained.IsRetired)
+            { if (!ReferenceEquals(existing, result)) Retire(result); return existing; }
+            Store(look, key.State, result);
+            return result;
+        }
+    }
+
+    internal static void Retire(CharacterGeometryResult result)
+    {
+        result.Retained.Retire();
+        foreach (var fragment in result.Detached) fragment.Geometry.Retire();
+    }
+
+    static void Store(LookCache look, StateKey key, CharacterGeometryResult result)
+    {
+        look.Results.Remove(key);
+        while (look.Results.Count >= 8)
+        {
+            var oldest = look.Results.First(); look.Results.Remove(oldest.Key); Retire(oldest.Value);
+        }
+        look.Results[key] = result;
+    }
 
     /// <summary>Looks up a published current-state mesh without importing anatomy or performing CPU cuts. Visual consumers must not bypass the producer's build budget.</summary>
     public bool TryCached(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body, BrutalityActorView state,
@@ -114,17 +183,13 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
             var result = BuildCore(appearance, rig, body, loadPartMesh, key, native.Anatomy, native.Relief, native.Info, state.Wounds);
             surfaceInfos.Add(result.Retained, native.Info);
             foreach (var fragment in result.Detached) surfaceInfos.Add(fragment.Geometry, native.Info);
-            while (look.Results.Count >= 8)
-            {
-                var oldest = look.Results.First(); look.Results.Remove(oldest.Key);
-                oldest.Value.Retained.Retire(); foreach (var fragment in oldest.Value.Detached) fragment.Geometry.Retire();
-            }
-            return look.Results[key] = result;
+            Store(look, key, result);
+            return result;
         }
     }
 
     static CharacterGeometryResult BuildCore(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,
-        Func<string, OgreMesh?> loadPartMesh, in StateKey state, OgreMesh? inside, OgreMesh? nativeRelief, NativeGeometryInfo surface, BodyWoundState wounds)
+        Func<string, OgreMesh?> loadPartMesh, in StateKey state, OgreMesh? inside, OgreMesh? nativeRelief, NativeGeometryInfo surface, BodyWoundState wounds, CancellationToken cancellation = default)
     {
         var general = new List<CutHalfspace>();
         var fragments = new List<(GeometryFragmentKind Kind, int Key, int Limb, Vector4 Plane, List<CutHalfspace> Rules)>();
@@ -180,6 +245,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         float originalRadius = MeshCut.SourceModel(body, rig.BoneCount).Radius;
         (RuntimeCharacterGeometry Geometry, CutMeshResult Skin) Piece(IReadOnlyList<CutHalfspace> rules, int stableKey)
         {
+            cancellation.ThrowIfCancellationRequested();
             var physicalComponents = componentMaps.For(stableKey);
             var cutBody = GeneratedExteriorLod.Clip(body, rig, rules, appearance.PoseWeights, shaved, flesh, components: physicalComponents);
             var parts = new List<RuntimeCharacterPart>();
@@ -205,6 +271,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
             }
             foreach (var part in appearance.Parts)
             {
+                cancellation.ThrowIfCancellationRequested();
                 if (part.Mode == AttachMode.Bone)
                 {
                     var (point, bone) = Attachment(appearance, rig, part);

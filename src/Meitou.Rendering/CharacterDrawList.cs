@@ -66,6 +66,18 @@ public sealed class CharacterDrawList
 {
     /// <summary>The live renderer context, valid only on its render thread; null for a headless or unattached list.</summary>
     public IGpuContext? Context { get; internal set; }
+    internal Func<CharacterAppearance, RuntimeCharacterGeometry?, bool>? PreparedQuery;
+    /// <summary>
+    /// Whether this exact appearance/geometry pair has an uploaded asset and, if supplied, compiled custom shader programs.
+    /// Render-thread query only: never starts or waits for preparation. False when unattached, disposed, retired, pending or failed.
+    /// A null geometry queries the native appearance, independently of other variants or loading-screen completion.
+    /// </summary>
+    public bool IsPrepared(CharacterAppearance appearance, RuntimeCharacterGeometry? geometry = null)
+    {
+        ArgumentNullException.ThrowIfNull(appearance);
+        return !resourcesDisposed && Context is not null && geometry?.IsRetired != true
+            && PreparedQuery?.Invoke(appearance, geometry) == true;
+    }
     /// <summary>Render-thread cleanup before the live context is released. Subscriptions are cleared after the one disposal notification.</summary>
     public event Action? Disposing;
     bool resourcesDisposed;
@@ -82,7 +94,7 @@ public sealed class CharacterDrawList
                     try { release(); }
                     catch (Exception error) { Console.Error.WriteLine($"warning   character resource cleanup: {error}"); }
         }
-        finally { Disposing = null; Context = null; }
+        finally { Disposing = null; PreparedQuery = null; Context = null; }
     }
 
     /// <summary>The characters that may be drawn or posed this frame: emptied by the renderer (<see cref="Clear"/>) and filled again each frame.</summary>

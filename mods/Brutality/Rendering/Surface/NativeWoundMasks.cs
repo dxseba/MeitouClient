@@ -36,6 +36,7 @@ sealed class NativeWoundMasks(IGpuContext gpu) : IDisposable
     public static Func<float, float, NativeWoundMark, Vector3>? Sample { get; set; }
 
     public void BeginFrame() { repaints = 0; frame++; }
+    internal void Touch(long key) { if (masks.TryGetValue(key, out var mask)) mask.Used = frame; }
 
     /// <summary>The bindless index of the character's mask, 0 without one.</summary>
     public uint Update(long key, SkeletonRig rig, WoundPoint[]? points, IReadOnlyList<NativeWoundMark> wounds)

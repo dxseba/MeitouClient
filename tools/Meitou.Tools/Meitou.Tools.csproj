@@ -13,6 +13,8 @@
     <!-- mod-check: the simulation with the enabled code mods (docs/modding.md "Determinism check"). -->
     <ProjectReference Include="../../src/Meitou.Simulation/Meitou.Simulation.csproj" />
     <ProjectReference Include="../../src/Meitou.Modding/Meitou.Modding.csproj" />
+    <ProjectReference Include="../../src/Meitou.Rendering/Meitou.Rendering.csproj" />
+    <ProjectReference Include="../../src/Meitou.Engine/Meitou.Engine.csproj" />
   </ItemGroup>
 
 </Project>

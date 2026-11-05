@@ -18,6 +18,7 @@ public sealed record GoreCharacterFrame(CharacterId Character, CharacterAppearan
     BonePose? Retained, IReadOnlyList<FragmentPoseSnapshot> Detached)
 {
     public Matrix4x4 Placement { get; init; } = Matrix4x4.Identity;
+    public FragmentBirthPresentation? BirthPresentation { get; init; }
 }
 public sealed record GorePresentationFrame(long Tick, IReadOnlyDictionary<CharacterId, GoreCharacterFrame> Characters);
 
@@ -42,6 +43,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         public bool NativeClaimed;
         public (long Tick, BonePose Pose, Matrix4x4 Placement)? ReturnFrame;
         public bool FootDiagnosed;
+        public FragmentBirthPresentation? BirthPresentation;
     }
     readonly AdvancedFragmentScene scene = new();
     readonly Queue<CombatHit> impacts = new();
@@ -146,6 +148,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                     else native.TryCapture(world, state.Character, out handoff);
                 }
                 var posed = BoneWorld(world, state.Character, cold, owner, placement, handoff);
+                owner.BirthPresentation = CaptureBirthPresentation(owner.Appearance, posed, placement, restoring: HasSavedOwner(world, state.Character));
                 var previousMotion = owner.Pieces.TryGetValue(0, out var priorBody) ? scene.CaptureMotion(priorBody.Piece)
                     : RobotRagdollWeight.CaptureMotion(cold.Race?.IsRobot == true, handoff);
                 var pending = handoff?.PendingLaunch;
@@ -234,7 +237,8 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
                 if (owner.Skin.FootBounds(owner.Setup.Rig, contactSkin) is { } feet)
                     Console.WriteLine($"Brutality physical foot skin: tick={world.Tick} owner={state.Character} min={feet.Min} max={feet.Max} ground={ground.GroundHeight(feet.Min.X, feet.Min.Z, feet.Min.Y)} frozen={lower.Piece.Frozen}");
             }
-            publish.Add(state.Character, new(state.Character, owner.Appearance, state, body, Array.AsReadOnly(detached.ToArray())) { Placement = owner.Placement });
+            publish.Add(state.Character, new(state.Character, owner.Appearance, state, body, Array.AsReadOnly(detached.ToArray()))
+            { Placement = owner.Placement, BirthPresentation = owner.BirthPresentation });
         }
         history.Enqueue(new(world.Tick + 1, new ReadOnlyDictionary<CharacterId, GoreCharacterFrame>(publish)));
         while (history.Count > 64) history.Dequeue();

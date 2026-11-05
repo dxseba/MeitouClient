@@ -71,6 +71,8 @@ public static class GpuVertex
         return bytes;
     }
 
+    public static byte[] PackCharacter(ReadOnlySpan<Vertex> vertices) => PackCharacter(vertices, preserveRawChannels: false);
+
     public static byte[] PackCharacter(ReadOnlySpan<Vertex> vertices, bool preserveRawChannels = false)
     {
         if (preserveRawChannels) return MemoryMarshal.AsBytes(vertices).ToArray();
@@ -96,6 +98,8 @@ public static class GpuVertex
     ];
 
     /// <summary>The character layout's attributes at locations 0 to 6 (the object's five, bones, weights) over <paramref name="vertices"/>.</summary>
+    public static LegacyProgram.Attribute?[] CharacterAttributes(DeviceBuffer vertices) => CharacterAttributes(vertices, preserveRawChannels: false);
+
     public static LegacyProgram.Attribute?[] CharacterAttributes(DeviceBuffer vertices, bool preserveRawChannels = false) => preserveRawChannels ?
     [
         Attribute(vertices, 0, InternalFormat.Rgb32f, Vertex.Size), Attribute(vertices, 12, InternalFormat.Rgb32f, Vertex.Size),

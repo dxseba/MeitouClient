@@ -183,18 +183,20 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     {
         get
         {
-            // A reused set: the background-loading bar asks every frame.
+            // A reused set: actual runtime variants have their own asset keys. Speculative Preparations never hold up loading.
             pendingLooks.Clear();
             foreach (var c in Draws.Items)
-                if (!assets.ContainsKey(c.Appearance)) pendingLooks.Add(c.Appearance);
+                if (!ItemPrepared(c)) pendingLooks.Add((c.Appearance, c.Geometry));
             foreach (var c in Draws.Distant)
-                if (!assets.ContainsKey(c.Appearance)) pendingLooks.Add(c.Appearance);
+                if (!assets.ContainsKey(c.Appearance)) pendingLooks.Add((c.Appearance, null));
             return pendingLooks.Count + content.Textures.AwaitedCount + content.Textures.UnresidentUsedCount;
         }
     }
-    readonly HashSet<CharacterAppearance> pendingLooks = new(ReferenceEqualityComparer.Instance);
+    readonly HashSet<(CharacterAppearance Appearance, RuntimeCharacterGeometry? Geometry)> pendingLooks = [];
+    bool ItemPrepared(in CharacterInstance instance) => instance.Geometry is { } geometry
+        ? runtimeAssets.ContainsKey((instance.Appearance, geometry)) : assets.ContainsKey(instance.Appearance);
     /// <summary>Current appearances still being prepared/uploaded, or textures still being loaded. Failed assets count as finished.</summary>
-    public bool ContentPending => Draws.Items.Any(c => !Deferred(c) && !assets.ContainsKey(c.Appearance)) || Draws.Distant.Any(c => !Deferred(c) && !assets.ContainsKey(c.Appearance))
+    public bool ContentPending => Draws.Items.Any(c => !Deferred(c) && !ItemPrepared(c)) || Draws.Distant.Any(c => !Deferred(c) && !assets.ContainsKey(c.Appearance))
         || content.Textures.AwaitedCount > 0 || content.Textures.UnresidentUsedCount > 0;
 
     /// <summary>
@@ -209,8 +211,26 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     /// <summary>Whether <paramref name="c"/> waits for the loading screen to lift (<see cref="LoadingFocus"/>).</summary>
     bool Deferred(in CharacterInstance c) =>
         LoadingFocus is { } f && Vector2.DistanceSquared(new Vector2(c.Position.X, c.Position.Z), f) > LoadingReach * LoadingReach;
-    /// <summary>The appearance was uploaded or failed with a diagnostic; either completes its loading request.</summary>
-    public bool IsPrepared(CharacterAppearance appearance) => assets.ContainsKey(appearance);
+    /// <summary>Every actual current variant of this appearance was uploaded or failed with a diagnostic.
+    /// Without current Items, retains the native appearance query. Speculative Preparations are best effort and excluded.</summary>
+    public bool IsPrepared(CharacterAppearance appearance)
+    {
+        bool requested = false;
+        foreach (var instance in Draws.Items)
+            if (ReferenceEquals(instance.Appearance, appearance))
+            {
+                requested = true;
+                if (!ItemPrepared(instance)) return false;
+            }
+        return requested || assets.ContainsKey(appearance);
+    }
+    /// <summary>Exact nonblocking presentation readiness; unlike loading completion, a failed asset is never drawable.</summary>
+    internal bool IsVariantPrepared(CharacterAppearance appearance, RuntimeCharacterGeometry? geometry)
+    {
+        if (geometry is null) return assets.TryGetValue(appearance, out var native) && native is not null;
+        return !geometry.IsRetired && runtimeAssets.TryGetValue((appearance, geometry), out var asset) && asset is not null
+            && (geometry.Shaders is not { } shaders || runtimePrograms?.Contains(shaders) == true);
+    }
     /// <summary>Start preparing a scene's essential characters ahead of the world streaming queue (render thread).</summary>
     public void Prefetch(CharacterAppearance appearance) => content.Fetched(appearance, urgent: true);
     /// <summary>Prepares a look's meshes without keeping the request (the character editor's next looks), on the urgent queue or the ordinary one; a close-up's without generated levels. Render thread.</summary>
@@ -414,6 +434,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     {
         Gpu = gpu;
         Draws.Context = gpu;
+        Draws.PreparedQuery = IsVariantPrepared;
         nativeFrame = new NativeFrame(gpu, extraStorage: 4);
         var colourFragment = CharacterShaders.Fragment(gpu.Shaders.DiscardNeedsLateDepth);
         colourProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.Vertex(),
@@ -519,6 +540,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         PollTimers();
         var watch = Stopwatch.StartNew();
         Draws.Clear();
+        content.BeginRuntimePreparationFrame();
         Source?.Invoke(Draws);
         StageClock.Part(StageClock.PartFill);
 
@@ -620,6 +642,15 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     /// <summary>Retires generated variants only after this frame has acquired every live shared mesh/morph dependency.</summary>
     void EvictRetiredRuntimeAssets()
     {
+        if (content.HasRuntimePreparations)
+        {
+            // Readiness calls recorded actual demand after Deferred/WantsAsset; mere Items membership includes offscreen
+            // actors that cannot consume their ready bundle. Explicit preparation remains wanted when its upload budget was spent.
+            foreach (var request in Draws.Preparations)
+                if (request.Geometry is { IsRetired: false } geometry && !Deferred(request))
+                    content.KeepRuntimePreparation(request.Appearance, geometry);
+            content.SweepRuntimePreparationDemand();
+        }
         if (runtimeAssets.Count == 0 || !runtimeAssets.Keys.Any(key => key.Geometry.IsRetired)) return;
         var current = new HashSet<RuntimeCharacterGeometry>(ReferenceEqualityComparer.Instance);
         Draws.CollectRuntimeGeometry(current);
@@ -647,7 +678,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
 
         // Interactive: the files are read and the meshes prepared on a worker first (CharacterContent.Fetched), then a few a frame are uploaded.
         bool overBudget = !Covered && built >= LoadBudget || buildMs >= (Covered ? CoveredBudgetMs : BuildBudgetMs);
-        if (LoadBudget > 0 && (!content.Fetched(inst.Appearance) || overBudget)) return null;
+        if (LoadBudget > 0 && (!content.Fetched(inst.Appearance, inst.Geometry) || overBudget)) return null;
 
         long buildStart = Stopwatch.GetTimestamp();
         asset = content.Build(inst.Appearance, inst.Geometry);

@@ -13,7 +13,7 @@ namespace Meitou.Brutality;
 public readonly record struct WeaponStainView(ItemInstance Item, Vector4 Blood, long Revision);
 
 /// <summary>Item-owned display state; item identities come from the native save writer, never inventory slots or weapon records.</summary>
-public sealed partial class WeaponBloodState : ITickSystem, IModSaveData
+public sealed partial class WeaponBloodState(RngPurpose purpose = default) : ITickSystem, IModSaveData, IStateHashed
 {
     sealed class Stain { public Vector4 Blood; public long Revision; public string? Key; }
     public sealed record SavedStain(string Key, float R, float G, float B, float Amount);
@@ -81,6 +81,7 @@ public sealed partial class WeaponBloodState : ITickSystem, IModSaveData
     }
     public void Schedule(World world)
     {
+        BindWorld(world);
         if (durable.Count == 0 && authoritativeSidecar) return;
         for (int slot = 0; slot < world.Characters.HighWater; slot++)
             if (world.Characters.Cold(slot)?.Inventory is { } inventory) AdoptInventory(inventory, 0);
@@ -109,7 +110,8 @@ public sealed partial class WeaponBloodState : ITickSystem, IModSaveData
         try
         {
             if (JsonSerializer.Deserialize<Document>(stream) is not { SchemaVersion: 1, Items: { Length: <= 100000 } items } document) return;
-            containerNamespace = Guid.TryParseExact(document.ContainerNamespace, "N", out var parsed) ? parsed.ToString("N") : Guid.NewGuid().ToString("N");
+            namespaceInitialized = Guid.TryParseExact(document.ContainerNamespace, "N", out var parsed);
+            containerNamespace = namespaceInitialized ? parsed.ToString("N") : EmptyNamespace;
             containerSerial = Math.Max(0, document.ContainerSerial);
             foreach (var row in items)
                 if (row is not null && row.Key is { Length: > 0 and <= 2048 } && Finite(new(row.R, row.G, row.B)) && float.IsFinite(row.Amount)

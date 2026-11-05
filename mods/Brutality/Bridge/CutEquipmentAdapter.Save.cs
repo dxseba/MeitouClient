@@ -44,7 +44,9 @@ public sealed partial class CutEquipmentAdapter
     }
     static void CapturePrefix(World world, out Capture? __state)
     {
-        __state = capture; capture = WeaponBloodState.For(world) is { } state ? new(state) : null;
+        __state = capture;
+        var state = WeaponBloodState.For(world); state?.BindWorld(world);
+        capture = state is not null ? new(state) : null;
     }
     static void ItemWritten(ItemInstance i, SaveItem __result) => capture?.Items.Add((__result, i));
     static void ItemCopied(ItemInstance __instance, ItemInstance __result)
@@ -66,7 +68,11 @@ public sealed partial class CutEquipmentAdapter
     static Exception? CaptureFinalizer(Exception? __exception, Capture? __state) { capture = __state; return __exception; }
     static void LoadPrefix(World world, SaveGame save)
     {
-        RegisterRecords(save); WeaponBloodState.For(world)?.ImportLegacySave(save);
+        RegisterRecords(save);
+        if (WeaponBloodState.For(world) is not { } state) return;
+        ulong seed = save.Camera.Record.Strings.GetValueOrDefault(SaveLoader.SeedKey) is { } text
+            && ulong.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var savedSeed) ? savedSeed : world.Seed;
+        state.ReserveContainerNamespaces(save); state.BindWorld(world, seed); state.ImportLegacySave(save);
     }
     static void Cloned(SaveGame __result) => RegisterRecords(__result);
 

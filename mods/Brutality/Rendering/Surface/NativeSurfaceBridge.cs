@@ -69,6 +69,8 @@ internal static partial class NativeSurfaceBridge
         for(int i=0;i<list.Items.Count;i++)
         {
             var item=list.Items[i];
+            if (RenderBridge.IsPresentationHeld(session.World, item.Key))
+            { if (item.RuntimeShaderData is not null) { used.Add(item.Key); masks.Touch(item.Key); } continue; }
             if(item.Geometry is not { Shaders:not null } geometry || !owners.TryGetValue(item.Key,out var owner)
                 || CharacterGeometryAdapter.SurfaceFor(geometry) is not { } info
                 || resources.Rigs.For(item.Appearance) is not { } setup) continue;

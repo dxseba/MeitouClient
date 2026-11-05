@@ -9,7 +9,10 @@ public sealed partial class CombatSystem
     bool TargetAllowed(World world, int attacker, int target, bool picked, bool native)
     {
         if (!world.TryCombatTarget(world.Characters.IdOf(attacker), world.Characters.IdOf(target), picked, out var rule)) return native;
-        var victim = world.Characters.Cold(target);
+        return TargetAllowed(world.Characters.Cold(target), rule);
+    }
+    static bool TargetAllowed(CharacterCold? victim, in CombatTargetOverride rule)
+    {
         if (!rule.Allowed || victim is not { Medical: { Dead: false } medical, CarriedBy.IsNone: true, IsImprisoned: false }) return false;
         if (rule.Part is { } part && ((uint)part >= (uint)medical.Parts.Count || medical.Parts[part].Limb == LimbState.Stump)) return false;
         return !medical.Incapacitated || rule.AllowIncapacitated;
