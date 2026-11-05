@@ -55,7 +55,7 @@ public sealed class BrutalityMod : IMod
         }
         var builds = new ConditionalWeakTable<SystemBuildContext, BrutalityGameplaySystem>();
         BrutalityGameplaySystem Gameplay(SystemBuildContext build) => builds.GetValue(build, b => new BrutalityGameplaySystem(b.Find<CombatSystem>(),
-            context.Population.Bodies.Constants, context.Population.BodyOptions, context.RngPurpose));
+            context.Population.Bodies.Constants, context.Population.BodyOptions, context.RngPurpose, chestHoleRule: () => menu.ChestHoleRule));
         context.AddSystem("gore", Gameplay, SystemAnchor.AfterPart(StandardParts.Combat));
         if (resources is not null)
             context.AddSystem("fragments", build => new FragmentPhysicsSystem(
@@ -75,6 +75,21 @@ sealed class BrutalityMenuSettings
 {
     [Setting("Brutality gore (restart required)", Hint = "Enables Brutality progression, advanced wounds and extra combat effects. Restart to apply.")]
     public bool GoreEnabled { get; set; }
+
+    [Setting("Martial arts punch-through", Hint = "A bare-handed blow to the chest or stomach with enough damage leaves a hole through the body.")]
+    public bool ChestHoles { get; set; } = true;
+
+    [Setting("Punch-through only on killing blows", Hint = "On: only a punch that kills opens the hole (fights usually end in a knockout first).")]
+    public bool ChestHoleLethalOnly { get; set; }
+
+    [Setting("Punch-through damage (% of part health)",
+        Hint = "Damage after armour needed, as a share of the struck chest's or stomach's maximum health.", Min = 10, Max = 150, Step = 5)]
+    public int ChestHoleDamagePercent { get; set; } = 50;
+
+    [Setting("Punch-through size (%)", Hint = "Scales the holes of new punches; holes already made keep their size.", Min = 50, Max = 150, Step = 5)]
+    public int ChestHoleSizePercent { get; set; } = 100;
+
+    public ChestHoleRule ChestHoleRule => new(ChestHoles, ChestHoleLethalOnly, ChestHoleDamagePercent / 100f, ChestHoleSizePercent / 100f);
 }
 
 public sealed record BrutalitySettings

@@ -34,6 +34,24 @@ both repeated one-thread runs and 1-versus-4-thread comparison; rendering remain
 Legacy hit sprites follow native weather/placer ownership; a DLL-only effect container does not
 enable them in otherwise empty scenes. Liquid and robot effects use their own bounded lifecycle.
 
+**Punch-through.** A bare-handed (Martial Arts, weapon category 5) crush blow to the chest or the
+stomach part that deals, after armour, at least a set share of that part's maximum health opens a
+hole through the torso (`ChestHolePolicy`). Mod settings: on/off, killing blows only (default off:
+**Observed** in sandbox fights, punches knock out before they kill), the share (default 50%) and a
+size scale for new holes (default 100%: a radius of 7.5-13% of the spine, more for harder blows).
+Robots, animals and cleaved torsos get none; a later cleave hides it. The blow's roll varies the
+height, side offset, size, an area-kept oval (aspect 0.8-1.25, any tilt), the edge's tear and a
+wider exit (up to 1.28x); oversized shapes shrink to stay inside the torso. The hole is visual
+only, saved in the sidecar and hashed only when present. All three shader passes discard skin,
+worn cloth (wider) and anatomy inside the ragged bind-space ellipse: an extra prefix matrix before
+the limb planes, flagged by bit 0 of header word 30. A generated tube (tangent w 36, colour alpha
+the region) lines it from the front to the back skin with that skin's weights; its shader paints
+muscle at the openings, rib chips and lung behind them in the chest, coiled gut and fat in the
+stomach. The impact adds a blood burst and meat and bone pieces out of the exit. Portraits use the
+host shader and show no hole. **Observed** (2026-11-05, Windows Vulkan sandbox previews of a Hungry
+bandit and a Starving Vagrant): the background shows through from front and back, cloth edges
+fray, and the wall shows at oblique angles. A real martial-arts hit is not yet checked in play.
+
 Surface rendering uses the ported colour, depth and motion shaders with projected wound masks,
 raw anatomy layer channels and the original 36-matrix prefix layout. It includes layered cut
 sections, fitted brain geometry/sections, cavity backing and mouth/tongue fitting and filtering.
@@ -58,7 +76,8 @@ fragments still need separate geometry memory; an unlimited crowd is not a bound
 
 Tests cover loader trust/disable/relocation, progression and actual-contact causality, native
 capture/claim/return, cut policies, independent carry/loot, pending saves, anatomy bounds and
-fitting, source shader compilation, palette packing, LOD and resource retirement. Isolated native
+fitting, source shader compilation, palette packing, LOD and resource retirement, and the chest
+hole's rule, resolved-hit path, save, shader payload and lining. Isolated native
 Windows previews have shown DLL discovery, body separation and projected anatomy exposure;
 these checks do not establish visual parity across every race, outfit, cut or crowded scene.
 
@@ -74,7 +93,8 @@ Remaining limits:
 - The mod effect pass lacks native soft-depth, fog and near/far particle partition integration.
 
 Developer previews require both `developerTools: true` and `MEITOU_BRUTALITY_PREVIEW` (torso,
-vertical, head:0..2, limb:0..3, severe:0..2; optional :carry or :carry-negative and :putdown=180).
+vertical, head:0..2, limb:0..3, severe:0..2, chest:0..5 and stomach:0..5 where 3..5 kill the target;
+optional :carry or :carry-negative and :putdown=180).
 `head:1:native` runs the pinned lethal-head-hit recipe at tick 120; `:all` targets the sandbox crowd.
 `:after=120` delays a preview until that tick to measure cuts after healthy asset preparation.
 `MEITOU_BRUTALITY_FOCUS=1` centres isolated sandbox captures. Bowel trace/hide and anatomy-hide

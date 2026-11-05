@@ -13,7 +13,8 @@ namespace Meitou.Brutality.Rendering;
 /// <summary>Standing wounded actors use the same immutable geometry path without allocating a fragment physics owner.</summary>
 internal static class BodyWoundRenderBridge
 {
-    sealed record Variant(CharacterAppearance Appearance, ulong Stamp, SevereHeadWoundState Severe, RuntimeCharacterGeometry Geometry, bool DeepAbdomen);
+    sealed record Variant(CharacterAppearance Appearance, ulong Stamp, SevereHeadWoundState Severe, RuntimeCharacterGeometry Geometry, bool DeepAbdomen,
+        ChestHoleState? Hole = null);
     sealed class Shown
     {
         public readonly Dictionary<CharacterId, Variant> Geometry = [];
@@ -78,9 +79,10 @@ internal static class BodyWoundRenderBridge
             ulong stamp = state.Wounds.StateKey();
             var severe = state.SevereHead with { HeavyHits = 0 };
             bool deepAbdomen = state.Wounds.BellyHits >= 10;
+            var hole = CharacterGeometryAdapter.ShownHole(state);
             shown.Geometry.TryGetValue(state.Character, out var previous);
             if (previous is { } ready && ReferenceEquals(ready.Appearance, instance.Appearance)
-                && ready.Stamp == stamp && ready.Severe == severe && !ready.Geometry.IsRetired)
+                && ready.Stamp == stamp && ready.Severe == severe && ready.Hole == hole && !ready.Geometry.IsRetired)
             { list.Items[i] = instance with { Geometry = ready.Geometry }; continue; }
 
             CharacterGeometryResult? generated = null;
@@ -115,7 +117,7 @@ internal static class BodyWoundRenderBridge
             shown.Queue.Remove(state.Character);
             RenderBridge.Track(session.World, generated.Retained);
             if (previous is not null && !ReferenceEquals(previous.Geometry, generated.Retained)) previous.Geometry.Retire();
-            shown.Geometry[state.Character] = new(instance.Appearance, stamp, severe, generated.Retained, deepAbdomen);
+            shown.Geometry[state.Character] = new(instance.Appearance, stamp, severe, generated.Retained, deepAbdomen, hole);
             list.Items[i] = instance with { Geometry = generated.Retained };
         }
         shown.Queue.StartNext();

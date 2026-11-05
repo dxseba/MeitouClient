@@ -13,6 +13,7 @@ public static class GoreRandom
     public static readonly RngPurpose HeadCutVisualPurpose = Purpose("meitou.brutality.head-cut");
     public static readonly RngPurpose TorsoVisualPurpose = Purpose("meitou.brutality.torso-cut");
     public static readonly RngPurpose HeadWoundVisualPurpose = Purpose("meitou.brutality.head-wound");
+    public static readonly RngPurpose ChestHoleVisualPurpose = Purpose("meitou.brutality.chest-hole");
     static RngPurpose Purpose(string name) => (RngPurpose)(uint)(Rng.StableHash(name) | 0x80000000UL);
 }
 
@@ -41,7 +42,7 @@ public sealed record GoreHitBridge
 
 [Flags]
 public enum GoreIntegrationGap { None = 0, PreHitContext = 1, HeadMedicalGate = 2, CounterpartDamage = 4 }
-public enum GoreCutKind { SevereHead, Head, Torso, Limb, PairedLimbAttempt }
+public enum GoreCutKind { SevereHead, Head, Torso, Limb, PairedLimbAttempt, ChestHole }
 
 /// <summary>A mod-owned immutable request. PairedLimbAttempt requires the native damage bridge to verify and commit the second loss; it is not itself an amputation.</summary>
 public readonly record struct GoreCutRequest(long Sequence, long Tick, CharacterId Victim, GoreCutKind Kind,
@@ -49,12 +50,14 @@ public readonly record struct GoreCutRequest(long Sequence, long Tick, Character
     LimbCutState? Limb = null, int LimbSlot = -1, GoreHitBridge? Bridge = null)
 {
     public CombatHit? Hit { get; init; }
+    public ChestHoleState? ChestHole { get; init; }
 }
 
 public sealed record BrutalityActorView(CharacterId Character, float Experience, float Level, float Progress,
     SevereHeadWoundState SevereHead, HeadCutState? Head, TorsoBisectionState? Torso, IReadOnlyList<LimbCutState> Limbs)
 {
     public BodyWoundState Wounds { get; init; } = BodyWoundState.Empty;
+    public ChestHoleState? ChestHole { get; init; }
 }
 
 /// <summary>Persistence uses an externally resolved durable character key, never a runtime slot/generation.</summary>
@@ -62,4 +65,5 @@ public sealed record BrutalityDurableState(string Key, float Experience, SevereH
     HeadCutState? Head, TorsoBisectionState? Torso, LimbCutState[] Limbs)
 {
     public BodyWoundState Wounds { get; init; } = BodyWoundState.Empty;
+    public ChestHoleState? ChestHole { get; init; }
 }

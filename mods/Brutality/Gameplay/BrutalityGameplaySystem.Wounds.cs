@@ -18,7 +18,7 @@ public sealed partial class BrutalityGameplaySystem
         return null;
     }
     static BrutalityDurableState Durable(string key, Actor actor) => new(key, actor.Progress.Experience, actor.Severe, actor.Head, actor.Torso, actor.Limbs.ToArray())
-    { Wounds = actor.Wounds.Snapshot() };
+    { Wounds = actor.Wounds.Snapshot(), ChestHole = actor.ChestHole };
     void HealBodyWounds(World world)
     {
         if (world.Tick / 3000 == woundHealStep) return;
@@ -43,7 +43,7 @@ public sealed partial class BrutalityGameplaySystem
     }
     void PublishBodyWounds(World world)
     {
-        var states = ActorViews.Where(view => view.Wounds.HasAny || view.Wounds.BellyHits > 0
+        var states = ActorViews.Where(view => view.Wounds.HasAny || view.Wounds.BellyHits > 0 || view.ChestHole is not null
             || view.SevereHead.Kind != SevereHeadWoundKind.None || view.Head is not null || view.Torso is not null || view.Limbs.Count > 0)
             .ToDictionary(view => view.Character);
         if (states.Count == 0 && woundHistory.Count == 0) return;

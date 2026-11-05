@@ -17,24 +17,33 @@ namespace Meitou.Brutality.Ui
                 return $"Brutality level {level:0.##} queued for {debug.Selected.Count} character(s).";
             }, hasField: true);
             if (!developerTools) return;
-            context.AddDebugCommand("Gore preview (torso, vertical, head, limb, severe)", debug =>
+            context.AddDebugCommand("Gore preview (torso, vertical, head, limb, severe, chest, stomach)", debug =>
             {
                 if (debug.Selected.Count == 0) return "Select a character.";
                 var fields = debug.Field.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
                 var kind = fields.FirstOrDefault()?.ToLowerInvariant() switch
                 {
                     "torso" => GorePreviewKind.Torso, "vertical" => GorePreviewKind.VerticalTorso, "head" => GorePreviewKind.Head,
-                    "limb" => GorePreviewKind.Limb, "severe" => GorePreviewKind.SevereHead, _ => (GorePreviewKind?)null,
+                    "limb" => GorePreviewKind.Limb, "severe" => GorePreviewKind.SevereHead, "chest" => GorePreviewKind.ChestHole,
+                    "stomach" => GorePreviewKind.StomachHole, _ => (GorePreviewKind?)null,
                 };
                 if (kind is null || fields.Length > 2 || fields.Length == 2 && !int.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
-                    return "Use torso, vertical, head 0-2, limb 0-3, or severe 0-5.";
+                    return "Use torso, vertical, head 0-2, limb 0-3, severe 0-5, chest 0-5 or stomach 0-5 (3-5 kill the target).";
                 int variant = fields.Length == 2 ? int.Parse(fields[1], CultureInfo.InvariantCulture) : 0;
-                if (variant < 0 || variant > (kind == GorePreviewKind.Head ? 2 : kind == GorePreviewKind.Limb ? 3 : kind == GorePreviewKind.SevereHead ? 5 : 0))
+                if (variant < 0 || variant > MaxVariant(kind.Value))
                     return "The preview variant is outside its range.";
                 debug.Enqueue(new PreviewBrutalityCut(debug.Selected.ToArray(), kind.Value, variant) { Tick = debug.Tick });
                 return "Permanent gore preview queued for the selection.";
             }, hasField: true);
         }
+
+        static int MaxVariant(GorePreviewKind kind) => kind switch
+        {
+            GorePreviewKind.Head => 2,
+            GorePreviewKind.Limb => 3,
+            GorePreviewKind.SevereHead or GorePreviewKind.ChestHole or GorePreviewKind.StomachHole => 5,
+            _ => 0,
+        };
     }
 }
 

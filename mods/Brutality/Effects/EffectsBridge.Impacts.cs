@@ -176,32 +176,56 @@ internal static partial class EffectsBridge
         foreach (bool flesh in new[] { false, true })
         {
             var asset = flesh ? meat : bone;
-            if (asset.Extent is not { } size) continue;
-            float scale = flesh ? .16f : .035f;
-            var piece = Activator.CreateInstance(pieceType, nonPublic: true)!;
-            Set("Mesh", asset.Mesh); Set("Scale", scale); Set("Extent", size * scale); Set("Floor", float.NaN);
-            Set("Born", impact.Hit.Tick); Set("Flesh", flesh); Set("Colour", 0u);
-            Set("Bloody", true); Set("BloodColour", impact.BloodColour);
-            Set("Position", impact.Hit.VictimPosition + new Vector3(0, 6 + random.NextSingle() * 8, 0));
-            Set("Velocity", new Vector3(along.X * 18 + random.NextSingle() * 12 - 6, 18 + random.NextSingle() * 16, along.Y * 18 + random.NextSingle() * 12 - 6));
-            Set("Rotation", Quaternion.Identity); Set("Spin", new Vector3(5, 3, 7));
-            Vector3? recolour = impact.BloodColour == 0x800000 ? null
-                : new Vector3(impact.BloodColour >> 16 & 255, impact.BloodColour >> 8 & 255, impact.BloodColour & 255) / 128;
-            Set("Recolour", recolour!);
-            if (asset.Diffuse is { } diffuse)
-            {
-                var blood = impact.BloodColour;
-                var colour = new Vector3(blood >> 16 & 255, blood >> 8 & 255, blood & 255) / 255;
-                splinterStyles.Add(piece, new(new LimbLook(diffuse, null, Vector3.Zero, colour), asset.Centre));
-            }
-            pieces.Add(piece);
-            void Set(string name, object value)
-            {
-                if (!debrisFields.TryGetValue((pieceType, name), out var field)) debrisFields[(pieceType, name)] = field = AccessTools.Field(pieceType, name);
-                field?.SetValue(piece, value);
-            }
+            if (asset.Extent is null) continue;
+            var at = impact.Hit.VictimPosition + new Vector3(0, 6 + random.NextSingle() * 8, 0);
+            var velocity = new Vector3(along.X * 18 + random.NextSingle() * 12 - 6, 18 + random.NextSingle() * 16, along.Y * 18 + random.NextSingle() * 12 - 6);
+            AddSplinter(pieces, pieceType, impact, asset, flesh, flesh ? .16f : .035f, at, velocity);
         }
+        if ((impact.Effects & ImpactEffectKind.OrganicExitSpray) != 0) ExitSplinters(pieces, pieceType, impact, bone, meat, along, random);
         while (pieces.Count > 400) pieces.RemoveAt(0);
+    }
+
+    /// <summary>A punch-through throws torn meat and rib splinters out of its exit, along the blow.</summary>
+    static void ExitSplinters(IList pieces, Type pieceType, in ImpactEffectEvent impact, SplinterAsset bone, SplinterAsset meat, Vector2 along,
+        Random random)
+    {
+        var exit = impact.Hit.VictimPosition + new Vector3(along.X * 1.6f, impact.FallbackHeight - .5f, along.Y * 1.6f);
+        for (int i = 0; i < 5; i++)
+        {
+            bool flesh = i < 3;
+            var asset = flesh ? meat : bone;
+            if (asset.Extent is null) continue;
+            float speed = 22 + random.NextSingle() * 14;
+            var velocity = new Vector3(along.X * speed + random.NextSingle() * 8 - 4, 6 + random.NextSingle() * 12, along.Y * speed + random.NextSingle() * 8 - 4);
+            AddSplinter(pieces, pieceType, impact, asset, flesh, flesh ? .1f + random.NextSingle() * .08f : .03f, exit, velocity);
+        }
+    }
+
+    static void AddSplinter(IList pieces, Type pieceType, in ImpactEffectEvent impact, SplinterAsset asset, bool flesh, float scale,
+        Vector3 at, Vector3 velocity)
+    {
+        var piece = Activator.CreateInstance(pieceType, nonPublic: true)!;
+        Set("Mesh", asset.Mesh); Set("Scale", scale); Set("Extent", asset.Extent!.Value * scale); Set("Floor", float.NaN);
+        Set("Born", impact.Hit.Tick); Set("Flesh", flesh); Set("Colour", 0u);
+        Set("Bloody", true); Set("BloodColour", impact.BloodColour);
+        Set("Position", at);
+        Set("Velocity", velocity);
+        Set("Rotation", Quaternion.Identity); Set("Spin", new Vector3(5, 3, 7));
+        Vector3? recolour = impact.BloodColour == 0x800000 ? null
+            : new Vector3(impact.BloodColour >> 16 & 255, impact.BloodColour >> 8 & 255, impact.BloodColour & 255) / 128;
+        Set("Recolour", recolour!);
+        if (asset.Diffuse is { } diffuse)
+        {
+            var blood = impact.BloodColour;
+            var colour = new Vector3(blood >> 16 & 255, blood >> 8 & 255, blood & 255) / 255;
+            splinterStyles.Add(piece, new(new LimbLook(diffuse, null, Vector3.Zero, colour), asset.Centre));
+        }
+        pieces.Add(piece);
+        void Set(string name, object value)
+        {
+            if (!debrisFields.TryGetValue((pieceType, name), out var field)) debrisFields[(pieceType, name)] = field = AccessTools.Field(pieceType, name);
+            field?.SetValue(piece, value);
+        }
     }
 
     // Reuse the native blood-capable debris material without introducing gore fields into the engine.

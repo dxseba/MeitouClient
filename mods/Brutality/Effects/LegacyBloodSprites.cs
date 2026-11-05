@@ -70,11 +70,28 @@ internal static class LegacyBloodSprites
         {
             var spray = Vector3.Normalize(new Vector3(along.X + random.NextSingle() - .5f,
                 .3f + random.NextSingle() * .6f, along.Y + random.NextSingle() - .5f));
-            var axis = Vector3.Cross(Vector3.UnitZ, spray); float length = axis.Length();
-            var rotation = length < 1e-5f ? Vector3.Dot(Vector3.UnitZ, spray) > 0 ? Quaternion.Identity
-                : Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI)
-                : Quaternion.CreateFromAxisAngle(axis / length, MathF.Atan2(length, Vector3.Dot(Vector3.UnitZ, spray)));
-            emit(new("HackBlood-system", from, rotation, .1f + force * .2f, 1, 1.8f, recolour));
+            emit(new("HackBlood-system", from, Facing(spray), .1f + force * .2f, 1, 1.8f, recolour));
         }
+        if ((impact.Effects & ImpactEffectKind.OrganicExitSpray) != 0) EmitExit(impact, along, recolour, random, emit);
+    }
+
+    /// <summary>A punch-through: a heavier burst out of the back, along the blow.</summary>
+    static void EmitExit(in ImpactEffectEvent impact, Vector2 along, Vector3? recolour, Random random, Action<LegacyBloodBurst> emit)
+    {
+        var exit = impact.Hit.VictimPosition + new Vector3(along.X * 1.6f, impact.FallbackHeight - .5f, along.Y * 1.6f);
+        for (int i = 0; i < 5; i++)
+        {
+            var spray = Vector3.Normalize(new Vector3(along.X + (random.NextSingle() - .5f) * .5f,
+                .1f + random.NextSingle() * .35f, along.Y + (random.NextSingle() - .5f) * .5f));
+            emit(new("HackBlood-system", exit, Facing(spray), .35f, 1.4f, 2.6f, recolour));
+        }
+    }
+
+    static Quaternion Facing(Vector3 spray)
+    {
+        var axis = Vector3.Cross(Vector3.UnitZ, spray);
+        float length = axis.Length();
+        if (length >= 1e-5f) return Quaternion.CreateFromAxisAngle(axis / length, MathF.Atan2(length, Vector3.Dot(Vector3.UnitZ, spray)));
+        return Vector3.Dot(Vector3.UnitZ, spray) > 0 ? Quaternion.Identity : Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
     }
 }

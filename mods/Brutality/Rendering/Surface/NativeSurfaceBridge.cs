@@ -25,6 +25,8 @@ internal static partial class NativeSurfaceBridge
     static readonly List<long> stalePayloads = [];
     static readonly int[] pieceKeys = [1, 2, 3, 10, 11, 12, 13];
     internal const int BloodColourWord = 29;
+    /// <summary>header[3][2]: bit 0 marks the chest hole matrix in front of the limb planes.</summary>
+    internal const int ChestHoleWord = 30;
 
     public static void Install(ModContext context, RenderResources source)
     {
@@ -65,7 +67,9 @@ internal static partial class NativeSurfaceBridge
                 if(RenderBridge.FragmentDrawKey(session.World,owner,piece) is { } shown) owners[shown]=(state,piece);
         }
         used.Clear();
-        Span<Matrix4x4> prefix=stackalloc Matrix4x4[NativeSurfaceShaders.WoundPaletteBones];
+        // The chest hole's matrix comes first; the legacy 36-matrix layout follows unchanged.
+        Span<Matrix4x4> payload=stackalloc Matrix4x4[NativeSurfaceShaders.HolePaletteBones];
+        var prefix=payload[1..];
         for(int i=0;i<list.Items.Count;i++)
         {
             var item=list.Items[i];
@@ -92,10 +96,11 @@ internal static partial class NativeSurfaceBridge
                 words[3*16+8]|=packedRig.HeadLow;
                 words[3*16+9]|=packedRig.HeadHigh;
             }
+            payload[0]=ChestHole(setup.Rig,owner.State,owner.Piece,words);
             if(!payloads.TryGetValue(item.Key,out var cached)
-                || !MemoryMarshal.AsBytes(prefix).SequenceEqual(MemoryMarshal.AsBytes(cached.Prefix.AsSpan())))
+                || !MemoryMarshal.AsBytes(payload).SequenceEqual(MemoryMarshal.AsBytes(cached.Prefix.AsSpan())))
             {
-                var saved=prefix.ToArray();
+                var saved=payload.ToArray();
                 cached=(saved,new RuntimeCharacterShaderData(saved));
                 payloads[item.Key]=cached;
             }
@@ -171,6 +176,15 @@ internal static partial class NativeSurfaceBridge
             prefix[3]=TorsoFrame(torso.Plane,piece==1 ? -1 : 1,torso.FullBody ? 1 : 0);
         if(spheres is not null) spheres.AsSpan(0,Math.Min(64,spheres.Length)).CopyTo(MemoryMarshal.Cast<Matrix4x4,Vector4>(prefix.Slice(4,16)));
         if(cuts is not null) cuts.AsSpan(0,Math.Min(64,cuts.Length)).CopyTo(MemoryMarshal.Cast<Matrix4x4,Vector4>(prefix.Slice(20,16)));
+    }
+
+    /// <summary>The hole's prefix matrix, marked in the header, for the retained body only: a cleaved torso keeps no hole.</summary>
+    internal static Matrix4x4 ChestHole(SkeletonRig rig,BrutalityActorView state,int piece,Span<uint> headerWords)
+    {
+        if(piece!=0 || CharacterGeometryAdapter.ShownHole(state) is not { } hole) return default;
+        if(ChestHoleFrame.Resolve(rig,hole) is not { } frame) return default;
+        headerWords[ChestHoleWord]|=NativeSurfaceShaders.ChestHoleHeaderBit;
+        return frame.Packed;
     }
 
     internal static void SetBloodColour(Span<Matrix4x4> prefix, uint colour) =>

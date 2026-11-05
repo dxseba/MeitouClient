@@ -138,6 +138,7 @@ public sealed partial class BrutalityGameplaySystem : IModSaveData
         {
             actor.Progress = new(baseline.Experience); actor.Severe = baseline.SevereHead; actor.Head = baseline.Head; actor.Torso = baseline.Torso;
             actor.Limbs = Array.AsReadOnly(baseline.Limbs.ToArray()); actor.Wounds = WoundBody.From(baseline.Wounds);
+            actor.ChestHole = baseline.ChestHole;
         }
         legacyBaselines.Clear(); legacyKeys.Clear(); legacySeen.Clear();
         unresolved.Clear();

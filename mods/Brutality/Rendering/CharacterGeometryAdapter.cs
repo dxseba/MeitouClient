@@ -55,7 +55,8 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         public readonly Dictionary<StateKey, CharacterGeometryResult> Results = [];
     }
     internal readonly record struct StateKey(OgreMesh Body, SkeletonRig Rig, TorsoBisectionState? Torso, HeadCutState? Head,
-        LimbCutState? LeftArm, LimbCutState? RightArm, LimbCutState? LeftLeg, LimbCutState? RightLeg, SevereHeadWoundState Severe, ulong Wounds, CharacterGeometryComponents Components);
+        LimbCutState? LeftArm, LimbCutState? RightArm, LimbCutState? LeftLeg, LimbCutState? RightLeg, SevereHeadWoundState Severe, ulong Wounds,
+        CharacterGeometryComponents Components, ChestHoleState? Hole = null);
 
     internal readonly record struct BuildKey(CharacterAppearance Appearance, StateKey State);
     internal sealed record BuildInput(BuildKey Key, CharacterAppearance Appearance, BrutalityActorView State,
@@ -180,7 +181,32 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         var limbs = new LimbCutState?[4];
         foreach (var cut in state.Limbs) if (cut.IsValid) limbs[cut.LimbSlot] ??= cut;
         return new(body, rig, state.Torso is { IsValid: true } torso ? torso : null,
-            state.Head is { IsValid: true } head ? head : null, limbs[0], limbs[1], limbs[2], limbs[3], state.SevereHead with { HeavyHits = 0 }, (state.Wounds.BellyHits >= 10 ? 1UL : 0UL), components);
+            state.Head is { IsValid: true } head ? head : null, limbs[0], limbs[1], limbs[2], limbs[3], state.SevereHead with { HeavyHits = 0 },
+            (state.Wounds.BellyHits >= 10 ? 1UL : 0UL), components, ShownHole(state));
+    }
+
+    /// <summary>A cleaved torso keeps no hole: the cleave is the stronger presentation, and its halves carry no lining.</summary>
+    internal static ChestHoleState? ShownHole(BrutalityActorView state) =>
+        state.Torso is null && state.ChestHole is { IsValid: true } hole ? hole : null;
+
+    static OgreMesh? ChestHoleLining(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body, in StateKey state, uint blood)
+    {
+        if (state.Hole is not { } hole || ChestHoleFrame.Resolve(rig, hole) is not { } frame) return null;
+        return NativeGeometry.ChestHoleLining(appearance, rig, body, frame, blood);
+    }
+
+    /// <summary>The tunnel's wall: shown wherever the hole is (the shader never masks it), inside the body so it casts no shadow.</summary>
+    static RuntimeCharacterPart LiningPart(CharacterAppearance appearance, OgreMesh lining)
+    {
+        var part = new CharacterPart
+        {
+            Record = appearance.Race, Mesh = "brutality-chest-hole", Field = "chest-hole", Mode = AttachMode.SharedSkeleton,
+        };
+        return new(part, lining, true)
+        {
+            CastsShadows = false, DrawFlags = NativeSurfaceShaders.WoundFlag | NativeSurfaceShaders.AnatomyFlag,
+            PreserveRawVertexChannels = true, ShowInPortrait = false, MinimumScreenPixels = 24, DoubleSided = true,
+        };
     }
 
     public CharacterGeometryResult Build(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,
@@ -250,6 +276,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         uint blood = unchecked((uint)appearance.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
         bool mechanical = appearance.Race.GetBool("is robot");
         var flesh = mechanical ? new Vector4(.28f, .31f, .32f, 1) : AnatomyGeometry.Recolour(new(.37f, .045f, .045f, 1), blood);
+        var lining = ChestHoleLining(appearance, rig, body, state, blood);
         bool shaved = appearance.Character?.GetBool("shaved") == true;
         var partSources = new Dictionary<string, OgreMesh?>(StringComparer.OrdinalIgnoreCase);
         OgreMesh? Source(string path)
@@ -309,6 +336,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
                 AddInside(NativeGeometry.SectionCaps(appearance, rig, body, rules, physicalComponents, blood, mechanical, pieceInside), mechanical ? "mechanical-section" : "wound-section");
             // Keep every fitted layer. The original shader masks exposure per pixel and shares the same planes in all passes.
             if (pieceInside is not null && !AnatomyExposure.Hidden) AddInside(pieceInside, "anatomy");
+            if (stableKey == 0 && lining is not null) parts.Add(LiningPart(appearance, lining));
             if (nativeRelief is not null && (!detachedHead || headOnly)) AddInside(nativeRelief, "head-relief");
             uint bodyFlags = NativeSurfaceShaders.WoundFlag | (surface.HeadReliefReady ? NativeSurfaceShaders.HeadReliefFlag : 0);
             return (new(rules.Count == 0 ? null : cutBody.Skin, parts, NativeSurfaceShaders.CreateSet(), bodyFlags: bodyFlags, bodyMaterialFlags: mechanical ? NativeSurfaceShaders.Mechanical : 0, bodyDoubleSided: true), cutBody);

@@ -21,5 +21,6 @@ public static class BrutalityStateCodec
     public static bool Valid(BrutalityDurableState? actor) => actor is { Key.Length: > 0, Limbs: not null }
         && actor.Key.Length <= 256 && float.IsFinite(actor.Experience) && actor.Experience is >= 0 and <= BrutalityProgress.MaximumExperience
         && actor.SevereHead.IsValid && (actor.Head is null || actor.Head.Value.IsValid) && (actor.Torso is null || actor.Torso.Value.IsValid)
+        && (actor.ChestHole is null || actor.ChestHole.Value.IsValid)
         && actor.Wounds is { IsValid: true } && actor.Limbs.Length <= 4 && actor.Limbs.All(c => c.IsValid) && actor.Limbs.Select(c => c.LimbSlot).Distinct().Count() == actor.Limbs.Length;
 }

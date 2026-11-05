@@ -8,7 +8,7 @@ using Meitou.Simulation.Combat;
 namespace Meitou.Brutality;
 
 [Flags]
-public enum ImpactEffectKind { None = 0, OrganicSpray = 1, OrganicSplinters = 2, RobotShortCircuit = 4, RobotScrap = 8 }
+public enum ImpactEffectKind { None = 0, OrganicSpray = 1, OrganicSplinters = 2, RobotShortCircuit = 4, RobotScrap = 8, OrganicExitSpray = 16 }
 public readonly record struct ImpactEffectEvent(long Sequence, CombatHit Hit, CombatWoundMechanism Mechanism, bool Execution, bool Robot,
     uint BloodColour, string ImpactBone, float FallbackHeight, ulong Seed, ImpactEffectKind Effects)
 {
@@ -61,14 +61,19 @@ public sealed class ImpactEffects : ICombatHitObserver
     }
     public void SlowWorld(World world)
     {
-        var cuts = BrutalityRuntime.For(world)?.CutRequests.Where(cut => cut.Kind != GoreCutKind.PairedLimbAttempt && cut.Hit is not null)
-            .Select(cut => GoreHitKey.From(cut.Hit!.Value)).ToHashSet() ?? [];
+        var requests = BrutalityRuntime.For(world)?.CutRequests ?? [];
+        var cuts = requests.Where(cut => cut.Kind != GoreCutKind.PairedLimbAttempt && cut.Hit is not null)
+            .Select(cut => GoreHitKey.From(cut.Hit!.Value)).ToHashSet();
+        var holes = requests.Where(cut => cut.Kind == GoreCutKind.ChestHole && cut.Hit is not null)
+            .Select(cut => GoreHitKey.From(cut.Hit!.Value)).ToHashSet();
         while (pending.TryDequeue(out var work))
         {
             var hit = work.Hit; var contact = work.Contact;
             if (contact.Robot && cuts.Contains(GoreHitKey.From(hit))) continue; // Robot rupture FX own the same electrical/scrap channels; organic Hit spray and splinters accompany rupture in the pin.
             ImpactEffectKind effect = contact.Robot ? ImpactEffectKind.None : ImpactEffectKind.OrganicSpray;
             if (!contact.Robot && hit.Damage.Cut + hit.Damage.Pierce >= 15) effect |= ImpactEffectKind.OrganicSplinters;
+            if (!contact.Robot && holes.Contains(GoreHitKey.From(hit)))
+                effect |= ImpactEffectKind.OrganicExitSpray | ImpactEffectKind.OrganicSplinters;
             if (contact.Robot && hit.Source == CombatHitSource.Melee && float.IsFinite(hit.Damage.Cut) && hit.Damage.Cut > 0
                 && (contact.Mechanism == CombatWoundMechanism.Slash || contact.Mechanism == CombatWoundMechanism.Unspecified && hit.CutDirection != 4))
                 effect |= ImpactEffectKind.RobotShortCircuit;

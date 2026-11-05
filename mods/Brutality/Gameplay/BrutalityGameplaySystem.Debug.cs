@@ -6,7 +6,7 @@ using Meitou.Simulation.Carrying;
 
 namespace Meitou.Brutality;
 
-public enum GorePreviewKind { Torso, VerticalTorso, Head, Limb, SevereHead }
+public enum GorePreviewKind { Torso, VerticalTorso, Head, Limb, SevereHead, ChestHole, StomachHole }
 
 public sealed partial class BrutalityGameplaySystem
 {
@@ -24,7 +24,9 @@ public sealed partial class BrutalityGameplaySystem
             var context = new MedicalContext(constants, options, race);
             int chest = medical.Parts.ToList().FindIndex(p => p.Template.Type == BodyPartType.Torso);
             if (chest < 0) return false;
-            medical.ApplyHit(chest, new(10000, 0, 0), context);
+            // Punch-through holes 0-2 leave the target standing so the opening can be inspected; 3-5 are the same holes on a corpse.
+            bool hole = kind is GorePreviewKind.ChestHole or GorePreviewKind.StomachHole;
+            if (!hole || variant >= 3) medical.ApplyHit(chest, new(10000, 0, 0), context);
             switch (kind)
             {
                 case GorePreviewKind.Torso: actor.Torso = new(new Vector4(new Vector3(.17f, 1, .08f), -12.7f) / new Vector3(.17f, 1, .08f).Length()); break;
@@ -34,6 +36,8 @@ public sealed partial class BrutalityGameplaySystem
                     actor.Head = HeadCutPolicy.Preview((variant % 3) switch { 0 => "oblique", 1 => "split", _ => "neck" });
                     break;
                 case GorePreviewKind.Limb: actor.Limbs = Array.AsReadOnly(new[] { new LimbCutState(Math.Abs(variant) % 4, .5f, new(.25f, -.15f)) }); break;
+                case GorePreviewKind.ChestHole: actor.ChestHole = ChestHolePolicy.Preview(variant); break;
+                case GorePreviewKind.StomachHole: actor.ChestHole = ChestHolePolicy.Preview(variant, ChestHoleState.Abdomen); break;
             }
         }
         int part = medical.Parts.ToList().FindIndex(p => kind is GorePreviewKind.Head or GorePreviewKind.SevereHead
@@ -47,6 +51,7 @@ public sealed partial class BrutalityGameplaySystem
             case GorePreviewKind.Head: Add(hit, GoreCutKind.Head, head: actor.Head); break;
             case GorePreviewKind.Limb: Add(hit, GoreCutKind.Limb, limb: actor.Limbs[0], limbSlot: actor.Limbs[0].LimbSlot); break;
             case GorePreviewKind.SevereHead: Add(hit, GoreCutKind.SevereHead, severe: actor.Severe); break;
+            case GorePreviewKind.ChestHole or GorePreviewKind.StomachHole: Add(hit, GoreCutKind.ChestHole, chestHole: actor.ChestHole); break;
         }
         changed = true;
         return true;
@@ -87,7 +92,8 @@ internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
             var kind = fields.FirstOrDefault()?.ToLowerInvariant() switch
             {
                 "vertical" => GorePreviewKind.VerticalTorso, "head" => GorePreviewKind.Head, "limb" => GorePreviewKind.Limb,
-                "severe" => GorePreviewKind.SevereHead, _ => GorePreviewKind.Torso,
+                "severe" => GorePreviewKind.SevereHead, "chest" => GorePreviewKind.ChestHole, "stomach" => GorePreviewKind.StomachHole,
+                _ => GorePreviewKind.Torso,
             };
             int variant = fields.Length > 1 && int.TryParse(fields[1], out int number) ? number : 1;
             owner = world.Characters.IdOf(targets[1]);

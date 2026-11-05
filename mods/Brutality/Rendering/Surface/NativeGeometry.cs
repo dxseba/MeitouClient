@@ -130,6 +130,14 @@ internal static class NativeGeometry
         });
     }
 
+    /// <summary>The punched tunnel's wall for this look, or null when too few of its rays cross the torso skin.</summary>
+    public static OgreMesh? ChestHoleLining(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body, in ChestHoleFrame frame, uint blood)
+    {
+        var source = Original(body, rig);
+        var delta = source.Morphs?.Deltas(appearance.PoseWeights, appearance.Character?.GetBool("shaved") == true);
+        return ChestHoleGeometry.Lining(source.Body, delta, rig, frame, blood, body.SkeletonName);
+    }
+
     public static OgreMesh? SectionCaps(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,
         IReadOnlyList<CutHalfspace> rules, int[]? components, uint blood, bool mechanical, OgreMesh? anatomy = null)
     {

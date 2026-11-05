@@ -10,7 +10,8 @@ using Meitou.Simulation.Combat;
 namespace Meitou.Brutality;
 
 /// <summary>Owns progression and cut decisions; native characters and medical outcomes are changed only by the separate bridge.</summary>
-public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameConstants constants, BodyOptions options, RngPurpose purpose, int playerFaction = -1)
+public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameConstants constants, BodyOptions options, RngPurpose purpose,
+    int playerFaction = -1, Func<ChestHoleRule>? chestHoleRule = null)
     : ICombatHitObserver, IStateHashed
 {
     sealed class Actor
@@ -21,6 +22,7 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
         public TorsoBisectionState? Torso;
         public IReadOnlyList<LimbCutState> Limbs = [];
         public WoundBody Wounds = new();
+        public ChestHoleState? ChestHole;
     }
     readonly Dictionary<CharacterId, Actor> actors = [];
     readonly ConditionalWeakTable<CharacterCold, Actor> retained = new();
@@ -131,6 +133,7 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
     public void Schedule(World world)
     {
         BindWorld(world);
+        ReadChestHoleRule();
         // Match spawn-time NPC seeding before native combat XP changes the raw skills.
         for (int slot = 0; slot < world.Characters.HighWater; slot++)
             if (world.Characters.Next[slot].Alive) Find(world, world.Characters.IdOf(slot));
@@ -197,6 +200,7 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
                 TorsoBisectionPolicy.VisualSeedFor(world.Seed, hit.Victim, hit.Attacker, counter), travel, hit.VictimYaw);
             if (torso.IsValid) { actor.Torso = torso; Add(hit, GoreCutKind.Torso, torso: torso); }
         }
+        TryPunchThrough(world, work, actor, part, context, counter);
         TraceDecisions(world, work, input, requestBefore);
         if (!options.AdvancedRagdolls || !hit.VictimWasAlive) return;
         foreach (int limb in context.SeveredLimbSlots)
@@ -248,14 +252,15 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
     }
 
     void Add(in CombatHit hit, GoreCutKind kind, SevereHeadWoundState? severe = null, HeadCutState? head = null,
-        TorsoBisectionState? torso = null, LimbCutState? limb = null, int limbSlot = -1, GoreHitBridge? bridge = null)
+        TorsoBisectionState? torso = null, LimbCutState? limb = null, int limbSlot = -1, GoreHitBridge? bridge = null,
+        ChestHoleState? chestHole = null)
     {
-        history.Add(new(++nextRequest, hit.Tick, hit.Victim, kind, severe, head, torso, limb, limbSlot, bridge) { Hit = hit });
+        history.Add(new(++nextRequest, hit.Tick, hit.Victim, kind, severe, head, torso, limb, limbSlot, bridge) { Hit = hit, ChestHole = chestHole });
         if (history.Count > 512) history.RemoveAt(0);
         changed = true;
     }
     static BrutalityActorView View(CharacterId id, Actor actor) => new(id, actor.Progress.Experience, actor.Progress.Level, actor.Progress.Progress01,
-        actor.Severe, actor.Head, actor.Torso, actor.Limbs) { Wounds = actor.Wounds.Snapshot() };
+        actor.Severe, actor.Head, actor.Torso, actor.Limbs) { Wounds = actor.Wounds.Snapshot(), ChestHole = actor.ChestHole };
 
     public BrutalityDurableState? DurableFor(CharacterCold cold, string key) =>
         key.Length > 0 && retained.TryGetValue(cold, out var actor)
@@ -280,7 +285,9 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
             if (resolve(key) is { } id && Find(world, id) is { } actor)
             {
                 actor.Progress = new(saved.Experience); actor.Severe = saved.SevereHead; actor.Head = saved.Head; actor.Torso = saved.Torso;
-                actor.Limbs = Array.AsReadOnly(saved.Limbs.ToArray()); actor.Wounds = WoundBody.From(saved.Wounds); unresolved.Remove(key); changed = true; count++;
+                actor.Limbs = Array.AsReadOnly(saved.Limbs.ToArray()); actor.Wounds = WoundBody.From(saved.Wounds);
+                actor.ChestHole = saved.ChestHole is { IsValid: true } hole ? hole : null;
+                unresolved.Remove(key); changed = true; count++;
             }
         return count;
     }
@@ -291,10 +298,18 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
         hash.Add(woundHealStep);
         hash.Add((int)Gaps); hash.Add(actors.Count);
         foreach (var (id, actor) in actors.OrderBy(p => Rng.Key(p.Key)))
-        { hash.Add(id); HashActor(ref hash, actor.Progress.Experience, actor.Severe, actor.Head, actor.Torso, actor.Limbs, actor.Wounds.Snapshot()); }
+        {
+            hash.Add(id);
+            HashActor(ref hash, actor.Progress.Experience, actor.Severe, actor.Head, actor.Torso, actor.Limbs, actor.Wounds.Snapshot());
+            HashChestHole(ref hash, actor.ChestHole);
+        }
         hash.Add(unresolved.Count);
         foreach (var (key, actor) in unresolved.OrderBy(p => p.Key, StringComparer.Ordinal))
-        { hash.Add(Rng.StableHash(key)); HashActor(ref hash, actor.Experience, actor.SevereHead, actor.Head, actor.Torso, actor.Limbs, actor.Wounds); }
+        {
+            hash.Add(Rng.StableHash(key));
+            HashActor(ref hash, actor.Experience, actor.SevereHead, actor.Head, actor.Torso, actor.Limbs, actor.Wounds);
+            HashChestHole(ref hash, actor.ChestHole);
+        }
         hash.Add(pending.Count);
         foreach (var work in pending)
         {

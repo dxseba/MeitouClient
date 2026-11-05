@@ -23,6 +23,11 @@ internal static class NativeSurfaceShaders
     public const int WoundHeaderBones = 35;
     /// <summary>The limb-plane matrix precedes the legacy header, preserving every head/sphere/cut offset.</summary>
     public const int WoundPaletteBones = WoundHeaderBones + 1;
+    /// <summary>The chest hole's matrix precedes the limb planes; bit 0 of the header's word 30 (header[3][2]) marks it present.</summary>
+    public const int HolePaletteBones = WoundPaletteBones + 1;
+    public const uint ChestHoleHeaderBit = 1u;
+    /// <summary>The tangent w of the chest hole's lining (<see cref="ChestHoleGeometry"/>).</summary>
+    public const int ChestHoleLayer = 36;
     /// <summary>Instance flag of the anatomy part: it shows only within the wound spheres in entries 1 and 2 of the header (bind position, radius).</summary>
     public const uint AnatomyFlag = 1u << 30;
     public const uint HeadReliefFlag = 1u << 4;
@@ -157,6 +162,31 @@ internal static class NativeSurfaceShaders
         flat out uint vAnatomy; // 1 on the anatomy part, whose UVs are its nearest skin
         out float vClip;        // anatomy: above 0 outside every wound
         out float vBloodAmount; // the blood amount of the vertex's body part (the instance carries the parts': two 8-bit amounts in the w of each matrix row)
+        out float vHole;            // 1: a chest hole opens this torso surface (skin, worn cloth, anatomy; never the hole's own lining)
+        flat out vec4 vHoleCentre;  // the hole's bind centre and radius
+        flat out vec4 vHoleAxis;    // its bind axis and ragged seed
+        flat out vec4 vHoleShape;   // its aspect, tilt, tear and flare
+
+        // The chest hole: its matrix precedes the limb planes and bit 0 of header[3][2] marks it. Only torso-group vertices open.
+        void chestHoleVertex(bool lining)
+        {
+            vHole = 0.0;
+            vHoleCentre = vec4(0.0);
+            vHoleAxis = vec4(0.0);
+            vHoleShape = vec4(1.0, 0.0, 1.0, 1.0);
+            if ((aInstanceData.z & 0x8000000Cu) == 0u || lining) return;
+            mat4 header = skin.bones[aInstanceData.x - {{WoundHeaderBones}}u];
+            if ((floatBitsToUint(header[3][2]) & {{ChestHoleHeaderBit}}u) == 0u) return;
+            uint at = 0u;
+            for (uint k = 1u; k < 4u; k++) if (aWeights[k] > aWeights[at]) at = k;
+            uint bone = aBones[at];
+            uint group = (floatBitsToUint(header[1 + bone / 32u][bone / 8u % 4u]) >> (bone % 8u * 4u)) & 15u;
+            mat4 hole = skin.bones[aInstanceData.x - {{HolePaletteBones}}u];
+            vHole = group == 0u ? 1.0 : 0.0;
+            vHoleCentre = hole[0];
+            vHoleAxis = hole[1];
+            vHoleShape = hole[2];
+        }
 
         // The lower jaw: any real weight on its bone (lips and chin are shared with the head), or the face below the mouth's line. The throat under the chin stays with the neck.
         bool JawVertex(mat4 header)
@@ -234,6 +264,8 @@ internal static class NativeSurfaceShaders
             vBlood = vec4(aPosition.y, turn, turn > 0.0 ? turn - 0.5 : turn + 0.5, aNormal.z);
             bool wounded = (aInstanceData.z & 0x80000000u) != 0u, anatomy = (aInstanceData.z & 0x40000000u) != 0u;
             bool mechanicalInterior = anatomy && aTangent.w > 33.5 && aTangent.w < 34.5;
+            bool holeLining = anatomy && aTangent.w > {{F(ChestHoleLayer - .5f)}} && aTangent.w < {{F(ChestHoleLayer + .5f)}};
+            chestHoleVertex(holeLining);
             vHeadHair = aInstanceData.z & {{HairWoundFlag}}u;
             bool headHeader = wounded || vHeadHair != 0u;
             uint limbPlaneMask = headHeader ? floatBitsToUint(skin.bones[aInstanceData.x - {{WoundHeaderBones}}u][3][0]) : 0u;
@@ -316,6 +348,7 @@ internal static class NativeSurfaceShaders
                 }
             }
             else if (anatomy && ((aTangent.w > 31.5 && aTangent.w < 32.5) || (aTangent.w > 34.5 && aTangent.w < 35.5))) vAnatomy = 5u;   // generated torso or limb section
+            else if (holeLining) vAnatomy = 7u;   // the chest hole's own wall: always drawn, never masked
             else if (anatomy && aTangent.w > 7.5) vAnatomy = uint((aTangent.w - 8.0) * 0.5) == vHeadProfile && (mod(aTangent.w - 8.0, 2.0) < 0.5 ? vHeadOpen == 1u : vHeadOpen >= 2u) ? 4u : 3u;   // fitted scalp/bone relief, only its own wound variant
             else if (anatomy && aTangent.w > 5.5 && aTangent.w < 6.5) vAnatomy = vHeadOpen >= 2u || (vHeadRelief & 1u) != 0u ? 2u : 3u;   // brain exposed by a skull wound or full-body slice
             else if (anatomy && aTangent.w > 4.5 && aTangent.w < 5.5)
@@ -447,7 +480,9 @@ internal static class NativeSurfaceShaders
 
     static string F(float v) => v.ToString("0.0########", System.Globalization.CultureInfo.InvariantCulture);
 
-    public static string Fragment(bool lateDepth = false) => "#version 450\n" + RuntimeCharacterShaderSources.Prelude(PushMembers) + "#define LAMP_SKIN\n" + RuntimeCharacterShaderSources.AtmosphereFunctions + Structs + Lookup + NativeHeadSurface.ShaderField + NativeTorsoSurface.ShaderField + $$"""
+    public static string Fragment(bool lateDepth = false) => "#version 450\n" + RuntimeCharacterShaderSources.Prelude(PushMembers) + "#define LAMP_SKIN\n"
+        + RuntimeCharacterShaderSources.AtmosphereFunctions + Structs + Lookup + NativeHeadSurface.ShaderField + NativeTorsoSurface.ShaderField
+        + ChestHoleShader.Field + $$"""
         in vec3 vWorld;
         in float vCurvature;
         in vec3 vNormal;
@@ -476,6 +511,10 @@ internal static class NativeSurfaceShaders
         flat in uint vAnatomy;
         in float vClip;
         in float vBloodAmount;
+        in float vHole;
+        flat in vec4 vHoleCentre;
+        flat in vec4 vHoleAxis;
+        flat in vec4 vHoleShape;
         layout(std430, set = 0, binding = {{BonesBinding}}) readonly buffer CutMats { mat4 m[]; } cutMats;
 
         // The cuts as blade shapes in UV, smooth at any distance: x core, y open area, z ring, w depth.
@@ -628,6 +667,76 @@ internal static class NativeSurfaceShaders
                            mix(fullBodyFleshHash(cell + vec3(0,1,1)), fullBodyFleshHash(cell + vec3(1,1,1)), f.x), f.y), f.z);
         }
 
+        // Round a chest hole: plate keeps a torn dark edge, cloth a frayed blood-soaked fringe, skin a bruised ring and a wet lip.
+        void chestHoleRim(float edge, uint f, CharMaterial m, inout vec3 albedo, inout float gloss, inout float metal, inout float skin)
+        {
+            if (vAnatomy != 0u) return;
+            float ring = 1.0 - smoothstep(0.0, 0.6, edge), lip = 1.0 - smoothstep(0.0, 0.14, edge);
+            if (vPlated > 0.0)
+            {
+                albedo = mix(albedo, vec3(0.10, 0.11, 0.115), lip * 0.8);
+                albedo = mix(albedo, goreColour(vec3(0.16, 0.01, 0.012), m), ring * 0.45);
+                metal = max(metal, lip * 0.7);
+                gloss = mix(gloss, 0.6, ring);
+                return;
+            }
+            if (flag(f, 16384u))
+            {
+                float fibre = smoothstep(0.8, 0.98, sin(vSkinPos.y * 310.0 + vSkinPos.x * 73.0));
+                albedo = mix(albedo, albedo * 0.35 + vec3(0.05, 0.04, 0.03), lip * 0.85);
+                albedo = mix(albedo, goreColour(vec3(0.20, 0.010, 0.015), m), ring * 0.55);
+                albedo += vec3(0.10, 0.08, 0.05) * fibre * lip;
+                gloss = mix(gloss, 0.35, ring * 0.6);
+                return;
+            }
+            float smear = ring * (0.55 + 0.45 * fullBodyFleshNoise(vSkinPos * 6.0));
+            albedo = mix(albedo, albedo * vec3(0.62, 0.40, 0.40), ring * 0.5);
+            albedo = mix(albedo, goreColour(vec3(0.22, 0.012, 0.015), m), max(smear * 0.7, lip * 0.95));
+            gloss = mix(gloss, 0.55, ring);
+            skin *= 1.0 - ring;
+        }
+
+        // Coiled gut: soft rounded loops of warped noise, dull pink over dark meat, a little yellow fat between them.
+        void chestHoleGut(inout vec3 albedo, inout float gloss, CharMaterial m, float mottled)
+        {
+            vec3 p = vSkinPos * vec3(3.2, 5.5, 3.2) + mottled * 1.7;
+            float loops = fullBodyFleshNoise(p) * 0.65 + fullBodyFleshNoise(p * 2.3 + 11.0) * 0.35;
+            float tube = smoothstep(0.42, 0.62, loops);
+            albedo = goreColour(mix(vec3(0.22, 0.05, 0.045), vec3(0.5, 0.24, 0.21), tube), m) * (0.85 + 0.25 * mottled);
+            float fat = smoothstep(0.7, 0.82, fullBodyFleshNoise(vSkinPos * 6.0 + 3.0)) * (1.0 - tube);
+            albedo = mix(albedo, vec3(0.42, 0.34, 0.2), fat * 0.5);
+            gloss = mix(0.3, 0.45, tube);
+        }
+
+        // Dark spongy lung, and the rib cage cut through near both openings: only chips of each rib remain, their edges bloody.
+        void chestHoleLung(inout vec3 albedo, inout float gloss, CharMaterial m, float mottled, float opening)
+        {
+            float spongy = smoothstep(0.4, 0.7, fullBodyFleshNoise(vSkinPos * 14.0));
+            albedo = mix(raceBlood(m) * 0.26, goreColour(vec3(0.42, 0.17, 0.16), m), spongy * 0.6) * (0.85 + 0.25 * mottled);
+            float depth = min(vUv.x, 1.0 - vUv.x), cage = smoothstep(0.03, 0.08, depth) * (1.0 - smoothstep(0.2, 0.3, depth));
+            float band = abs(fract(vSkinPos.y * 3.0 + 0.3 * mottled) - 0.5);
+            float chip = step(0.62, fullBodyFleshNoise(vSkinPos * vec3(9.0, 2.0, 9.0) + 7.0));
+            float rib = (1.0 - smoothstep(0.07, 0.12, band)) * chip * cage;
+            vec3 bone = mix(vec3(0.62, 0.55, 0.45), raceBlood(m) * 0.4, smoothstep(0.03, 0.1, band));
+            albedo = mix(albedo, bone, rib * 0.85);
+            gloss = mix(0.35, 0.22, rib) * (1.0 - 0.3 * opening);
+        }
+
+        // The tunnel's wall (uv.x 0 at the entry to 1 at the exit; the colour's alpha the region): torn muscle by both openings, darker
+        // deep inside. The chest shows ribs cut through near both openings and spongy lung between; the stomach coiled gut and fat.
+        // Wet but matte: a glossier wall mirrors the sky down the tunnel.
+        void chestHoleWall(inout vec3 albedo, inout float gloss, CharMaterial m)
+        {
+            float mottled = fullBodyFleshNoise(vSkinPos * 3.1);
+            float fibre = smoothstep(0.6, 0.8, fullBodyFleshNoise(vSkinPos * 11.0 + mottled * 1.3));
+            float opening = 1.0 - smoothstep(0.02, 0.09, min(vUv.x, 1.0 - vUv.x));   // the muscle in front of the ribs
+            vec3 muscle = raceBlood(m) * 0.55 * (0.8 + 0.35 * mottled) + fibre * goreColour(vec3(0.06, 0.015, 0.012), m);
+            if (vColour.a > 0.5) chestHoleGut(albedo, gloss, m, mottled);
+            else chestHoleLung(albedo, gloss, m, mottled, opening);
+            albedo = mix(albedo, muscle, opening * 0.75);
+            albedo *= mix(0.9, 0.5, 1.0 - abs(vUv.x * 2.0 - 1.0));   // little light reaches the tunnel's middle
+        }
+
         void main()
         {
             // The backend's discard workaround: preserve the rasterized depth, with writes deferred until after alpha rejection.
@@ -640,6 +749,13 @@ internal static class NativeSurfaceShaders
             bool fullBodyExposed = (vHeadRelief & 1u) != 0u && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
             if ((vHeadRelief & 2u) != 0u && !fullBodyExposed) discard;
             if (vClipLayer > 5.5 && vClipLayer < 6.5 && !fullBodyExposed && !headBrainVisible(vSkinPos, vHeadProfile, vHeadFrame, vHeadOpen)) discard;
+            float holeEdge = 1000.0;
+            if (vHole > 0.5)
+            {
+                holeEdge = chestHoleEdge(vSkinPos, vHoleCentre, vHoleAxis, vHoleShape)
+                    - chestHoleWidening(materials.items[vMaterial].flags, vAnatomy, vPlated);
+                if (holeEdge < 0.0) discard;
+            }
             if (pc.depthIndex != 0u) { fragColour = vec4(pc.flatColour, 1.0); return; }
             CharMaterial m = surfaceMaterial(vMaterial, vAnatomy);
             uint f = m.flags;
@@ -841,7 +957,7 @@ internal static class NativeSurfaceShaders
             if (vAnatomy != 0u)
             {
                 // Only under a hole: a coarse skin mesh would let the fitted anatomy show elsewhere. Wet grain, as Anatomy.hlsl.
-                if (vWounds == 0u && vAnatomy != 2u && vAnatomy != 4u && vAnatomy != 5u && !torsoExposed) discard;   // permanent cut layers need no temporary mask
+                if (vWounds == 0u && vAnatomy != 2u && vAnatomy != 4u && vAnatomy != 5u && vAnatomy != 7u && !torsoExposed) discard;   // permanent cut layers need no temporary mask
                 // By depth, as Gore Lab's RemoveLayer: only a very deep cut loses its muscle and shows the bone and organs behind; they stay whole.
                 // In bind space, per pixel: the anatomy's own UVs are one skin vertex's and would cut it in blocks.
                 if (vAnatomy == 1u && vClipLayer > 0.5 && vClipLayer < 3.5)
@@ -857,13 +973,15 @@ internal static class NativeSurfaceShaders
                 if (vClipLayer > 3.5 && vClipLayer < 4.5) { albedo = vColour.rgb * (0.9 + 0.1 * sin(vBlood.y * 30.0)); gloss = 0.75; }
                 if (vAnatomy == 2u) albedo *= 0.6;   // a stump's cut flesh, wet and dark
                 gloss = vAnatomy == 4u ? (vColour.r > 0.5 ? 0.25 : 0.65) : 0.5;
+                if (vAnatomy == 7u) chestHoleWall(albedo, gloss, m);
                 if (flag(f, {{Mechanical}}u))
                 {
                     metal = vAnatomy == 6u && vColour.g > vColour.r * 1.4 ? 0.08 : 0.65;
                     gloss = 0.55;
                 }
             }
-            else if (m.shading == 1u && !gl_FrontFacing && (vWounds != 0u || vTorsoBand < 999.0) && ((vHeadRelief & 1u) == 0u || vHeadHair == 0u) && dot(vNormal, view.eye - vWorld) < 0.0)   // truly the inside: a flipped outer triangle still has its normal towards the eye
+            else if (m.shading == 1u && !gl_FrontFacing && (vWounds != 0u || vTorsoBand < 999.0 || holeEdge < 1.5)
+                && ((vHeadRelief & 1u) == 0u || vHeadHair == 0u) && dot(vNormal, view.eye - vWorld) < 0.0)   // truly the inside: a flipped outer triangle still has its normal towards the eye
             {
                 // The body's inside, drawn only through a hole: the cavity behind the anatomy. An unwounded body keeps its plain colour: a reduced level's flipped triangles must not vanish.
                 // Wet cavity wall, not a black void.
@@ -888,6 +1006,8 @@ internal static class NativeSurfaceShaders
                 }
             }
             else if (vWounds != 0u) woundSurface(albedo, gloss, m, woundBend);
+            // Round a chest hole; the skin's own inside is the cavity above.
+            if (holeEdge < 0.7 && (gl_FrontFacing || m.shading != 1u)) chestHoleRim(holeEdge, f, m, albedo, gloss, metal, skin);
             if (cut) discard;
             // The game writes character albedo darkened: 0.7 for bodies, heads and hair (character.hlsl DARKEN), 0.8 for worn items (skin.hlsl); not its icons (rtticons.hlsl,
             // a fog distance of -1).
@@ -971,7 +1091,8 @@ internal static class NativeSurfaceShaders
         string stock = RuntimeCharacterShaderSources.DepthFragment;
         const string stockMain = "void main() { shadowWriteDepth(); }";
         if (!stock.Contains(stockMain)) throw new InvalidOperationException("CharacterShaders: the stock depth fragment changed");
-        return stock.Replace(stockMain, "") + Structs + Lookup + NativeHeadSurface.ShaderField + NativeTorsoSurface.ShaderField + """
+        return stock.Replace(stockMain, "") + Structs + Lookup + NativeHeadSurface.ShaderField + NativeTorsoSurface.ShaderField
+            + ChestHoleShader.Field + """
         in vec2 vUv;
         flat in uint vMaterial;
         flat in uint vRaceRgb;
@@ -990,6 +1111,10 @@ internal static class NativeSurfaceShaders
         in float vClip;
         in float vCutBand;
         in vec4 vBlood;
+        in float vHole;
+        flat in vec4 vHoleCentre;
+        flat in vec4 vHoleAxis;
+        flat in vec4 vHoleShape;
         void main()
         {
             if (vHidden > 0.0 || (vClipLayer > 7.5 && vAnatomy == 3u) || (vHeadHair != 0u && vHeadOpen != 0u && headSwordHair(vSkinPos, vHeadProfile, vHeadFrame) < 1.15)) discard;
@@ -997,6 +1122,8 @@ internal static class NativeSurfaceShaders
             bool fullBodyExposed = (vHeadRelief & 1u) != 0u && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
             if ((vHeadRelief & 2u) != 0u && !fullBodyExposed) discard;
             if (vClipLayer > 5.5 && vClipLayer < 6.5 && !fullBodyExposed && !headBrainVisible(vSkinPos, vHeadProfile, vHeadFrame, vHeadOpen)) discard;
+            if (vHole > 0.5 && chestHoleEdge(vSkinPos, vHoleCentre, vHoleAxis, vHoleShape)
+                < chestHoleWidening(materials.items[vMaterial].flags, vAnatomy, vPlated)) discard;
             CharMaterial m = surfaceMaterial(vMaterial, vAnatomy);
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;
@@ -1026,7 +1153,8 @@ internal static class NativeSurfaceShaders
     /// The motion pass (<c>IWorldPostChain.ObjectMotion</c>): the character's own motion, as the grass writes its sway (UV units, this frame minus last, jitter removed), where
     /// the character is what the scene depth shows (<c>pc.depthIndex</c> carries the depth texture's bindless index in this pass).
     /// </summary>
-    public static string MotionFragment() => "#version 450\n" + RuntimeCharacterShaderSources.Prelude(PushMembers) + Structs + Lookup + NativeHeadSurface.ShaderField + NativeTorsoSurface.ShaderField + """
+    public static string MotionFragment() => "#version 450\n" + RuntimeCharacterShaderSources.Prelude(PushMembers) + Structs + Lookup
+        + NativeHeadSurface.ShaderField + NativeTorsoSurface.ShaderField + ChestHoleShader.Field + """
         in vec2 vUv;
         in vec4 vNow;
         in vec4 vPrevious;
@@ -1047,6 +1175,10 @@ internal static class NativeSurfaceShaders
         in float vClip;
         in float vCutBand;
         in vec4 vBlood;
+        in float vHole;
+        flat in vec4 vHoleCentre;
+        flat in vec4 vHoleAxis;
+        flat in vec4 vHoleShape;
         layout(location = 0) out vec4 fragColour;
         """ + RuntimeCharacterShaderSources.DepthConventionGlsl + """
         void main()
@@ -1056,6 +1188,8 @@ internal static class NativeSurfaceShaders
             bool fullBodyExposed = (vHeadRelief & 1u) != 0u && vTorsoBand >= 0.0 && vTorsoBand < torsoExposureDepth;
             if ((vHeadRelief & 2u) != 0u && !fullBodyExposed) discard;
             if (vClipLayer > 5.5 && vClipLayer < 6.5 && !fullBodyExposed && !headBrainVisible(vSkinPos, vHeadProfile, vHeadFrame, vHeadOpen)) discard;
+            if (vHole > 0.5 && chestHoleEdge(vSkinPos, vHoleCentre, vHoleAxis, vHoleShape)
+                < chestHoleWidening(materials.items[vMaterial].flags, vAnatomy, vPlated)) discard;
             CharMaterial m = surfaceMaterial(vMaterial, vAnatomy);
             uint f = m.flags;
             if ((f & 32768u) != 0u) discard;

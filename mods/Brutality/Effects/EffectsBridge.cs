@@ -173,7 +173,8 @@ internal static partial class EffectsBridge
             if (request.Sequence <= effects.Sequence) continue;
             if (request.Tick > session.ShownTick) break;
             effects.Sequence = request.Sequence;
-            if (request.Kind == GoreCutKind.PairedLimbAttempt) continue;
+            // A chest hole cuts nothing off: its blood comes with the blow's impact event.
+            if (request.Kind is GoreCutKind.PairedLimbAttempt or GoreCutKind.ChestHole) continue;
             if (effects.Pending.Count >= 128) effects.Pending.Remove(effects.Pending.Keys.Min());
             effects.Pending[request.Sequence] = request;
         }
