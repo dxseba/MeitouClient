@@ -8,7 +8,7 @@ using Meitou.Simulation.Combat;
 namespace Meitou.Brutality;
 
 [Flags]
-public enum ImpactEffectKind { None = 0, OrganicSpray = 1, OrganicSplinters = 2, RobotShortCircuit = 4, RobotScrap = 8, OrganicExitSpray = 16 }
+public enum ImpactEffectKind { None = 0, OrganicSpray = 1, OrganicSplinters = 2, RobotShortCircuit = 4, RobotScrap = 8, OrganicExitSpray = 16, HeadBurst = 32 }
 public readonly record struct ImpactEffectEvent(long Sequence, CombatHit Hit, CombatWoundMechanism Mechanism, bool Execution, bool Robot,
     uint BloodColour, string ImpactBone, float FallbackHeight, ulong Seed, ImpactEffectKind Effects)
 {
@@ -20,7 +20,7 @@ public sealed record ImpactEffectsFrame(long Tick, IReadOnlyList<ImpactEffectEve
 public sealed class ImpactEffects : ICombatHitObserver
 {
     const int Capacity = 512;
-    readonly record struct Contact(CombatWoundMechanism Mechanism, bool Execution, bool Robot, uint Colour, string Bone, float Height, int Rupture);
+    readonly record struct Contact(CombatWoundMechanism Mechanism, bool Execution, bool Robot, uint Colour, string Bone, float Height, int Rupture, bool HeadBurst);
     readonly Dictionary<GoreHitKey, Contact> contacts = [];
     readonly Queue<(CombatHit Hit, Contact Contact)> pending = new();
     readonly HashSet<GoreHitKey> seen = [];
@@ -37,25 +37,25 @@ public sealed class ImpactEffects : ICombatHitObserver
         for (int i = available.Length - 1; i >= 0; i--) if (available[i].Tick <= tick) return available[i];
         return null;
     }
-    internal void Capture(World world, in CombatHit hit, CombatWoundMechanism mechanism, bool execution, int rupture = -1)
+    internal void Capture(World world, in CombatHit hit, CombatWoundMechanism mechanism, bool execution, int rupture = -1, bool headBurst = false)
     {
-        if (Read(world, hit, mechanism, execution, rupture) is not { } captured) return;
+        if (Read(world, hit, mechanism, execution, rupture, headBurst) is not { } captured) return;
         if (contacts.Count >= Capacity) contacts.Remove(contacts.Keys.First());
         contacts[GoreHitKey.From(hit)] = captured;
     }
-    static Contact? Read(World world, in CombatHit hit, CombatWoundMechanism mechanism, bool execution, int rupture)
+    static Contact? Read(World world, in CombatHit hit, CombatWoundMechanism mechanism, bool execution, int rupture, bool headBurst)
     {
         if (!world.Characters.TryResolveNext(hit.Victim, out int slot) || world.Characters.Cold(slot) is not { Race: { } race, Medical: { } medical }
             || (uint)hit.Part >= (uint)medical.Parts.Count) return null;
         var part = medical.Parts[hit.Part].Template;
-        return new(mechanism, execution, race.IsRobot, race.BloodColour, Bone(part, hit.LowStrike), Height(part), rupture);
+        return new(mechanism, execution, race.IsRobot, race.BloodColour, Bone(part, hit.LowStrike), Height(part), rupture, headBurst);
     }
     public void HitResolved(World world, in CombatHit hit)
     {
         var key = GoreHitKey.From(hit);
         if (!seen.Add(key)) return;
         seenOrder.Enqueue(key); while (seenOrder.Count > Capacity * 4) seen.Remove(seenOrder.Dequeue());
-        var context = contacts.Remove(key, out var captured) ? captured : Read(world, hit, CombatWoundMechanism.Unspecified, false, -1);
+        var context = contacts.Remove(key, out var captured) ? captured : Read(world, hit, CombatWoundMechanism.Unspecified, false, -1, false);
         if (context is not { } contact) return;
         if (pending.Count >= Capacity) pending.Dequeue(); pending.Enqueue((hit, contact));
     }
@@ -78,6 +78,7 @@ public sealed class ImpactEffects : ICombatHitObserver
                 && (contact.Mechanism == CombatWoundMechanism.Slash || contact.Mechanism == CombatWoundMechanism.Unspecified && hit.CutDirection != 4))
                 effect |= ImpactEffectKind.RobotShortCircuit;
             if (contact.Robot && contact.Rupture >= 0) effect |= ImpactEffectKind.RobotScrap;
+            if (contact.HeadBurst) effect = ImpactEffectKind.HeadBurst;
             if (effect == ImpactEffectKind.None) continue;
             events.Enqueue(new(++sequence, hit, contact.Mechanism, contact.Execution, contact.Robot, contact.Colour, contact.Bone, contact.Height,
                 VisualSeed(hit, world.Seed), effect) { RuptureKind = contact.Rupture });

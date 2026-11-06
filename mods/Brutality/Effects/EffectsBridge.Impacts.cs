@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Brutality.Rendering;
+
 using Meitou.Engine;
 using Meitou.Data.Characters;
 using Meitou.Rendering;
@@ -37,10 +38,20 @@ internal static partial class EffectsBridge
     static readonly Dictionary<Type, Type?> debrisTypes = [];
     static readonly Dictionary<(Type, string), FieldInfo?> debrisFields = [];
 
+    internal static void EmitHeadBurst(object host, World world, Vector3 at, Vector2 travel, uint blood)
+    {
+        if (!Enabled(host) || !ReadBool(Member(host, "o"), "MeitouBlood", true)) return;
+        var effects = worlds.GetValue(world, static _ => new());
+        effects.Scene.Blood.SplashHead(at, travel, world.Walkability.GroundHeight(at.X, at.Z, at.Y), blood);
+        if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null)
+            Console.WriteLine($"Brutality head burst spray at release: {at}");
+    }
+
     static bool CaptureImpacts(object host, WorldSession session, ParticleRenderer particles, FxWorld effects, double now, bool enabled)
     {
         if (resources is null || drawKey is null) return false;
         bool organicHit = false;
+
         var world = session.World;
         if (ImpactEffects.ForWorld(world)?.FrameAt(session.ShownTick) is { } frame)
             foreach (var impact in frame.Events)
@@ -49,10 +60,11 @@ internal static partial class EffectsBridge
                 effects.Impacts.Sequence = impact.Sequence;
                 double born = impact.Hit.Tick * world.TickSeconds;
                 double age = now - born;
-                if (age < 0 || age > (impact.Robot ? 30 : 1)) continue;
+                if (age < 0 || age > (impact.Robot ? 30 : 1) || (impact.Effects & ImpactEffectKind.HeadBurst) != 0) continue;
                 var hit = impact.Hit;
                 var at = ImpactContact(host, effects, impact)?.Position ?? hit.VictimPosition + Vector3.UnitY * impact.FallbackHeight;
                 var travel = new Vector2(hit.Travel.X, hit.Travel.Z);
+
                 if (enabled && (impact.Effects & (ImpactEffectKind.RobotShortCircuit | ImpactEffectKind.RobotScrap)) != 0)
                 {
                     ulong seed = Rng.Mix(world.Seed ^ Rng.Key(hit.Victim) ^ (ulong)hit.Tick ^ ((ulong)(uint)hit.Part << 32));
@@ -173,6 +185,7 @@ internal static partial class EffectsBridge
         _ = random.Next(1, SplinterMeshCount); // The bone choice has already been made from this seed.
         var flat = new Vector2(impact.Hit.Travel.X, impact.Hit.Travel.Z);
         var along = flat.LengthSquared() > 1e-6f ? Vector2.Normalize(flat) : Vector2.UnitX;
+
         foreach (bool flesh in new[] { false, true })
         {
             var asset = flesh ? meat : bone;

@@ -174,7 +174,12 @@ public sealed partial class BrutalityGameplaySystem(CombatSystem? combat, GameCo
         ulong victimKey = Rng.Key(hit.Victim);
         float Roll(ulong domain) => Rng.Float(Rng.Hash(world.Seed, victimKey ^ domain, purpose, counter));
         float force = mechanism == CombatWoundMechanism.Crush ? hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce : hit.Damage.Cut + hit.Damage.Pierce;
-        if (!work.Robot && part.Type == BodyPartType.Head && force >= BrutalityHeadPolicy.HeavyForce)
+        if (context.MartialArtsBurst is not null && work.VictimDead && hit.VictimWasAlive && actor.Head is null && options.Decapitation)
+        {
+            actor.Head = context.MartialArtsBurst;
+            Add(hit, GoreCutKind.Head, head: actor.Head);
+        }
+        if (context.MartialArtsBurst is null && !work.Robot && part.Type == BodyPartType.Head && force >= BrutalityHeadPolicy.HeavyForce)
         {
             var requested = (hit.Victim.Slot % 3) switch { 1 => SevereHeadWoundKind.Scalp, 2 => SevereHeadWoundKind.BrokenSkull, _ => SevereHeadWoundKind.JawLost };
             var placement = HeadWoundPlacementPolicy.Estimate(travel, hit.VictimYaw, hit.CutDirection, force,

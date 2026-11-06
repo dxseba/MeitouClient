@@ -161,17 +161,23 @@ internal sealed class CutGeometryQueue<TOwner, TKey>(int capacity = 128,
 
 internal static class CutGeometryWorker
 {
-    sealed record Job(Func<CharacterGeometryResult> Work, TaskCompletionSource<CharacterGeometryResult> Result);
-    static readonly ConcurrentQueue<Job> cuts = new(), wounds = new();
+    static readonly ConcurrentQueue<Action> cuts = new(), wounds = new(), preparations = new();
     static int running;
 
     internal static Task<CharacterGeometryResult> Start(Func<CharacterGeometryResult> work) => Enqueue(cuts, work);
     internal static Task<CharacterGeometryResult> StartWound(Func<CharacterGeometryResult> work) => Enqueue(wounds, work);
 
-    static Task<CharacterGeometryResult> Enqueue(ConcurrentQueue<Job> queue, Func<CharacterGeometryResult> work)
+    internal static Task<T> StartPreparation<T>(Func<T> work) => Enqueue(preparations, work);
+
+    static Task<T> Enqueue<T>(ConcurrentQueue<Action> queue, Func<T> work)
     {
-        var result = new TaskCompletionSource<CharacterGeometryResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        queue.Enqueue(new(work, result));
+        var result = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        queue.Enqueue(() =>
+        {
+            try { result.TrySetResult(work()); }
+            catch (OperationCanceledException error) { result.TrySetCanceled(error.CancellationToken); }
+            catch (Exception error) { result.TrySetException(error); }
+        });
         StartDrain();
         return result.Task;
     }
@@ -188,14 +194,9 @@ internal static class CutGeometryWorker
         Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
         do
         {
-            while (cuts.TryDequeue(out var job) || wounds.TryDequeue(out job))
-            {
-                try { job.Result.TrySetResult(job.Work()); }
-                catch (OperationCanceledException error) { job.Result.TrySetCanceled(error.CancellationToken); }
-                catch (Exception error) { job.Result.TrySetException(error); }
-            }
+            while (cuts.TryDequeue(out var job) || wounds.TryDequeue(out job) || preparations.TryDequeue(out job)) job();
             Volatile.Write(ref running, 0);
             // A producer racing the empty queue either starts another drain or hands its job to this one.
-        } while ((!cuts.IsEmpty || !wounds.IsEmpty) && Interlocked.CompareExchange(ref running, 1, 0) == 0);
+        } while ((!cuts.IsEmpty || !wounds.IsEmpty || !preparations.IsEmpty) && Interlocked.CompareExchange(ref running, 1, 0) == 0);
     }
 }

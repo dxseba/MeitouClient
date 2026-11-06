@@ -272,7 +272,7 @@ public sealed partial class FragmentPhysicsSystem(BrutalityGameplaySystem gamepl
         }
     }
 
-    static BonePose CopyPose(BonePose source)
+    internal static BonePose CopyPose(BonePose source)
     {
         var result = new BonePose(source.Set.Length) { Weight = source.Weight, AbsolutePositions = source.AbsolutePositions, Components = source.Components?.ToArray() };
         source.Set.CopyTo(result.Set, 0); source.Position.CopyTo(result.Position, 0); source.Rotation.CopyTo(result.Rotation, 0);

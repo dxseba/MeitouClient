@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Brutality.Anatomy;
 using Meitou.Brutality.Physics;
+using Meitou.Brutality.Effects;
 using Meitou.Content;
 using Meitou.Data;
 using Meitou.Data.Characters;
@@ -73,6 +74,15 @@ internal static class RenderBridge
     static Func<object, CharacterId, long>? drawKey;
     static readonly ConditionalWeakTable<World, RenderState> states = new();
     static long serial = -0x4000000000000000L;
+    const float HeadBurstPreparationWindow = 4;
+    sealed class HeadBurstPresentation(GoreCutRequest request)
+    {
+        public readonly GoreCutRequest Request = request;
+        public FragmentBirthPresentation? LaunchPose;
+        public double Expires;
+        public bool Suppressed;
+    }
+
     sealed class RenderState
     {
         public readonly Dictionary<(CharacterId, int), long> Keys = [];
@@ -80,10 +90,14 @@ internal static class RenderBridge
         public readonly Dictionary<long, RuntimeCharacterGeometry> WeaponVariants = [];
         public readonly Dictionary<CharacterId, (CharacterAppearance Look, CharacterGeometryResult Geometry, CharacterGeometryAdapter.BuildKey Key)> Cuts = [];
         public readonly CutGeometryQueue<CharacterId, CharacterGeometryAdapter.BuildKey> CutQueue = new();
+        public readonly HeadBurstPreparations BurstPreparations = new();
         public readonly Dictionary<CharacterId, CharacterGeometryAdapter.BuildKey> Pending = [];
         public readonly Dictionary<CharacterId, CutPresentationFamily> Families = [];
         public readonly Dictionary<CharacterId, (CharacterGeometryAdapter.BuildKey Key, CharacterGeometryResult Geometry, HashSet<RuntimeCharacterGeometry> Wrappers)> Staged = [];
         public readonly HashSet<long> HeldKeys = [];
+        public readonly Dictionary<CharacterId, HeadBurstPresentation?> HeadBursts = [];
+        public readonly Dictionary<(CharacterId, int), long> BurstDrawKeys = [];
+        public HeadBurstRagdolls? BurstRagdolls;
         public readonly ConcurrentDictionary<RuntimeCharacterGeometry, byte> Generated = new(ReferenceEqualityComparer.Instance);
     }
 
@@ -146,6 +160,8 @@ internal static class RenderBridge
         if (states.TryGetValue(__instance, out var state))
         {
             state.CutQueue.Dispose();
+            state.BurstPreparations.Dispose();
+            state.BurstRagdolls?.Dispose();
             if (resources is not null)
                 foreach (var look in state.Cuts.Values.Select(value => value.Look).Distinct()) resources.Geometry.Forget(look);
             foreach (var geometry in state.Generated.Keys) geometry.Retire();
@@ -175,6 +191,8 @@ internal static class RenderBridge
         var sourceResources = resources;
         var render = states.GetValue(session.World, static _ => new());
         render.HeldKeys.Clear();
+        double shownSeconds = (session.ShownTick + session.SimulationAlpha) * session.World.TickSeconds;
+        render.BurstRagdolls?.Advance(shownSeconds, session.World.PhysicsSpeed, session.ShownTick);
         GeometryPreparations.Capture(__instance, list, session, resources);
         var physics = session.World.Systems.OfType<FragmentPhysicsSystem>().FirstOrDefault();
         var proxyFrame = BodyFragmentProxySystem.ForWorld(session.World)?.FrameAt(session.ShownTick);
@@ -188,6 +206,7 @@ internal static class RenderBridge
                 var hidden = proxyFrame.Proxies.Keys.Select(proxy => drawKey(__instance, proxy)).ToHashSet();
                 list.Items.RemoveAll(instance => hidden.Contains(instance.Key));
             }
+            render.BurstPreparations.Capture(__instance, list, session, sourceResources);
             FinishPresentation(__instance, session, list, render, started);
             return;
         }
@@ -200,6 +219,9 @@ internal static class RenderBridge
         foreach (var (key, proxy) in proxyKeys) render.Keys[(proxy.Owner, proxy.StableKey)] = key;
         var neededOwners = frame.Characters.Keys.ToHashSet();
         render.CutQueue.Retain(neededOwners);
+        foreach (var owner in render.HeadBursts.Keys.Where(owner => !neededOwners.Contains(owner)).ToArray()) render.HeadBursts.Remove(owner);
+        foreach (var key in render.BurstDrawKeys.Keys.Where(key => !neededOwners.Contains(key.Item1)).ToArray())
+            if (render.BurstDrawKeys.Remove(key, out long drawId)) render.BurstRagdolls?.Remove(drawId);
         foreach (var owner in render.Staged.Keys.Where(owner => !neededOwners.Contains(owner)).ToArray()) DiscardStage(render, owner);
         foreach (var owner in render.Pending.Keys.Where(owner => !neededOwners.Contains(owner)).ToArray()) render.Pending.Remove(owner);
         foreach (var owner in render.Cuts.Keys.Where(owner => !neededOwners.Contains(owner)).ToArray())
@@ -210,6 +232,7 @@ internal static class RenderBridge
         var processed = new HashSet<CharacterId>(); var output = new List<CharacterInstance>();
         var stains = session.World.Systems.OfType<WeaponBloodState>().FirstOrDefault()?.FrameAt(session.ShownTick);
         double now = Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+        int burstBudget = HeadBurstRagdolls.Capacity;
         foreach (var source in original)
         {
             var current = proxyKeys.TryGetValue(source.Key, out var proxy) ? frame.Characters.GetValueOrDefault(proxy.Owner) : byKey.GetValueOrDefault(source.Key);
@@ -221,6 +244,23 @@ internal static class RenderBridge
             foreach (var pair in proxyKeys) if (pair.Value.Owner == current.Character) removed.Add(pair.Key);
             if (!render.Families.TryGetValue(current.Character, out var family)) render.Families[current.Character] = family = new();
             GoreCharacterFrame? before = previous?.Characters.GetValueOrDefault(current.Character);
+            HeadBurstPresentation? liveBurst = null;
+            if (current.State.Head is { Mode: HeadCutMode.Burst } && current.BirthPresentation is not null)
+            {
+                if (!render.HeadBursts.TryGetValue(current.Character, out liveBurst))
+                {
+                    var requestHit = BrutalityRuntime.For(session.World)?.CutRequests.LastOrDefault(request =>
+                        request.Victim == current.Character && request.Head is { Mode: HeadCutMode.Burst });
+                    liveBurst = requestHit is { Sequence: > 0 } hitRequest ? new(hitRequest) : null;
+                    render.HeadBursts[current.Character] = liveBurst;
+                }
+            }
+            double burstAge = liveBurst is { } launch
+                ? shownSeconds - launch.Request.Tick * session.World.TickSeconds : double.PositiveInfinity;
+            bool waitForBurst = liveBurst is { LaunchPose: null, Suppressed: false } && hasRoot && !rootSource.Hidden
+                && burstAge is >= 0 and < HeadBurstPreparationWindow;
+            bool burstActive = liveBurst?.LaunchPose is not null && shownSeconds < liveBurst.Expires;
+            bool buildBurst = waitForBurst || burstActive;
             if (sourceResources.Rigs.For(current.Appearance) is not { } setup || sourceResources.Mesh(current.Appearance.BodyMesh) is not { } body)
             { Hold(); continue; }
             var physicalComponents = ComponentsOf(current);
@@ -235,7 +275,10 @@ internal static class RenderBridge
                     {
                         var input = CharacterGeometryAdapter.Capture(request, current.State, sourceResources.Mesh, deferMeshReads: true);
                         var adapter = sourceResources.Geometry;
-                        render.CutQueue.Request(current.Character, request, cancellation => adapter.BuildUnpublished(input, cancellation));
+                        var prepared = buildBurst && request.State.HeadOnlyBurstFit ? render.BurstPreparations.For(current.Character) : null;
+                        if (render.CutQueue.Request(current.Character, request, cancellation =>
+                            adapter.BuildUnpublished(input, cancellation, buildBurstShards: buildBurst, preparation: prepared)))
+                            render.BurstPreparations.YieldToCut(prepared is null ? null : current.Character);
                     }
                     if (render.CutQueue.TryPendingKey(current.Character, out _)) render.Pending[current.Character] = request;
                     else render.Pending.Remove(current.Character);
@@ -256,8 +299,73 @@ internal static class RenderBridge
                 list.Preparations.Add(rootSource with { Appearance = current.Appearance, Geometry = shape, Bones = null, RuntimeShaderData = null });
                 ready &= list.IsPrepared(current.Appearance, shape);
             }
-            if (!ready)
+            if (geometry.BurstShards.Count > 0)
+            {
+                if (!buildBurst)
+                {
+                    foreach (var shard in geometry.BurstShards)
+                    {
+                        shard.Geometry.Retire();
+                        if (render.BurstDrawKeys.Remove((current.Character, shard.Key), out long drawId))
+                            render.BurstRagdolls?.Remove(drawId);
+                    }
+                }
+                else if (burstBudget >= geometry.BurstShards.Count && hasRoot && !rootSource.Hidden
+                    && current.BirthPresentation is { } birth && setup.Rig.Handle("Bip01 Head") is { } head
+                    && liveBurst is { Request.Hit: { } hit } burst)
+                {
+                    bool shardsReady = true;
+                    foreach (var shard in geometry.BurstShards)
+                    {
+                        Track(session.World, shard.Geometry);
+                        list.Preparations.Add(rootSource with { Appearance = birth.Appearance, Geometry = shard.Geometry, Bones = null, RuntimeShaderData = null });
+                        shardsReady &= list.IsPrepared(birth.Appearance, shard.Geometry);
+                    }
+                    if (shardsReady && (ready || burstActive))
+                    {
+                        var travel = new Vector2(hit.Travel.X, hit.Travel.Z);
+                        if (travel.LengthSquared() > 1e-6f) travel = Vector2.Normalize(travel);
+                        var ragdolls = render.BurstRagdolls ??= new(new WalkabilityEnvironment(session.World.Walkability));
+                        bool launching = burst.LaunchPose is null;
+                        if (launching && ragdolls.HasRoom(geometry.BurstShards.Count)
+                            && Hold(draw: false) is { Bones: { AbsolutePositions: true } pose, World: { } placement }
+                            && (uint)head < (uint)pose.Set.Length && pose.Set[head])
+                        {
+                            // Freeze the actual displayed head pose only on the frame that swaps to the stump.
+                            burst.LaunchPose = new(birth.Appearance, FragmentPhysicsSystem.CopyPose(pose), placement);
+                            burst.Expires = shownSeconds + HeadBurstRagdolls.Lifetime;
+                        }
+                        if (burst.LaunchPose is { } from)
+                        {
+                            var at = Vector3.Transform(from.Bones.Position[head], from.Placement);
+                            var rotation = Quaternion.Normalize(from.Bones.Rotation[head] * setup.Rig.BindRotationInverse[head]);
+                            ulong seed = session.World.Seed ^ Rng.Key(current.Character) ^ (ulong)hit.Tick;
+                            if (float.IsFinite(at.LengthSquared()) && float.IsFinite(travel.LengthSquared()))
+                            {
+                                foreach (var shard in geometry.BurstShards)
+                                {
+                                    burstBudget--;
+                                    var shardKey = (current.Character, shard.Key);
+                                    if (!render.BurstDrawKeys.TryGetValue(shardKey, out long key))
+                                        render.BurstDrawKeys[shardKey] = key = Interlocked.Decrement(ref serial);
+                                    if (ragdolls.Place(rootSource, shard, from, at, rotation, setup.Rig.BindPosition[head],
+                                        travel, burst.Expires, seed, key, current.Character.Slot + 1) is { } piece) output.Add(piece);
+                                }
+                                if (launching)
+                                {
+                                    uint blood = unchecked((uint)current.Appearance.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
+                                    EffectsBridge.EmitHeadBurst(__instance, session.World, at, travel, blood);
+                                    if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null)
+                                        Console.WriteLine($"Brutality burst timing: hit={hit.Tick}, shown={session.ShownTick}, wait={burstAge:F3}s");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (!ready || waitForBurst && geometry.BurstShards.Count > 0 && liveBurst?.LaunchPose is null)
             { render.Pending[current.Character] = request; Hold(); continue; }
+            if (liveBurst is { LaunchPose: null } unusedBurst) unusedBurst.Suppressed = true;
             render.Pending.Remove(current.Character);
             render.Staged.Remove(current.Character); // This complete family now owns its displayed base/wrapper variants.
             if (render.Cuts.TryGetValue(current.Character, out var replaced) && !ReferenceEquals(replaced.Geometry, geometry))
@@ -302,7 +410,7 @@ internal static class RenderBridge
             RuntimeCharacterGeometry Paint(RuntimeCharacterGeometry shape) => stains?.Characters.GetValueOrDefault(current.Character) is { } blood
                 ? sourceResources.WeaponBlood.Apply(current.Appearance, shape, blood.Parts, sourceResources.Mesh) ?? shape : shape;
 
-            void Hold()
+            CharacterInstance? Hold(bool draw = true)
             {
                 if (!family.HasPresentation && current.BirthPresentation is { } birth)
                 {
@@ -312,7 +420,8 @@ internal static class RenderBridge
                     family.Capture(new[] { new PresentedPiece(0, born) });
                 }
                 if (!family.Hold(current.Appearance, item => sourceResources.Rigs.For(item.Appearance) is { } heldSetup
-                    ? CutPresentationFamily.WorldBones(item, heldSetup, sourceResources.Rigs) : new BonePose(0))) return;
+                    ? CutPresentationFamily.WorldBones(item, heldSetup, sourceResources.Rigs) : new BonePose(0))) return null;
+                CharacterInstance? heldRoot = null;
                 foreach (var row in family.Pieces)
                 {
                     var shown = row.Instance;
@@ -328,15 +437,25 @@ internal static class RenderBridge
                             shown = family.AdvanceHeld(row, heldSetup.Rig, driver, Placement(before, current, session.SimulationAlpha));
                         }
                     }
-                    if (row.StableKey == 0 && !hasRoot) shown = shown with { Hidden = true };
-                    output.Add(shown); render.HeldKeys.Add(shown.Key);
+                    if (row.StableKey == 0)
+                    {
+                        if (waitForBurst && shown.Appearance.Headless && current.BirthPresentation is { } whole)
+                            shown = shown with { Appearance = whole.Appearance, Geometry = null, RuntimeShaderData = null };
+                        else if (!waitForBurst && current.State.Head is { Mode: HeadCutMode.Burst } && hasRoot && rootSource.Appearance.Headless)
+                            shown = shown with { Appearance = rootSource.Appearance, Geometry = null, RuntimeShaderData = null };
+                        if (!hasRoot) shown = shown with { Hidden = true };
+                        heldRoot = shown;
+                    }
+                    if (draw) { output.Add(shown); render.HeldKeys.Add(shown.Key); }
                 }
-                if (current.State.Head is not null) replacedHeads.Add(rootKey);
+                if (draw && current.State.Head is not null) replacedHeads.Add(rootKey);
+                return heldRoot;
             }
         }
         render.CutQueue.StartNext();
         list.Items.RemoveAll(instance => removed.Contains(instance.Key) || instance.FreezeFrom is { } from && replacedHeads.Contains(from));
         list.Items.AddRange(output);
+        render.BurstPreparations.Capture(__instance, list, session, sourceResources);
         FinishPresentation(__instance, session, list, render, started);
     }
 

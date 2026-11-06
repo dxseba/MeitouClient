@@ -102,10 +102,11 @@ internal static class MeshCut
         var model = preparedModel ?? SourceModel(source, rig.BoneCount);
         var surfaces = Enumerable.Range(0, source.SubMeshes.Count).Select(i => new Surface(i)).ToArray();
         var edges = cuts.Select(_ => new List<Edge>()).ToArray();
-        var groups = BoneGroups(rig);
+        var groups = removeVolumes is not null || cuts.Any(cut => cut.Group >= 0 || cut.LegacyTorso) ? BoneGroups(rig) : null;
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
         int total = 0;
+        CutHalfspace? singlePlane = cuts.Count == 1 && removeVolumes is null ? cuts[0] : null;
         foreach (var part in model.Parts)
         {
             var morphs = MorphDeltas(source, part.SubMeshIndex, part.Vertices.Length, poseWeights, cutHorns);
@@ -125,56 +126,58 @@ internal static class MeshCut
                     a = Owned(a, owner, components); b = Owned(b, owner, components); c = Owned(c, owner, components);
                 }
                 SurfaceOwner? sectionOwner = null;
-                int group = TriangleGroup(a, b, c, groups);
-                var polygon = new List<Sample>(6)
+                int group = groups is null ? 0 : TriangleGroup(a, b, c, groups);
+                var sa = new Sample(a, morphs[ia], new(ia, ib, ic, Vector3.UnitX));
+                var sb = new Sample(b, morphs[ib], new(ia, ib, ic, Vector3.UnitY));
+                var sc = new Sample(c, morphs[ic], new(ia, ib, ic, Vector3.UnitZ));
+                if (singlePlane is { } plane)
                 {
-                    new(a, morphs[ia], new(ia, ib, ic, Vector3.UnitX)),
-                    new(b, morphs[ib], new(ia, ib, ic, Vector3.UnitY)),
-                    new(c, morphs[ic], new(ia, ib, ic, Vector3.UnitZ)),
-                };
+                    float da = plane.Band(a.Position + (plane.MorphedDistance ? sa.Morph : default), group);
+                    float db = plane.Band(b.Position + (plane.MorphedDistance ? sb.Morph : default), group);
+                    float dc = plane.Band(c.Position + (plane.MorphedDistance ? sc.Morph : default), group);
+                    if (da < -Epsilon && db < -Epsilon && dc < -Epsilon) continue;
+                    if (da > Epsilon && db > Epsilon && dc > Epsilon)
+                    {
+                        EmitTriangle(target, sa, sb, sc);
+                        continue;
+                    }
+                }
+                var polygon = new List<Sample>(6) { sa, sb, sc };
                 for (int cutIndex = 0; cutIndex < cuts.Count && polygon.Count > 0; cutIndex++)
                     polygon = ClipPolygon(polygon, cuts[cutIndex], group, 1u << cutIndex);
                 if (polygon.Count < 3) continue;
+                if (removeVolumes is null)
+                {
+                    EmitPolygon(polygon);
+                    continue;
+                }
                 var polygons = new List<List<Sample>> { polygon };
-                if (removeVolumes is not null)
+                var minimum = new Vector3(float.MaxValue); var maximum = new Vector3(float.MinValue);
+                foreach (var point in polygon) { minimum = Vector3.Min(minimum, point.Vertex.Position + point.Morph); maximum = Vector3.Max(maximum, point.Vertex.Position + point.Morph); }
+                foreach (var volume in removeVolumes)
                 {
-                    var minimum = new Vector3(float.MaxValue); var maximum = new Vector3(float.MinValue);
-                    foreach (var point in polygon) { minimum = Vector3.Min(minimum, point.Vertex.Position + point.Morph); maximum = Vector3.Max(maximum, point.Vertex.Position + point.Morph); }
-                    foreach (var volume in removeVolumes)
+                    if (polygons.Count == 0) break;
+                    if (volume.Group >= 0 && !(volume.Group == 7 ? group is 6 or 7 : group == volume.Group)) continue;
+                    if (volume.Bounds is { } sphere && Vector3.DistanceSquared(Vector3.Clamp(new(sphere.X, sphere.Y, sphere.Z), minimum, maximum), new(sphere.X, sphere.Y, sphere.Z)) > sphere.W * sphere.W) continue;
+                    polygons = polygons.SelectMany(poly => Subtract(poly, volume, group)).ToList();
+                }
+                foreach (var keptPolygon in polygons) EmitPolygon(keptPolygon);
+
+                void EmitPolygon(List<Sample> polygon)
+                {
+                    for (int i = 0; i < polygon.Count; i++)
                     {
-                        if (polygons.Count == 0) break;
-                        if (volume.Group >= 0 && !(volume.Group == 7 ? group is 6 or 7 : group == volume.Group)) continue;
-                        if (volume.Bounds is { } sphere && Vector3.DistanceSquared(Vector3.Clamp(new(sphere.X, sphere.Y, sphere.Z), minimum, maximum), new(sphere.X, sphere.Y, sphere.Z)) > sphere.W * sphere.W) continue;
-                        polygons = polygons.SelectMany(poly => Subtract(poly, volume, group)).ToList();
+                        var p = polygon[i]; var q = polygon[(i + 1) % polygon.Count];
+                        uint mask = p.CutMask & q.CutMask;
+                        for (int cutIndex = 0; buildCaps && cutIndex < cuts.Count; cutIndex++)
+                            if ((mask & (1u << cutIndex)) != 0 && Vector3.DistanceSquared(p.Vertex.Position + p.Morph, q.Vertex.Position + q.Morph) > Epsilon * Epsilon)
+                            {
+                                sectionOwner ??= components is null ? new(-1, 0) : Owner(a, b, c, components);
+                                edges[cutIndex].Add(new(p, q, sectionOwner.Value));
+                            }
                     }
-                }
-                foreach (var keptPolygon in polygons)
-                {
-                polygon = keptPolygon;
-                for (int i = 0; i < polygon.Count; i++)
-                {
-                    var p = polygon[i]; var q = polygon[(i + 1) % polygon.Count];
-                    uint mask = p.CutMask & q.CutMask;
-                    for (int cutIndex = 0; buildCaps && cutIndex < cuts.Count; cutIndex++)
-                        if ((mask & (1u << cutIndex)) != 0 && Vector3.DistanceSquared(p.Vertex.Position + p.Morph, q.Vertex.Position + q.Morph) > Epsilon * Epsilon)
-                        {
-                            sectionOwner ??= components is null ? new(-1, 0) : Owner(a, b, c, components);
-                            edges[cutIndex].Add(new(p, q, sectionOwner.Value));
-                        }
-                }
-                for (int i = 1; i + 1 < polygon.Count; i++)
-                {
-                    if (Vector3.Cross(polygon[i].Vertex.Position - polygon[0].Vertex.Position,
-                        polygon[i + 1].Vertex.Position - polygon[0].Vertex.Position).LengthSquared() < 1e-14f) continue;
-                    foreach (var vertex in new[] { polygon[0], polygon[i], polygon[i + 1] })
-                    {
-                        target.Vertices.Add(vertex);
-                        min = Vector3.Min(min, vertex.Vertex.Position + vertex.Morph);
-                        max = Vector3.Max(max, vertex.Vertex.Position + vertex.Morph);
-                    }
-                    total += 3;
-                    if (total > VertexLimit) throw new InvalidDataException("Generated character geometry exceeds the vertex budget.");
-                }
+                    for (int i = 1; i + 1 < polygon.Count; i++)
+                        EmitTriangle(target, polygon[0], polygon[i], polygon[i + 1]);
                 }
             }
         }
@@ -183,6 +186,24 @@ internal static class MeshCut
         for (int i = 0; buildCaps && i < cuts.Count; i++) AppendCaps(edges[i], cuts[i], wound, capColour, rig, components);
         return new(skin, wound.Count == 0 ? null : FromTriangles(wound, source.SkeletonName, preserveRawVertexChannels: rawCaps),
             total == 0 ? Vector3.Zero : min, total == 0 ? Vector3.Zero : max, total != 0);
+
+        void EmitTriangle(Surface target, in Sample a, in Sample b, in Sample c)
+        {
+            if (Vector3.Cross(b.Vertex.Position - a.Vertex.Position, c.Vertex.Position - a.Vertex.Position).LengthSquared() < 1e-14f) return;
+            EmitVertex(target, a);
+            EmitVertex(target, b);
+            EmitVertex(target, c);
+            total += 3;
+            if (total > VertexLimit) throw new InvalidDataException("Generated character geometry exceeds the vertex budget.");
+        }
+
+        void EmitVertex(Surface target, in Sample vertex)
+        {
+            target.Vertices.Add(vertex);
+            var point = vertex.Vertex.Position + vertex.Morph;
+            min = Vector3.Min(min, point);
+            max = Vector3.Max(max, point);
+        }
     }
 
     static IEnumerable<List<Sample>> Subtract(List<Sample> polygon, CutVolume volume, int group)
@@ -211,12 +232,27 @@ internal static class MeshCut
 
     static List<Sample> ClipPolygon(List<Sample> polygon, in CutHalfspace cut, int group, uint bit)
     {
-        var result = new List<Sample>(polygon.Count + 1);
-        for (int i = 0; i < polygon.Count; i++)
+        int count = polygon.Count;
+        Span<float> distances = count <= 64 ? stackalloc float[count] : new float[count];
+        bool unchanged = true, discarded = true;
+        for (int i = 0; i < count; i++)
         {
-            var a = polygon[i]; var b = polygon[(i + 1) % polygon.Count];
-            float da = cut.Band(a.Vertex.Position + (cut.MorphedDistance ? a.Morph : default), group);
-            float db = cut.Band(b.Vertex.Position + (cut.MorphedDistance ? b.Morph : default), group);
+            var point = polygon[i];
+            float distance = cut.Band(point.Vertex.Position + (cut.MorphedDistance ? point.Morph : default), group);
+            distances[i] = distance;
+            // Vertices within epsilon still need the plane's bit for cap construction.
+            unchanged &= bit == 0 ? distance >= -Epsilon : distance > Epsilon;
+            discarded &= distance < -Epsilon;
+        }
+        if (unchanged) return polygon;
+        if (discarded) return [];
+
+        var result = new List<Sample>(count + 1);
+        for (int i = 0; i < count; i++)
+        {
+            int next = (i + 1) % count;
+            var a = polygon[i]; var b = polygon[next];
+            float da = distances[i], db = distances[next];
             if (MathF.Abs(da) <= Epsilon) a = a with { CutMask = a.CutMask | bit };
             if (da >= -Epsilon) result.Add(a);
             if ((da < -Epsilon) == (db < -Epsilon)) continue;
@@ -230,6 +266,17 @@ internal static class MeshCut
         Vector3.Lerp(a.Morph, b.Morph, t), a.Trace with { Bary = Vector3.Lerp(a.Trace.Bary, b.Trace.Bary, t) });
 
     internal static Vertex Interpolate(in Vertex a, in Vertex b, float t)
+    {
+        uint bone = a.Bones & 255;
+        var (bones, values) = a.Weights == Vector4.UnitX && b.Weights == Vector4.UnitX && (b.Bones & 255) == bone
+            ? (bone, Vector4.UnitX) : InterpolateWeights(a, b, t);
+        var tangent = Vector4.Lerp(a.Tangent, b.Tangent, t);
+        tangent.W = t < .5f ? a.Tangent.W : b.Tangent.W;
+        return new Vertex { Position = Vector3.Lerp(a.Position, b.Position, t), Normal = Unit(Vector3.Lerp(a.Normal, b.Normal, t), a.Normal),
+            Uv = Vector2.Lerp(a.Uv, b.Uv, t), Tangent = tangent, Colour = Vector4.Lerp(a.Colour, b.Colour, t), Bones = bones, Weights = values };
+    }
+
+    static (uint Bones, Vector4 Weights) InterpolateWeights(in Vertex a, in Vertex b, float t)
     {
         Span<float> weights = stackalloc float[256];
         weights.Clear();
@@ -250,10 +297,7 @@ internal static class MeshCut
         }
         float sum = values.X + values.Y + values.Z + values.W;
         if (sum > Epsilon) values /= sum;
-        var tangent = Vector4.Lerp(a.Tangent, b.Tangent, t);
-        tangent.W = t < .5f ? a.Tangent.W : b.Tangent.W;
-        return new Vertex { Position = Vector3.Lerp(a.Position, b.Position, t), Normal = Unit(Vector3.Lerp(a.Normal, b.Normal, t), a.Normal),
-            Uv = Vector2.Lerp(a.Uv, b.Uv, t), Tangent = tangent, Colour = Vector4.Lerp(a.Colour, b.Colour, t), Bones = bones, Weights = values };
+        return (bones, values);
     }
 
     internal static int[] BoneGroups(SkeletonRig rig)
@@ -321,12 +365,22 @@ internal static class MeshCut
             var sub = EncodePart(surface.Vertices.Select(v => v.Vertex).ToArray(), original.MaterialName);
             foreach (var (key, value) in original.TextureAliases) sub.TextureAliases.Add(key, value);
             mesh.SubMeshes.Add(sub);
-            foreach (var pose in source.Poses.Where(p => p.Target == (original.UseSharedVertices ? 0 : surface.Source + 1)))
+            var poses = source.Poses.Where(p => p.Target == (original.UseSharedVertices ? 0 : surface.Source + 1)).ToArray();
+            if (poses.Length == 0) continue;
+            // Most vertices on a retained body have no face morphs. Find the affected traces once for all poses.
+            var posedSource = poses.SelectMany(pose => pose.Vertices).Select(vertex => vertex.Index).ToHashSet();
+            var posedOutput = new List<int>();
+            for (int i = 0; i < surface.Vertices.Count; i++)
+            {
+                var trace = surface.Vertices[i].Trace;
+                if (posedSource.Contains(trace.A) || posedSource.Contains(trace.B) || posedSource.Contains(trace.C)) posedOutput.Add(i);
+            }
+            foreach (var pose in poses)
             {
                 var sparse = pose.Vertices.GroupBy(p => p.Index).ToDictionary(g => g.Key,
                     g => new OgrePoseVertex(g.Key, g.Aggregate(Vector3.Zero, (sum, p) => sum + p.Offset), g.Aggregate(Vector3.Zero, (sum, p) => sum + p.Normal)));
                 var output = new OgrePose { Name = pose.Name, Target = checked((ushort)mesh.SubMeshes.Count), IncludesNormals = pose.IncludesNormals };
-                for (int i = 0; i < surface.Vertices.Count; i++)
+                foreach (int i in posedOutput)
                 {
                     var trace = surface.Vertices[i].Trace;
                     var a = sparse.GetValueOrDefault(trace.A); var b = sparse.GetValueOrDefault(trace.B); var c = sparse.GetValueOrDefault(trace.C);

@@ -29,7 +29,7 @@ public static partial class CombatAdapter
         public required Vector3 Travel;
         public required float Yaw, Brutality;
         public required bool LowStrike, Intended, WasAlive, WasIncapacitated;
-        public bool Execution, RawCaptured, PrimaryFinished, MedicalActive, ApplyingCounterpart, HeadGate;
+        public bool Execution, RawCaptured, PrimaryFinished, MedicalActive, ApplyingCounterpart, HeadGate, MartialArts;
         public DamagePacket Packet;
         public MedicalContext Context;
         public CombatConstants Constants = null!;
@@ -110,7 +110,11 @@ public static partial class CombatAdapter
         {
             contact.Travel = new(contact.Travel.X, 0, contact.Travel.Z);
             int strikeLimb = e.Arg <= 1 ? tech.Limb1 : tech.Limb2;
-            if (table.Cold(e.Source)?.Fighter is { IsAnimal: false, Unarmed: false } fighter && strikeLimb == 4) contact.ActualWeapon = fighter.Weapon?.SourceItem;
+            if (table.Cold(e.Source)?.Fighter is { IsAnimal: false } fighter)
+            {
+                contact.MartialArts = fighter.Unarmed;
+                if (!fighter.Unarmed && strikeLimb == 4) contact.ActualWeapon = fighter.Weapon?.SourceItem;
+            }
         }
     }
 
@@ -182,10 +186,15 @@ public static partial class CombatAdapter
             : attacker?.Fighter is { } fighter ? CombatWoundMechanisms.Classify(fighter, contact.Packet, contact.Direction) : CombatWoundMechanism.Unspecified;
         contact.Before = contact.Gameplay.CaptureBeforeHit(contact.World, contact.Attacker, contact.Victim, part, contact.Packet, mechanism, ctx, contact.Target);
         // A candidate changes the look only after the native vital/head/severance gate actually accepts this damage.
-        if (contact.World.Characters.Cold(contact.Victim.Slot)?.Fighter is not { IsAnimal: true })
-            contact.Head = HeadCutPolicy.Candidate(contact.Brutality, mechanism, contact.Direction, contact.Packet.Cut,
-                HeadCutPolicy.VisualSeedFor(contact.World.Seed, contact.Victim, contact.Attacker,
-                    CombatRolls.BlowCounter(contact.Attacker.Slot, contact.Sequence, contact.Blow, 0)), new(contact.Travel.X, contact.Travel.Z), contact.Yaw);
+        var struck = __instance.Parts[part];
+        if (struck.Template.Type != Meitou.Data.Gameplay.Bodies.BodyPartType.Head
+            || contact.World.Characters.Cold(contact.Victim.Slot)?.Fighter is { IsAnimal: true }) return;
+        ulong seed = HeadCutPolicy.VisualSeedFor(contact.World.Seed, contact.Victim, contact.Attacker,
+            CombatRolls.BlowCounter(contact.Attacker.Slot, contact.Sequence, contact.Blow, 0));
+        contact.Head = contact.MartialArts && contact.WasAlive && contact.Before.OrganicBeforeHit == true
+            ? HeadCutPolicy.MartialArtsBurst(contact.Brutality, hit, struck.MaxHp, seed)
+            : HeadCutPolicy.Candidate(contact.Brutality, mechanism, contact.Direction, contact.Packet.Cut, seed,
+                new(contact.Travel.X, contact.Travel.Z), contact.Yaw);
     }
 
     static bool DecapitationPrefix(MedicalState __instance)
@@ -206,11 +215,13 @@ public static partial class CombatAdapter
             .Select(e => contact.Medical.Parts[e.Part].Template.LimbSlot).Where(limb => limb is >= 0 and <= 3).Distinct().ToArray() ?? [];
         int rupture = contact.Medical.Decapitated && contact.Medical.Parts[contact.Part].Template.Type == Meitou.Data.Gameplay.Bodies.BodyPartType.Head ? 1
             : events?.Any(e => e.Kind == MedicalEventKind.PartSevered && e.Part == contact.Part) == true ? 0 : -1;
-        ImpactEffects.ForWorld(contact.World)?.Capture(contact.World, contact.Hit, before.Mechanism, contact.Execution, rupture);
+        HeadCutState? burst = contact.HeadGate && contact.Medical.Decapitated && contact.Head is { Mode: HeadCutMode.Burst }
+            ? contact.Head : null;
+        ImpactEffects.ForWorld(contact.World)?.Capture(contact.World, contact.Hit, before.Mechanism, contact.Execution, rupture, burst is not null);
         DeveloperCombatDiagnostics.CaptureNative(contact.World, contact.Hit, events?.Count ?? 0);
         contact.Gameplay.RecordHitBridge(GoreHitKey.From(contact.Hit), before with
         {
-            HeadSeveranceAccepted = contact.HeadGate, SeveredLimbSlots = limbs, CounterpartResolved = true,
+            HeadSeveranceAccepted = contact.HeadGate, MartialArtsBurst = burst, SeveredLimbSlots = limbs, CounterpartResolved = true,
         });
         contact.PrimaryFinished = true;
     }

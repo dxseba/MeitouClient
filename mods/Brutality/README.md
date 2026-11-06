@@ -25,6 +25,15 @@ weapon stains/drops, body-part targeting and labels. Torso halves have independe
 carry targets and shared loot. Saves use complete native character/item identities; migration
 reads the integrated version's wound, cut, carried-corpse and weapon-blood records.
 Transient blood/electrical effects do not replay after loading; bowel props reconstruct.
+A lethal unarmed martial-arts head hit can burst an organic humanoid's head from Brutality 80.
+The hit must pass the native decapitation gate and deliver at least 85% of the head's maximum
+health in cut plus blunt damage after armour, including at least 15% in blunt damage.
+The chance rises from 4% at level 80 to 20% at level 100. The saved wound leaves a neck stump.
+The impact sends actual skin and skull fragments from the struck model, plus up to three fitted
+brain pieces and flying blood. Each fragment has a small ragdoll collider for tumbling, ground
+contact and a light rebound. The display scene caps active bodies at 45. The pieces expire
+six seconds after release and are transient on load. During asset preparation the displayed
+head follows the body. The stump, spray and fragments switch together from that posed head.
 Weapon stains participate in the state hash; new opaque item namespaces derive from the world
 seed and registered mod RNG purpose, while loaded namespaces retain their original identity.
 A native load reserves saved container namespaces before choosing a replacement for a missing sidecar.
@@ -95,7 +104,8 @@ Remaining limits:
 Developer previews require both `developerTools: true` and `MEITOU_BRUTALITY_PREVIEW` (torso,
 vertical, head:0..2, limb:0..3, severe:0..2, chest:0..5 and stomach:0..5 where 3..5 kill the target;
 optional :carry or :carry-negative and :putdown=180).
-`head:1:native` runs the pinned lethal-head-hit recipe at tick 120; `:all` targets the sandbox crowd.
+`head:1:native` runs the pinned lethal-head-hit recipe at tick 120; `burst` previews the martial-arts
+finish through a lethal native blunt head hit. `:all` targets the sandbox crowd.
 `:after=120` delays a preview until that tick to measure cuts after healthy asset preparation.
 `MEITOU_BRUTALITY_FOCUS=1` centres isolated sandbox captures. Bowel trace/hide and anatomy-hide
 switches are opt-in visual diagnostics, with no gameplay/save changes.

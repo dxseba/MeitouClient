@@ -34,6 +34,19 @@ public sealed record CharacterGeometryResult(RuntimeCharacterGeometry Retained, 
     public IReadOnlyList<Vertex> AbdomenAnchor { get; init; } = [];
     internal NativeGeometryInfo? Surface { get; init; }
     internal CutAnchorGeometry? CutAnchors { get; init; }
+    internal IReadOnlyList<HeadBurstShard> BurstShards { get; init; } = [];
+}
+
+internal sealed record PreparedHeadBurst(OgreMesh Body, SkeletonRig Rig, CharacterAppearance Appearance, Vector4 Plane,
+    CutMeshResult Retained, IReadOnlyDictionary<(OgreMesh Mesh, float LodScale), CutMeshResult> Parts,
+    IReadOnlyList<PreparedHeadBurstShard> Shards, long Bytes)
+{
+    internal bool Matches(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body) =>
+        ReferenceEquals(Body, body) && ReferenceEquals(Rig, rig) && ReferenceEquals(Appearance.Race, appearance.Race)
+        && Appearance.Female == appearance.Female && !appearance.Headless && !appearance.HeadOnly
+        && Appearance.Character?.GetBool("shaved") == appearance.Character?.GetBool("shaved")
+        && Appearance.PoseWeights.Count == appearance.PoseWeights.Count
+        && Appearance.PoseWeights.All(weight => appearance.PoseWeights.TryGetValue(weight.Key, out float value) && weight.Value == value);
 }
 
 /// <summary>
@@ -56,7 +69,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
     }
     internal readonly record struct StateKey(OgreMesh Body, SkeletonRig Rig, TorsoBisectionState? Torso, HeadCutState? Head,
         LimbCutState? LeftArm, LimbCutState? RightArm, LimbCutState? LeftLeg, LimbCutState? RightLeg, SevereHeadWoundState Severe, ulong Wounds,
-        CharacterGeometryComponents Components, ChestHoleState? Hole = null);
+        CharacterGeometryComponents Components, ChestHoleState? Hole = null, bool HeadOnlyBurstFit = false);
 
     internal readonly record struct BuildKey(CharacterAppearance Appearance, StateKey State);
     internal sealed record BuildInput(BuildKey Key, CharacterAppearance Appearance, BrutalityActorView State,
@@ -81,17 +94,51 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         return new(key, appearance, saved, loadPartMesh);
     }
 
+    internal PreparedHeadBurst PrepareHeadBurst(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,
+        Func<string, OgreMesh?> loadPartMesh, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        var plane = ResolveHeadPlane(body, rig, appearance, HeadCutPolicy.BurstShape.Plane);
+        CutHalfspace[] rules = [new(plane, -1, 7, MorphedDistance: true)];
+        bool shaved = appearance.Character?.GetBool("shaved") == true;
+        uint blood = unchecked((uint)appearance.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
+        var fracture = NativeGeometry.PrepareFracture(anatomy, rig, body, appearance.Female, blood);
+        cancellation.ThrowIfCancellationRequested();
+        var retained = GeneratedExteriorLod.Clip(body, rig, rules, appearance.PoseWeights, shaved);
+        var parts = new Dictionary<(OgreMesh Mesh, float LodScale), CutMeshResult>();
+        foreach (var part in appearance.Parts)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            if (part.Mode != AttachMode.SharedSkeleton || loadPartMesh(part.Mesh) is not { } source) continue;
+            float scale = ExteriorLodScale(appearance, part);
+            if (!parts.ContainsKey((source, scale))) parts.Add((source, scale), GeneratedExteriorLod.Clip(source, rig, rules, lodScale: scale));
+        }
+        cancellation.ThrowIfCancellationRequested();
+        var shards = HeadBurstGeometry.Prepare(appearance, rig, body, fracture, plane, FleshColour(blood, mechanical: false), cancellation);
+        long bytes = AnatomyFitCache<int>.EstimateBytes(retained.Skin) + parts.Values.Sum(part => AnatomyFitCache<int>.EstimateBytes(part.Skin));
+        foreach (var shard in shards)
+            bytes += AnatomyFitCache<int>.EstimateBytes(shard.Body) + shard.Parts.Sum(part => AnatomyFitCache<int>.EstimateBytes(part.Mesh));
+        return new(body, rig, appearance, plane, retained, parts, shards, bytes);
+    }
+
     /// <summary>CPU-only and unpublished: cancellation or a newer cut can discard the result without retiring a live variant.</summary>
-    internal CharacterGeometryResult BuildUnpublished(BuildInput input, CancellationToken cancellation, bool prepareFragments = true)
+    internal CharacterGeometryResult BuildUnpublished(BuildInput input, CancellationToken cancellation, bool prepareFragments = true,
+        bool buildBurstShards = true, Task<PreparedHeadBurst?>? preparation = null)
     {
         cancellation.ThrowIfCancellationRequested();
         var key = input.Key.State;
-        var native = NativeGeometry.Build(anatomy, input.Appearance, key.Rig, key.Body, key.Severe);
+        bool traceBurst = buildBurstShards && key.Head is { Mode: HeadCutMode.Burst }
+            && Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null;
+        long started = traceBurst ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        var native = NativeGeometry.Build(anatomy, input.Appearance, key.Rig, key.Body, key.Severe, key.HeadOnlyBurstFit);
+        if (traceBurst) Console.WriteLine($"Brutality burst fit: {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
         cancellation.ThrowIfCancellationRequested();
+        var prepared = preparation is { IsCompletedSuccessfully: true } ? preparation.Result : null;
         var result = BuildCore(input.Appearance, key.Rig, key.Body, input.LoadPartMesh,
-            key, native.Anatomy, native.Relief, native.Info, input.State.Wounds, cancellation);
+            key, native.Anatomy, native.Relief, native.Info, input.State.Wounds, cancellation, buildBurstShards, prepared);
         surfaceInfos.Add(result.Retained, native.Info);
         foreach (var fragment in result.Detached) surfaceInfos.Add(fragment.Geometry, native.Info);
+        if (traceBurst) Console.WriteLine($"Brutality burst fit and mesh build: {System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
         if (!prepareFragments) return result;
         FragmentWorldBounds.Prepare(result.Retained, input.Appearance, key.Rig, key.Body, input.LoadPartMesh);
         foreach (var fragment in result.Detached)
@@ -130,6 +177,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
     {
         result.Retained.Retire();
         foreach (var fragment in result.Detached) fragment.Geometry.Retire();
+        foreach (var shard in result.BurstShards) shard.Geometry.Retire();
     }
 
     static void Store(LookCache look, StateKey key, CharacterGeometryResult result)
@@ -167,11 +215,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         if (!looks.TryGetValue(appearance, out var look) || !looks.Remove(appearance)) return;
         lock (look)
         {
-            foreach (var result in look.Results.Values)
-            {
-                result.Retained.Retire();
-                foreach (var fragment in result.Detached) fragment.Geometry.Retire();
-            }
+            foreach (var result in look.Results.Values) Retire(result);
             look.Results.Clear();
         }
     }
@@ -180,9 +224,15 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
     {
         var limbs = new LimbCutState?[4];
         foreach (var cut in state.Limbs) if (cut.IsValid) limbs[cut.LimbSlot] ??= cut;
-        return new(body, rig, state.Torso is { IsValid: true } torso ? torso : null,
-            state.Head is { IsValid: true } head ? head : null, limbs[0], limbs[1], limbs[2], limbs[3], state.SevereHead with { HeavyHits = 0 },
-            (state.Wounds.BellyHits >= 10 ? 1UL : 0UL), components, ShownHole(state));
+        TorsoBisectionState? torso = state.Torso is { IsValid: true } validTorso ? validTorso : null;
+        HeadCutState? head = state.Head is { IsValid: true } validHead ? validHead : null;
+        var hole = ShownHole(state);
+        // Segment 8 is the head. Keep full anatomy when another wound may expose it.
+        bool headOnlyBurstFit = head is { Mode: HeadCutMode.Burst } && torso is null && hole is null
+            && limbs.All(limb => limb is null) && state.Wounds.BellyHits < 10
+            && state.Wounds.Entries.All(entry => entry.Region == -1 && entry.Mark.Segment == 8);
+        return new(body, rig, torso, head, limbs[0], limbs[1], limbs[2], limbs[3], state.SevereHead with { HeavyHits = 0 },
+            (state.Wounds.BellyHits >= 10 ? 1UL : 0UL), components, hole, headOnlyBurstFit);
     }
 
     /// <summary>A cleaved torso keeps no hole: the cleave is the stronger presentation, and its halves carry no lining.</summary>
@@ -222,7 +272,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         {
             if (look.Results.TryGetValue(key, out var existing) && !existing.Retained.IsRetired) return existing;
             look.Results.Remove(key);
-            var native = NativeGeometry.Build(anatomy, appearance, rig, body, key.Severe);
+            var native = NativeGeometry.Build(anatomy, appearance, rig, body, key.Severe, key.HeadOnlyBurstFit);
             var result = BuildCore(appearance, rig, body, loadPartMesh, key, native.Anatomy, native.Relief, native.Info, state.Wounds);
             surfaceInfos.Add(result.Retained, native.Info);
             foreach (var fragment in result.Detached) surfaceInfos.Add(fragment.Geometry, native.Info);
@@ -232,7 +282,7 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
     }
 
     static CharacterGeometryResult BuildCore(CharacterAppearance appearance, SkeletonRig rig, OgreMesh body,
-        Func<string, OgreMesh?> loadPartMesh, in StateKey state, OgreMesh? inside, OgreMesh? nativeRelief, NativeGeometryInfo surface, BodyWoundState wounds, CancellationToken cancellation = default)
+        Func<string, OgreMesh?> loadPartMesh, in StateKey state, OgreMesh? inside, OgreMesh? nativeRelief, NativeGeometryInfo surface, BodyWoundState wounds, CancellationToken cancellation = default, bool buildBurstShards = true, PreparedHeadBurst? prepared = null)
     {
         var general = new List<CutHalfspace>();
         var fragments = new List<(GeometryFragmentKind Kind, int Key, int Limb, Vector4 Plane, List<CutHalfspace> Rules)>();
@@ -244,7 +294,9 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         if (inside is null && (state.Torso is not null || state.Head is not null || state.LeftArm is not null || state.RightArm is not null
             || state.LeftLeg is not null || state.RightLeg is not null || state.Severe.Kind != SevereHeadWoundKind.None)) gaps |= GeometryFidelityGap.MissingAnatomy;
         var groups = MeshCut.BoneGroups(rig);
-        var headPlane = state.Head is { } hc ? ResolveHeadPlane(body, rig, appearance, hc.Plane) : default;
+        var warmBurst = state.HeadOnlyBurstFit && state.Head == HeadCutPolicy.BurstShape && !appearance.Race.GetBool("is robot")
+            && prepared?.Matches(appearance, rig, body) == true ? prepared : null;
+        var headPlane = warmBurst?.Plane ?? (state.Head is { } hc ? ResolveHeadPlane(body, rig, appearance, hc.Plane) : default);
         if (state.Head is { } head)
         {
             if (head.Mode == HeadCutMode.DetachedSplit)
@@ -257,7 +309,8 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
             else
             {
                 general.Add(new(headPlane, -1, 7, MorphedDistance: true));
-                fragments.Add((GeometryFragmentKind.HeadPositive, 2, -1, headPlane, [new(headPlane, 1, 7, true, MorphedDistance: true)]));
+                if (head.Mode != HeadCutMode.Burst)
+                    fragments.Add((GeometryFragmentKind.HeadPositive, 2, -1, headPlane, [new(headPlane, 1, 7, true, MorphedDistance: true)]));
             }
         }
         foreach (var cut in new[] { state.LeftArm, state.RightArm, state.LeftLeg, state.RightLeg })
@@ -275,7 +328,9 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
         }
         uint blood = unchecked((uint)appearance.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
         bool mechanical = appearance.Race.GetBool("is robot");
-        var flesh = mechanical ? new Vector4(.28f, .31f, .32f, 1) : AnatomyGeometry.Recolour(new(.37f, .045f, .045f, 1), blood);
+        var flesh = FleshColour(blood, mechanical);
+        if (warmBurst is not null && Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null)
+            Console.WriteLine("Brutality burst: reused prepared exterior and shards");
         var lining = ChestHoleLining(appearance, rig, body, state, blood);
         bool shaved = appearance.Character?.GetBool("shaved") == true;
         var partSources = new Dictionary<string, OgreMesh?>(StringComparer.OrdinalIgnoreCase);
@@ -285,16 +340,17 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
             return mesh;
         }
         var componentMaps = state.Components;
-        bool detachedHead = state.Head is { Mode: HeadCutMode.NeckDetach or HeadCutMode.DetachedSplit };
+        bool detachedHead = state.Head is { Mode: HeadCutMode.NeckDetach or HeadCutMode.DetachedSplit or HeadCutMode.Burst };
+        bool headOnlyBurstFit = state.HeadOnlyBurstFit;
         float originalRadius = MeshCut.SourceModel(body, rig.BoneCount).Radius;
         (RuntimeCharacterGeometry Geometry, CutMeshResult Skin) Piece(IReadOnlyList<CutHalfspace> rules, int stableKey)
         {
             cancellation.ThrowIfCancellationRequested();
             var physicalComponents = componentMaps.For(stableKey);
-            var cutBody = GeneratedExteriorLod.Clip(body, rig, rules, appearance.PoseWeights, shaved, flesh, components: physicalComponents);
+            var cutBody = warmBurst?.Retained ?? GeneratedExteriorLod.Clip(body, rig, rules, appearance.PoseWeights, shaved, flesh, components: physicalComponents);
             var parts = new List<RuntimeCharacterPart>();
             bool headOnly = stableKey is 2 or 3;
-            var pieceInside = inside is null ? null : headOnly ? NativeAnatomyRegions.Select(inside, rig, true)
+            var pieceInside = inside is null || headOnlyBurstFit ? null : headOnly ? NativeAnatomyRegions.Select(inside, rig, true)
                 : detachedHead ? NativeAnatomyRegions.Select(inside, rig, false) : inside;
             // The pin's 180-pixel budget is measured on the whole actor. A head's actual culling sphere is smaller.
             float detailScale = Math.Clamp(Vector3.Distance(cutBody.Min, cutBody.Max) * .5f / originalRadius, .01f, 1);
@@ -325,8 +381,9 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
                 }
                 if (Source(part.Mesh) is not { } source) { gaps |= GeometryFidelityGap.MissingPartMesh; continue; }
                 bool hair = part.Slot is AttachSlot.Hair or AttachSlot.Beard;
-                float partLodScale = part.Record.Type == Meitou.Data.Fcs.FcsRecordType.ATTACHMENT && appearance.Animal is null ? 4 : 1;
-                var cut = GeneratedExteriorLod.Clip(source, rig, rules, capColour: flesh, components: physicalComponents, lodScale: partLodScale);
+                float partLodScale = ExteriorLodScale(appearance, part);
+                var cut = warmBurst?.Parts.GetValueOrDefault((source, partLodScale))
+                    ?? GeneratedExteriorLod.Clip(source, rig, rules, capColour: flesh, components: physicalComponents, lodScale: partLodScale);
                 if (cut.HasTriangles) parts.Add(new(part, rules.Count == 0 ? null : cut.Skin)
                 { DrawFlags = (part.Record.GetInt("material type") == 3 ? NativeSurfaceShaders.PlateFlag : NativeSurfaceShaders.TearFlag)
                     | (hair ? NativeSurfaceShaders.HairWoundFlag : 0) });
@@ -349,8 +406,21 @@ public sealed class CharacterGeometryAdapter(AnatomyLibrary anatomy)
             if (!built.Skin.HasTriangles) continue;
             detached.Add(new(piece.Kind, piece.Key, piece.Limb, built.Geometry, built.Skin.Min, built.Skin.Max, piece.Plane));
         }
-        return new(retained.Geometry, detached.AsReadOnly(), retained.Skin.Min, retained.Skin.Max, gaps) { AbdomenAnchor = bodyWounds.AbdomenAnchor, Surface = surface };
+        return new(retained.Geometry, detached.AsReadOnly(), retained.Skin.Min, retained.Skin.Max, gaps)
+        {
+            AbdomenAnchor = bodyWounds.AbdomenAnchor, Surface = surface,
+            BurstShards = buildBurstShards && state.Head is { Mode: HeadCutMode.Burst }
+                ? warmBurst is not null ? HeadBurstGeometry.Instantiate(appearance, warmBurst.Shards)
+                    : HeadBurstGeometry.Build(appearance, rig, body, inside, headPlane, flesh, cancellation)
+                : [],
+        };
     }
+
+    static Vector4 FleshColour(uint blood, bool mechanical) => mechanical ? new(.28f, .31f, .32f, 1)
+        : AnatomyGeometry.Recolour(new(.37f, .045f, .045f, 1), blood);
+
+    static float ExteriorLodScale(CharacterAppearance appearance, CharacterPart part) =>
+        part.Record.Type == Meitou.Data.Fcs.FcsRecordType.ATTACHMENT && appearance.Animal is null ? 4 : 1;
 
     /// <summary>The saved normalized head plane is resolved against the current morphed head, as in the pinned renderer.</summary>
     internal static Vector4 ResolveHeadPlane(OgreMesh body, SkeletonRig rig, CharacterAppearance appearance, Vector4 normalized)

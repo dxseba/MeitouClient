@@ -64,12 +64,15 @@ internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         var fields = profile.Split(':', StringSplitOptions.RemoveEmptyEntries);
-        if (fields.FirstOrDefault()?.Equals("head", StringComparison.OrdinalIgnoreCase) != true
-            || !fields.Any(field => field.Equals("native", StringComparison.OrdinalIgnoreCase))) return;
+        if (!IsNativeHead(fields)) return;
         nativeInputs = true;
         try { SlowWorld(world); }
         finally { nativeInputs = false; }
     }
+    static bool IsNativeHead(string[] fields) => fields.FirstOrDefault()?.Equals("burst", StringComparison.OrdinalIgnoreCase) == true
+        || fields.FirstOrDefault()?.Equals("head", StringComparison.OrdinalIgnoreCase) == true
+        && fields.Any(field => field.Equals("native", StringComparison.OrdinalIgnoreCase));
+
     CharacterId carrier = CharacterId.None, owner = CharacterId.None, carryTarget = CharacterId.None;
     long appliedTick, heldSince = -1;
     public void SlowWorld(World world)
@@ -77,8 +80,8 @@ internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
         var fields = profile.Split(':', StringSplitOptions.RemoveEmptyEntries);
         bool negative = fields.Any(field => field.Equals("carry-negative", StringComparison.OrdinalIgnoreCase));
         bool carry = negative || fields.Any(field => field.Equals("carry", StringComparison.OrdinalIgnoreCase));
-        bool nativeHead = fields.FirstOrDefault()?.Equals("head", StringComparison.OrdinalIgnoreCase) == true
-            && fields.Any(field => field.Equals("native", StringComparison.OrdinalIgnoreCase));
+        bool burst = fields.FirstOrDefault()?.Equals("burst", StringComparison.OrdinalIgnoreCase) == true;
+        bool nativeHead = IsNativeHead(fields);
         if (!applied)
         {
             if (nativeHead && !nativeInputs) return;
@@ -91,7 +94,7 @@ internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
             if (targets.Length < 2) return;
             var kind = fields.FirstOrDefault()?.ToLowerInvariant() switch
             {
-                "vertical" => GorePreviewKind.VerticalTorso, "head" => GorePreviewKind.Head, "limb" => GorePreviewKind.Limb,
+                "vertical" => GorePreviewKind.VerticalTorso, "head" or "burst" => GorePreviewKind.Head, "limb" => GorePreviewKind.Limb,
                 "severe" => GorePreviewKind.SevereHead, "chest" => GorePreviewKind.ChestHole, "stomach" => GorePreviewKind.StomachHole,
                 _ => GorePreviewKind.Torso,
             };
@@ -103,12 +106,12 @@ internal sealed class GoreVisualCheckSystem(string profile) : ITickSystem
             {
                 int changed = 0;
                 foreach (int slot in targets)
-                    if (nativeHead ? gameplay.ApplyMatchedNativeHeadCut(world, world.Characters.IdOf(slot), carrier, variant)
+                    if (nativeHead ? gameplay.ApplyMatchedNativeHeadCut(world, world.Characters.IdOf(slot), carrier, variant, burst: burst)
                         : gameplay.ApplyDebugCut(world, world.Characters.IdOf(slot), kind, variant)) changed++;
                 applied = true;
                 Console.WriteLine($"Brutality visual crowd: {kind}/{variant}, targets={changed}");
             }
-            else applied = nativeHead ? gameplay.ApplyMatchedNativeHeadCut(world, owner, carrier, variant)
+            else applied = nativeHead ? gameplay.ApplyMatchedNativeHeadCut(world, owner, carrier, variant, burst: burst)
                 : gameplay.ApplyDebugCut(world, owner, kind, variant);
             appliedTick = world.Tick;
             Console.WriteLine($"Brutality visual check: {kind}/{variant}, target {owner}, applied={applied}");

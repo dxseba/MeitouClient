@@ -31,7 +31,7 @@ static class NativeAnatomy
     /// <summary>The bowel's group: with the torso's until it spills, then gone (<see cref="DebrisRenderer.Bowel"/>).</summary>
     const int LooseBowelGroup = 5;
     public static List<Vertex>? Build(SkeletonRig rig, WoundPoint[] skin, Vertex[] headSource, bool female, NativeMeshMorphs? morphs,
-        bool headless, bool headOnly, string path, uint bloodColour = NativeFluidPalette.DefaultBlood, Vertex[]? bodySource = null)
+        bool headless, bool headOnly, string path, uint bloodColour = NativeFluidPalette.DefaultBlood, Vertex[]? bodySource = null, bool fractureOnly = false)
     {
         path = GameFiles.Resolve(path);
         if (skin.Length == 0 || !File.Exists(path) || rig.Handle("Bip01 Pelvis") is not { } pelvis || rig.Handle("Bip01 Neck") is not { } neck || Math.Max(pelvis, neck) >= rig.BindPosition.Length) return null;
@@ -75,7 +75,7 @@ static class NativeAnatomy
             return best < float.MaxValue ? found : new WoundPoint(p, Vector3.UnitZ, default, fallbackBone, (uint)fallbackBone, Vector4.UnitX);
         }
         var vertices = new List<Vertex>();
-        var batches = AnatomyFile.Read(stream);
+        var batches = fractureOnly ? AnatomyFile.ReadSkull(stream) : AnatomyFile.Read(stream);
         // Negative V also includes Shek torso spikes. Head/jaw skin influence and horn-pose slots identify the actual head volume.
         bool headSupported = NativeHeadSurface.TryAnatomyBounds(headSource,
             rig.Handle("Bip01 Head") ?? -1, rig.Handle("Bip01 Jaw") ?? -1, morphs, out var headMin, out var headMax);
@@ -102,11 +102,14 @@ static class NativeAnatomy
             if (batch.Layer != 0) colour = NativeFluidPalette.Recolour(colour, bloodColour);
             // The face keeps skull/teeth and its dark inside; remove whole soft-tissue triangles to preserve later layer/bone boundaries.
             IEnumerable<AnatomyVertex> sourceVertices = batch.Layer == 0 ? batch.Vertices : AnatomyTriangles.BelowHeight(batch.Vertices, (16.9f - hip.Y) / scale + 9.956298f);
+            int group = NativeWoundMasks.BodyGroup(batch.Bone);
+            // Skull triangles share positions. Their skin lookup depends on the fitted point, not the corner normal.
+            var skullSamples = fractureOnly ? new Dictionary<Vector3, WoundPoint>() : null;
             foreach (var v in sourceVertices)
             {
                 var fitted = (v.Position - new Vector3(-0.0446148f, 9.956298f, -0.227702f)) * scale + hip;
                 // The file's rib cage against this body: a narrower sternum, stouter ribs.
-                if (batch.Layer == 0 && NativeWoundMasks.BodyGroup(batch.Bone) == 0 && fitted.Y is > 11f and < 16f && fitted.Z > 0)
+                if (batch.Layer == 0 && group == 0 && fitted.Y is > 11f and < 16f && fitted.Z > 0)
                 {
                     if (MathF.Abs(fitted.X) < 0.75f) fitted = new Vector3(fitted.X * 0.68f, fitted.Y, fitted.Z - 0.1f);
                     else fitted += v.Normal * 0.05f;
@@ -118,15 +121,19 @@ static class NativeAnatomy
                     normal = Vector3.Normalize(normal / skullScale);
                 }
                 // Kept under the skin: anything above the clearance moves down along the skin's normal.
-                var over = Nearest(fitted, NativeWoundMasks.BodyGroup(batch.Bone), bone);
+                if (skullSamples is null || !skullSamples.TryGetValue(fitted, out var over))
+                {
+                    over = Nearest(fitted, group, bone);
+                    skullSamples?.Add(fitted, over);
+                }
                 float height = Vector3.Dot(fitted - over.Position, over.Normal);
-                if ((batch.Layer != 0 || NativeWoundMasks.BodyGroup(batch.Bone) != 0) && height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);   // bone keeps its true shape: the depth push hides what stands proud
-                vertices.Add(AnatomyTriangles.FollowBone(new Vertex { Position = fitted, Normal = normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? NativeFluidPalette.Recolour(OrganColour((int)MathF.Floor(v.Uv.X / 10)), bloodColour) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : NativeWoundMasks.BodyGroup(batch.Bone) + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) } }, bone));
+                if ((batch.Layer != 0 || group != 0) && height > -AnatomyClearance) fitted -= over.Normal * (height + AnatomyClearance);   // bone keeps its true shape: the depth push hides what stands proud
+                vertices.Add(AnatomyTriangles.FollowBone(new Vertex { Position = fitted, Normal = normal, Uv = over.Uv, Tangent = new Vector4(fitted, batch.Layer), Colour = (batch.Layer == 4 ? NativeFluidPalette.Recolour(OrganColour((int)MathF.Floor(v.Uv.X / 10)), bloodColour) : colour) with { W = batch.Layer == 4 && (int)MathF.Floor(v.Uv.X / 10) == 5 ? LooseBowelGroup : group + (StaysOnStump(batch, fitted, female) ? 0.25f : 0) } }, bone));
             }
         }
         // The body's back wall (Gore Lab's cavity lining): what a line of sight through the torso ends on. Layer 7, the torso's group.
         // Reconstruct the reference's rear wall and flank returns from actual installed body triangles.
-        var wall = RuntimeCavityLining.Build(bodySource ?? [], rig, hip, scale);
+        var wall = headOnly ? null : RuntimeCavityLining.Build(bodySource ?? [], rig, hip, scale);
         Vertex Wall(int row, int column)
         {
             var p = wall![row,column];
@@ -135,7 +142,7 @@ static class NativeAnatomy
         }
         var axial = new[] { "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2", "Bip01 Neck" }
             .Select(name => rig.Handle(name)).Where(handle => handle.HasValue).Select(handle => (int)handle!.Value).ToArray();
-        if (!headOnly && wall is not null)
+        if (wall is not null)
             for (int row = 0; row + 1 < RuntimeCavityLining.Rows; row++)
                 for (int column = 0; column + 1 < RuntimeCavityLining.Columns; column++)
                 {
@@ -152,7 +159,7 @@ static class NativeAnatomy
                     foreach (var point in new[] { a, b, c, b, d, c }) vertices.Add(AnatomyTriangles.FollowBone(point, wallBone));
                 }
         // The mouth behind a lost jaw (Z-Anatomy, the user's Mouth.anatomy): placed as one piece, box to box, in the head's lower part. Rigid on the head bone.
-        if (!headless && headSupported && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy")) && rig.Handle("Bip01 Head") is { } mouthBone)
+        if (!fractureOnly && !headless && headSupported && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy")) && rig.Handle("Bip01 Head") is { } mouthBone)
         {
             using var mouthStream = File.OpenRead(Path.Combine(Path.GetDirectoryName(path)!, "Mouth.anatomy"));
             var mouth = AnatomyFile.Read(mouthStream);

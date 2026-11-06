@@ -75,8 +75,11 @@ internal static class GeometryPreparations
             var installRoot = resources.InstallRoot;
             cache.Request(key, instance, frame, () =>
             {
+                // Fit the compact fracture source first so a hit can use it while the full-body fit is still running.
+                var fracture = key.Mechanical ? null : NativeGeometry.PrepareFracture(library, key.Rig, key.Body, key.Female, key.Blood);
                 fragmentAssets.Prepare(bodyPath, key.Body, race, key.Female, key.Rig, indexed, installRoot);
-                return Prepare(library, key.Rig, key.Body, race, parts, exteriors, key.Female, key.Blood, key.Mechanical);
+                var prepared = Prepare(library, key.Rig, key.Body, race, parts, exteriors, key.Female, key.Blood, key.Mechanical);
+                return prepared with { FractureAnatomy = fracture, Bytes = prepared.Bytes + AnatomyFitCache<int>.EstimateBytes(fracture) };
             });
         }
         cache.Publish(list.Preparations);
@@ -104,7 +107,8 @@ internal static class GeometryPreparations
     }
 }
 
-internal readonly record struct PreparedGeometry(RuntimeCharacterGeometry Geometry, long Bytes, OgreMesh? SourceAnatomy = null);
+internal readonly record struct PreparedGeometry(RuntimeCharacterGeometry Geometry, long Bytes, OgreMesh? SourceAnatomy = null,
+    OgreMesh? FractureAnatomy = null);
 
 /// <summary>One background fit at a time, one start per GPU frame, byte-bounded residency, and no repeated work for evicted keys.</summary>
 internal sealed class GeometryPreparationCache<TKey>(long byteBudget = 192L * 1024 * 1024, int capacity = 16,

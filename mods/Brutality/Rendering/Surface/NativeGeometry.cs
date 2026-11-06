@@ -21,7 +21,7 @@ internal static class NativeGeometry
         public Vertex[]? HeadSkin, MechanicalHeadSkin;
     }
     sealed class Sources { public readonly Dictionary<SkeletonRig, Source> ByRig = []; }
-    readonly record struct FitKey(OgreMesh Body, SkeletonRig Rig, bool Female, uint Blood, bool Robot, bool Headless, bool HeadOnly);
+    readonly record struct FitKey(OgreMesh Body, SkeletonRig Rig, bool Female, uint Blood, bool Robot, bool Headless, bool HeadOnly, bool FractureOnly = false);
     static readonly ConditionalWeakTable<OgreMesh, Sources> sources = new();
     static readonly ConditionalWeakTable<AnatomyLibrary, AnatomyFitCache<FitKey>> fits = new();
     static readonly ConditionalWeakTable<OgreMesh, Vertex[]> brainSources = new();
@@ -48,18 +48,18 @@ internal static class NativeGeometry
     }
 
     public static (OgreMesh? Anatomy, OgreMesh? Relief, NativeGeometryInfo Info) Build(AnatomyLibrary library,
-        CharacterAppearance appearance, SkeletonRig rig, OgreMesh body, SevereHeadWoundState severe)
+        CharacterAppearance appearance, SkeletonRig rig, OgreMesh body, SevereHeadWoundState severe, bool headOnlyBurstFit = false)
     {
         var source = Original(body, rig);
         uint blood = unchecked((uint)appearance.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
         bool robot = appearance.Race.GetBool("is robot");
-        var key = new FitKey(body, rig, appearance.Female, blood, robot, appearance.Headless, appearance.HeadOnly);
+        var key = new FitKey(body, rig, appearance.Female, blood, robot, appearance.Headless, appearance.HeadOnly || headOnlyBurstFit, FractureOnly: headOnlyBurstFit);
         var anatomy = Fit(library, rig, body, key, source);
         fits.GetValue(library, static _ => new()).SharePublished(key, anatomy);
         OgreMesh? relief = null;
         HeadWoundFrame? fitted = null;
         bool reliefReady = false;
-        if (!appearance.Headless && !robot && severe.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull
+        if (!headOnlyBurstFit && !appearance.Headless && !robot && severe.Kind is SevereHeadWoundKind.Scalp or SevereHeadWoundKind.BrokenSkull
             && rig.Handle("Bip01 Head") is { } headBone)
         {
             var delta = source.Morphs?.Deltas(appearance.PoseWeights, appearance.Character?.GetBool("shaved") == true);
@@ -86,6 +86,14 @@ internal static class NativeGeometry
 
         Vertex[] SetFrame(Vertex[] vertices, HeadWoundFrame frame)
         { fitted = frame; reliefReady = true; return vertices; }
+    }
+
+    internal static OgreMesh? PrepareFracture(AnatomyLibrary library, SkeletonRig rig, OgreMesh body, bool female, uint blood)
+    {
+        var key = new FitKey(body, rig, female, blood & 0xFFFFFF, false, false, true, FractureOnly: true);
+        var fitted = Fit(library, rig, body, key, Original(body, rig));
+        fits.GetValue(library, static _ => new()).SharePublished(key, fitted);
+        return fitted;
     }
 
     /// <summary>Immutable fit inputs only: worker preparation never reads a mutable actor or appearance.</summary>
@@ -118,12 +126,13 @@ internal static class NativeGeometry
             }
             else if (library.PathFor(AnatomyKind.Body) is { } path)
                 vertices = NativeAnatomy.Build(rig, source.Skin, source.Head, key.Female, source.Morphs,
-                    key.Headless, key.HeadOnly, path, key.Blood, source.Body);
+                    key.Headless, key.HeadOnly, path, key.Blood, source.Body, key.FractureOnly);
             else vertices = null;
             if (vertices is not { Count: > 0 }) return null;
             var mesh = MeshCut.FromTriangles(vertices, body.SkeletonName, preserveRawVertexChannels: true);
             // As in the reference, anatomy levels are shared independently of active wounds and never mutate after publication.
-            var fitted = AnatomyDetail.WithLevels(mesh, rig, [], preserveRawVertexChannels: true);
+            // Fracture input is clipped into new meshes before drawing; its own detail levels would be unused.
+            var fitted = key.FractureOnly ? mesh : AnatomyDetail.WithLevels(mesh, rig, [], preserveRawVertexChannels: true);
             if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_PREVIEW") is not null)
                 Console.WriteLine($"Brutality fit: body={RuntimeHelpers.GetHashCode(body)}, rig={RuntimeHelpers.GetHashCode(rig)}, female={key.Female}, robot={key.Robot}, bytes={AnatomyFitCache<FitKey>.EstimateBytes(fitted)}");
             return fitted;

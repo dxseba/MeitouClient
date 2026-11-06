@@ -23,6 +23,7 @@ public static class RagdollSeverance
                 if (!attached || !Matches(a.Name, -1) && !Matches(b.Name, -1)) return null;
                 return IntoHeadHalf(source, joint, -plane);
             });
+        if (mode == HeadCutMode.Burst) return (remaining, null, null);
         var head = RagdollCut.Filter(source, body => Matches(body.Name, -1) ? body : null);
         var positive = Half(plane);
         var negative = mode == HeadCutMode.DetachedSplit ? Half(-plane) : null;

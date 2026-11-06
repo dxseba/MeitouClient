@@ -49,6 +49,23 @@ public sealed partial class LiquidBloodSimulation(Random random)
         return true;
     }
 
+    internal void SplashHead(Vector3 at, Vector2 travel, float floor, uint blood)
+    {
+        if (!Finite(at) || !float.IsFinite(floor) || !float.IsFinite(travel.LengthSquared())) return;
+        var along = travel.LengthSquared() > 1e-6f ? Vector2.Normalize(travel) : Vector2.UnitX;
+        var colour = new Vector3((blood >> 16) & 255, (blood >> 8) & 255, blood & 255) / 255f;
+        for (int i = 0; i < 48 && drops.Count < DropLimit; i++)
+        {
+            float angle = MathF.Tau * random.NextSingle();
+            var radial = new Vector3(MathF.Cos(angle), 0, MathF.Sin(angle));
+            bool near = i < 12;
+            float speed = near ? 3 + random.NextSingle() * 6 : 8 + random.NextSingle() * 17;
+            float push = near ? 4 : 11;
+            var velocity = radial * speed + new Vector3(along.X * push, 3 + random.NextSingle() * 16, along.Y * push);
+            drops.Add(new(at + radial * .4f, velocity, colour, .05f + random.NextSingle() * .15f, 0, floor));
+        }
+    }
+
     public void Advance(double now, Func<CharacterId, int, CutFluidContact?> contact, Func<Vector3, float> ground)
     {
         impacts.Clear();

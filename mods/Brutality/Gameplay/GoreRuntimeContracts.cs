@@ -33,6 +33,7 @@ public sealed record GoreHitBridge
     public float? PartMaximumBeforeHit { get; init; }
     public bool? OrganicBeforeHit { get; init; }
     public bool? HeadSeveranceAccepted { get; init; }
+    internal HeadCutState? MartialArtsBurst { get; init; }
     public bool? AllowsMedicalSeverance { get; init; }
     /// <summary>The native bridge has evaluated the opposite limb, including a correctly blocked follow-through.</summary>
     public bool CounterpartResolved { get; init; }

@@ -6,7 +6,7 @@ using Meitou.Simulation.Combat;
 
 namespace Meitou.Brutality;
 
-public enum HeadCutMode { NeckDetach = 0, AttachedSplit = 1, DetachedSplit = 2 }
+public enum HeadCutMode { NeckDetach = 0, AttachedSplit = 1, DetachedSplit = 2, Burst = 3 }
 
 /// <summary>A fixed plane in normalized head bounds: q = (bind point - bounds centre) / half extent. Positive is the falling side.</summary>
 public readonly record struct HeadCutState(Vector4 Plane, HeadCutMode Mode)
@@ -15,7 +15,7 @@ public readonly record struct HeadCutState(Vector4 Plane, HeadCutMode Mode)
     {
         get
         {
-            if (Mode is < HeadCutMode.NeckDetach or > HeadCutMode.DetachedSplit
+            if (Mode is < HeadCutMode.NeckDetach or > HeadCutMode.Burst
                 || !float.IsFinite(Plane.X) || !float.IsFinite(Plane.Y) || !float.IsFinite(Plane.Z) || !float.IsFinite(Plane.W)) return false;
             float length = new Vector3(Plane.X, Plane.Y, Plane.Z).LengthSquared();
             float radius = MathF.Abs(Plane.X) + MathF.Abs(Plane.Y) + MathF.Abs(Plane.Z);
@@ -69,6 +69,19 @@ public static class HeadCutPolicy
         return Plane(new(across.X * neckTilt, 1, across.Y * neckTilt), .84f + offset * .10f, HeadCutMode.NeckDetach);
     }
 
+    public const float BurstLevel = 80;
+
+    internal static HeadCutState? MartialArtsBurst(float brutality, in HitDamage hit, float headHealth, ulong seed)
+    {
+        float force = hit.Cut + hit.Blunt;
+        if (!float.IsFinite(brutality) || brutality < BurstLevel || !float.IsFinite(headHealth) || headHealth <= 0
+            || !float.IsFinite(force) || force < headHealth * .85f || hit.Blunt < headHealth * .15f) return null;
+        float chance = .04f + .16f * Math.Clamp((brutality - BurstLevel) / (100 - BurstLevel), 0, 1);
+        return Rng.Float(Rng.Mix(seed ^ 0x4845414442555253UL)) < chance ? BurstShape : null;
+    }
+
+    internal static HeadCutState BurstShape => Plane(Vector3.UnitY, .90f, HeadCutMode.Burst);
+
     /// <summary>Explicit debug shape; invalid names return no candidate. This does not grant real skill or alter medical death.</summary>
     public static HeadCutState? Preview(string style, int cutDirection = 1, ulong visualSeed = 0, Vector2 travel = default, float victimYaw = 0)
     {
@@ -76,6 +89,7 @@ public static class HeadCutPolicy
         return style.ToLowerInvariant() switch
         {
             "auto" => Candidate(100, CombatWoundMechanism.Slash, cutDirection, 300, visualSeed, travel, victimYaw),
+            "burst" => BurstShape,
             "neck" => Plane(new(across.X * .16f, 1, across.Y * .16f), .90f, HeadCutMode.NeckDetach),
             "transverse" => Plane(Vector3.UnitY, -.10f, HeadCutMode.AttachedSplit),
             "oblique" => Plane(new(across.X * .7f, .7f, across.Y * .7f), 0, HeadCutMode.AttachedSplit),

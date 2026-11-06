@@ -17,7 +17,7 @@ public sealed partial class BrutalityGameplaySystem
     /// <summary>Opt-in developer reference fixture, matching DebugHeadCut at pinned source 3a15eeb9.
     /// Domain32 belongs only to that reference recipe; normal mod combat keeps its own named RNG domains.</summary>
     internal bool ApplyMatchedNativeHeadCut(World world, CharacterId target, CharacterId attacker, int variant = 1,
-        int direction = 1, ulong? visualSeed = null)
+        int direction = 1, ulong? visualSeed = null, bool burst = false)
     {
         var table = world.Characters;
         if (combat is null || !table.TryResolveNext(target, out int slot)
@@ -30,18 +30,21 @@ public sealed partial class BrutalityGameplaySystem
         var travel = source.IsNone ? -new Vector2(MathF.Sin(yaw), MathF.Cos(yaw))
             : new Vector2(position.X - table.Next[source.Slot].Position.X, position.Z - table.Next[source.Slot].Position.Z);
         ulong seed = visualSeed ?? Rng.Hash(world.Seed, Rng.Key(target) ^ Rng.Mix(Rng.Key(source)), (RngPurpose)32, (ulong)world.Tick);
-        string style = (variant % 3) switch { 0 => "oblique", 1 => "split", _ => "neck" };
+        string style = burst ? "burst" : (variant % 3) switch { 0 => "oblique", 1 => "split", _ => "neck" };
         if (HeadCutPolicy.Preview(style, direction, seed, travel, yaw) is not { IsValid: true } cut) return false;
         var context = (MedicalContext)nativePreviewContext.Invoke(combat, [world, slot, cold])!;
         var struck = medical.Parts[part];
         if (!context.Options.Decapitation || context.Options.Dismemberment < Dismemberment.Rare || !context.HasStats || !medical.HasStatsObject
             || !struck.Template.Severance || struck.Limb is not (LimbState.Original or LimbState.Crushed)) return false;
         float maximum = struck.MaxHp; bool wasIncapacitated = medical.Incapacitated;
-        var damage = new HitDamage(MathF.Max(300, maximum * 3), 0, 0);
-        var packet = new DamagePacket(damage.Cut, 0, 0, 0, 1, 0);
-        var before = CaptureBeforeHit(world, source, target, part, packet, CombatWoundMechanism.Slash, context) with
+        if (burst && (race.IsRobot || struck.IsRobotic(race))) return false;
+        float force = MathF.Max(300, maximum * 3);
+        var damage = burst ? new HitDamage(0, force, 0) : new HitDamage(force, 0, 0);
+        var packet = new DamagePacket(damage.Cut, damage.Blunt, 0, 0, 1, 0);
+        var mechanism = burst ? CombatWoundMechanism.Crush : CombatWoundMechanism.Slash;
+        var before = CaptureBeforeHit(world, source, target, part, packet, mechanism, context) with
         {
-            ChallengeFactor = 0, HeadSeveranceAccepted = true, CounterpartResolved = true,
+            ChallengeFactor = 0, HeadSeveranceAccepted = true, CounterpartResolved = true, MartialArtsBurst = burst ? cut : null,
             WeaponCategory = !source.IsNone ? table.Cold(source.Slot)?.Fighter?.Weapon?.Data.SkillCategory ?? -1 : -1,
         };
         if (cut.Mode == HeadCutMode.AttachedSplit)
@@ -56,13 +59,13 @@ public sealed partial class BrutalityGameplaySystem
         if (!medical.Dead) return false;
         actor.Head = cut;
         if (medical.Decapitated) table.LimbsChanged.Enqueue((slot, -1));
-        nativePreviewKnockdown.Invoke(combat, [world, slot, cold, travel, damage.Cut]);
+        nativePreviewKnockdown.Invoke(combat, [world, slot, cold, travel, burst ? 60f : force]);
         TaskStart.Stand(table, slot); table.Next[slot].Velocity = Vector3.Zero;
         var hit = new CombatHit(world.Tick, CombatHitSource.Melee, source, target, 0, 0, part, damage, default,
             table.Previous[slot].Position, new(travel.X, 0, travel.Y), table.Previous[slot].Yaw, direction, false, true, true, wasIncapacitated);
         Add(hit, GoreCutKind.Head, head: cut);
         RecordHitBridge(GoreHitKey.From(hit), before);
-        ImpactEffects.ForWorld(world)?.Capture(world, hit, CombatWoundMechanism.Slash, false, medical.Decapitated ? 1 : -1);
+        ImpactEffects.ForWorld(world)?.Capture(world, hit, mechanism, false, medical.Decapitated ? 1 : -1, headBurst: burst);
         nativePreviewObserve.Invoke(world, [hit]);
         // Pin PublishHit supplies event brutality100 without training the attacker's actual skill.
         // Preserve observer order and all other queued contacts; replace only this one debug event's override.

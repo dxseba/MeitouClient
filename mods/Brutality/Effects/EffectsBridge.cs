@@ -113,10 +113,12 @@ internal static partial class EffectsBridge
         return LegacyBloodSprites.AllowNativeBurst(system, binding.Sprites, ReadBool(Member(binding.Host, "o"), "NoParticles"));
     }
     static bool NeckSpurtPrefix(CharacterAppearance look) => LegacyBloodSprites.AllowNeckSpurt(look);
-    static bool OwnedHeadPrefix(object __instance, CharacterSnapshot c, out bool __state)
+    static bool OwnedHeadPrefix(object __instance, CharacterSnapshot c, CharacterAppearance look, out bool __state)
     {
         __state = LegacyBloodSprites.NeckSpurtSuppressed;
         if (hostSession?.GetValue(__instance) is not WorldSession session) return true;
+        if (look.Headless && BrutalityRuntime.For(session.World)?.ActorViews.Any(actor =>
+            actor.Character == c.Id && actor.Head is { Mode: HeadCutMode.Burst }) == true) return false;
         bool advanced = session.World.Systems.OfType<BodySystem>().FirstOrDefault()?.Options.AdvancedRagdolls == true;
         var frame = session.World.Systems.OfType<FragmentPhysicsSystem>().FirstOrDefault()?.FrameAt(session.ShownTick);
         bool owned = LegacyBloodSprites.OwnsShownHead(frame, c.Id, session.ShownTick, advanced);
@@ -174,7 +176,7 @@ internal static partial class EffectsBridge
             if (request.Tick > session.ShownTick) break;
             effects.Sequence = request.Sequence;
             // A chest hole cuts nothing off: its blood comes with the blow's impact event.
-            if (request.Kind is GoreCutKind.PairedLimbAttempt or GoreCutKind.ChestHole) continue;
+            if (request.Kind is GoreCutKind.PairedLimbAttempt or GoreCutKind.ChestHole || request.Head is { Mode: HeadCutMode.Burst }) continue;
             if (effects.Pending.Count >= 128) effects.Pending.Remove(effects.Pending.Keys.Min());
             effects.Pending[request.Sequence] = request;
         }

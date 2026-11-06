@@ -16,7 +16,11 @@ public static class AnatomyFile
 {
     const int MaxBatches = 90, MaxNameLength = 80, MaxLayer = 6, MaxBatchVertices = 200000, MaxVertices = 1500000;
 
-    public static IReadOnlyList<AnatomyBatch> Read(Stream stream)
+    public static IReadOnlyList<AnatomyBatch> Read(Stream stream) => Read(stream, skullOnly: false);
+
+    internal static IReadOnlyList<AnatomyBatch> ReadSkull(Stream stream) => Read(stream, skullOnly: true);
+
+    static IReadOnlyList<AnatomyBatch> Read(Stream stream, bool skullOnly)
     {
         using var reader = new BinaryReader(stream, Encoding.ASCII, leaveOpen: true);
         byte[] magic = reader.ReadBytes(4);
@@ -35,7 +39,16 @@ public static class AnatomyFile
             if (name.Length != length) throw new EndOfStreamException("Truncated anatomy bone name");
             if (name.Any(c => c is < 32 or > 126)) throw new InvalidDataException("Invalid anatomy bone name");
             string bone = Encoding.ASCII.GetString(name);
-            var vertices = new AnatomyVertex[count];
+            total += count;
+            bool keep = !skullOnly || layer == 0 && (bone is "Bip01 Head" or "Bip01 Jaw");
+            if (!keep && stream.CanSeek)
+            {
+                long bytes = count * 8L * sizeof(float);
+                if (bytes > stream.Length - stream.Position) throw new EndOfStreamException("Truncated anatomy vertices");
+                stream.Seek(bytes, SeekOrigin.Current);
+                continue;
+            }
+            var vertices = keep ? new AnatomyVertex[count] : null;
             for (int i = 0; i < count; i++)
             {
                 var p = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
@@ -43,11 +56,9 @@ public static class AnatomyFile
                 var uv = new Vector2(reader.ReadSingle(), reader.ReadSingle());
                 if (!Finite(p) || !Finite(n) || !float.IsFinite(uv.X) || !float.IsFinite(uv.Y))
                     throw new InvalidDataException("Non-finite anatomy vertex");
-                vertices[i] = new AnatomyVertex(p, n, uv);
+                if (vertices is not null) vertices[i] = new AnatomyVertex(p, n, uv);
             }
-            total += count;
-            if (total > MaxVertices) throw new InvalidDataException("Anatomy budget exceeded");
-            result.Add(new AnatomyBatch(bone, layer, vertices));
+            if (vertices is not null) result.Add(new AnatomyBatch(bone, layer, vertices));
         }
         return result.AsReadOnly();
     }
