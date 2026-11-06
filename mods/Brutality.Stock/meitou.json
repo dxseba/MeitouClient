@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.brutality.stock",
+  "apiVersion": 1,
+  "assemblies": ["Brutality.dll"],
+  "entry": "Meitou.Brutality.BrutalityMod"
+}

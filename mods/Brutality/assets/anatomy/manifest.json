@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "format": "ECR1",
+  "importedFrom": "User-supplied Gauntlet of Crowns mod anatomy bundle; copied without changes.",
+  "notices": [
+    "LICENSE.md",
+    "ATTRIBUTION.md",
+    "Ecorche-CC-BY-SA-4.0.txt",
+    "Ecorche-MIT.txt",
+    "SUPPLEMENTAL-ATTRIBUTION.md"
+  ],
+  "sources": [
+    "https://github.com/Charleeh/ecorche",
+    "https://github.com/Z-Anatomy/Models-of-human-anatomy",
+    "https://dbarchive.biosciencedbc.jp/en/bodyparts3d/",
+    "https://brainder.org/research/brain-for-blender/"
+  ],
+  "files": [
+    {
+      "path": "Ecorche.anatomy",
+      "bytes": 33844764,
+      "sha256": "646a94348bbdab3436ae0a3de241ba9537140b82e104773e0c78e04a25f58606"
+    },
+    {
+      "path": "Brain.anatomy",
+      "bytes": 5204904,
+      "sha256": "8a6550ceafe2bedc67cdf075b97092e24c8a03cbba5384f0e2a786f011f12c01",
+      "batches": 52,
+      "selection": "First 80 name-sorted mesh objects containing gyrus (case insensitive); source has 52 matches.",
+      "credits": [
+        "Anderson M. Winkler (Brain for Blender, CC BY-SA 3.0)",
+        "Gauthier Kervyn (Z-Anatomy adaptation, CC BY-SA 4.0)"
+      ]
+    },
+    {
+      "path": "Mouth.anatomy",
+      "bytes": 4522639,
+      "sha256": "13110d13fc939209bc9ec829fc74d62ee2880fd0c71772d2c297584a4cc36b85",
+      "batches": 8,
+      "selection": [
+        "Tongue",
+        "Soft palate",
+        "Uvula of palate",
+        "Gingiva",
+        "Superior pharyngeal constrictor.l",
+        "Superior pharyngeal constrictor.r",
+        "Middle pharyngeal constrictor.l",
+        "Middle pharyngeal constrictor.r"
+      ],
+      "credits": [
+        "Gauthier Kervyn (Z-Anatomy, CC BY-SA 4.0)",
+        "The Database Center for Life Science (BodyParts3D, CC BY 4.0)"
+      ]
+    }
+  ],
+  "adaptedMeshLicense": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "originalBrainLicense": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "headExportSource": {
+    "archive": "Z-Anatomy.zip",
+    "archiveSha256": "e029688545627bd0214b269e1063143abb580aad72b2c2445d6d8a9a0d9da736",
+    "path": "Z-Anatomy/Startup.blend",
+    "bytes": 306838281,
+    "sha256": "9f08a17ea0115fed80b2a73ecdf0a1bc2ab2f6956f37c593ce23d513ea35afcd",
+    "upstreamCommit": null,
+    "verification": "Blender 5.2.2 export reproduces both Brain.anatomy and Mouth.anatomy SHA-256 hashes exactly."
+  }
+}
