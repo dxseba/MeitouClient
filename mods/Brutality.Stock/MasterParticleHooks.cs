@@ -3,10 +3,12 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Content;
+using Meitou.Data.Ogre;
 using Meitou.Data.Particles;
+using Meitou.Game.Rendering.Gpu;
+using Meitou.Game.Rendering.Particles;
+using Meitou.Game.Rendering.Terrain;
 using Meitou.Modding;
-using Meitou.Rendering;
-using Meitou.Rendering.Gpu;
 
 namespace Meitou.Brutality.Effects;
 
@@ -24,9 +26,9 @@ internal sealed class MasterParticleHooks
 
     static MasterParticleHooks? installed;
     static readonly ConditionalWeakTable<ParticleRenderer, Binding> bindings = new();
-    static readonly FieldInfo? particleContext = AccessTools.Field(typeof(ParticleRenderer), "gpu");
-    static readonly FieldInfo? terrainContext = AccessTools.Field(typeof(TerrainRenderer), "gpu");
-    readonly FieldInfo? hostGpu, hostParticles, hostTerrain, metalRenderer;
+    static readonly FieldInfo? particleContext = AccessTools.Field(typeof(ParticleRenderer), "_gpu");
+    static readonly FieldInfo? terrainContext = AccessTools.Field(typeof(TerrainRenderer), "_gpu");
+    readonly FieldInfo? hostGpu, hostParticles, hostTerrain, metalRenderer, battle;
     readonly PropertyInfo? isFlat;
     readonly string folder;
     readonly Func<object, GoreEffectsSimulation?> sceneForHost;
@@ -41,17 +43,18 @@ internal sealed class MasterParticleHooks
         this.allowFlatCombat = allowFlatCombat && !Environment.GetCommandLineArgs().Contains("--no-particles");
         if (AccessTools.TypeByName("Meitou.Game.GameHost") is not { } host) return;
 
-        hostGpu = AccessTools.Field(host, "gpu") ?? throw new MissingFieldException(host.FullName, "gpu");
+        hostGpu = AccessTools.Field(host, "Gpu") ?? throw new MissingFieldException(host.FullName, "Gpu");
         hostParticles = AccessTools.Field(hostGpu.FieldType, "Particles") ?? throw new MissingFieldException(hostGpu.FieldType.FullName, "Particles");
         hostTerrain = AccessTools.Field(hostGpu.FieldType, "Terrain");
-        metalRenderer = AccessTools.Field(host, "metalRenderer");
-        isFlat = AccessTools.Property(host, "IsFlat");
+        metalRenderer = AccessTools.Field(host, "MetalRenderer");
+        battle = AccessTools.Field(host, "Battle");
+        if (battle is not null) isFlat = AccessTools.Property(battle.FieldType, "IsFlat");
         installed = this;
 
         var renderer = typeof(ParticleRenderer);
-        Patch(AccessTools.Method(host, "SetUpBlood"), nameof(SetupPostfix));
+        Patch(AccessTools.Method(AccessTools.Field(host, "BloodDecals").FieldType, "SetUpBlood"), nameof(SetupPostfix));
         // Metal can set up blood before loading mods. This also binds the current renderer after a host swap.
-        Patch(AccessTools.Method(host, "UpdateModHits"), nameof(FramePostfix));
+        Patch(AccessTools.Method(AccessTools.Field(host, "Modding").FieldType, "UpdateModHits"), nameof(FramePostfix));
         Patch(AccessTools.Method(renderer, nameof(ParticleRenderer.Prepare)), nameof(PreparePostfix));
         Patch(AccessTools.Method(renderer, nameof(ParticleRenderer.Record)), nameof(RecordPostfix));
         Patch(AccessTools.Method(renderer, nameof(ParticleRenderer.DrawCoverage)), nameof(CoveragePostfix));
@@ -65,15 +68,23 @@ internal sealed class MasterParticleHooks
                 postfix: new(AccessTools.Method(typeof(MasterParticleHooks), callback)));
     }
 
-    static void SetupPostfix(object __instance, IGpuContext context) => installed?.Bind(__instance, context);
-    static void FramePostfix(object __instance) => installed?.Bind(__instance);
+    static void SetupPostfix(object __instance, IGpuContext context)
+    {
+        if (StockHostParts.HostOf(__instance) is { } host) installed?.Bind(host, context);
+    }
+
+    static void FramePostfix(object __instance)
+    {
+        if (StockHostParts.HostOf(__instance) is { } host) installed?.Bind(host);
+    }
 
     void Bind(object host, IGpuContext? context = null)
     {
         if (hostGpu?.GetValue(host) is not { } gpu || hostParticles is null) return;
         if (hostParticles.GetValue(gpu) is not ParticleRenderer particles)
         {
-            if (!allowFlatCombat || flatAttempts.TryGetValue(gpu, out _) || isFlat?.GetValue(host) is not true
+            if (!allowFlatCombat || flatAttempts.TryGetValue(gpu, out _)
+                || battle?.GetValue(host) is not { } arena || isFlat?.GetValue(arena) is not true
                 || (metalRenderer?.GetValue(host) is true && Environment.GetEnvironmentVariable("MEITOU_METAL_NO_PARTICLES") == "1")) return;
             context ??= hostTerrain?.GetValue(gpu) is TerrainRenderer terrain ? terrainContext?.GetValue(terrain) as IGpuContext : null;
             if (context is null) return;

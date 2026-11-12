@@ -1,6 +1,6 @@
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 using Meitou.Brutality.Physics;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality.Effects;
 
@@ -45,6 +45,14 @@ internal sealed class BowelSkinning
             }
             links[v] = (nearest, weights / total);
         }
+    }
+
+    /// <summary>Rest-mesh weights and four packed node indices for the tissue vertex shader.</summary>
+    internal (Vector2 Weights, Vector2 WeightAndNodes) PackedInfluences(int index)
+    {
+        var (nodes, weights) = links[index];
+        int packed = nodes[0] | nodes[1] << 4 | nodes[2] << 8 | nodes[3] << 12;
+        return (new(weights.X, weights.Y), new(weights.Z, packed));
     }
 
     /// <summary>Writes coordinates relative to the physics pose's centre, without changing UVs or vertex metadata.</summary>

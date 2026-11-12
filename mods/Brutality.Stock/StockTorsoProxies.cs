@@ -1,3 +1,5 @@
+using Meitou.Game.Host;
+using Meitou.Simulation.Player;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -6,7 +8,6 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Data.Gameplay.Bodies;
-using Meitou.Engine;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -37,7 +38,7 @@ internal sealed class StockTorsoProxies : ITickSystem
     static readonly ConditionalWeakTable<World, StockTorsoProxies> worlds = new();
     static readonly ConditionalWeakTable<CharacterCold, LootAlias> lootOwners = new();
     static FieldInfo? uiSession;
-    static readonly FieldInfo? nativeRagdolls = AccessTools.Field(typeof(RagdollSystem), "ragdolls");
+    static readonly FieldInfo? nativeRagdolls = AccessTools.Field(typeof(RagdollSystem), "_ragdolls");
     static readonly MethodInfo? shiftNative = AccessTools.Method(typeof(RagdollSystem), "Shift");
     [ThreadStatic] static World? corpseUpdate;
 
@@ -82,7 +83,7 @@ internal sealed class StockTorsoProxies : ITickSystem
         context.Harmony.Patch(AccessTools.Method(typeof(CrimeSystem), nameof(CrimeSystem.Loot)), prefix: Hook(nameof(AliasLootSlot)));
         context.Harmony.Patch(AccessTools.Method(typeof(CrimeSystem), nameof(CrimeSystem.Pickpocket)), prefix: Hook(nameof(AliasOwnerSlot)));
         context.Harmony.Patch(AccessTools.Method(typeof(StolenMark), nameof(StolenMark.Of)), prefix: Hook(nameof(AliasMark)));
-        if (typeof(World).Assembly.GetType("Meitou.Simulation.CharacterAssembly") is { } assembly
+        if (typeof(World).Assembly.GetType("Meitou.Simulation.Bodies.CharacterAssembly") is { } assembly
             && AccessTools.Method(assembly, "RefreshEquipment", [typeof(CharacterCold)]) is { } refresh)
             context.Harmony.Patch(refresh, prefix: Hook(nameof(AliasEquipment)));
         StockTorsoMarkerFilter.Install(context);

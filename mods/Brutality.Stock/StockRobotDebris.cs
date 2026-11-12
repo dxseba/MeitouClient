@@ -8,11 +8,13 @@ using Meitou.Brutality.Rendering;
 using Meitou.Data;
 using Meitou.Data.Characters;
 using Meitou.Data.Gameplay.Bodies;
-using Meitou.Engine;
+using Meitou.Data.Ogre;
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Gpu;
+using Meitou.Game.Rendering.Objects;
 using Meitou.Modding;
-using Meitou.Rendering;
-using Meitou.Rendering.Gpu;
 using Meitou.Simulation;
+using Meitou.Simulation.Bodies;
 
 namespace Meitou.Brutality.Effects;
 
@@ -26,9 +28,9 @@ internal sealed class StockRobotDebris
     static StockRobotDebris? installed;
     readonly GameDatabase data;
     readonly FieldInfo session, gpu, debris, debrisList, gpuContext, textures, nativeHeads, headFrom, headStart, headVelocity, headAside, headSpin;
-    readonly FieldInfo rendererStates, stateBones, options, noParticles, metalRenderer;
+    readonly FieldInfo rendererStates, stateBones, options, noParticles, metalRenderer, battle, assets;
     readonly PropertyInfo isFlat;
-    readonly MethodInfo rgba8, drawKey, activeRenderer, bonePosition, lastDrawn;
+    readonly MethodInfo rgba8, drawKey, activeRenderer, bonePosition, lastDrawn, loadTexture;
     readonly ConstructorInfo textureConstructor;
     readonly ConditionalWeakTable<object, Scene> scenes = new();
     readonly ConditionalWeakTable<object, object> headsSeen = new();
@@ -56,31 +58,34 @@ internal sealed class StockRobotDebris
     StockRobotDebris(ModContext context, Type host, Type renderer)
     {
         data = context.Data;
-        session = Field(host, "session");
-        gpu = Field(host, "gpu");
+        session = Field(host, "Session");
+        gpu = Field(host, "Gpu");
         debris = Field(gpu.FieldType, "Debris");
         debrisList = Field(gpu.FieldType, "DebrisPieces");
-        gpuContext = Field(typeof(DebrisRenderer), "gpu");
-        textures = Field(typeof(DebrisRenderer), "textures");
-        var image = typeof(DebrisRenderer).Assembly.GetType("Meitou.Rendering.SampledImage")
+        gpuContext = Field(typeof(DebrisRenderer), "_gpu");
+        textures = Field(typeof(DebrisRenderer), "_textures");
+        loadTexture = Method(typeof(DebrisRenderer), "Texture", typeof(string));
+        assets = Field(host, "Assets");
+        var image = typeof(DebrisRenderer).Assembly.GetType("Meitou.Game.Rendering.Sky.SampledImage")
             ?? throw new TypeLoadException("SampledImage");
         rgba8 = Method(image, "Rgba8", typeof(IGpuContext), typeof(int), typeof(int), typeof(byte[]), typeof(bool), typeof(bool), typeof(string));
         var texture = textures.FieldType.GetGenericArguments()[1];
         textureConstructor = AccessTools.Constructor(texture, [typeof(IGpuContext), image])
             ?? throw new MissingMethodException(texture.Name, ".ctor");
-        nativeHeads = Field(host, "heads");
+        nativeHeads = Field(Field(host, "Decapitation").FieldType, "_heads");
         var nativeHead = nativeHeads.FieldType.GetGenericArguments()[0];
         headFrom = Field(nativeHead, "From"); headStart = Field(nativeHead, "Start");
         headVelocity = Field(nativeHead, "Velocity"); headAside = Field(nativeHead, "Aside"); headSpin = Field(nativeHead, "Spin");
-        options = AccessTools.GetDeclaredFields(host).Single(field => field.FieldType.FullName == "Meitou.Rendering.WorldOptions");
+        options = Field(host, "WorldOptions");
         noParticles = Field(options.FieldType, "NoParticles");
-        metalRenderer = Field(host, "metalRenderer");
-        isFlat = AccessTools.Property(host, "IsFlat") ?? throw new MissingMemberException(host.Name, "IsFlat");
+        metalRenderer = Field(host, "MetalRenderer");
+        battle = Field(host, "Battle");
+        isFlat = AccessTools.Property(battle.FieldType, "IsFlat") ?? throw new MissingMemberException(battle.FieldType.Name, "IsFlat");
         drawKey = Method(host, "DrawKey", typeof(CharacterId));
         activeRenderer = AccessTools.PropertyGetter(host, "ActiveCharacters") ?? throw new MissingMemberException("ActiveCharacters");
         bonePosition = Method(renderer, "BonePosition", typeof(long), typeof(string));
         lastDrawn = Method(renderer, "LastDrawn", typeof(long), typeof(string));
-        rendererStates = Field(renderer, "states");
+        rendererStates = Field(renderer, "_states");
         stateBones = Field(rendererStates.FieldType.GetGenericArguments()[1], "Bones");
     }
 
@@ -90,10 +95,11 @@ internal sealed class StockRobotDebris
         try
         {
             var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new TypeLoadException("GameHost");
-            var renderer = AccessTools.TypeByName("Meitou.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
+            var renderer = Field(Field(host, "Gpu").FieldType, "Characters").FieldType;
             var hooks = new StockRobotDebris(context, host, renderer);
-            context.Harmony.Patch(Method(host, "UpdateModHits"), postfix: Patch(nameof(AfterFrame)));
-            context.Harmony.Patch(Method(host, "CutHead", typeof(CharacterSnapshot), typeof(CharacterAppearance)), postfix: Patch(nameof(AfterHead)));
+            context.Harmony.Patch(Method(Field(host, "Modding").FieldType, "UpdateModHits"), postfix: Patch(nameof(AfterFrame)));
+            context.Harmony.Patch(Method(Field(host, "Decapitation").FieldType, "CutHead", typeof(CharacterSnapshot), typeof(CharacterAppearance)),
+                postfix: Patch(nameof(AfterHead)));
             context.Harmony.Patch(Method(host, "Run"), finalizer: Patch(nameof(AfterRun)));
             installed = hooks;
             context.Log("Brutality stock robot scrap initialized");
@@ -110,8 +116,15 @@ internal sealed class StockRobotDebris
     static MethodInfo Method(Type type, string name, params Type[] parameters) =>
         AccessTools.Method(type, name, parameters) ?? throw new MissingMethodException(type.Name, name);
 
-    static void AfterFrame(object __instance) => installed?.Update(__instance);
-    static void AfterHead(object __instance, CharacterSnapshot c, CharacterAppearance look) => installed?.Head(__instance, c, look);
+    static void AfterFrame(object __instance)
+    {
+        if (StockHostParts.HostOf(__instance) is { } host) installed?.Update(host);
+    }
+
+    static void AfterHead(object __instance, CharacterSnapshot c, CharacterAppearance look)
+    {
+        if (StockHostParts.HostOf(__instance) is { } host) installed?.Head(host, __instance, c, look);
+    }
     static void AfterRun(object __instance) => installed?.scenes.Remove(__instance);
 
     internal static void BeginTorso(object host, in GoreEffectCut cut, double time)
@@ -160,10 +173,10 @@ internal sealed class StockRobotDebris
         }
     }
 
-    void Head(object host, CharacterSnapshot actor, CharacterAppearance look)
+    void Head(object host, object decapitation, CharacterSnapshot actor, CharacterAppearance look)
     {
         if (!look.Headless || !look.Race.GetBool("is robot") || !Enabled(host)
-            || session.GetValue(host) is not WorldSession shown || nativeHeads.GetValue(host) is not IList { Count: > 0 } heads
+            || session.GetValue(host) is not WorldSession shown || nativeHeads.GetValue(decapitation) is not IList { Count: > 0 } heads
             || heads[heads.Count - 1] is not { } head || drawKey.Invoke(host, [actor.Id]) is not long key
             || headFrom.GetValue(head) is not long from || key != from || headStart.GetValue(head) is not Vector3 start
             || headsSeen.TryGetValue(head, out _)) return;
@@ -233,15 +246,17 @@ internal sealed class StockRobotDebris
         if (particlesDisabled || metalRenderer.GetValue(host) is true
             && Environment.GetEnvironmentVariable("MEITOU_METAL_NO_PARTICLES") == "1") return false;
         // Flat arenas disable weather and map effects in Program. Combat debris has its own stock renderer.
-        return isFlat.GetValue(host) is true || options.GetValue(host) is { } value && noParticles.GetValue(value) is not true;
+        return IsFlat(host) || options.GetValue(host) is { } value && noParticles.GetValue(value) is not true;
     }
+
+    bool IsFlat(object host) => battle.GetValue(host) is { } arena && isFlat.GetValue(arena) is true;
 
     void Queue(object host, in GoreEffectCut cut, double time, Func<int, CutFluidContact?>? follow)
     {
         bool enabled = Enabled(host);
         if (!enabled || session.GetValue(host) is not WorldSession shown)
         {
-            if (trace) Console.WriteLine($"Brutality stock robot scrap skipped kind={cut.Kind} enabled={enabled} flat={isFlat.GetValue(host)} explicitNoParticles={particlesDisabled}");
+            if (trace) Console.WriteLine($"Brutality stock robot scrap skipped kind={cut.Kind} enabled={enabled} flat={IsFlat(host)} explicitNoParticles={particlesDisabled}");
             return;
         }
         var scene = For(host, shown.World);
@@ -289,7 +304,7 @@ internal sealed class StockRobotDebris
         if (scene.Pending.Count > 0)
         {
             var meshes = available.GetValue(render, static _ => new());
-            Prepare(render, meshes);
+            Prepare(render, meshes, assets.GetValue(host) as AssetLocator);
             if (meshes.Faulted) scene.Pending.Clear();
             else if (meshes.Next == ItemIds.Length)
             {
@@ -313,15 +328,21 @@ internal sealed class StockRobotDebris
         drawn.AddRange(scene.Motion.Drawn);
     }
 
-    void Prepare(DebrisRenderer renderer, Meshes meshes)
+    void Prepare(DebrisRenderer renderer, Meshes meshes, AssetLocator? locator)
     {
         if (meshes.Faulted || meshes.Next >= ItemIds.Length) return;
         try
         {
-            if (!meshes.SteelReady)
+            if (data.Find(ItemIds[meshes.Next++]) is not { } item) return;
+            string material = item.GetPath("mesh");
+            string mesh = item.GetPath("ground mesh") is { Length: > 0 } ground ? ground : material;
+            if (mesh.Length == 0) return;
+            var context = (IGpuContext)gpuContext.GetValue(renderer)!;
+            context.EnsureFrame();
+            // The flat world has no object material resolver. Give the native debris cache the item atlas explicitly.
+            string? diffuse = locator is null ? null : NativeDiffuse(renderer, locator, item);
+            if (diffuse is null && !meshes.SteelReady)
             {
-                var context = (IGpuContext)gpuContext.GetValue(renderer)!;
-                context.EnsureFrame();
                 var cache = (IDictionary)textures.GetValue(renderer)!;
                 const int width = 8;
                 var image = rgba8.Invoke(null, [context, width, width, SteelPixels(width), true, false, Steel]);
@@ -331,19 +352,34 @@ internal sealed class StockRobotDebris
                 // The stock DebrisRenderer now owns this texture and releases it with the rest of its cache.
                 meshes.SteelReady = true;
             }
-            if (data.Find(ItemIds[meshes.Next++]) is not { } item) return;
-            string material = item.GetPath("mesh");
-            string mesh = item.GetPath("ground mesh") is { Length: > 0 } ground ? ground : material;
-            if (mesh.Length == 0) return;
-            string tinted = mesh + DebrisPiece.TextureMark + Steel;
-            if (renderer.Extent(tinted, material.Length > 0 ? material : mesh) is { } extent
+            string textured = mesh + DebrisPiece.TextureMark + (diffuse ?? Steel);
+            if (renderer.Extent(textured, material.Length > 0 ? material : mesh) is { } extent
                 && float.IsFinite(extent.LengthSquared()) && extent.LengthSquared() > 1e-10f)
-                meshes.List.Add(new(tinted, extent));
+            {
+                meshes.List.Add(new(textured, extent));
+                if (trace) Console.WriteLine($"Brutality stock robot scrap material item={item.Name} diffuse={diffuse ?? Steel}");
+            }
         }
         catch (Exception error)
         {
             meshes.Faulted = true;
             if (trace) Console.WriteLine($"Brutality stock robot scrap unavailable: {error.GetBaseException().Message}");
+        }
+    }
+
+    string? NativeDiffuse(DebrisRenderer renderer, AssetLocator locator, GameRecord item)
+    {
+        if (Available(item.GetPath("texture map")) is { } direct) return direct;
+        foreach (var reference in item.GetReferences("material"))
+            if (data.Find(reference.TargetStringId) is { } material && Available(material.GetPath("texture map")) is { } diffuse)
+                return diffuse;
+        return null;
+
+        string? Available(string texture)
+        {
+            string name = Path.GetFileName(texture.Replace('\\', '/'));
+            return name.Length > 0 && !MaterialResolver.Placeholders.Contains(name) && locator.Find(name) is not null
+                && loadTexture.Invoke(renderer, [name]) is not null ? name : null;
         }
     }
 
@@ -356,10 +392,11 @@ internal sealed class StockRobotDebris
                 int i = (y * width + x) * 4;
                 int grain = (x * 19 + y * 27 + x * y * 3) % 23;
                 int streak = y is 2 or 5 ? 11 : 0;
-                pixels[i] = (byte)(43 + grain + streak);
-                pixels[i + 1] = (byte)(47 + grain + streak);
-                pixels[i + 2] = (byte)(51 + grain + streak);
-                pixels[i + 3] = 170;
+                int oxide = (x * 5 + y * 11 + x * y) % 17 > 10 ? 10 : 0;
+                pixels[i] = (byte)(55 + grain + streak + oxide);
+                pixels[i + 1] = (byte)(50 + grain + streak + oxide / 2);
+                pixels[i + 2] = (byte)(44 + grain + streak - oxide / 3);
+                pixels[i + 3] = (byte)(112 + grain * 2 + streak);
             }
         return pixels;
     }

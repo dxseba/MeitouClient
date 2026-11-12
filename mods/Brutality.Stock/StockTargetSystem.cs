@@ -1,3 +1,6 @@
+using Meitou.Simulation.Movement;
+using Meitou.Simulation.Ai;
+using Meitou.Simulation.Player;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.Gameplay.Bodies;
 using System.Numerics;
@@ -121,7 +124,7 @@ internal sealed class StockTargetSystem(CombatSystem combat) : ITickSystem, IOrd
             {
                 if (!table.TryResolveNext(id, out int attacker) || !SourceReady(table.Cold(attacker))
                     || !TargetValid(value, attacker, command.Target, focus, starting: true)) continue;
-                PlayerOrders.Give(value, attacker, new OrderEntry(TaskType.FOCUSED_MELEE_ATTACK, this)
+                PlayerOrders.Give(value, attacker, new OrderEntry(TaskType.FocusedMeleeAttack, this)
                 { Target = command.Target, Detail = focus }, command.Queued);
             }
         }
@@ -226,7 +229,7 @@ internal sealed class StockTargetSystem(CombatSystem combat) : ITickSystem, IOrd
         : SourceReady(value.Characters.Cold(slot)) ? OrderCheck.Run : OrderCheck.Blocked();
 
     public void Start(World value, int slot, OrderEntry order) =>
-        TaskStart.Start(value, slot, new TaskRequest(CharacterTask.Attack, TaskType.FOCUSED_MELEE_ATTACK, TaskSource.Order)
+        TaskStart.Start(value, slot, new TaskRequest(CharacterTask.Attack, TaskType.FocusedMeleeAttack, TaskSource.Order)
         { Target = order.Target });
 
     public int SaveKind(OrderEntry order) => StockTargetSave.Ready && order.Detail is Focus focus ? focus.Part + 1 : -1;

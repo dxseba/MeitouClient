@@ -10,19 +10,32 @@ namespace Meitou.Reports;
 /// </summary>
 sealed class Discord(Config config, Intake intake, Roadmap roadmap, IHttpClientFactory http)
 {
+    /// <summary>
+    /// Whether the Discord endpoint is on: a public key (<c>DISCORD_PUBLIC_KEY</c>) is set.
+    /// </summary>
     public bool Enabled => config.DiscordPublicKey is not null;
 
-    /// <summary>Discord signs every interaction with the application's Ed25519 key over timestamp + body.</summary>
+    /// <summary>
+    /// Discord signs every interaction with the application's Ed25519 key over timestamp + body.
+    /// </summary>
     public bool Verify(string? signature, string? timestamp, byte[] body)
     {
         if (config.DiscordPublicKey is null || signature is null || timestamp is null) return false;
         try
         {
-            return Ed25519.Verify(Convert.FromHexString(config.DiscordPublicKey), Convert.FromHexString(signature), [.. Encoding.UTF8.GetBytes(timestamp), .. body]);
+            return Ed25519.Verify(Convert.FromHexString(config.DiscordPublicKey), Convert.FromHexString(signature),
+                    [.. Encoding.UTF8.GetBytes(timestamp), .. body]);
         }
-        catch (FormatException) { return false; }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
+    /// <summary>
+    /// Answers one verified interaction: a ping (type 1), the system autocomplete (type 4) or a <c>/works</c> or <c>/broken</c> command, as the JSON
+    /// response Discord expects.
+    /// </summary>
     public async Task<JsonObject> Handle(JsonNode interaction)
     {
         int type = (int)interaction["type"]!;
@@ -36,10 +49,11 @@ sealed class Discord(Config config, Intake intake, Roadmap roadmap, IHttpClientF
             string typed = (Opt("system") ?? "").Trim();
             var rows = await roadmap.Rows();
             var choices = new JsonArray();
-            foreach (var r in rows.Values
-                         .Where(r => typed.Length == 0 || r.System.Contains(typed, StringComparison.OrdinalIgnoreCase) || r.Id.Contains(typed, StringComparison.OrdinalIgnoreCase))
-                         .Take(25))
-                choices.Add((JsonNode)new JsonObject { ["name"] = Trim(r.System, 100), ["value"] = r.Id });   // the non-generic Add: the generic one is not AOT-safe
+            foreach (var r in rows.Values.Where(r => Matches(r, typed)).Take(25))
+            {
+                // The non-generic Add: the generic one is not AOT-safe.
+                choices.Add((JsonNode)new JsonObject { ["name"] = Trim(r.System, 100), ["value"] = r.Id });
+            }
             return new() { ["type"] = 8, ["data"] = new JsonObject { ["choices"] = choices } };
         }
 
@@ -56,17 +70,33 @@ sealed class Discord(Config config, Intake intake, Roadmap roadmap, IHttpClientF
         var row = (await roadmap.Rows())[report.Row!];
         return Reply(command == "works"
             ? $"Thanks, recorded: **{row.System}** works for you (report {id})."
-            : $"Thanks, recorded: **{row.System}** is broken for you (report {id}). If you can, open an issue with steps and your log.txt: https://github.com/{config.Repo}/issues/new/choose");
+            : $"Thanks, recorded: **{row.System}** is broken for you (report {id}). "
+                + $"If you can, open an issue with steps and your log.txt: https://github.com/{config.Repo}/issues/new/choose");
     }
 
-    static JsonObject Reply(string text) => new() { ["type"] = 4, ["data"] = new JsonObject { ["content"] = text, ["flags"] = 64 } };   // only the reporter sees it
+    /// <summary>
+    /// Whether the autocomplete offers <paramref name="r"/> for what was <paramref name="typed"/>: its system or id holds it.
+    /// </summary>
+    static bool Matches(RoadmapRow r, string typed) =>
+        typed.Length == 0 || r.System.Contains(typed, StringComparison.OrdinalIgnoreCase) || r.Id.Contains(typed, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// An answer saying <paramref name="text"/>; flags 64: only the reporter sees it.
+    /// </summary>
+    static JsonObject Reply(string text) => new() { ["type"] = 4, ["data"] = new JsonObject { ["content"] = text, ["flags"] = 64 } };
+
+    /// <summary>
+    /// <paramref name="s"/> cut to <paramref name="max"/> characters, the last one an ellipsis, when longer.
+    /// </summary>
     static string Trim(string s, int max) => s.Length > max ? s[..(max - 1)] + "…" : s;
 
-    /// <summary>Registers (overwrites) the two global commands with Discord.</summary>
+    /// <summary>
+    /// Registers (overwrites) the two global commands with Discord.
+    /// </summary>
     public async Task<string> Register()
     {
-        if (config.DiscordAppId is null || config.DiscordBotToken is null) return "Set DISCORD_APP_ID and DISCORD_BOT_TOKEN first.";
+        if (config.DiscordAppId is null || config.DiscordBotToken is null)
+            return "Set DISCORD_APP_ID and DISCORD_BOT_TOKEN first.";
         JsonObject Str(string name, string description, bool required, bool autocomplete = false, int? max = null)
         {
             var o = new JsonObject { ["type"] = 3, ["name"] = name, ["description"] = description, ["required"] = required };
@@ -86,13 +116,15 @@ sealed class Discord(Config config, Intake intake, Roadmap roadmap, IHttpClientF
             new JsonObject
             {
                 ["name"] = "works", ["description"] = "Tell the Meitou roadmap a system works for you",
-                ["options"] = new JsonArray(Str("system", "The roadmap system", true, autocomplete: true), Str("build", "Meitou version, e.g. 0.15.0", false, max: 64),
+                ["options"] = new JsonArray(Str("system", "The roadmap system", true, autocomplete: true), Str("build", "Meitou version, e.g. 0.15.0",
+                        false, max: 64),
                     Platform(), Modded(), Str("note", "What you did", false, max: 300)),
             },
             new JsonObject
             {
                 ["name"] = "broken", ["description"] = "Tell the Meitou roadmap a system is broken for you",
-                ["options"] = new JsonArray(Str("system", "The roadmap system", true, autocomplete: true), Str("what", "What happened", true, max: 300),
+                ["options"] = new JsonArray(Str("system", "The roadmap system", true, autocomplete: true), Str("what", "What happened", true,
+                        max: 300),
                     Str("build", "Meitou version, e.g. 0.15.0", false, max: 64), Platform(), Modded()),
             });
         using var request = new HttpRequestMessage(HttpMethod.Put, $"https://discord.com/api/v10/applications/{config.DiscordAppId}/commands")
@@ -101,6 +133,8 @@ sealed class Discord(Config config, Intake intake, Roadmap roadmap, IHttpClientF
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bot", config.DiscordBotToken);
         using var response = await http.CreateClient().SendAsync(request);
-        return response.IsSuccessStatusCode ? "Commands registered." : $"Discord answered {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}";
+        return response.IsSuccessStatusCode
+            ? "Commands registered."
+            : $"Discord answered {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}";
     }
 }

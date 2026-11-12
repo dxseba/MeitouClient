@@ -1,6 +1,6 @@
+using Meitou.Game.Rendering.Frame;
 using System.Runtime.CompilerServices;
 using Meitou.Brutality.Anatomy;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality.Effects;
 

@@ -199,14 +199,31 @@ internal sealed class StockHeadShardPhysics(IRagdollEnvironment ground) : IDispo
         return Vector3.Lerp(piece.Previous.Position, body.Pose.Position, body.Awake ? due / StepSeconds : 1);
     }
 
+    /// <summary>Gets the floor under a head once the collider is touching it and the head has slowed down.</summary>
+    internal Vector3? PoolContact(long key)
+    {
+        if (physics is not { } active || !pieces.TryGetValue(key, out var piece)) return null;
+        var body = active.Simulation.Bodies.GetBodyReference(piece.Body);
+        if (body.Awake && (body.Velocity.Linear.LengthSquared() > 2.25f || body.Velocity.Angular.LengthSquared() > 2.25f)) return null;
+        var at = body.Pose.Position;
+        float floor = ground.GroundHeight(at.X, at.Z, at.Y);
+        float gap = at.Y - Height(piece, body.Pose.Orientation) - floor;
+        return gap is >= -.40f and <= .28f ? new(at.X, floor, at.Z) : null;
+    }
+
+    static float Height(Piece piece, Quaternion rotation)
+    {
+        var axes = Matrix4x4.CreateFromQuaternion(rotation);
+        return Vector3.Dot(piece.HalfExtent, Vector3.Abs(new(axes.M12, axes.M22, axes.M32)));
+    }
+
     void ResolveLanding(RagdollPhysics active, Piece piece)
     {
         var body = active.Simulation.Bodies.GetBodyReference(piece.Body);
         var at = body.Pose.Position;
         float floor = ground.GroundHeight(at.X, at.Z, MathF.Max(at.Y, piece.Previous.Position.Y));
         if (!float.IsFinite(floor)) return;
-        var axes = Matrix4x4.CreateFromQuaternion(body.Pose.Orientation);
-        float height = Vector3.Dot(piece.HalfExtent, Vector3.Abs(new(axes.M12, axes.M22, axes.M32)));
+        float height = Height(piece, body.Pose.Orientation);
         float gap = at.Y - height - floor;
         bool contact = gap <= .10f && body.Velocity.Linear.Y - piece.DownwardSpeed > 3;
         // Catch fast shards that cross a one-sided floor before the coverage budget reaches their tile.

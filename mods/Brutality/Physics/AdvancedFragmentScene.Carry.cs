@@ -8,8 +8,19 @@ internal sealed partial class AdvancedFragmentScene
 {
     public void SetCarried(Piece piece, RigidTransform[] target, bool[] connected, bool[] pinned, bool entering)
     {
+#if BRUTALITY_STOCK_MASTER
+        bool wasFrozen = piece.Frozen;
+        if (wasFrozen)
+        {
+            MakeRoom(piece.Bodies.Where((handle, b) => handle is not null && connected[b] && !pinned[b]).Count());
+            piece.Frozen = false;
+        }
+        bool rebuild = wasFrozen || !piece.Carried || entering || Enumerable.Range(0, pinned.Length)
+            .Any(b => connected[b] && piece.Bodies[b] is not null && piece.Dynamic[b] == pinned[b]);
+#else
         if (piece.Frozen) Impulse(piece, -1, Vector3.Zero);
-        bool rebuild = !piece.Carried || entering || Enumerable.Range(0, pinned.Length).Any(b => piece.Dynamic[b] == pinned[b]);
+        bool rebuild = !piece.Carried || entering || Enumerable.Range(0, pinned.Length).Any(b => piece.Bodies[b] is not null && piece.Dynamic[b] == pinned[b]);
+#endif
         piece.Carried = true;
         if (rebuild)
         {
@@ -19,6 +30,17 @@ internal sealed partial class AdvancedFragmentScene
             for (int b = 0; b < piece.Bodies.Length; b++)
             {
                 if (piece.Bodies[b] is not { } handle) continue;
+#if BRUTALITY_STOCK_MASTER
+                ref var tag = ref physics.Tag(handle);
+                tag.CarryPin = pinned[b];
+                tag.CarryOrphan = !connected[b];
+                if (!connected[b])
+                {
+                    // Lifting the torso leaves a settled loose fragment at rest. A falling one keeps its momentum.
+                    if (wasFrozen) piece.Dynamic[b] = false;
+                    continue;
+                }
+#endif
                 var body = physics.Simulation.Bodies.GetBodyReference(handle);
                 if (pinned[b]) body.BecomeKinematic();
                 else body.SetLocalInertia(shapes[b].Inertia);
@@ -33,18 +55,25 @@ internal sealed partial class AdvancedFragmentScene
         }
         for (int b = 0; b < piece.Bodies.Length; b++)
         {
-            if (!pinned[b] || piece.Bodies[b] is not { } handle) continue;
+            if (!pinned[b]) continue;
+            piece.Pose[b] = target[b];
+            if (piece.Bodies[b] is not { } handle) continue;
             var body = physics.Simulation.Bodies.GetBodyReference(handle);
             body.Pose = new RigidPose(target[b].Position, target[b].Rotation);
             body.Velocity = default; body.Awake = true;
-            piece.Pose[b] = target[b];
         }
         piece.Age = 0;
     }
 
-    public void ReleaseCarried(Piece piece)
+    public void ReleaseCarried(Piece piece, bool preserveDynamic = false)
     {
         if (!piece.Carried) return;
+#if BRUTALITY_STOCK_MASTER
+        var connected = piece.StockGripBodies ??= ConnectedRoot(piece.Definition);
+        if (preserveDynamic) MakeRoom(piece.Bodies.Where((handle, b) => handle is not null && connected[b] && !piece.Dynamic[b]).Count());
+#else
+        if (preserveDynamic) MakeRoom(piece.Bodies.Where((handle, b) => handle is not null && !piece.Dynamic[b]).Count());
+#endif
         piece.Carried = false;
         foreach (var joint in piece.Joints) physics.Simulation.Solver.Remove(joint);
         piece.Joints.Clear();
@@ -52,6 +81,12 @@ internal sealed partial class AdvancedFragmentScene
         for (int b = 0; b < piece.Bodies.Length; b++)
         {
             if (piece.Bodies[b] is not { } handle) continue;
+#if BRUTALITY_STOCK_MASTER
+            ref var tag = ref physics.Tag(handle);
+            tag.CarryPin = tag.CarryOrphan = false;
+            if (preserveDynamic && !connected[b]) continue;
+#endif
+            if (preserveDynamic && piece.Dynamic[b]) continue;
             var body = physics.Simulation.Bodies.GetBodyReference(handle);
             body.SetLocalInertia(shapes[b].Inertia); body.Velocity = default; body.Awake = true;
             piece.Dynamic[b] = true;

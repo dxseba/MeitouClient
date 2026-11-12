@@ -59,6 +59,33 @@ namespace Meitou.Brutality.Physics
 {
     internal sealed partial class AdvancedFragmentScene
     {
+        /// <summary>Finds the support below a settled limb without depending on the time it freezes.</summary>
+        internal Vector3? PoolContact(Piece piece, IRagdollEnvironment ground)
+        {
+            if (piece.Carried) return null;
+            foreach (var handle in piece.Bodies)
+            {
+                if (handle is not { } id) continue;
+                var body = physics.Simulation.Bodies.GetBodyReference(id);
+                if (body.Velocity.Linear.LengthSquared() > 2.25f || body.Velocity.Angular.LengthSquared() > 2.25f) return null;
+            }
+
+            if (At(piece.Definition.Root) is { } root) return root;
+            for (int i = 0; i < piece.Bodies.Length; i++)
+                if (i != piece.Definition.Root && At(i) is { } support) return support;
+            return null;
+
+            Vector3? At(int index)
+            {
+                if (piece.Bodies[index] is not { } id) return null;
+                var body = physics.Simulation.Bodies.GetBodyReference(id);
+                var at = body.Pose.Position;
+                float floor = ground.GroundHeight(at.X, at.Z, at.Y);
+                float gap = body.BoundingBox.Min.Y - floor;
+                return gap is >= -.40f and <= .28f ? new(at.X, floor, at.Z) : null;
+            }
+        }
+
         internal bool RestingNearGround(Piece piece, IRagdollEnvironment ground)
         {
             if (piece.Frozen) return true;

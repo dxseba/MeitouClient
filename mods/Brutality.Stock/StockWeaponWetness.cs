@@ -1,9 +1,9 @@
+using Meitou.Game.Rendering.Frame;
 using System.Globalization;
 using System.Numerics;
 using System.Reflection;
 using HarmonyLib;
 using Meitou.Modding;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality;
 
@@ -31,9 +31,9 @@ internal static class StockWeaponWetness
         if (enabled) return;
         try
         {
-            var assembly = typeof(AssetLocator).Assembly;
-            var shaders = assembly.GetType("Meitou.Rendering.Characters.CharacterShaders", throwOnError: true)!;
-            var material = assembly.GetType("Meitou.Rendering.Characters.PartMaterial", throwOnError: true)!;
+            var assembly = typeof(Model).Assembly;
+            var shaders = assembly.GetType("Meitou.Game.Rendering.Characters.CharacterShaders", throwOnError: true)!;
+            var material = assembly.GetType("Meitou.Game.Rendering.Characters.PartMaterial", throwOnError: true)!;
             var tone = AccessTools.Field(material, "SkinTone");
             var fragment = AccessTools.Method(shaders, "Fragment", [typeof(bool)]);
             if (tone?.FieldType != typeof(Vector3) || fragment?.ReturnType != typeof(string)

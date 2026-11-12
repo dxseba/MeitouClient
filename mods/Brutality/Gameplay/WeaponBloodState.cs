@@ -34,7 +34,7 @@ public sealed partial class WeaponBloodState(RngPurpose purpose = default) : ITi
     public bool Deposit(ItemInstance? item, RaceData race, in HitDamage damage, bool aliveBeforeHit, bool organicBeforeHit,
         CombatWoundMechanism mechanism = CombatWoundMechanism.Unspecified)
     {
-        if (item is not { Type: FcsRecordType.WEAPON } || !aliveBeforeHit || !organicBeforeHit || race.IsRobot
+        if (item is not { Type: FcsRecordType.Weapon } || !aliveBeforeHit || !organicBeforeHit || race.IsRobot
             || !float.IsFinite(race.BleedRate) || race.BleedRate <= 0
             || !float.IsFinite(damage.Cut) || damage.Cut < 0 || !float.IsFinite(damage.Pierce) || damage.Pierce < 0
             || !float.IsFinite(damage.Blunt) || damage.Blunt < 0 || !float.IsFinite(damage.Scale) || damage.Scale <= 0) return false;

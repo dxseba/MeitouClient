@@ -19,7 +19,7 @@ internal static class StockWeaponItems
         // CharacterAssembly.MakeFighter chooses the first valid WEAPON in this section. A record
         // matching the fighter necessarily passed the same native weapon lookup.
         foreach (var item in inventory.Items)
-            if (item.Type == FcsRecordType.WEAPON && item.Section == section && item.Record == record) return item;
+            if (item.Type == FcsRecordType.Weapon && item.Section == section && item.Record == record) return item;
         return null;
     }
 

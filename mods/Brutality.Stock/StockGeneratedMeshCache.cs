@@ -1,3 +1,5 @@
+using Meitou.Game.Rendering.Gpu;
+using Meitou.Game.Rendering.Frame;
 using System.Collections;
 using System.Numerics;
 using System.Reflection;
@@ -5,8 +7,6 @@ using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Data.Characters;
 using Meitou.Modding;
-using Meitou.Rendering;
-using Meitou.Rendering.Gpu;
 
 namespace Meitou.Brutality;
 
@@ -50,22 +50,22 @@ internal sealed class StockGeneratedMeshCache
 
     StockGeneratedMeshCache(Type type, Type renderer)
     {
-        content = Field(renderer, "content"); assets = Field(renderer, "assets");
+        content = Field(renderer, "_content"); assets = Field(renderer, "_assets");
         draws = Property(renderer, "Draws");
-        states = Field(renderer, "states"); stateAsset = Field(states.FieldType.GetGenericArguments()[1], "Asset");
-        bodyHeights = Field(renderer, "bodyHeights"); portraits = Field(renderer, "portraitShown");
+        states = Field(renderer, "_states"); stateAsset = Field(states.FieldType.GetGenericArguments()[1], "Asset");
+        bodyHeights = Field(renderer, "_bodyHeights"); portraits = Field(renderer, "_portraitShown");
         portraitAsset = Property(portraits.FieldType.GetGenericArguments()[1], "Asset");
-        live = Field(renderer, "live"); liveCount = Field(renderer, "liveCount");
-        nativeMeshes = Field(type, "meshes"); prepared = Field(type, "prepared");
-        fetching = Field(type, "fetching"); close = Field(type, "closeUp"); rig = Property(type, "Rigs");
-        setups = Field(typeof(CharacterRigs), "setups"); meshBytes = Property(type, "MeshBytes");
+        live = Field(renderer, "_live"); liveCount = Field(renderer, "_liveCount");
+        nativeMeshes = Field(type, "_meshes"); prepared = Field(type, "_prepared");
+        fetching = Field(type, "_fetching"); close = Field(type, "_closeUp"); rig = Property(type, "Rigs");
+        setups = Field(typeof(CharacterRigs), "_setups"); meshBytes = Property(type, "MeshBytes");
         gpuMesh = Property(nativeMeshes.FieldType.GetGenericArguments()[1], "Gpu");
         meshGpuBytes = Field(gpuMesh.PropertyType, "Bytes"); gpuParts = Property(gpuMesh.PropertyType, "Parts");
         var part = gpuParts.PropertyType.GetGenericArguments()[0];
         vertices = Field(part, "Vertices"); indices = Field(part, "Indices");
         morphArena = Property(type, "Morphs");
         var morph = morphArena.PropertyType;
-        knownMorphs = Field(morph, "known"); morphGpu = Field(morph, "gpu");
+        knownMorphs = Field(morph, "_known"); morphGpu = Field(morph, "_gpu");
         reserveMorphs = Method(morph, "Reserve", typeof(int));
         writeMorphs = Method(morph, "Write", typeof(int), typeof(Vector4[]));
     }
@@ -76,7 +76,7 @@ internal sealed class StockGeneratedMeshCache
         string step = "resolve stock cache members";
         try
         {
-            var renderer = content.Assembly.GetType("Meitou.Rendering.Characters.CharacterRenderer", true)!;
+            var renderer = content.Assembly.GetType("Meitou.Game.Rendering.Characters.CharacterRenderer", true)!;
             var hook = new StockGeneratedMeshCache(content, renderer);
             var start = Method(content, "Start", typeof(CharacterAppearance), typeof(bool), typeof(bool));
             // Build has a filtered catch whose IL the pinned Harmony version cannot rewrite. AssetFor also covers synchronous stills.

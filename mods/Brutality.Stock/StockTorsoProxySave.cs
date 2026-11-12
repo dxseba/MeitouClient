@@ -150,8 +150,8 @@ internal static class StockTorsoProxySave
 
     static bool AllowedRow(TaskType row, int kind) => row switch
     {
-        TaskType.LIFT_PERSON_PLAYER_ORDER or TaskType.KIDNAP_ORDER or TaskType.PUT_DOWN_OBJECT => kind == 0,
-        TaskType.LOOT_TARGET => kind is 0 or 1,
+        TaskType.LiftPersonPlayerOrder or TaskType.KidnapOrder or TaskType.PutDownObject => kind == 0,
+        TaskType.LootTarget => kind is 0 or 1,
         _ => false,
     };
 
@@ -159,7 +159,20 @@ internal static class StockTorsoProxySave
         && order.Row == row.Row && order.Kind == row.Kind;
 
     static bool Valid(Vector3 position) => float.IsFinite(position.LengthSquared()) && position.LengthSquared() < 1e14f;
-    static bool Character(Hand handle) => handle.RecordType == FcsRecordType.CHARACTER;
+    static bool Character(Hand handle) => handle.RecordType == FcsRecordType.Character;
+
+    /// <summary>Collects cut owners needed by a loaded character before native orders and carries restore.</summary>
+    internal static void AddRequiredOwners(CharacterCold cold, HashSet<Hand> required)
+    {
+        if (cold.Save is not { } link) return;
+        if (link.CarryIsCarrier && Character(link.CarryPartner)) required.Add(link.CarryPartner);
+        if (StateOf(cold).Data is not { } saved) return;
+
+        if (saved.CarriedLower is { } carry) required.Add(carry);
+        if (cold.SavedOrders is not { } orders) return;
+        foreach (var row in saved.Orders)
+            if ((uint)row.Index < (uint)orders.Count && Matches(orders[row.Index], row)) required.Add(row.Owner);
+    }
 
     static Loaded StateOf(CharacterCold cold) => loaded.GetValue(cold, static actor =>
         new Loaded(Read(actor.Save?.Source.GameState)));
@@ -255,8 +268,8 @@ internal static class StockTorsoProxySave
             if (!selected.TryGetValue(i, out var row) || !Matches(order, row)) { rows.Add(order); continue; }
             if (!TryLower(world, state, row.Owner, out var proxy, out _)) continue;
             // A pickup that already attached before the save has completed its purpose. Do not block later queued orders.
-            if (row.Started && cold.Carrying == proxy && (row.Row is TaskType.LIFT_PERSON_PLAYER_ORDER or TaskType.KIDNAP_ORDER)) continue;
-            var alias = new Hand((int)FcsRecordType.CHARACTER, int.MinValue, int.MinValue, i, int.MinValue);
+            if (row.Started && cold.Carrying == proxy && (row.Row is TaskType.LiftPersonPlayerOrder or TaskType.KidnapOrder)) continue;
+            var alias = new Hand((int)FcsRecordType.Character, int.MinValue, int.MinValue, i, int.MinValue);
             aliases[alias] = proxy;
             rows.Add(order with { Hand = alias });
         }

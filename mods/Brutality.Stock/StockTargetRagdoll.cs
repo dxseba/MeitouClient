@@ -22,9 +22,9 @@ internal static class StockTargetRagdoll
 
     static readonly Type systemType = typeof(RagdollSystem);
     static readonly Type bodyType = AccessTools.Inner(systemType, "Ragdoll");
-    static readonly System.Reflection.FieldInfo map = AccessTools.Field(systemType, "ragdolls"),
-        scene = AccessTools.Field(systemType, "physics"), environment = AccessTools.Field(systemType, "environment"),
-        options = AccessTools.Field(systemType, "options");
+    static readonly System.Reflection.FieldInfo map = AccessTools.Field(systemType, "_ragdolls"),
+        scene = AccessTools.Field(systemType, "_physics"), environment = AccessTools.Field(systemType, "_environment"),
+        options = AccessTools.Field(systemType, "_options");
     static readonly System.Reflection.FieldInfo simulation = AccessTools.Field(scene.FieldType, "Simulation"),
         mask = AccessTools.Field(bodyType, "Mask"), frozen = AccessTools.Field(bodyType, "Frozen"), age = AccessTools.Field(bodyType, "Age"),
         handles = AccessTools.Field(bodyType, "Bodies"), dynamic = AccessTools.Field(bodyType, "Dynamic"),

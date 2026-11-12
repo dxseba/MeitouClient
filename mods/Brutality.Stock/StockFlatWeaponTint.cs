@@ -1,3 +1,7 @@
+using Meitou.Game.Rendering.Gpu;
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Objects;
+using Meitou.Game.Rendering.Terrain;
 using System.Collections;
 using System.Numerics;
 using System.Reflection;
@@ -6,10 +10,7 @@ using System.Runtime.InteropServices;
 using HarmonyLib;
 using Meitou.Brutality.Rendering;
 using Meitou.Data.Ogre;
-using Meitou.Engine;
 using Meitou.Modding;
-using Meitou.Rendering;
-using Meitou.Rendering.Gpu;
 
 namespace Meitou.Brutality;
 
@@ -20,10 +21,10 @@ internal sealed class StockFlatWeaponTint(ModContext context, Type host, Type ch
     static StockFlatWeaponTint? installed;
     [ThreadStatic] static ShaderEdits? shaderEdits;
     readonly ConditionalWeakTable<DebrisRenderer, Display> displays = new();
-    readonly FieldInfo gpu = RequireField(typeof(DebrisRenderer), "gpu");
-    readonly FieldInfo meshes = RequireField(typeof(DebrisRenderer), "meshes");
-    readonly FieldInfo content = RequireField(characters, "content");
-    readonly FieldInfo resolver = RequireField(RequireField(characters, "content").FieldType, "resolver");
+    readonly FieldInfo gpu = RequireField(typeof(DebrisRenderer), "_gpu");
+    readonly FieldInfo meshes = RequireField(typeof(DebrisRenderer), "_meshes");
+    readonly FieldInfo content = RequireField(characters, "_content");
+    readonly FieldInfo resolver = RequireField(RequireField(characters, "_content").FieldType, "_resolver");
     readonly FieldInfo art = AccessTools.GetDeclaredFields(host).Single(field => field.FieldType == typeof(AssetLocator));
     readonly FieldInfo options = AccessTools.GetDeclaredFields(host).Single(field => field.FieldType.Name == "WorldOptions");
     readonly FieldInfo blood = RequireField(AccessTools.GetDeclaredFields(host).Single(field => field.FieldType.Name == "WorldOptions").FieldType, "MeitouBlood");
@@ -51,8 +52,8 @@ internal sealed class StockFlatWeaponTint(ModContext context, Type host, Type ch
         try
         {
             var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new TypeLoadException("GameHost");
-            var characters = AccessTools.TypeByName("Meitou.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
-            var shaders = typeof(DebrisRenderer).Assembly.GetType("Meitou.Rendering.NativeShaders", throwOnError: true)!;
+            var characters = AccessTools.TypeByName("Meitou.Game.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
+            var shaders = typeof(DebrisRenderer).Assembly.GetType("Meitou.Game.Rendering.Frame.NativeShaders", throwOnError: true)!;
             var hooks = new StockFlatWeaponTint(context, host, characters);
             context.Harmony.Patch(RequireMethod(shaders, "Port", typeof(string), typeof(IReadOnlyDictionary<string, string>), typeof(string)),
                 prefix: Patch(nameof(Shader)));
@@ -147,8 +148,8 @@ internal sealed class StockFlatWeaponTint(ModContext context, Type host, Type ch
             {
                 display.Renderer ??= MakeRenderer(host, native, display.Assets);
                 key = $"brutality-arena-weapon-{display.Variants.Count}";
-                string? diffuse = context.Data.Find(pending.Key.Material)?.GetPath("texture map");
-                if (string.IsNullOrEmpty(diffuse)) diffuse = null;
+                string? diffuse = context.Data.Find(pending.Key.Record) is { } record
+                    ? StockWeaponGround.DiffuseOf(context.Data, display.Assets, record, pending.Key.Material) : null;
                 object? built = build.Invoke(display.Renderer, [key, paint.Original, paint.Mesh, null, diffuse]);
                 if (built is not null && meshes.GetValue(display.Renderer) is IDictionary cache) cache.Add(key, built);
                 else key = null;

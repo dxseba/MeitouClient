@@ -1,3 +1,5 @@
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Objects;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -6,11 +8,10 @@ using Meitou.Brutality.Rendering;
 using Meitou.Data;
 using Meitou.Data.Characters;
 using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
 using Meitou.Data.Ogre;
 using Meitou.Data.World;
-using Meitou.Engine;
 using Meitou.Modding;
-using Meitou.Rendering;
 using Meitou.Simulation;
 using Meitou.Simulation.Items;
 
@@ -29,7 +30,8 @@ internal sealed class StockWeaponGround
     readonly object resident, failed;
     readonly bool trace = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS") == "1";
 
-    sealed record Snapshot(long Tick, long Revision, IReadOnlyDictionary<int, WeaponStainView> Stains);
+    sealed record Snapshot(long Tick, long Revision, IReadOnlyDictionary<int, WeaponStainView> Stains,
+        IReadOnlyDictionary<int, string> Materials);
     sealed class GroundPublication
     {
         public volatile Snapshot? Latest;
@@ -51,15 +53,15 @@ internal sealed class StockWeaponGround
     StockWeaponGround(Type host, ModContext context)
     {
         data = context.Data;
-        session = Field(host, "session");
-        groundPoses = Field(host, "groundPoses");
+        session = Field(host, "Session");
+        groundPoses = Field(StockHostParts.GroundItems.FieldType, "_groundPoses");
         graphics = AccessTools.GetDeclaredFields(host).Single(f => f.FieldType.Name == "WorldOptions");
         blood = Field(graphics.FieldType, "MeitouBlood");
         assets = AccessTools.GetDeclaredFields(host).Single(f => f.FieldType == typeof(AssetLocator));
         objects = AccessTools.PropertyGetter(host, "ActiveObjects") ?? throw new MissingMethodException("GameHost.ActiveObjects");
-        showGround = Method(host, "ShowGround", typeof(GroundItemSnapshot), typeof(Quaternion), typeof(float));
-        cache = Field(typeof(WorldObjectRenderer), "meshes");
-        placements = Field(typeof(WorldObjectRenderer), "objects");
+        showGround = Method(StockHostParts.GroundItems.FieldType, "ShowGround", typeof(GroundItemSnapshot), typeof(Quaternion), typeof(float));
+        cache = Field(typeof(WorldObjectRenderer), "_meshes");
+        placements = Field(typeof(WorldObjectRenderer), "_objects");
         hasRuntime = Method(placements.FieldType, "HasRuntime", typeof(string));
         getMesh = Method(cache.FieldType, "Get", typeof(string), typeof(bool));
         requestMesh = Method(cache.FieldType, "Request", getMesh.ReturnType, typeof(float));
@@ -78,7 +80,7 @@ internal sealed class StockWeaponGround
                 prefix: Patch(nameof(FindMesh)));
             context.Harmony.Patch(Method(typeof(MaterialResolver), nameof(MaterialResolver.Candidates), typeof(string), typeof(OgreSubMesh)),
                 prefix: Patch(nameof(MaterialPath)), postfix: Patch(nameof(TintMaterial)));
-            context.Harmony.Patch(Method(host, "UpdateGroundItems", typeof(WorldSnapshot)), postfix: Patch(nameof(GroundUpdated)));
+            context.Harmony.Patch(Method(StockHostParts.GroundItems.FieldType, "UpdateGroundItems", typeof(WorldSnapshot)), postfix: Patch(nameof(GroundUpdated)));
             context.Harmony.Patch(Method(host, "Run"), finalizer: Patch(nameof(HostFinished)));
             installed = hooks;
             context.Log("Brutality stock ground weapon stains initialized");
@@ -100,9 +102,26 @@ internal sealed class StockWeaponGround
         long revision = world.GroundItems.Revision;
         if (publication.Latest?.Revision == revision) return;
         var stains = new Dictionary<int, WeaponStainView>();
+        var materials = new Dictionary<int, string>();
         foreach (var item in world.GroundItems.All)
-            if (item.Item.Type == FcsRecordType.WEAPON && state.TryGet(item.Item, out var stain)) stains.Add(item.Id, stain);
-        publication.Latest = new(world.Tick + 1, revision, stains);
+        {
+            if (item.Item.Type is not (FcsRecordType.Weapon or FcsRecordType.Crossbow)) continue;
+            if (item.Item.MaterialId.Length > 0) materials.Add(item.Id, item.Item.MaterialId);
+            if (item.Item.Type == FcsRecordType.Weapon && state.TryGet(item.Item, out var stain)) stains.Add(item.Id, stain);
+        }
+        publication.Latest = new(world.Tick + 1, revision, stains, materials);
+    }
+
+    internal static string MaterialId(World world, int item) =>
+        publications.TryGetValue(world, out var source) ? source.Latest?.Materials.GetValueOrDefault(item) ?? "" : "";
+
+    internal static string? DiffuseOf(GameDatabase data, AssetLocator art, GameRecord item, string materialId)
+    {
+        var texture = ItemIcons.MaterialOf(data, item, materialId)?.GetPath("texture map");
+        if (!string.IsNullOrEmpty(texture) && art.Find(texture) is not null) return texture;
+        if (materialId.Length == 0) return null;
+        texture = ItemIcons.MaterialOf(data, item, "")?.GetPath("texture map");
+        return !string.IsNullOrEmpty(texture) && art.Find(texture) is not null ? texture : null;
     }
 
     internal static IReadOnlyDictionary<int, WeaponStainView>? StainsFor(WorldSession shown, WorldSnapshot snapshot) =>
@@ -133,10 +152,13 @@ internal sealed class StockWeaponGround
                 __result[i] = __result[i] with { VertexColours = true };
     }
 
-    static void GroundUpdated(object __instance, WorldSnapshot snapshot) => installed?.Update(__instance, snapshot);
+    static void GroundUpdated(object __instance, WorldSnapshot snapshot)
+    {
+        if (installed is { } hooks && StockHostParts.HostOf(__instance) is { } host) hooks.Update(host, __instance, snapshot);
+    }
     static void HostFinished(object __instance) => installed?.Reset(__instance);
 
-    void Update(object host, WorldSnapshot snapshot)
+    void Update(object host, object ground, WorldSnapshot snapshot)
     {
         if (session.GetValue(host) is not WorldSession shown) return;
         displays.TryGetValue(host, out var display);
@@ -151,7 +173,7 @@ internal sealed class StockWeaponGround
         bool enabled = graphics.GetValue(host) is { } options && blood.GetValue(options) is true;
         if (display is null && (!enabled || state.Stains.Count == 0)) return;
         if (objects.Invoke(host, null) is not WorldObjectRenderer renderer || assets.GetValue(host) is not AssetLocator art
-            || groundPoses.GetValue(host) is not Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)> poses) return;
+            || groundPoses.GetValue(ground) is not Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)> poses) return;
         if (display is not null && !ReferenceEquals(display.Renderer, renderer))
         {
             Reset(host);
@@ -184,7 +206,7 @@ internal sealed class StockWeaponGround
             {
                 if (enabled) continue;
                 renderer.RemoveRuntime(pose.Key);
-                showGround.Invoke(host, [item, pose.Rotation, pose.At.Y]);
+                showGround.Invoke(ground, [item, pose.Rotation, pose.At.Y]);
                 display.Shown.Remove(item.Id);
                 continue;
             }

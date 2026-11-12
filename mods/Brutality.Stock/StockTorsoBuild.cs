@@ -1,10 +1,11 @@
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 using Meitou.Brutality.Anatomy;
+using Meitou.Brutality.Physics;
 using Meitou.Brutality.Rendering;
 using Meitou.Brutality.Rendering.Surface;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality;
 
@@ -12,8 +13,7 @@ namespace Meitou.Brutality;
 internal static class StockTorsoBuild
 {
     internal sealed record Prior(StockLimbRules.Request[] Limbs, StockWoundRules.View? Wounds);
-    internal sealed record Cut(SkeletonRig Rig, Vector4 Plane, IReadOnlyList<Piece> Pieces,
-        OgreMesh SourceSkin, OgreMesh RetainedSkin, Vector4? AttachedHeadPlane);
+    internal sealed record Cut(SkeletonRig Rig, Vector4 Plane, IReadOnlyList<Piece> Pieces);
 
     internal sealed record Piece(int Side, OgreMesh Body, IReadOnlyList<(OgreMesh Mesh, string Label)> Tissue,
         IReadOnlyList<(CharacterPart Part, OgreMesh? Mesh)> Equipment, Vector3 Min, Vector3 Max, bool[] KeptBones,
@@ -31,8 +31,8 @@ internal static class StockTorsoBuild
     static readonly object anatomyLock = new();
     static (string Path, Lazy<IReadOnlyList<AnatomyBatch>> Batches)? anatomy;
 
-    internal static Cut? Build(string folder, CharacterRigs rigs, CharacterAppearance look, TorsoBisectionState cut,
-        CancellationToken cancellation, Prior? prior = null)
+    internal static StockTorsoPhysics.Prepared? Build(string folder, CharacterRigs rigs, CharacterAppearance look, TorsoBisectionState cut,
+        CancellationToken cancellation, Prior? prior, StockTorsoSave.Pose? saved)
     {
         if (!cut.IsValid || look.Animal is not null || rigs.FindMesh(look.BodyMesh) is not { } path) return null;
         cancellation.ThrowIfCancellationRequested();
@@ -73,6 +73,8 @@ internal static class StockTorsoBuild
             }
             else punchVolume = null;
         }
+        if (StockTorsoPhysics.BuildDefinitions(rigs, look, rig, cut, naturalBody, body,
+                hiddenLimbs is null ? null : prior, attachedHeadPlane, saved, cancellation) is not { } definitions) return null;
         CutVolume[]? openTunnel = punchVolume is null ? null : [punchVolume with { Group = -1 }];
 
         var groups = MeshCut.BoneGroups(rig);
@@ -96,19 +98,27 @@ internal static class StockTorsoBuild
             cancellation.ThrowIfCancellationRequested();
             var section = new CutHalfspace(cut.Plane, side, LegacyTorso: !cut.FullBody, MorphedDistance: true);
             var kept = KeptBones(rig, groups, section);
-            var fallback = NearestKeptBones(rig, groups, kept);
+            var definition = side > 0 ? definitions.Positive : definitions.Negative;
+            var components = cut.FullBody && !robot ? AdvancedFragmentScene.StockBoneComponents(definition, rig) : null;
+            if (components is not null)
+                foreach (var actor in definition.Bodies)
+                    if (actor.Bone <= byte.MaxValue) kept[actor.Bone] = true;
+            var fallback = NearestKeptBones(rig, groups, kept, components);
             if (fallback is null) return null;
-            var backing = cut.FullBody && sectionSkin is not null ? OrganicSection(sectionSkin, packedGroups, cut.Plane, side, palette, skeleton) : null;
+            var backing = components is not null && sectionSkin is not null
+                ? OrganicSection(sectionSkin, packedGroups, cut.Plane, side, palette, skeleton, kept, fallback, components) : null;
             var skin = MeshCut.Clip(body, rig, [section], look.PoseWeights, shaved, flesh, buildCaps: backing is null,
-                capWeldDistance: robot ? 0 : SectionWeldDistance, shareSourceVertices: true);
+                capWeldDistance: robot ? 0 : SectionWeldDistance, shareSourceVertices: true, components: backing is null ? components : null);
             if (!robot && backing is null && skin.HasTriangles && skin.Wound is null)
-                backing = MeshCut.Clip(body, rig, [section], look.PoseWeights, shaved, flesh).Wound;
+                backing = MeshCut.Clip(body, rig, [section], look.PoseWeights, shaved, flesh, components: components).Wound;
             if (!skin.HasTriangles) return null;
             var tissue = new List<(OgreMesh Mesh, string Label)>(2);
             if ((backing ?? skin.Wound) is { } cap) AddTissue(cap, robot ? "mechanical section" : "fracture surface", maskPunch: true);
             if (interior is not null)
             {
-                var lining = MeshCut.Clip(interior, rig, [section], removeVolumes: openTunnel, buildCaps: false);
+                var slab = cut.Plane with { W = cut.Plane.W - side * OrganicInteriorDepth };
+                CutHalfspace[] interiorBounds = robot ? [section] : [section, new(slab, -side)];
+                var lining = MeshCut.Clip(interior, rig, interiorBounds, removeVolumes: openTunnel, buildCaps: false);
                 if (lining.HasTriangles) AddTissue(lining.Skin, robot ? "mechanical interior" : "anatomy section");
             }
             if (cut.FullBody && !robot && !look.Headless)
@@ -172,7 +182,7 @@ internal static class StockTorsoBuild
             Console.WriteLine($"Brutality stock composed torso priorLimbs={prior?.Limbs.Length ?? 0} punch={labels.Contains("punch-through lining")} stump={labels.Contains("muscle and bone section")}");
         }
 #endif
-        return new(rig, cut.Plane, pieces, naturalBody, body, attachedHeadPlane);
+        return new(new(rig, cut.Plane, pieces), definitions.Positive, definitions.Negative);
     }
 
     static Vertex[] SectionSkin(OgreMesh body, SkeletonRig rig, CharacterAppearance look, bool shaved)
@@ -192,17 +202,39 @@ internal static class StockTorsoBuild
         return vertices.ToArray();
     }
 
-    static OgreMesh? OrganicSection(Vertex[] skin, uint[] groups, Vector4 plane, int side, StockTissuePalette palette, string skeleton)
+    static OgreMesh? OrganicSection(Vertex[] skin, uint[] groups, Vector4 plane, int side, StockTissuePalette palette,
+        string skeleton, bool[] kept, int[] fallback, int[] components)
     {
+        const float depth = .85f;
+        var outward = -Vector3.Normalize(new(plane.X, plane.Y, plane.Z)) * side;
         var cut = new NativeSectionCut(plane, side, FullBody: true);
-        var section = NativeSectionGeometry.Build(skin, groups, cut, weldDistance: SectionWeldDistance);
+        var section = NativeSectionGeometry.Build(skin, groups, cut, components: components,
+            weldDistance: SectionWeldDistance, backingDepth: depth, bindBacking: BindBacking);
         // A contour on an arm or the neck is not enough: the wider weld can close one of those
         // while collapsing nearby edges of the actual trunk opening.
         if (!CoversTorso(section))
-            section = NativeSectionGeometry.Build(skin, groups, cut) ?? section;
+            section = NativeSectionGeometry.Build(skin, groups, cut, components: components, backingDepth: depth, bindBacking: BindBacking) ?? section;
         if (!CoversTorso(section))
-            section = NativeSectionGeometry.Build(skin, groups, cut, weldDistance: .006f) ?? section;
+            section = NativeSectionGeometry.Build(skin, groups, cut, components: components,
+                weldDistance: .006f, backingDepth: depth, bindBacking: BindBacking) ?? section;
         if (section is not { Length: > 0 }) return null;
+
+        Vertex BindBacking(Vertex vertex)
+        {
+            var weights = vertex.Weights;
+            int strongest = 0;
+            float sum = 0;
+            for (int k = 0; k < 4; k++)
+            {
+                if (vertex.Weights[k] > vertex.Weights[strongest]) strongest = k;
+                int bone = (int)(vertex.Bones >> (k * 8) & 255);
+                if (bone >= kept.Length || !kept[bone]) weights[k] = 0;
+                sum += weights[k];
+            }
+            if (sum > 1e-5f) return vertex with { Weights = weights / sum };
+            int source = (int)(vertex.Bones >> (strongest * 8) & 255);
+            return vertex with { Bones = (uint)fallback[Math.Min(source, fallback.Length - 1)], Weights = Vector4.UnitX };
+        }
 
         bool CoversTorso(Vertex[]? vertices) => vertices is not null
             && vertices.Count(vertex => NativeSectionGeometry.Group(vertex, groups) == 0) >= 24;
@@ -215,11 +247,13 @@ internal static class StockTorsoBuild
             else if (vertex.Uv.X >= NativeSectionGeometry.BackingBand)
             {
                 var p = vertex.Position;
-                float grain = .64f + .15f * MathF.Sin(p.X * 12 + p.Y * 5 + p.Z * 8);
+                float grain = .71f + .10f * MathF.Sin(p.X * 12 + p.Y * 5 + p.Z * 8);
                 colour = palette.Muscle * new Vector4(grain, grain, grain, 1);
             }
             else colour = palette.Tint(vertex.Colour with { W = 1 }, .72f);
-            section[i] = vertex with { Colour = colour, Tangent = Vector4.UnitW };
+            var normal = vertex.Uv.X >= NativeSectionGeometry.BackingBand
+                ? Vector3.Normalize(Vector3.Lerp(outward, vertex.Normal, .25f)) : vertex.Normal;
+            section[i] = vertex with { Colour = colour, Normal = normal, Tangent = Vector4.UnitW };
         }
         return MeshCut.FromTriangles(section, skeleton);
     }
@@ -232,7 +266,7 @@ internal static class StockTorsoBuild
         return kept;
     }
 
-    static int[]? NearestKeptBones(SkeletonRig rig, int[] groups, bool[] kept)
+    static int[]? NearestKeptBones(SkeletonRig rig, int[] groups, bool[] kept, int[]? components)
     {
         int[] allowed = Enumerable.Range(0, kept.Length).Where(i => kept[i]).ToArray();
         if (allowed.Length == 0) return null;
@@ -244,6 +278,7 @@ internal static class StockTorsoBuild
             float distance = float.PositiveInfinity;
             foreach (int candidate in allowed)
             {
+                if (components is not null && components[candidate] != components[bone]) continue;
                 float score = Vector3.DistanceSquared(rig.BindPosition[bone], rig.BindPosition[candidate]);
                 if (groups[candidate] != groups[bone]) score += 25;
                 if (score < distance) (closest, distance) = (candidate, score);
@@ -338,19 +373,22 @@ internal static class StockTorsoBuild
                 if ((index & 2047) == 0) cancellation.ThrowIfCancellationRequested();
                 var a = batch.Vertices[index]; var b = batch.Vertices[index + 1]; var c = batch.Vertices[index + 2];
                 var p = Fit(a); var q = Fit(b); var r = Fit(c);
-                if (batch.Layer == 1)
-                {
-                    if (!NearSection(plane, OrganicInteriorDepth + .35f, p, q, r)) continue;
-                    p = muscles.Fit(p); q = muscles.Fit(q); r = muscles.Fit(r);
-                    if (Vector3.Cross(q - p, r - p).LengthSquared() < 1e-8f) continue;
-                }
-                if (!NearSection(plane, OrganicInteriorDepth, p, q, r)) continue;
-                vertices.Add(AsVertex(a, p)); vertices.Add(AsVertex(b, q)); vertices.Add(AsVertex(c, r));
+                if (!NearSection(plane, OrganicInteriorDepth + .7f, p, q, r)) continue;
+                if (muscles.Fit(p) is not { } first || muscles.Fit(q) is not { } second || muscles.Fit(r) is not { } third) continue;
+                if (!NearSection(plane, OrganicInteriorDepth, first.Position, second.Position, third.Position)) continue;
+                var edge = second.Position - first.Position;
+                var other = third.Position - first.Position;
+                if (Vector3.Cross(edge, other).LengthSquared() < 1e-8f) continue;
+                // Neighbours fitted against different folds of skin must not create a sheet across the cavity.
+                float longest = LongestEdge(p, q, r);
+                if (LongestEdge(first.Position, second.Position, third.Position) > MathF.Max(.8f * .8f, longest * 3)) continue;
+                vertices.Add(AsVertex(a, first)); vertices.Add(AsVertex(b, second)); vertices.Add(AsVertex(c, third));
             }
 
             Vector3 Fit(AnatomyVertex vertex) => hip + (vertex.Position - AnatomyPelvis) * fit;
-            Vertex AsVertex(AnatomyVertex vertex, Vector3 position)
+            Vertex AsVertex(AnatomyVertex vertex, StockTorsoMuscle.Fitted fitted)
             {
+                var position = fitted.Position;
                 var normal = vertex.Normal / fit;
                 float striation = .80f + .20f * MathF.Pow(.5f + .5f * MathF.Sin(position.X * 27 + position.Z * 23 + position.Y * 4), 2);
                 var colour = batch.Layer switch
@@ -362,7 +400,7 @@ internal static class StockTorsoBuild
                 return new()
                 {
                     Position = position, Normal = normal.LengthSquared() > 1e-10f ? Vector3.Normalize(normal) : Vector3.UnitY,
-                    Colour = colour, Bones = (uint)bone, Weights = Vector4.UnitX,
+                    Colour = colour, Bones = fitted.Bones, Weights = fitted.Weights,
                 };
             }
         }
@@ -413,6 +451,9 @@ internal static class StockTorsoBuild
         }
         return near.Count == 0 ? null : MeshCut.FromTriangles(near, body.SkeletonName);
     }
+
+    static float LongestEdge(Vector3 a, Vector3 b, Vector3 c) =>
+        MathF.Max(Vector3.DistanceSquared(a, b), MathF.Max(Vector3.DistanceSquared(b, c), Vector3.DistanceSquared(c, a)));
 
     static bool NearSection(Vector4 plane, float depth, Vector3 a, Vector3 b, Vector3 c)
     {

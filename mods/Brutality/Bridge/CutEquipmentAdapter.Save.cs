@@ -83,7 +83,7 @@ public sealed partial class CutEquipmentAdapter
         foreach (var (name, file) in save.AllFiles())
             foreach (var record in file.Records)
             {
-                if (record.RecordType is not (FcsRecordType.INVENTORY_ITEM_STATE or FcsRecordType.ITEM) || record.StringId.Length == 0) continue;
+                if (record.RecordType is not (FcsRecordType.InventoryItemState or FcsRecordType.Item) || record.StringId.Length == 0) continue;
                 string key = "item-record:v1:" + Uri.EscapeDataString(name.Replace('\\', '/')) + ":" + Uri.EscapeDataString(record.StringId);
                 recordKeys.Remove(record); recordKeys.Add(record, new(key));
             }

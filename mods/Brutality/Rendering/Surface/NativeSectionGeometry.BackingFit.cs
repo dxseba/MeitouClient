@@ -1,12 +1,12 @@
 // Adapted from integrated GPL-3.0-or-later source 3a15eeb9f5523b9d106b40fd0ec99ccdb2658efa.
-using Meitou.Rendering;
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 
 namespace Meitou.Brutality.Rendering.Surface;
 
 internal static partial class NativeSectionGeometry
 {
-    static void FitSectionBacking(List<Vertex> vertices, in NativeSectionCut cut, SectionSkin skin)
+    static void FitSectionBacking(List<Vertex> vertices, in NativeSectionCut cut, SectionSkin skin, float backingDepth)
     {
         var normal = new Vector3(cut.Plane.X, cut.Plane.Y, cut.Plane.Z);
         var kept = normal * cut.KeepSide;
@@ -16,7 +16,7 @@ internal static partial class NativeSectionGeometry
         Vector3 Base(Vertex vertex) => vertex.Position - normal * (Vector3.Dot(normal, vertex.Position) + planeOffset);
         float Maximum(Vector3 point)
         {
-            if (!allowed.TryGetValue(point, out float depth)) allowed[point] = depth = SectionDepth(point + kept * 0.001f, kept, skin);
+            if (!allowed.TryGetValue(point, out float depth)) allowed[point] = depth = SectionDepth(point + kept * 0.001f, kept, skin, backingDepth);
             return depth;
         }
         for (int i = 0; i < vertices.Count; i++)

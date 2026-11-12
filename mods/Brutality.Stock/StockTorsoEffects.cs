@@ -1,7 +1,7 @@
+using Meitou.Game.Host;
 using System.Numerics;
 using Meitou.Brutality.Anatomy;
 using Meitou.Data.Characters;
-using Meitou.Engine;
 using Meitou.Simulation;
 using Meitou.Simulation.Ragdolls;
 
@@ -28,6 +28,27 @@ internal sealed class StockTorsoEffects(string folder) : IDisposable
     internal bool Active => sources.Count != 0 || wounds.Count != 0 || bowels?.Count > 0 || cables.Count > 0;
     internal bool HasSpilled(CharacterId owner) => bowels?.HasSpilled(owner) == true;
 
+    internal IReadOnlyDictionary<CharacterId, SavedBowelOwner>? Capture(double now) => bowels?.Capture(now);
+
+    internal void Restore(object host, WorldSession shown, CharacterRigs rigs, double now)
+    {
+        foreach (var actor in shown.CurrentSnapshot.Characters)
+        {
+            var owner = actor.Id;
+            if (StockBowelSave.Pending(shown.World, owner) is not { } saved
+                || actor.Appearance is not { } look || rigs.For(look) is not { } setup) continue;
+            if (saved.Pieces.Any(piece => piece.Rig.PinNode >= 0 && StockTorsoFragments.Contact(host, owner, piece.Half) is null))
+                continue;
+
+            EnsureBowels();
+            if (!bowels!.TryRestore(owner, look, setup.Rig, now, saved)) continue;
+            StockBowelSave.Consume(shown.World, owner);
+            wounds.Remove(owner);
+            if (trace && saved.Pieces.Length > 0 && bowels.Capture(now).TryGetValue(owner, out var actual))
+                Console.WriteLine($"Brutality stock bowel restored owner={owner} {StockBowelSave.Describe(actual)}");
+        }
+    }
+
     internal void BeginWound(CharacterId owner, CharacterAppearance look, SkeletonRig rig, CutFluidContact contact, double now)
     {
         if (sources.ContainsKey(owner) || HasSpilled(owner) || wounds.Count >= 16 && !wounds.ContainsKey(owner)) return;
@@ -39,7 +60,7 @@ internal sealed class StockTorsoEffects(string folder) : IDisposable
     {
         if (bowels is not null) return;
         var anatomy = new AnatomyLibrary(new AnatomyAssets(folder));
-        bowels = new(anatomy, new(scale => BowelPresentation.BuildBowelAssets(anatomy, scale)));
+        bowels = new(anatomy, new(scale => BowelPresentation.BuildBowelAssets(anatomy, scale)), gpuSkinning: true);
     }
 
     internal void Begin(in StockTorsoRules.CutRequest request, CharacterAppearance look, SkeletonRig rig, double time)
@@ -78,6 +99,7 @@ internal sealed class StockTorsoEffects(string folder) : IDisposable
                         contacts.Add(new(source.Key * 2 + half, point));
                 continue;
             }
+            if (StockBowelSave.Pending(shown.World, owner) is not null) continue;
             // Time the organ's emergence from the first visible frame after its asset is ready.
             if (bowels is { } organs && (organs.HasSpilled(owner)
                 || organs.Begin(owner, source.Look, source.Rig, source.Cut.Restoring ? source.Time - GutEmergence.ReleaseAge : now, now,
@@ -91,6 +113,7 @@ internal sealed class StockTorsoEffects(string folder) : IDisposable
                 wounds.Remove(owner);
                 continue;
             }
+            if (StockBowelSave.Pending(shown.World, owner) is not null) continue;
             uint blood = unchecked((uint)wound.Look.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
             if (bowels?.BeginWound(owner, wound.Look, wound.Rig, now, now, wound.Contact, blood, environment) == true)
             {

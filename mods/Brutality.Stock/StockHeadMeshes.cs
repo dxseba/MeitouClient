@@ -1,3 +1,5 @@
+using Meitou.Game.Rendering.Foliage;
+using Meitou.Game.Rendering.Frame;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -6,7 +8,6 @@ using HarmonyLib;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
 using Meitou.Modding;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality;
 
@@ -22,7 +23,7 @@ internal static class StockHeadMeshes
     const int ProcessMeshLimit = 256;
     const long ProcessByteLimit = 96L * 1024 * 1024;
 
-    enum Surface { Skin, Wound, Anatomy, Equipment, WeaponBlood, GroundWeapon }
+    enum Surface { Skin, Wound, Anatomy, Section, Bruise, Equipment, WeaponBlood, GroundWeapon }
 
     sealed record Entry(OgreMesh Mesh, string? SkeletonName, Surface Surface, string? OriginalMesh = null);
     sealed record Variant(string[] Paths);
@@ -32,6 +33,7 @@ internal static class StockHeadMeshes
     static readonly Dictionary<string, int> pathReferences = new(StringComparer.OrdinalIgnoreCase);
     static readonly ConditionalWeakTable<OgreMesh, Entry> generatedMeshes = new();
     static readonly ConditionalWeakTable<Model, Entry> generatedModels = new();
+    static readonly ConditionalWeakTable<CharacterAppearance, CharacterAppearance> woundPoseSources = new();
     static readonly object admission = new();
     static readonly MethodInfo? setBodyMesh = AccessTools.PropertySetter(typeof(CharacterAppearance), nameof(CharacterAppearance.BodyMesh));
     static readonly MethodInfo? setHeadOnly = AccessTools.PropertySetter(typeof(CharacterAppearance), nameof(CharacterAppearance.HeadOnly));
@@ -53,15 +55,17 @@ internal static class StockHeadMeshes
     public static bool Install(ModContext context)
     {
         if (installed) return true;
-        var content = typeof(AssetLocator).Assembly.GetType("Meitou.Rendering.Characters.CharacterContent");
+        var content = typeof(Model).Assembly.GetType("Meitou.Game.Rendering.Characters.CharacterContent");
         if (content is null || setBodyMesh is null || setHeadOnly is null) return false;
-        var findMesh = AccessTools.Method(content, "FindMesh", [typeof(AssetLocator), typeof(string)]);
+        var findMesh = AccessTools.Method(content, "FindMesh", [typeof(string)]);
         if (findMesh is null) return false;
 
         try
         {
             context.Harmony.Patch(findMesh, prefix: Patch(nameof(FindMeshPrefix)));
             context.Harmony.Patch(AccessTools.Method(typeof(CharacterRigs), nameof(CharacterRigs.BodySkeletonName)), prefix: Patch(nameof(BodySkeletonPrefix)));
+            context.Harmony.Patch(AccessTools.Method(typeof(CharacterRigs), nameof(CharacterRigs.For), [typeof(CharacterAppearance)]),
+                prefix: Patch(nameof(WoundPoseSourcePrefix)));
             // The host defers JIT warm-up until code mods initialize. Patch the reader directly to leave PrepareMesh's exception filter intact.
             context.Harmony.Patch(readFile, prefix: Patch(nameof(ReadMeshPrefix)));
         }
@@ -97,6 +101,9 @@ internal static class StockHeadMeshes
                 description = AccessTools.Field(materialType, "Description");
                 context.Harmony.Patch(itemMaterial, postfix: Patch(nameof(WeaponMaterialPostfix)), transpiler: Patch(nameof(TissueMaterialTranspiler)));
                 drawsTissue = true;
+                StockSectionDetail.Install(context);
+                StockBruiseGeometry.Install(context);
+                StockVestTears.Install(context);
             }
             catch (Exception e)
             {
@@ -253,7 +260,8 @@ internal static class StockHeadMeshes
     public static bool IsGeneratedBody(CharacterAppearance look) => IsSynthetic(look.BodyMesh);
 
     public static CharacterAppearance? CreateWounds(CharacterAppearance original, OgreMesh? body,
-        IReadOnlyList<(OgreMesh Mesh, string Label)> tissue, IReadOnlyList<(CharacterPart Part, OgreMesh? Mesh)> equipment, bool showHead = false)
+        IReadOnlyList<(OgreMesh Mesh, string Label)> tissue, IReadOnlyList<(CharacterPart Part, OgreMesh? Mesh)> equipment,
+        bool showHead = false, bool foreground = false, bool materialOnly = false)
     {
         if (!installed || !drawsTissue || !drawsVertexColours || vertexColoured is null || setHeadless is null
             || setHiddenLimbs is null || setHiddenParts is null
@@ -262,7 +270,15 @@ internal static class StockHeadMeshes
         var look = CopyFull(original);
         if (showHead) setHeadless.Invoke(look, [false]);
         look.Lights.AddRange(original.Lights);
-        return Register(look, body, body?.SkeletonName, surfaces, equipment, allVertexColours: true);
+        var result = Register(look, body, body?.SkeletonName, surfaces, equipment, allVertexColours: true, foreground: foreground,
+            materialOnly: materialOnly);
+        // The renderer reads the edited mesh, while the rig keeps the intact body's sliders and grounding.
+        if (result is not null && body is not null)
+        {
+            if (woundPoseSources.TryGetValue(original, out var source)) woundPoseSources.Add(result, source);
+            else if (!IsGeneratedBody(original)) woundPoseSources.Add(result, original);
+        }
+        return result;
     }
 
     static CharacterAppearance CopyFull(CharacterAppearance original, int? hiddenLimbs = null)
@@ -279,7 +295,7 @@ internal static class StockHeadMeshes
 
     static CharacterAppearance? Register(CharacterAppearance look, OgreMesh? body, string? skeleton,
         IReadOnlyList<(OgreMesh Mesh, string Label)> surfaces, IReadOnlyList<(CharacterPart Part, OgreMesh? Mesh)> equipment,
-        bool allVertexColours, Surface equipmentSurface = Surface.Equipment, bool foreground = false)
+        bool allVertexColours, Surface equipmentSurface = Surface.Equipment, bool foreground = false, bool materialOnly = false)
     {
         long bytes = (body is null ? 0 : EstimateBytes(body)) + surfaces.Sum(surface => EstimateBytes(surface.Mesh));
         int count = (body is null ? 0 : 1) + surfaces.Count;
@@ -293,7 +309,7 @@ internal static class StockHeadMeshes
         // Keep the process allowance reserved while retired geometry still occupies native caches.
         lock (admission)
         {
-            if (count == 0 || retainedMeshes + count > (foreground ? ForegroundMeshLimit : MeshLimit)
+            if (count == 0 && !materialOnly || retainedMeshes + count > (foreground ? ForegroundMeshLimit : MeshLimit)
                 || bytes > (foreground ? ForegroundByteLimit : ByteLimit) - retainedBytes ||
                 committedMeshes + count > ProcessMeshLimit || bytes > ProcessByteLimit - totalBytes) return null;
             string[] paths = new string[count];
@@ -440,13 +456,17 @@ internal static class StockHeadMeshes
     static string MeshPath(long id) => FormattableString.Invariant($"{PathPrefix}{id}.mesh");
     static bool IsSynthetic(string path) => path.StartsWith(PathPrefix, StringComparison.OrdinalIgnoreCase);
     internal static bool IsTissue(string path) => IsSynthetic(path) && meshes.TryGetValue(path, out var entry)
-        && entry.Surface is Surface.Wound or Surface.Anatomy;
-    static bool IsAnatomy(string path) => IsSynthetic(path) && meshes.TryGetValue(path, out var entry) && entry.Surface == Surface.Anatomy;
+        && entry.Surface is Surface.Wound or Surface.Anatomy or Surface.Section or Surface.Bruise;
 
-    static Surface TissueSurface(string label, bool allVertexColours) => drawsVertexColours && anatomyMaterialConstructor is not null && vertexColoured is not null &&
-        (allVertexColours || label.StartsWith("brain", StringComparison.OrdinalIgnoreCase) || label.StartsWith("skull", StringComparison.OrdinalIgnoreCase) ||
-            label.StartsWith("fracture", StringComparison.OrdinalIgnoreCase))
-        ? Surface.Anatomy : Surface.Wound;
+    static Surface TissueSurface(string label, bool allVertexColours)
+    {
+        if (!drawsVertexColours || anatomyMaterialConstructor is null || vertexColoured is null) return Surface.Wound;
+        if (label.EndsWith("muscle and bone section", StringComparison.Ordinal)) return Surface.Section;
+        if (label == "skin bruise") return Surface.Bruise;
+        return allVertexColours || label.StartsWith("brain", StringComparison.OrdinalIgnoreCase) ||
+            label.StartsWith("skull", StringComparison.OrdinalIgnoreCase) || label.StartsWith("fracture", StringComparison.OrdinalIgnoreCase)
+            ? Surface.Anatomy : Surface.Wound;
+    }
 
     // The fallback material resolver indexes the FCS record by the original mesh basename.
     static string OriginalMaterialPath(string path) => IsSynthetic(path) && meshes.TryGetValue(path, out var entry)
@@ -454,19 +474,22 @@ internal static class StockHeadMeshes
 
     static object? AnatomyMaterial(string path)
     {
-        if (!IsAnatomy(path)) return null;
-        // The stock item material defaults to ShadeItem. It uses the mesh colour and lighting with no diffuse texture.
+        if (!IsSynthetic(path) || !meshes.TryGetValue(path, out var entry)
+            || entry.Surface is not (Surface.Anatomy or Surface.Section or Surface.Bruise)) return null;
+        // Anatomy keeps the stock lighting and the mesh's species-specific colour.
         var material = anatomyMaterialConstructor!.Invoke(null);
         vertexColoured!.SetValue(material, true);
         doubleSided?.SetValue(material, true);
-        description?.SetValue(material, "Brutality anatomy");
+        description?.SetValue(material, entry.Surface == Surface.Section ? "Brutality section" : "Brutality anatomy");
+        if (entry.Surface == Surface.Section) StockSectionDetail.Mark(material);
+        if (entry.Surface == Surface.Bruise) StockBruiseGeometry.Mark(material);
         return material;
     }
 
-    static bool FindMeshPrefix(string __1, ref string? __result)
+    static bool FindMeshPrefix(string __0, ref string? __result)
     {
-        if (!IsSynthetic(__1)) return true;
-        __result = meshes.ContainsKey(__1) ? __1 : null;
+        if (!IsSynthetic(__0)) return true;
+        __result = meshes.ContainsKey(__0) ? __0 : null;
         return false;
     }
 
@@ -477,12 +500,17 @@ internal static class StockHeadMeshes
         return false;
     }
 
+    static void WoundPoseSourcePrefix(ref CharacterAppearance __0)
+    {
+        if (woundPoseSources.TryGetValue(__0, out var source)) __0 = source;
+    }
+
     static bool GeneratedLevelsPrefix(string __0, OgreMesh __1, Model __2, float __3, float __4,
         FoliageLodBuilder.Settings __5, ref List<MeshLodLevel> __result)
     {
         if (!IsSynthetic(__0)) return true;
         __result = [new(0, [.. __1.SubMeshes.Select(part => part.Indices.Indices)])];
-        if (!__5.UvAware || !meshes.TryGetValue(__0, out var entry) || entry.Surface is not (Surface.Skin or Surface.Equipment or Surface.Anatomy))
+        if (!__5.UvAware || !meshes.TryGetValue(__0, out var entry) || entry.Surface is not (Surface.Skin or Surface.Equipment or Surface.Anatomy or Surface.Section or Surface.Bruise))
             return false;
         var parts = __2.Parts.Where(part => part.Indices.Length > 0).ToArray();
         int triangles = parts.Sum(part => part.Indices.Length / 3);
@@ -518,11 +546,13 @@ internal static class StockHeadMeshes
 
     // Anatomy uses the stock item shader's vertex colour. Its blue channel is the original pigment.
     static bool MarkCurvaturePrefix(Model __0) => !generatedModels.TryGetValue(__0, out var entry)
-        || entry.Surface is not (Surface.Anatomy or Surface.WeaponBlood);
+        || entry.Surface is not (Surface.Anatomy or Surface.Section or Surface.Bruise or Surface.WeaponBlood);
 
-    static void WeaponMaterialPostfix(CharacterPart part, object __result)
+    static void WeaponMaterialPostfix(CharacterPart part, object loaded, object __result)
     {
-        if (IsSynthetic(part.Mesh) && meshes.TryGetValue(part.Mesh, out var entry) && entry.Surface == Surface.WeaponBlood)
+        if (!IsSynthetic(part.Mesh) || !meshes.TryGetValue(part.Mesh, out var entry)) return;
+        if (entry.Surface == Surface.Bruise) StockBruiseGeometry.MarkLoadedMesh(loaded);
+        if (entry.Surface == Surface.WeaponBlood)
         {
             vertexColoured?.SetValue(__result, true);
             StockWeaponWetness.Mark(__result);

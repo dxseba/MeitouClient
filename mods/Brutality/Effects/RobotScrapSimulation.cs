@@ -1,5 +1,5 @@
+using Meitou.Game.Rendering.Objects;
 using System.Numerics;
-using Meitou.Rendering;
 using Meitou.Simulation;
 
 namespace Meitou.Brutality.Effects;

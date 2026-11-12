@@ -1,12 +1,13 @@
 #if BRUTALITY_STOCK_SAVE_PROBE
+using Meitou.Simulation.Population;
+using Meitou.Game.Host;
+using Meitou.Game.Host.Cameras;
 using System.Globalization;
 using System.Numerics;
 using HarmonyLib;
 using Meitou.Data.Fcs;
 using Meitou.Data.Characters;
 using Meitou.Modding;
-using Meitou.Engine;
-using Meitou.Engine.Cameras;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
 
@@ -18,13 +19,14 @@ internal static class StockSandboxCombatProbe
     static string? foe, part;
     static float? multiplier;
     static bool delayedAttack, combined;
+    static System.Reflection.FieldInfo? sceneHost, sceneSession;
 
     internal static void Install(ModContext context)
     {
         if (!Environment.GetCommandLineArgs().Contains("--sandbox", StringComparer.Ordinal)) return;
         string? name = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_PROBE_FOE");
         if (!string.IsNullOrWhiteSpace(name))
-            foe = context.Data.Records.Values.FirstOrDefault(record => record.Type == FcsRecordType.CHARACTER
+            foe = context.Data.Records.Values.FirstOrDefault(record => record.Type == FcsRecordType.Character
                 && (record.StringId.Equals(name, StringComparison.OrdinalIgnoreCase) || record.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))?.StringId
                 ?? throw new ArgumentException($"Unknown probe opponent: {name}");
         part = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_PROBE_PART");
@@ -35,7 +37,10 @@ internal static class StockSandboxCombatProbe
         if (close)
         {
             var host = AccessTools.TypeByName("Meitou.Game.GameHost");
-            context.Harmony.Patch(AccessTools.Method(host, "StageScene"), postfix: new HarmonyMethod(typeof(StockSandboxCombatProbe), nameof(FocusFoe)));
+            var scenes = AccessTools.TypeByName("Meitou.Game.DevTools.ScreenshotScenes");
+            sceneHost = AccessTools.Field(scenes, "<host>P");
+            sceneSession = AccessTools.Field(host, "Session");
+            context.Harmony.Patch(AccessTools.Method(scenes, "StageScene"), postfix: new HarmonyMethod(typeof(StockSandboxCombatProbe), nameof(FocusFoe)));
             if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_PROBE_TRACK_CHEST") == "1")
                 context.Harmony.Patch(AccessTools.Method(host, "ApplyCamera"), prefix: new HarmonyMethod(typeof(StockSandboxCombatProbe), nameof(FocusChest)));
         }
@@ -43,17 +48,18 @@ internal static class StockSandboxCombatProbe
         if (foe is null && part is null && multiplier is null && !delayedAttack && !combined) return;
         if (Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_PROBE_NO_NATIVE_HEAD") == "1")
         {
-            var host = AccessTools.TypeByName("Meitou.Game.GameHost");
-            context.Harmony.Patch(AccessTools.Method(host, "CutHead"), prefix: new HarmonyMethod(typeof(StockSandboxCombatProbe), nameof(WithholdNativeHead)));
+            var decapitation = AccessTools.TypeByName("Meitou.Game.Effects.Decapitation");
+            context.Harmony.Patch(AccessTools.Method(decapitation, "CutHead"), prefix: new HarmonyMethod(typeof(StockSandboxCombatProbe), nameof(WithholdNativeHead)));
         }
         context.Harmony.Patch(AccessTools.Method(typeof(PopulationSystem), nameof(PopulationSystem.SpawnSandbox)),
             prefix: new HarmonyMethod(typeof(StockSandboxCombatProbe), nameof(BeforeSpawn)),
             postfix: new HarmonyMethod(typeof(StockSandboxCombatProbe), nameof(AfterSpawn)));
     }
 
-    static void FocusFoe(WorldSession ___session, ref Vector3? __result)
+    static void FocusFoe(object __instance, ref Vector3? __result)
     {
-        if (___session.CurrentSnapshot.Characters.FirstOrDefault(actor => actor.Id.Slot == 1) is not { } foe) return;
+        if (sceneHost?.GetValue(__instance) is not { } host || sceneSession?.GetValue(host) is not WorldSession session
+            || session.CurrentSnapshot.Characters.FirstOrDefault(actor => actor.Id.Slot == 1) is not { } foe) return;
         __result = foe.Position + new Vector3(Offset("OFFSET_X", 0), Offset("RISE", 3), Offset("OFFSET_Z", 0));
 
         static float Offset(string name, float fallback) =>
@@ -61,10 +67,10 @@ internal static class StockSandboxCombatProbe
                 NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed) && float.IsFinite(parsed) ? parsed : fallback;
     }
 
-    static void FocusChest(WorldSession ___session, CharacterRigs? ___characterRigs, ref CameraState s)
+    static void FocusChest(WorldSession ___Session, CharacterRigs? ___CharacterRigs, ref CameraState s)
     {
-        if (___session.CurrentSnapshot.Characters.FirstOrDefault(actor => actor.Id.Slot == 1) is not
-            { Ragdoll: { } pose, Appearance: { } look } foe || ___characterRigs?.For(look) is not { } setup
+        if (___Session.CurrentSnapshot.Characters.FirstOrDefault(actor => actor.Id.Slot == 1) is not
+            { Ragdoll: { } pose, Appearance: { } look } foe || ___CharacterRigs?.For(look) is not { } setup
             || setup.Rig.Handle("Bip01 Spine2") is not int chest) return;
         var rig = setup.Rig;
         var scratch = rig.Rent();
@@ -78,7 +84,7 @@ internal static class StockSandboxCombatProbe
             float yaw = MathF.Atan2(front.X, front.Z);
             float pitch = MathF.Asin(Math.Clamp(front.Y, .11f, .995f));
             s = s with { Target = target, Yaw = yaw, Pitch = pitch };
-            if (___session.World.Tick is > 395 and < 415)
+            if (___Session.World.Tick is > 395 and < 415)
                 Console.WriteLine(FormattableString.Invariant($"Brutality probe chest target={target} front={front}"));
         }
         finally { rig.Return(scratch); }

@@ -1,3 +1,4 @@
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 using Meitou.Brutality.Physics;
 using Meitou.Brutality.Rendering;
@@ -5,13 +6,13 @@ using Meitou.Data.Characters;
 using Meitou.Data.Fcs;
 using Meitou.Data.Ogre;
 using Meitou.Data.Physics;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality;
 
 /// <summary>Clips the natural stock mesh and shared-skeleton clothing with the original limb cut plane.</summary>
 internal static class StockLimbBuild
 {
+    static readonly bool trace = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS") == "1";
     internal sealed record Look(OgreMesh Body, IReadOnlyList<(OgreMesh Mesh, string Label)> Tissue,
         IReadOnlyList<(CharacterPart Part, OgreMesh? Mesh)> Equipment, int HiddenLimbs);
     internal sealed record Detached(StockLimbRules.Request Cut, Vector4 Plane, Look Look, RagdollDefinition Definition);
@@ -60,18 +61,11 @@ internal static class StockLimbBuild
             CutHalfspace[] rules = [section.Rule(-1)];
             var skin = MeshCut.Clip(body, rig, rules, look.PoseWeights, shaved, flesh, buildCaps: robot);
             if (!skin.HasTriangles) return null;
-            var contour = !robot || skin.Wound is null ? SectionContour(skin.Skin, rig, look, section.Plane) : [];
+            var contour = robot && skin.Wound is null ? SectionContour(skin.Skin, rig, look, section.Plane) : [];
             if (!robot)
             {
-                int bone = MeshCut.SectionBone(rig, section.Rule(1));
-                if (bone >= 0 && contour.Count >= 3)
-                    StockLimbSections.Append(retainedTissue, contour, rig, section.Cut.Shape, section.Plane, 1, keptMap[bone], palette);
-                else
-                {
-                    var proximal = MeshCut.Clip(body, rig, [section.Rule(1)], look.PoseWeights, shaved, flesh);
-                    if (proximal.Wound is { } cap) remaining = AddTissue(remaining, cap, keptMap, "fracture surface");
-                    skin = MeshCut.Clip(body, rig, rules, look.PoseWeights, shaved, flesh);
-                }
+                if (!AppendOrganic(retainedTissue, remaining.Body, section, 1, keptMap))
+                    remaining = FallbackOrganic(remaining, section.Rule(1), keptMap);
             }
             else if (contour.Count >= 3) remaining = AddCap(remaining, contour, section.Rule(1), keptMap);
             if (prior.Contains((section.Slot, section.Cut.Tick))) continue;
@@ -81,18 +75,16 @@ internal static class StockLimbBuild
             var map = Identity(rig);
             MapWeights(rig, groups, section, side: -1, map);
             var distal = MakeLook(skin, rules, hidden, map, detached: true);
-            if (contour.Count >= 3)
+            if (!robot)
             {
-                if (robot) distal = AddCap(distal, contour, section.Rule(-1), map);
-                else if (MeshCut.SectionBone(rig, section.Rule(-1)) is int bone && bone >= 0)
-                {
-                    var detailed = new List<Vertex>();
-                    StockLimbSections.Append(detailed, contour, rig, section.Cut.Shape, section.Plane, -1, map[bone], palette);
-                    distal = AddDetailed(distal, detailed);
-                }
+                var detailed = new List<Vertex>();
+                distal = AppendOrganic(detailed, distal.Body, section, -1, map)
+                    ? AddDetailed(distal, detailed)
+                    : FallbackOrganic(distal, section.Rule(-1), map);
             }
             if (robot)
             {
+                if (contour.Count >= 3) distal = AddCap(distal, contour, section.Rule(-1), map);
                 mechanics ??= MechanicalInterior(body, rig, look.Headless);
                 if (mechanics is not null)
                 {
@@ -108,6 +100,24 @@ internal static class StockLimbBuild
             pieces.Add(new(section.Cut, section.Plane, distal, definition));
         }
         return new(rig, AddDetailed(remaining, retainedTissue), pieces);
+
+        bool AppendOrganic(List<Vertex> detail, OgreMesh clippedSkin, Section section, int side, int[] map)
+        {
+            var rule = section.Rule(side);
+            int bone = MeshCut.SectionBone(rig, rule);
+            if (bone < 0) return false;
+            int start = detail.Count;
+            foreach (var contour in StockSectionContours.Read(clippedSkin, rig, look, rule))
+                StockLimbSections.Append(detail, contour, rig, section.Cut.Shape, section.Plane, side, map[bone], palette);
+            if (trace) Console.WriteLine($"Brutality stock limb section slot={section.Slot} side={side} triangles={(detail.Count - start) / 3}");
+            return detail.Count != start;
+        }
+
+        Look FallbackOrganic(Look appearance, CutHalfspace rule, int[] map)
+        {
+            var clipped = MeshCut.Clip(body, rig, [rule], look.PoseWeights, shaved, flesh, capWeldDistance: .002f);
+            return clipped.Wound is { } cap ? AddTissue(appearance, cap, map, "fracture surface") : appearance;
+        }
 
         Look AddDetailed(Look appearance, List<Vertex> vertices)
         {
@@ -147,7 +157,7 @@ internal static class StockLimbBuild
             foreach (var part in look.Parts)
             {
                 cancellation.ThrowIfCancellationRequested();
-                if (part.Record.Type == FcsRecordType.LIMB_REPLACEMENT
+                if (part.Record.Type == FcsRecordType.LimbReplacement
                     && part.Record.GetInt("slot") - 50 is >= 0 and <= 3 and var slot && (mask & (1 << slot)) != 0) continue;
                 if (part.Mode == AttachMode.Bone)
                 {

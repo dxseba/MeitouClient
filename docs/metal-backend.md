@@ -157,10 +157,10 @@ Two sharp edges:
 
 ## The backend so far
 
-- `src/Meitou.Metal/` - the backend (macOS only, outside the solution so the Windows build never
+- `src/Meitou.Game/Rendering/Metal/` - the backend (macOS only, outside the solution so the Windows build never
   sees it): `MslTranslator` (SPIR-V -> MSL), `MetalUniformBlock` (the engine's uniform block on
   the CPU), `MetalSky` (the spike's hand-driven sky), `MetalDisplay` (the window, the layer, the present).
-- `src/Meitou.Metal.Host/` - the host: the sky in a window of its own.
+- `tools/Meitou.MetalHost/` - the host: the sky in a window of its own.
 - The game: `--renderer metal` (macOS only). The game boots without the Vulkan renderer, the
   simulation runs, and the sky is drawn by Metal. The sky is the game's **simple** sky (the
   colour model, no textures); the camera's own view and the clock's own sun.
@@ -199,8 +199,8 @@ operation a later pass needs first throws (`InvalidOperationException` naming it
 - The frame's timestamps are the seam's `IGpuTimestamps` now (the Vulkan `QueryArena` implements
   it); Metal's hands out slots and reads nothing - Metal's GPU counters are a sampling-point model
   of their own (MTLCounterSampleBuffer, later if wanted).
-- The backend constructs the engine's handles, so `Meitou.Rendering` grants `InternalsVisibleTo`
-  `Meitou.Metal` (as it does to the viewer, the game and the tests).
+- The backend constructs the engine's handles: it is part of the game assembly (`Meitou.Game.Rendering.Metal`, compiled where
+  `MeitouMetal` is set, Directory.Build.props), which grants `InternalsVisibleTo` to the viewer, the Metal host and the tests.
 
 What the sky-sized scope does not have yet (each member throws): compute, the bindless table,
 indirect draws, dispatches, buffer/texture copies, in-pass clears, swizzled views, secondary
@@ -411,7 +411,7 @@ the large per-pixel differences left are the missing shadows and GI (steps 4 and
    `gpu.Device.Limits.MinUniformBufferOffsetAlignment` → the seam's device fact
    (`UniformBufferAlign` exists on `IGpuContext`). Keep the Vulkan parity byte-for-byte: the
    widening must not change the Vulkan path's code paths, only their parameter types.
-2. The game's Metal path (`GameHost.Metal.cs`): give the host pass a **depth attachment** (a
+2. The game's Metal path (`Host/MetalGameLoop.cs`): give the host pass a **depth attachment** (a
    per-slot depth texture at the backbuffer's size — the context owns it, resized with the
    backbuffer); the pass's state becomes `DrawState.Scene` (depth tested); the sky draws, then
    `terrain.Draw(viewProjection, eye, frustum, options, light)` with the light from
@@ -487,7 +487,7 @@ population and navmesh now run in the live loop); the world's lamps and room lig
 particles (the low-resolution targets are shared; the near-plane close pass is still Vulkan-only); the HUD and the faithful panels
 (inventory, stats, overview/map, menu), with portraits, item icons and the panels' own pointer/keyboard controls;
 the hover outline, move marker and navmesh debug overlay (Shift+F11).
-`GameHost.Metal.cs` is now a playable loop: WASD/arrows, Q/E, wheel and middle-drag
+`MetalGameLoop` (`Host/MetalGameLoop.cs`) is now a playable loop: WASD/arrows, Q/E, wheel and middle-drag
 move the strategy camera; edge scrolling, left click/box select, right-click move orders and the HUD keys work;
 F7 hides the interface, F8 saves a screenshot, Ctrl+/ writes one frame's Metal capture (`.gputrace`), F11 lists the frame, F12 the fps line, Alt+Enter is borderless.
 The shared settings menu is now wired on Metal too (F10; Display, Graphics, Interface, Controls, Advanced and Audio),
@@ -624,7 +624,7 @@ Keep `RecordsSecondaries` false: Metal records inline into one list.
    (`uFogVolumeData`, `uFogVolumeEye` and `uFogVolumeInfo` are published by `FogVolumes`). SSAO, FXAA, the heat haze
    and the light shafts (`LightShaftShaders` inject/integrate/scatter/apply) run there too. The shafts use the
    fragment integrate/scatter path; the compute scan is Vulkan-only. Still to do: the fog-rate target
-   (`PostProcess.FogRate`), which the shafts and the volumetric fog read. Metal has no fragment-shading-rate
+   (`FogRateImage`), which the shafts and the volumetric fog read. Metal has no fragment-shading-rate
    attachment, so the FogRate path stays Vulkan-only unless a non-VRS fallback is added.
 3. **The HiZ pyramid and the GPU culls** (`HizPyramid`, `FoliageGpuCull`, `FoliageGrassGpu`): `FoliageGpuCull`
    now works on Metal through `IGpuContext`, argument buffers and a separate pre-frame command buffer, and is live
@@ -729,7 +729,7 @@ default.
 - **GI**: the probe GI needs ray queries; Metal's ray tracing is a different model. Vulkan on this Mac reports GI
   off (MoltenVK exposes no `VK_KHR_ray_query`), so local parity is no-GI; on a machine where Vulkan has ray
   queries the target includes GI. Either port `GiScene`/`GiProbes` to Metal ray queries (a project of its own) or
-  accept the no-GI look as the macOS baseline. **Observed** (`Meitou.MetalSpike --rt-bench`, M1 Pro): one
+  accept the no-GI look as the macOS baseline. **Observed** (the Metal spike's `--rt-bench`, since removed; M1 Pro): one
   524k-triangle terrain acceleration structure took about 75–100 ms to build (88 MB plus 97 MB scratch), while
   the 131k-ray probe batch took about 0.25–0.31 ms. That is traversal only; real scene builds, object/foliage
   structures, refit and resolve are still unmeasured. The trace cost looks promising; memory and scene-build
@@ -805,7 +805,7 @@ default.
   also runs upstream's rotor pass, so wind generators and other `ROTATION_OUTPUT` parts turn on Metal.
 - **Play benchmark.** `--play-bench` is Vulkan-only: Metal rejects it with a message because the report's late-pipeline
   and display timings are Vulkan's.
-- **UI/input scope.** `GameHost.Metal` boots `PlayerInterface` for presentation (`LoadUi`, `ArrangeUi`, `Draw`),
+- **UI/input scope.** `MetalGameLoop` boots `PlayerInterface` for presentation (`LoadUi`, `ArrangeUi`, `Draw`),
   portraits, item icons and the map callbacks. It wires the panels' keyboard/pointer controls (I/C, M/T/Y, Esc,
   F7, F10 settings, hover/click/scroll), the strategy camera (WASD/arrows, Q/E, wheel, middle drag, edge scroll),
   selection/box select and right-click move orders. Title, new game, save/load, audio and the shared trade, dialogue,
@@ -835,6 +835,9 @@ default.
 - Debris now uses the shared `kenshiLight`/`atmoApply` fragment: the atmosphere, shadows, GI, lamps and its diffuse map
   come through the bindless set, with the model matrix, fallback light and per-part diffuse/cut-out values in one
   128-byte push block. That removes the old Metal-only simple sun/ambient path.
+- **Verified** on Apple M4 Pro (macOS 27.2, MoltenVK 1.4.2): the generated debris shader with separate skin and ordinary lighting calls
+  can abort the Metal compiler with fast math enabled. A standalone Metal pipeline probe compiled when the shader selected the diffuse
+  term first and called the shared lighting routine once. Both diffuse terms retain their original formulas.
 - UI shots: the Metal HUD is part of every screenshot. `--new-game --ui-panel inventory|stats|overview|menu`
   opens a panel; `MEITOU_METAL_OVERLAY=1` adds the frame-stats lines at the top-left. The Vulkan HUD/panel still
   renders (verified with `--ui-panel inventory` after the shared changes).

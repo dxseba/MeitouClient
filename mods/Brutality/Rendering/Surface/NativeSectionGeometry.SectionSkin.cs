@@ -1,5 +1,4 @@
 // Adapted from integrated GPL-3.0-or-later source 3a15eeb9f5523b9d106b40fd0ec99ccdb2658efa.
-using Meitou.Rendering;
 using System.Numerics;
 using System.Runtime.InteropServices;
 

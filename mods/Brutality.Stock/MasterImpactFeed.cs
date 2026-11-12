@@ -6,9 +6,9 @@ using Meitou.Data;
 using Meitou.Data.Characters;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.World;
-using Meitou.Engine;
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Terrain;
 using Meitou.Modding;
-using Meitou.Rendering;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Combat;
@@ -39,25 +39,28 @@ internal sealed class MasterImpactFeed
     readonly bool particlesDisabled = Environment.GetCommandLineArgs().Contains("--no-particles", StringComparer.Ordinal);
     readonly FieldInfo sessionField, gpuField, charactersField, terrainField, optionsField, bloodField;
     readonly FieldInfo? decalStoreField;
+    readonly MethodInfo? rendererRigs;
     readonly Func<object, CharacterId, long> drawKey;
     readonly Func<object, long, string, Vector3?> bonePosition;
     readonly bool trace = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS") == "1";
     object? drawnHost;
     World? world;
+    int renderThread;
+    double effectsTime;
 
     internal MasterImpactFeed(ModContext context)
     {
         data = context.Data;
         folder = context.Folder;
         var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new InvalidOperationException("Brutality impact effects require the game host.");
-        sessionField = RequireField(host, "session");
-        gpuField = RequireField(host, "gpu");
+        sessionField = RequireField(host, "Session");
+        gpuField = RequireField(host, "Gpu");
         charactersField = RequireField(gpuField.FieldType, "Characters");
         splinters = new(host, gpuField.FieldType, charactersField.FieldType);
         terrainField = RequireField(gpuField.FieldType, "Terrain");
+        rendererRigs = AccessTools.PropertyGetter(charactersField.FieldType, "Rigs");
         decalStoreField = AccessTools.Field(gpuField.FieldType, "DecalStore");
-        optionsField = AccessTools.GetDeclaredFields(host).SingleOrDefault(field => field.FieldType.FullName == "Meitou.Rendering.WorldOptions")
-            ?? throw new MissingFieldException(host.FullName, "WorldOptions");
+        optionsField = RequireField(host, "WorldOptions");
         bloodField = RequireField(optionsField.FieldType, "MeitouBlood");
         var keyMethod = AccessTools.Method(host, "DrawKey", [typeof(CharacterId)]) ?? throw new MissingMethodException(host.FullName, "DrawKey");
         var boneMethod = AccessTools.Method(charactersField.FieldType, "BonePosition", [typeof(long), typeof(string)])
@@ -70,13 +73,19 @@ internal sealed class MasterImpactFeed
             Expression.Call(Expression.Convert(target, host), keyMethod, id), target, id).Compile();
         bonePosition = Expression.Lambda<Func<object, long, string, Vector3?>>(
             Expression.Call(Expression.Convert(target, charactersField.FieldType), boneMethod, key, bone), target, key, bone).Compile();
-        var update = AccessTools.Method(host, "UpdateModHits") ?? throw new MissingMethodException(host.FullName, "UpdateModHits");
+        var modding = RequireField(host, "Modding").FieldType;
+        var update = AccessTools.Method(modding, "UpdateModHits") ?? throw new MissingMethodException(modding.FullName, "UpdateModHits");
         context.Harmony.Patch(update, postfix: new HarmonyMethod(typeof(MasterImpactFeed), nameof(UpdatePostfix)));
-        if (AccessTools.Method(host, "Spurt", [typeof(long), typeof(CharacterAppearance), typeof(Vector3)]) is { } spurt)
+        var decapitation = RequireField(host, "Decapitation").FieldType;
+        if (AccessTools.Method(decapitation, "Spurt", [typeof(long), typeof(CharacterAppearance), typeof(Vector3)]) is { } spurt)
             context.Harmony.Patch(spurt, prefix: new HarmonyMethod(typeof(MasterImpactFeed), nameof(NativeSpurtPrefix)));
         context.AddCombatHitFeed(Receive);
         active = this;
     }
+
+    internal static IReadOnlyDictionary<CharacterId, SavedBowelOwner>? CaptureBowels(World world) =>
+        active is { } feed && ReferenceEquals(feed.world, world) && feed.renderThread == Environment.CurrentManagedThreadId
+            ? feed.tissues?.Capture(feed.effectsTime) : null;
 
     internal GoreEffectsSimulation? SceneForHost(object host) => ReferenceEquals(host, drawnHost) ? scene : null;
 
@@ -95,7 +104,8 @@ internal sealed class MasterImpactFeed
     }
 
     internal static bool AcceptsWound(object host, CharacterId owner) => active is { } feed
-        && feed.SceneForHost(host) is not null && feed.tissues?.HasSpilled(owner) != true;
+        && feed.SceneForHost(host) is not null && feed.tissues?.HasSpilled(owner) != true
+        && (feed.world is null || StockBowelSave.Pending(feed.world, owner) is null);
 
     internal static void BeginWound(object host, CharacterId owner, CharacterAppearance look, SkeletonRig rig,
         CutFluidContact contact, double now)
@@ -172,20 +182,25 @@ internal sealed class MasterImpactFeed
 
     static bool NativeSpurtPrefix(object __instance, long from)
     {
-        if (active is not { } feed || feed.sessionField.GetValue(__instance) is not WorldSession shown) return true;
+        if (active is not { } feed || StockHostParts.HostOf(__instance) is not { } host
+            || feed.sessionField.GetValue(host) is not WorldSession shown) return true;
         foreach (var actor in shown.CurrentSnapshot.Characters)
-            if (feed.drawKey(__instance, actor.Id) == from)
+            if (feed.drawKey(host, actor.Id) == from)
                 return !StockHeadRules.TryGet(shown.World, actor.Id, shown.ShownTick, out var cut) || cut.Shape.Mode != HeadCutMode.Burst;
         return true;
     }
 
-    static void UpdatePostfix(object __instance) => active?.Update(__instance);
+    static void UpdatePostfix(object __instance)
+    {
+        if (StockHostParts.HostOf(__instance) is { } host) active?.Update(host);
+    }
 
     void Update(object host)
     {
         if (sessionField.GetValue(host) is not WorldSession session || gpuField.GetValue(host) is not { } gpu
             || charactersField.GetValue(gpu) is not { } renderer || terrainField.GetValue(gpu) is not TerrainRenderer terrain) return;
         drawnHost = host;
+        renderThread = Environment.CurrentManagedThreadId;
         if (!ReferenceEquals(world, session.World))
         {
             // UpdateModHits attaches a fresh queue on the first frame of a new world and delivers no batch that frame.
@@ -196,7 +211,9 @@ internal sealed class MasterImpactFeed
             tissues = null;
         }
 
-        double now = (session.ShownTick + session.SimulationAlpha) * world.TickSeconds;
+        double now = effectsTime = (session.ShownTick + session.SimulationAlpha) * world.TickSeconds;
+        if (StockBowelSave.HasPending(world) && rendererRigs?.Invoke(renderer, null) is CharacterRigs setup)
+            (tissues ??= new(folder)).Restore(host, session, setup, now);
         float Ground(Vector3 position) => terrain.HeightAt(position.X, position.Z);
         bool bloodEnabled = optionsField.GetValue(host) is { } options && bloodField.GetValue(options) is true;
         if (!bloodEnabled) { scene.Blood.Clear(); splinters.Clear(); }

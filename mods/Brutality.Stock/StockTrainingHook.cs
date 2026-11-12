@@ -47,19 +47,19 @@ internal static class StockTrainingHook
         context.Harmony.Patch(medical, prefix: new HarmonyMethod(typeof(StockTrainingHook), nameof(MedicalPrefix)));
     }
 
-    static void ApplyPrefix(CombatSystem __instance, World world, in Effect e, CombatSlot[] ___write, out Pending? __state)
+    static void ApplyPrefix(CombatSystem __instance, World world, in Effect e, CombatSlot[] ____write, out Pending? __state)
     {
         __state = current;
         current = null;
         var table = world.Characters;
         if (e.Kind != CombatSystem.BlowEffect || (uint)e.Source >= (uint)table.HighWater || (uint)e.Target >= (uint)table.HighWater
-            || (uint)e.Source >= (uint)___write.Length || (uint)e.Target >= (uint)___write.Length
-            || ___write[e.Source].CancelTick == (int)world.Tick || StockProgression.For(world) is not { } progression
+            || (uint)e.Source >= (uint)____write.Length || (uint)e.Target >= (uint)____write.Length
+            || ____write[e.Source].CancelTick == (int)world.Tick || StockProgression.For(world) is not { } progression
             || table.Cold(e.Target)?.Medical is not { } medical) return;
 
         // An emitted blow can still land after the attacker has ended or replaced the swing in Act.
         current = new(world, __instance, progression, table.IdOf(e.Source), table.IdOf(e.Target), medical,
-            ___write[e.Target], (int)e.Amount, e.Arg);
+            ____write[e.Target], (int)e.Amount, e.Arg);
         if (StockWeaponStains.Enabled)
             current.Weapon = StockWeaponItems.Swing(table.Cold(e.Source), __instance, e);
     }

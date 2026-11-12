@@ -35,7 +35,7 @@ public sealed partial class WeaponBloodState
                 var parts = new List<WeaponStainAttachment>(); var gaps = WeaponBloodPresentationGap.None;
                 foreach (var part in look.Parts)
                 {
-                    if (part.Mode != AttachMode.Bone || part.Record.Type != FcsRecordType.WEAPON || part.Field == "sheath" || part.Point == "back2") continue;
+                    if (part.Mode != AttachMode.Bone || part.Record.Type != FcsRecordType.Weapon || part.Field == "sheath" || part.Point == "back2") continue;
                     ItemInstance? item = part.Shown switch
                     {
 #if BRUTALITY_STOCK_MASTER
@@ -50,7 +50,7 @@ public sealed partial class WeaponBloodState
                     };
                     if (item is not null && item.Record == part.Record.StringId && TryGet(item, out var blood))
                         parts.Add(new(item, part, blood.Blood, blood.Revision));
-                    else if (item is null && inventory.Items.Any(candidate => candidate.Type == FcsRecordType.WEAPON && candidate.Record == part.Record.StringId && stains.ContainsKey(candidate)))
+                    else if (item is null && inventory.Items.Any(candidate => candidate.Type == FcsRecordType.Weapon && candidate.Record == part.Record.StringId && stains.ContainsKey(candidate)))
                         gaps |= WeaponBloodPresentationGap.AmbiguousAttachment;
                 }
                 if (parts.Count == 0 && gaps == WeaponBloodPresentationGap.None) continue;
@@ -81,7 +81,7 @@ public sealed partial class WeaponBloodState
 #endif
         if (source is null || cold.Inventory is not { } inventory || source.Record != part.Record.StringId) return null;
         // The serializer's Always tag can also name spare weapons. Only a unique actual item at that point is safe.
-        var candidates = inventory.Items.Where(item => item.Type == FcsRecordType.WEAPON && item.Record == part.Record.StringId
+        var candidates = inventory.Items.Where(item => item.Type == FcsRecordType.Weapon && item.Record == part.Record.StringId
             && (part.Point == "hands" || (item.Section == "back" && item.Y > 0 ? "back2" : item.Section) == part.Point)).ToArray();
         return candidates.Length == 1 && ReferenceEquals(candidates[0], source) ? source : null;
     }

@@ -68,7 +68,7 @@ internal static class StockLimbRules
                 [typeof(int), typeof(HitDamage).MakeByRefType(), typeof(MedicalContext).MakeByRefType(), typeof(List<MedicalEvent>)])
                 ?? throw new MissingMethodException(nameof(MedicalState.ApplyHit));
             var knockdown = AccessTools.Method(typeof(CombatSystem), "Knockdown",
-                [typeof(World), typeof(int), typeof(CharacterCold), typeof(Vector2), typeof(float), typeof(int)])
+                [typeof(World), typeof(int), typeof(CharacterCold), typeof(Vector2), typeof(float), typeof(int), typeof(float)])
                 ?? throw new MissingMethodException("Knockdown");
             context.Harmony.Patch(apply, prefix: Patch(nameof(ApplyPrefix)), finalizer: Patch(nameof(ApplyFinalizer)));
             context.Harmony.Patch(knockdown, postfix: Patch(nameof(KnockdownPostfix)));
@@ -85,14 +85,14 @@ internal static class StockLimbRules
 
     static HarmonyMethod Patch(string name) => new(typeof(StockLimbRules), name);
 
-    static void ApplyPrefix(CombatSystem __instance, World world, in Effect e, CombatSlot[] ___write, out Contact? __state)
+    static void ApplyPrefix(CombatSystem __instance, World world, in Effect e, CombatSlot[] ____write, out Contact? __state)
     {
         __state = current;
         current = null;
         var table = world.Characters;
         if (!Enabled || e.Kind != CombatSystem.BlowEffect || (uint)e.Source >= (uint)table.HighWater
-            || (uint)e.Target >= (uint)table.HighWater || (uint)e.Source >= (uint)___write.Length
-            || ___write[e.Source].CancelTick == (int)world.Tick
+            || (uint)e.Target >= (uint)table.HighWater || (uint)e.Source >= (uint)____write.Length
+            || ____write[e.Source].CancelTick == (int)world.Tick
             || (uint)(int)e.Position.X >= (uint)__instance.Techniques.Count
             || table.Cold(e.Target) is not { Medical: { Dead: false } medical, Fighter.IsAnimal: false }) return;
         var tech = __instance.Techniques[(int)e.Position.X];

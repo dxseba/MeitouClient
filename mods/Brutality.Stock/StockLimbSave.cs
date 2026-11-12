@@ -187,7 +187,7 @@ internal static class StockLimbSave
         // Stock leaves an unchanged zone untouched. Refresh the same FCS record by zone and its native id in that case.
         foreach (var mark in capture.Items.Values)
             if (mark.RecordId is { } id && !updated.Contains((mark.Zone, id)) && game.Zones.TryGetValue(mark.Zone, out var zone)
-                && zone.File.Records.Find(record => record.StringId == id && record.RecordType == FcsRecordType.ITEM) is { } record)
+                && zone.File.Records.Find(record => record.StringId == id && record.RecordType == FcsRecordType.Item) is { } record)
                 Write(record, mark.Data);
     }
 

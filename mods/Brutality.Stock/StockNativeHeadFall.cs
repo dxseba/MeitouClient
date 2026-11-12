@@ -1,8 +1,8 @@
+using Meitou.Game.Host;
 using System.Collections;
 using System.Numerics;
 using System.Reflection;
 using HarmonyLib;
-using Meitou.Engine;
 using Meitou.Modding;
 
 namespace Meitou.Brutality;
@@ -11,12 +11,13 @@ namespace Meitou.Brutality;
 internal sealed class StockNativeHeadFall
 {
     static StockNativeHeadFall? installed;
-    readonly FieldInfo session, heads, key, tick, start;
+    readonly FieldInfo session, decapitation, heads, key, tick, start;
 
     StockNativeHeadFall(Type host, Type falling)
     {
-        session = Field(host, "session");
-        heads = Field(host, "heads");
+        session = Field(host, "Session");
+        decapitation = StockHostParts.Decapitation;
+        heads = Field(decapitation.FieldType, "_heads");
         key = Field(falling, "Key");
         tick = Field(falling, "Tick");
         start = Field(falling, "Start");
@@ -27,10 +28,11 @@ internal sealed class StockNativeHeadFall
         if (installed is not null) return;
         try
         {
-            var falling = AccessTools.Inner(host, "FallingHead") ?? throw new MissingMemberException(host.Name, "FallingHead");
+            var decapitation = StockHostParts.Decapitation.FieldType;
+            var falling = AccessTools.Inner(decapitation, "FallingHead") ?? throw new MissingMemberException(decapitation.Name, "FallingHead");
             var hook = new StockNativeHeadFall(host, falling);
-            var surface = AccessTools.Method(host, "SurfaceUnder", [chars, typeof(Vector2), falling])
-                ?? throw new MissingMethodException(host.Name, "SurfaceUnder");
+            var surface = AccessTools.Method(decapitation, "SurfaceUnder", [chars, typeof(Vector2), falling])
+                ?? throw new MissingMethodException(decapitation.Name, "SurfaceUnder");
             context.Harmony.Patch(surface, prefix: new HarmonyMethod(typeof(StockNativeHeadFall), nameof(UseGround)));
             installed = hook;
         }
@@ -45,7 +47,8 @@ internal sealed class StockNativeHeadFall
 
     static bool UseGround(object __instance, Vector2 at, object head, ref float __result)
     {
-        if (installed is not { } hook || hook.session.GetValue(__instance) is not WorldSession shown
+        if (installed is not { } hook || StockHostParts.HostOf(__instance) is not { } host
+            || hook.session.GetValue(host) is not WorldSession shown
             || hook.start.GetValue(head) is not Vector3 from) return true;
         // Stock records the first contact height indefinitely. An animated or hidden bone can leave
         // a head suspended above the actual floor after the ragdoll moves.
@@ -57,7 +60,7 @@ internal sealed class StockNativeHeadFall
 
     internal static bool StartReplacement(object host, long headKey, double clock)
     {
-        if (installed is not { } hook || hook.heads.GetValue(host) is not IList falling) return false;
+        if (installed is not { } hook || hook.heads.GetValue(hook.decapitation.GetValue(host)) is not IList falling) return false;
         foreach (object head in falling)
         {
             if (hook.key.GetValue(head) is not long key || key != headKey) continue;

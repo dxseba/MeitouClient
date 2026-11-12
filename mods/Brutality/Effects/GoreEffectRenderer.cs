@@ -1,8 +1,9 @@
+using Meitou.Game.Rendering.Sky;
+using Meitou.Game.Rendering.Gpu;
+using System.Buffers;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Meitou.Data.Textures;
-using Meitou.Rendering;
-using Meitou.Rendering.Gpu;
 
 namespace Meitou.Brutality.Effects;
 
@@ -14,11 +15,12 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
     sealed class TissueSlot(DeviceBuffer buffer, int count)
     {
         public readonly DeviceBuffer Buffer = buffer;
-        public readonly FxVertex[] Packed = new FxVertex[count];
+        public readonly int Count = count;
         public long Version = -1;
         public uint BloodColour;
         public bool Mechanical;
         public Vector3 Centre;
+        public Matrix4x4[]? Pose;
     }
     sealed class Batch(int kind, Texture image)
     {
@@ -48,7 +50,7 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
     readonly IGpuContext gpu;
     readonly LegacyProgram program;
     readonly UniformHandle viewProjection, eyeUniform, kindUniform, coverageUniform, centreUniform, sunUniform;
-    readonly UniformHandle bowelSun, bowelSky, bowelGround, atmosphereParams;
+    readonly UniformHandle bowelSun, bowelSky, bowelGround, atmosphereParams, tissueSkinned, tissuePose;
     readonly SamplerSlot imageUniform;
     readonly VertexArrayBindings attributes;
     readonly Dictionary<(AttachmentFormats, BlendState, ColorMask), GpuPipeline> pipelines = [];
@@ -78,14 +80,16 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
         centreUniform = program.Uniform("uCentre"); sunUniform = program.Uniform("uSunDirection");
         bowelSun = program.Uniform("uBowelSun"); bowelSky = program.Uniform("uBowelSky"); bowelGround = program.Uniform("uBowelGround");
         atmosphereParams = program.Uniform("uAtmoParams");
+        tissueSkinned = program.Uniform("uTissueSkinned");
+        tissuePose = program.Uniform("uTissuePose[0]");
         white = new(gpu, new(1, 1, [255, 255, 255, 255]), "Brutality white");
         arc = Load("robot-electric-arc.png"); spark = Load("robot-spark.png");
         smoke = new(3, white); stream = new(6, white); drops = new(5, white); arcs = new(1, arc); sparks = new(4, spark); flashes = new(7, white);
         batches = [smoke, stream, drops, arcs, sparks, flashes];
         const uint stride = 60;
-        attributes = new([new LegacyProgram.Attribute(default, InternalFormat.Rgb32f, stride, false), new LegacyProgram.Attribute(default, InternalFormat.RG32f, stride, false),
-            new LegacyProgram.Attribute(default, InternalFormat.Rgba32f, stride, false), new LegacyProgram.Attribute(default, InternalFormat.Rgb32f, stride, false),
-            new LegacyProgram.Attribute(default, InternalFormat.Rgb32f, stride, false)], default);
+        attributes = new([new LegacyProgram.Attribute(default, InternalFormat.Rgb32F, stride, false), new LegacyProgram.Attribute(default, InternalFormat.Rg32F, stride, false),
+            new LegacyProgram.Attribute(default, InternalFormat.Rgba32F, stride, false), new LegacyProgram.Attribute(default, InternalFormat.Rgb32F, stride, false),
+            new LegacyProgram.Attribute(default, InternalFormat.Rgb32F, stride, false)], default);
         return;
 
         Texture Load(string name)
@@ -167,15 +171,39 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
             if (!tissues.TryGetValue(piece.Key, out var slot))
                 tissues.Add(piece.Key, slot = new(DeviceBuffer.Create(gpu, (ulong)(piece.Vertices.Length * 60 + 84), BufferUse.Vertex, "Brutality bowel tissue"), piece.Vertices.Length));
             slot.Centre = piece.Centre;
+            slot.Pose = piece.Pose;
             if (slot.Version != piece.Version || slot.BloodColour != piece.BloodColour || slot.Mechanical != piece.Mechanical)
             {
-                for (int i = 0; i < piece.Vertices.Length; i++)
+                var tissueLighting = Vector3.Zero;
+#if BRUTALITY_STOCK_MASTER
+                // The stock organ palette expects the forward pass to supply diffuse bounce.
+                if (piece.Albedo.HasValue) tissueLighting = Vector3.UnitZ;
+#endif
+                // Skinning keeps the rest vertices resident. Reuse scratch memory for initial and CPU-only uploads.
+                var packed = ArrayPool<FxVertex>.Shared.Rent(slot.Count);
+                try
                 {
-                    var v = piece.Vertices[i];
-                    slot.Packed[i] = new(v.Position, v.Uv, piece.ColourOf(v.Colour), default, v.Normal);
+                    for (int i = 0; i < slot.Count; i++)
+                    {
+                        var v = piece.Vertices[i];
+                        var uv = v.Uv;
+                        var aux = tissueLighting;
+                        if (piece.Skinning is { } skinning)
+                        {
+                            var (weights, weightAndNodes) = skinning.PackedInfluences(i);
+                            uv = weights;
+                            aux.X = weightAndNodes.X;
+                            aux.Y = weightAndNodes.Y;
+                        }
+                        packed[i] = new(v.Position, uv, piece.ColourOf(v.Colour), aux, v.Normal);
+                    }
+                    using var upload = gpu.Uploads.Begin();
+                    upload.Write(slot.Buffer, 0, MemoryMarshal.AsBytes(packed.AsSpan(0, slot.Count)));
                 }
-                using var upload = gpu.Uploads.Begin();
-                upload.Write(slot.Buffer, 0, MemoryMarshal.AsBytes(slot.Packed.AsSpan()));
+                finally
+                {
+                    ArrayPool<FxVertex>.Shared.Return(packed);
+                }
                 slot.Version = piece.Version; slot.BloodColour = piece.BloodColour; slot.Mechanical = piece.Mechanical;
             }
             BatchCount++;
@@ -251,11 +279,14 @@ internal sealed unsafe class GoreEffectRenderer : IDisposable
             {
                 program.Set(kindUniform, slot.Mechanical ? 9 : 8);
                 program.Set(centreUniform, slot.Centre - eye);
+                program.Set(tissueSkinned, slot.Pose is null ? 0 : 1);
+                if (slot.Pose is { } pose) program.Set(tissuePose, MemoryMarshal.Cast<Matrix4x4, float>(pose.AsSpan()), 4, 4);
                 GpuBufferBinding[] bindings = [new(slot.Buffer.Handle, 0), new(slot.Buffer.Handle, 12), new(slot.Buffer.Handle, 20), new(slot.Buffer.Handle, 36), new(slot.Buffer.Handle, 48)];
-                cmd.BindVertexBuffers(0, bindings); program.Flush(cmd); cmd.Draw((uint)slot.Packed.Length);
+                cmd.BindVertexBuffers(0, bindings); program.Flush(cmd); cmd.Draw((uint)slot.Count);
             }
         }
         program.Set(centreUniform, Vector3.Zero);
+        program.Set(tissueSkinned, 0);
         foreach (var batch in batches)
         {
             if (batch.Vertices.Count == 0) continue;

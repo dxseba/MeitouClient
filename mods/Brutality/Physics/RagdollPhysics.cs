@@ -19,6 +19,7 @@ internal struct BodyTag
 #if BRUTALITY_STOCK_MASTER
     public int CutPair; // Negative while fresh halves are separating, positive when they may touch.
     public bool NativeMirror;
+    public bool CarryPin, CarryOrphan;
 #endif
 }
 
@@ -44,6 +45,8 @@ internal struct ContactRules : INarrowPhaseCallbacks
         ref var tb = ref Tags[b.BodyHandle];
 #if BRUTALITY_STOCK_MASTER
         if (ta.Ragdoll != tb.Ragdoll && ta.CutPair < 0 && ta.CutPair == tb.CutPair) return false;
+        // Animated carry pins can move through old detached pieces in one solver step.
+        if (ta.Ragdoll == tb.Ragdoll && (ta.CarryPin && tb.CarryOrphan || tb.CarryPin && ta.CarryOrphan)) return false;
 #endif
         return ta.Ragdoll != tb.Ragdoll || ta.Ragdoll == 0 || tb.Index >= 64 || (ta.Joined & (1UL << tb.Index)) == 0;
     }
@@ -172,7 +175,12 @@ internal sealed class RagdollPhysics : IDisposable
     public static float StepOf(float tickSeconds, float speed) => MathF.Min(tickSeconds / (speed >= 1 ? speed : 1), MaxStep);
 
     /// <summary>Steps the bodies, on <paramref name="threads"/> when given (<see cref="BepuPhysics.Simulation.Deterministic"/> is on, so the result does not depend on them).</summary>
-    public void Step(float dt, IThreadDispatcher? threads = null) => Simulation.Timestep(dt, threads);
+    public void Step(float dt, IThreadDispatcher? threads = null) =>
+#if BRUTALITY_STOCK_MASTER
+        NativeContacts.Step(Simulation, dt, threads);
+#else
+        Simulation.Timestep(dt, threads);
+#endif
 
     /// <summary>
     /// Once per process, on a worker: a throwaway scene with every shape, joint and kind of contact the ragdolls use, stepped and frozen as a ragdoll is. The game

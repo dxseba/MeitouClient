@@ -1,3 +1,4 @@
+using Meitou.Simulation.Player;
 using System.Numerics;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -27,7 +28,7 @@ internal static class StockTargetAim
             (AccessTools.Method(combat, "StartAttack"), nameof(StartAttack)),
             (AccessTools.Method(combat, nameof(CombatSystem.SwingAim)), nameof(SwingAim)),
             (AccessTools.Method(combat, nameof(CombatSystem.SteersAt)), nameof(SteeringLine)),
-            (AccessTools.Method(pursuit, "Pursue"), nameof(Pursue)),
+            (AccessTools.Method(pursuit, "Chase"), nameof(Chase)),
             (AccessTools.Method(pursuit, "Steer"), nameof(Steer)),
         };
         var installed = new List<(MethodInfo Method, MethodInfo Hook)>();
@@ -101,27 +102,29 @@ internal static class StockTargetAim
         return StockTargetHooks.ExpandBranches(code);
     }
 
-    static IEnumerable<CodeInstruction> Pursue(IEnumerable<CodeInstruction> source, ILGenerator il)
+    static IEnumerable<CodeInstruction> Chase(IEnumerable<CodeInstruction> source, ILGenerator il)
     {
         var code = source.ToList();
-        var (target, point) = CapturePoint(code, il, attacker: 3);
-        int hold = code.FindIndex(op => op.Calls(AccessTools.Method(typeof(Orders), nameof(Orders.Holding))));
-        int steer = code.FindIndex(op => op.Calls(AccessTools.Method(typeof(PursuitSystem), "Steer")));
+        const int attacker = 3, target = 6;
+        int point = il.DeclareLocal(typeof(Vector3?)).LocalIndex;
+        Insert(code, code[0], Arg(1), Arg(attacker), Arg(target), Call(nameof(Point)), CodeInstruction.StoreLocal(point));
         int floor = code.FindIndex(op => op.Calls(otherFloor));
-        if (hold < 0 || steer <= hold || floor <= steer) throw new InvalidOperationException("Unexpected stock pursuit boundaries.");
-        var positions = code.Where((_, i) => PositionOf(code, i, target) && (i < hold || i > steer) && i != floor - 1).ToArray();
+        if (floor < 0) throw new InvalidOperationException("Missing stock pursuit floor check.");
+        var positions = code.Where((op, i) => i >= 2 && i != floor - 1 && op.operand is FieldInfo field && field == position
+            && code[i - 2].IsLdarg(target) && code[i - 1].operand is MethodInfo item && item.Name == "get_Item").ToArray();
         if (positions.Length < 5) throw new InvalidOperationException("Unexpected pursuit aim positions.");
         foreach (var use in positions) ChangePosition(code, use, il, [Load(point)], nameof(AtFloor));
 
-        // The two planar ranges subtract the target body's footprint. The selected limb is a point within that body.
-        foreach (var call in code.Where(op => op.Calls(footprint)).Take(4).Where((_, i) => i % 2 == 1).ToArray())
-            Append(code, call, Load(point), Call(nameof(AimFootprint)));
+        // UpdateRunning owns the running-distance calculation. Here only the target radius in aimGap changes.
+        var radii = code.Where(op => op.Calls(footprint)).ToArray();
+        if (radii.Length != 2) throw new InvalidOperationException("Unexpected stock pursuit footprints.");
+        Append(code, radii[1], Load(point), Call(nameof(AimFootprint)));
         Append(code, code.Where(op => op.Calls(stand)).Last(), Load(point), Call(nameof(AimStand)));
         Append(code, code.Single(op => op.opcode == OpCodes.Ldc_R4 && op.operand is 144f), Load(point), Call(nameof(AimRepath)));
-        var face = code.Where(op => op.Calls(AccessTools.PropertySetter(typeof(CharacterCold), nameof(CharacterCold.FaceSlot)))).Last();
+        var face = code.Single(op => op.Calls(AccessTools.PropertySetter(typeof(CharacterCold), nameof(CharacterCold.FaceSlot))));
         Insert(code, face, Load(point), Call(nameof(AimFace)));
         RewriteGap(code, point);
-        RequireClearLine(code, point, target, attacker: 3);
+        Append(code, code.Single(op => op.Calls(otherFloor)), Arg(1), Arg(attacker), Arg(target), Load(point), Call(nameof(Blocked)));
         return StockTargetHooks.ExpandBranches(code);
     }
 

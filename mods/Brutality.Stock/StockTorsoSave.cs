@@ -1,3 +1,6 @@
+using Meitou.Simulation.Movement;
+using Meitou.Simulation.Factions;
+using Meitou.Simulation.Population;
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Reflection;
@@ -30,7 +33,7 @@ internal static class StockTorsoSave
         .Single(method => method.Name == "WriteCharacter" && method.GetParameters().Any(parameter => parameter.ParameterType == typeof(CharacterCold)));
     static readonly MethodInfo setCount = AccessTools.Method(typeof(SaveCapture), "SetCharCount");
     static readonly Type characters = typeof(SaveLoader).Assembly.GetType("Meitou.Simulation.Saving.SavedCharacters", true)!;
-    static readonly Type assembly = typeof(SaveLoader).Assembly.GetType("Meitou.Simulation.CharacterAssembly", true)!;
+    static readonly Type assembly = typeof(SaveLoader).Assembly.GetType("Meitou.Simulation.Bodies.CharacterAssembly", true)!;
     static readonly MethodInfo read = AccessTools.Method(characters, "Read"), make = AccessTools.Method(characters, "Make");
 
     sealed record CorpseLocation(string Platoon, int Slot);
@@ -185,11 +188,13 @@ internal static class StockTorsoSave
     {
         if (!(StockTorsoRules.Enabled || StockHeadRules.Enabled) || world.Saved is not { } context) return;
         var present = new HashSet<Hand>();
+        var required = new HashSet<Hand>();
         for (int slot = 0; slot < world.Characters.HighWater; slot++)
             if (world.Characters.Next[slot].Alive && world.Characters.Cold(slot) is { Save.Source.Handle: { IsNull: false } handle } cold)
             {
                 present.Add(handle);
                 Restore(world, world.Characters.IdOf(slot), cold);
+                if (StockTorsoRules.Enabled) StockTorsoProxySave.AddRequiredOwners(cold, required);
             }
 
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
@@ -198,7 +203,8 @@ internal static class StockTorsoSave
         foreach (var source in save.Characters)
         {
             if (source.Handle.IsNull || present.Contains(source.Handle) || source.GameState is not { } state
-                || !(StockTorsoRules.Enabled && state.Bools.GetValueOrDefault(Standalone) && Read(state) is not null
+                || !(StockTorsoRules.Enabled && (state.Bools.GetValueOrDefault(Standalone) || required.Contains(source.Handle))
+                    && Read(state) is not null
                     || StockHeadRules.Enabled && (StockHeadSplitSave.IsStandalone(state) || state.Bools.GetValueOrDefault(StockSaveMigration.WoundCorpse)))) continue;
             var prepared = read.Invoke(null, [source, source.Platoon.Name, data, options?.Appearances, races, parts, (Action<string>)__result.Notes.Add]);
             if (prepared is null || AccessTools.Property(prepared.GetType(), "Medical").GetValue(prepared) is not MedicalState { Dead: true }) continue;

@@ -1,3 +1,4 @@
+using Meitou.Simulation.Population;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using HarmonyLib;

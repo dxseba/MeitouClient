@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using BepuPhysics;
 using BepuPhysics.Collidables;
@@ -12,7 +13,7 @@ public sealed class BowelRagdollScene : IDisposable
     public const int Capacity = 32, NodeCount = 9;
     public const float FixedStep = 1f / 120, FreezeEarliest = 2, FreezeLatest = 12;
     const float NodeMass = 0.03f;
-    static readonly SpringSettings TissueSpring = new(5, 1);
+    static readonly SpringSettings TissueSpring = new(7, 1);
 
     sealed class Rig
     {
@@ -29,6 +30,7 @@ public sealed class BowelRagdollScene : IDisposable
         public int PinNode = -1;
         public Vector3 Anchor, AttachmentVelocity;
         public float AttachmentReach;
+        public SavedBowelRig? FrozenSave;
     }
 
     readonly RagdollPhysics physics = new();
@@ -41,13 +43,16 @@ public sealed class BowelRagdollScene : IDisposable
     public int Moving => rigs.Values.Count(r => !r.Frozen);
 
     public bool Add(long key, BowelRigGeometry geometry, Vector3 position, Quaternion rotation, Vector3 velocity,
-        bool resting = false, int pinNode = -1, bool preserveAttachment = false)
+        bool resting = false, int pinNode = -1, bool preserveAttachment = false, Vector3 launchSpin = default)
     {
         if (pinNode < -1 || pinNode >= NodeCount || disposed || rigs.ContainsKey(key) || rigs.Count >= Capacity || !Valid(geometry)
-            || !Finite(position) || !Finite(velocity) || !float.IsFinite(rotation.LengthSquared())
+            || !Finite(position) || !Finite(velocity) || !Finite(launchSpin) || !float.IsFinite(rotation.LengthSquared())
             || rotation.LengthSquared() < 1e-8f) return false;
         rotation = Quaternion.Normalize(rotation);
         if (velocity.LengthSquared() > 10000) velocity = Vector3.Normalize(velocity) * 100;
+        float spinSpeed = launchSpin.Length();
+        if (resting || !float.IsFinite(spinSpeed)) launchSpin = Vector3.Zero;
+        else if (spinSpeed > 3.5f) launchSpin *= 3.5f / spinSpeed;
         var sphere = new Sphere(geometry.Radius);
         var shape = physics.Simulation.Shapes.Add(sphere);
         var rig = new Rig { Key = key, Rest = (Vector3[])geometry.RestNodes.Clone(), Bodies = new BodyHandle[NodeCount],
@@ -57,10 +62,16 @@ public sealed class BowelRagdollScene : IDisposable
         int created = 0, tag = nextTag++;
         try
         {
+            Vector3 pivot = rig.PinNode >= 0 ? rig.Rest[rig.PinNode] : Vector3.Zero;
             for (int i = 0; i < NodeCount; i++)
             {
                 var at = position + Vector3.Transform(rig.Rest[i], rotation);
-                var description = BodyDescription.CreateDynamic(new RigidPose(at, rotation), new BodyVelocity(velocity),
+                // Start the fold progressively across the rows. A uniform impulse drops the original shape as one slab.
+                float spinWeight = .6f + .4f * (i / 3);
+                var spin = launchSpin * spinWeight;
+                var offset = Vector3.Transform(rig.Rest[i] - pivot, rotation);
+                var motion = new BodyVelocity(velocity + Vector3.Cross(spin, offset), spin);
+                var description = BodyDescription.CreateDynamic(new RigidPose(at, rotation), motion,
                     sphere.ComputeInertia(NodeMass), RagdollPhysics.Collidable(shape), new BodyActivityDescription(0.01f));
                 rig.Bodies[i] = physics.AddBody(description,
                     new BodyTag { Ragdoll = tag, Index = i, Joined = (1UL << NodeCount) - 1 });
@@ -96,7 +107,8 @@ public sealed class BowelRagdollScene : IDisposable
             {
                 int a = row * 3 + column;
                 if (column < 2) Join(rig, a, a + 1);
-                if (row < 2) Join(rig, a, a + 3);
+                // Join rows at their centres so the sheet can fold and twist around the middle.
+                if (column == 1 && row < 2) Join(rig, a, a + 3);
             }
     }
 
@@ -112,6 +124,48 @@ public sealed class BowelRagdollScene : IDisposable
     public BowelPose? PoseOf(long key) => rigs.TryGetValue(key, out var rig) ? rig.Pose : null;
 
     public bool IsAttached(long key) => rigs.TryGetValue(key, out var rig) && rig.PinNode >= 0;
+
+    internal SavedBowelRig? Capture(long key)
+    {
+        if (!rigs.TryGetValue(key, out var rig)) return null;
+        if (rig.FrozenSave is { } frozen) return frozen;
+        var nodes = ImmutableArray.CreateBuilder<SavedBowelNode>(NodeCount);
+        foreach (var handle in rig.Bodies)
+        {
+            var body = physics.Simulation.Bodies.GetBodyReference(handle);
+            nodes.Add(new(body.Pose.Position, body.Pose.Orientation, body.Velocity.Linear, body.Velocity.Angular));
+        }
+        var saved = new SavedBowelRig(nodes.MoveToImmutable(), rig.Age, rig.Frozen, rig.PinNode, rig.AttachmentVelocity);
+        if (rig.Frozen && rig.Placed) rig.FrozenSave = saved;
+        return saved;
+    }
+
+    internal bool Restore(long key, BowelRigGeometry geometry, SavedBowelRig saved, bool preserveAttachment)
+    {
+        if (!saved.IsValid || !Valid(geometry)) return false;
+        var first = saved.Nodes[0].Position;
+        float reach = MathF.Max(16, geometry.RestNodes.Max(node => node.Length()) * 8 + geometry.Radius);
+        if (saved.Nodes.Any(node => Vector3.DistanceSquared(first, node.Position) > reach * reach)
+            || !Add(key, geometry, first, Quaternion.Identity, Vector3.Zero, pinNode: saved.PinNode, preserveAttachment: preserveAttachment))
+            return false;
+
+        var rig = rigs[key];
+        for (int i = 0; i < NodeCount; i++)
+        {
+            var body = physics.Simulation.Bodies.GetBodyReference(rig.Bodies[i]);
+            var node = saved.Nodes[i];
+            body.Pose = new RigidPose(node.Position, Quaternion.Normalize(node.Rotation));
+            body.Velocity = i == saved.PinNode ? default : new(node.Linear, node.Angular);
+            body.UpdateBounds();
+        }
+        if (saved.PinNode >= 0) rig.Anchor = saved.Nodes[saved.PinNode].Position;
+        rig.Age = saved.Age;
+        rig.Placed = true;
+        if (saved.Frozen) Freeze(rig);
+        else if (saved.PinNode >= 0) rig.AttachmentVelocity = saved.AttachmentVelocity;
+        ReadPose(rig);
+        return true;
+    }
 
     /// <summary>Moves the pinned edge; retained tissue follows bounded pickup jumps as one piece.</summary>
     public bool MoveAttachment(long key, Vector3 target)
@@ -170,6 +224,7 @@ public sealed class BowelRagdollScene : IDisposable
         }
         JoinLattice(rig);
         rig.Frozen = false;
+        rig.FrozenSave = null;
         rig.Age = 0;
     }
 
@@ -263,6 +318,7 @@ public sealed class BowelRagdollScene : IDisposable
             body = physics.Simulation.Bodies.GetBodyReference(handle);
             body.Pose.Position.Y = floor + rig.Radius;
             body.Velocity.Linear.Y = MathF.Max(0, body.Velocity.Linear.Y);
+            body.UpdateBounds();
         }
     }
 

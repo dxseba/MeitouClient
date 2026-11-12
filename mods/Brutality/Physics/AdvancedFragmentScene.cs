@@ -31,6 +31,10 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
         public RigidTransform[]? Offsets;
         public List<ConstraintHandle> Joints = [];
         public bool Soft = true, Frozen, Carried;
+#if BRUTALITY_STOCK_MASTER
+        internal bool[]? StockGripBodies;
+        internal RigidTransform[]? StockGripTargets;
+#endif
         public float Age;
 #if BRUTALITY_STOCK_MASTER
         public float PairedCutTime;
@@ -57,8 +61,8 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
             foreach (var piece in pieces)
             {
                 if (piece.Frozen) continue;
-                foreach (var handle in piece.Bodies)
-                    if (handle is { } body && physics.Simulation.Bodies.GetBodyReference(body).Awake) count++;
+                for (int b = 0; b < piece.Bodies.Length; b++)
+                    if (piece.Dynamic[b] && piece.Bodies[b] is { } body && physics.Simulation.Bodies.GetBodyReference(body).Awake) count++;
             }
             return count;
         }
@@ -104,7 +108,7 @@ internal sealed partial class AdvancedFragmentScene : IDisposable
         bool moving = false;
         foreach (var piece in pieces)
         {
-            if (piece.Frozen) continue;
+            if (piece.Frozen || piece.Carried && !piece.Dynamic.Contains(true)) continue;
             moving = true;
             foreach (var body in piece.Pose) physics.Cover(body.Position, 4, environment, tick);
         }

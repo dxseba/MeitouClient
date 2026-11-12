@@ -7,8 +7,19 @@ namespace Meitou.Brutality;
 /// <summary>Torso regions; <see cref="Back"/> collects torso hits from behind. Ported from Kenshi Gore Lab's <c>TorsoWounds</c>.</summary>
 public enum WoundRegion { Unknown = -1, Chest, Abdomen, Back }
 
-/// <summary>One wound. <see cref="Segment"/>: L upper arm 0, L forearm 1, R upper arm 2, R forearm 3, L thigh 4, L calf 5, R thigh 6, R calf 7, head 8, torso 9; -1 for the three region wounds of old saves.</summary>
+/// <summary>One wound. Segments 0–7 are the arm and leg sections, 8 is the scalp, 9 is the torso, and 10–15 are hands and face.</summary>
 public readonly record struct Wound(int Segment, float T, Vector3 Side, WoundShape Shape, float Dose, int Hits, int Age, float Size = 1, long Born = 0);
+
+/// <summary>Additional placement sites within the engine's existing arm and head hit regions.</summary>
+internal static class WoundSegments
+{
+    internal const int LeftHand = 10, RightHand = 11, Cheek = 12, Jaw = 13, LeftDistalHand = 14, RightDistalHand = 15;
+
+    internal static bool IsHand(int segment) => segment is LeftHand or RightHand || IsDistalHand(segment);
+    internal static bool IsDistalHand(int segment) => segment is LeftDistalHand or RightDistalHand;
+    internal static bool IsHead(int segment) => segment is 8 or Cheek or Jaw;
+    internal static bool IsValid(int segment) => segment is >= 0 and <= RightDistalHand;
+}
 
 /// <summary>The visual wounds of one character: one per torso region, and up to <see cref="LimbSlots"/> on the limbs, a near hit deepening a wound and the oldest giving way.</summary>
 public sealed partial class WoundBody
@@ -67,7 +78,7 @@ public sealed partial class WoundBody
 
     public bool ApplyLimb(int segment, float t, Vector3 side, float tilt, WoundInput input)
     {
-        if (segment is < 0 or > 9 || !float.IsFinite(t)) return false;
+        if (!WoundSegments.IsValid(segment) || !float.IsFinite(t)) return false;
         int target = -1;
         for (int i = 0; i < LimbSlots && target < 0; i++)
             if (limbs[i] is { } w && w.Segment == segment && MathF.Abs(w.T - t) < 0.03f && Vector3.Dot(w.Side, side) > 0.98f) target = i;

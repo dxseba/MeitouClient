@@ -13,40 +13,45 @@ namespace Meitou.Brutality
         internal sealed record Prepared(StockTorsoBuild.Cut Cut, RagdollDefinition Positive, RagdollDefinition Negative);
 
         internal static Prepared? Build(string folder, CharacterRigs rigs, CharacterAppearance look, TorsoBisectionState cut,
-            CancellationToken cancellation, StockTorsoBuild.Prior? prior = null, StockTorsoSave.Pose? saved = null)
+            CancellationToken cancellation, StockTorsoBuild.Prior? prior = null, StockTorsoSave.Pose? saved = null) =>
+            StockTorsoBuild.Build(folder, rigs, look, cut, cancellation, prior, saved);
+
+        /// <summary>Builds the physical islands before the exposed cut surface is skinned.</summary>
+        internal static (RagdollDefinition Positive, RagdollDefinition Negative)? BuildDefinitions(
+            CharacterRigs rigs, CharacterAppearance look, SkeletonRig rig, TorsoBisectionState cut,
+            OgreMesh sourceSkin, OgreMesh retainedSkin, StockTorsoBuild.Prior? prior, Vector4? attachedHeadPlane,
+            StockTorsoSave.Pose? saved, CancellationToken cancellation)
         {
-            if (StockTorsoBuild.Build(folder, rigs, look, cut, cancellation, prior) is not { } prepared) return null;
             string ragdoll = look.Race.GetPath(look.Female ? "female ragdoll" : "male ragdoll");
             if (string.IsNullOrWhiteSpace(ragdoll)) ragdoll = look.Race.GetPath("male ragdoll");
             if (rigs.Find(ragdoll) is not { } path) return null;
-            var rig = prepared.Rig;
             var source = RagdollDefinition.Build(PhysicsFile.ReadFile(path), rig, 1, Hull);
             if (source is null) return null;
             if (look.Race.GetBool("is robot")) source = RobotRagdollWeight.Weight(source);
             cancellation.ThrowIfCancellationRequested();
             var retained = source;
-            if (prior is { Limbs.Length: > 0 } && prepared.Pieces[0].HiddenLimbs is not null)
+            if (prior is { Limbs.Length: > 0 })
                 foreach (var limb in prior.Limbs)
                     if (LimbCutGeometry.TryPlane(rig, limb.Shape, out var plane))
                         retained = RagdollSeverance.Split(retained, limb.Shape.LimbSlot, plane).Remaining ?? retained;
             if (look.Headless)
-                retained = (prepared.AttachedHeadPlane is { } head
+                retained = (attachedHeadPlane is { } head
                     ? RagdollSeverance.SplitHead(retained, head, HeadCutMode.AttachedSplit).Remaining
                     : RagdollSeverance.Split(retained, -1).Remaining) ?? retained;
-            if (!ReferenceEquals(retained, source) && Split(retained, prepared.RetainedSkin) is { } trimmed
+            if (!ReferenceEquals(retained, source) && Split(retained, retainedSkin) is { } trimmed
                 && (saved is null || AdvancedFragmentScene.MatchesStockDefinition(trimmed.Positive, saved.Positive)
                     && AdvancedFragmentScene.MatchesStockDefinition(trimmed.Negative, saved.Negative))) return trimmed;
 
             // Earlier saves captured the untrimmed definition. Keep their existing poses and joints loadable.
-            return Split(source, prepared.SourceSkin);
+            return Split(source, sourceSkin);
 
-            Prepared? Split(RagdollDefinition definition, OgreMesh mesh)
+            (RagdollDefinition Positive, RagdollDefinition Negative)? Split(RagdollDefinition definition, OgreMesh mesh)
             {
                 var skin = RagdollSkinSurface.Read(mesh);
-                var positive = RagdollCut.Build(definition, prepared.Plane, 1, cut.FullBody, skin.Bridges(rig, definition, prepared.Plane, 1));
+                var positive = RagdollCut.Build(definition, cut.Plane, 1, cut.FullBody, skin.Bridges(rig, definition, cut.Plane, 1));
                 cancellation.ThrowIfCancellationRequested();
-                var negative = RagdollCut.Build(definition, prepared.Plane, -1, cut.FullBody, skin.Bridges(rig, definition, prepared.Plane, -1));
-                return positive is not null && negative is not null ? new(prepared, positive, negative) : null;
+                var negative = RagdollCut.Build(definition, cut.Plane, -1, cut.FullBody, skin.Bridges(rig, definition, cut.Plane, -1));
+                return positive is not null && negative is not null ? (positive, negative) : null;
             }
 
             Vector3[]? Hull(string name) => rigs.Find(name) is { } hull ? CookedMeshReader.ReadConvex(File.ReadAllBytes(hull)).Vertices : null;

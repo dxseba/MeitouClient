@@ -1,5 +1,5 @@
 // Adapted from integrated GPL-3.0-or-later source 3a15eeb9f5523b9d106b40fd0ec99ccdb2658efa.
-using Meitou.Rendering;
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 
 namespace Meitou.Brutality.Rendering.Surface;
@@ -130,9 +130,9 @@ internal static partial class NativeSectionGeometry
 
     /// <summary>Intersects torso triangles, or every closed body contour in full-body mode, preserving weights and one interpolated body morph.</summary>
     public static Vertex[]? Build(Vertex[] source, uint[] groups, in NativeSectionCut cut, Vector4[]? morphs = null, int[]? components = null,
-        uint bloodColour = NativeFluidPalette.DefaultBlood, bool brainSection = false, bool mechanical = false, float weldDistance = .0001f
+        uint bloodColour = NativeFluidPalette.DefaultBlood, bool brainSection = false, bool mechanical = false, float weldDistance = .0001f, float backingDepth = ExposureDepth + .35f
 #if BRUTALITY_STOCK_MASTER
-        , Vector4? corticalColour = null
+        , Vector4? corticalColour = null, Func<Vertex, Vertex>? bindBacking = null
 #endif
         )
     {
@@ -218,21 +218,23 @@ internal static partial class NativeSectionGeometry
         for (int triangle = 0; triangle + 2 < source.Length; triangle += 3)
         {
             var a = source[triangle]; var b = source[triangle + 1]; var c = source[triangle + 2];
+            float da = Distance(a), db = Distance(b), dc = Distance(c);
+            if (MathF.Min(da, MathF.Min(db, dc)) > 1e-5f || MathF.Max(da, MathF.Max(db, dc)) < -1e-5f) continue;
             if (!normalized.FullBody && (Group(a, groups) != 0 || Group(b, groups) != 0 || Group(c, groups) != 0)) continue;
             var (component, fallbackBone) = Component(a, b, c);
             var hit = new List<int>(3);
-            void Intersect(Vertex p, Vertex q)
+            void Intersect(Vertex p, Vertex q, float dp, float dq)
             {
-                float dp = Vector3.Dot(n, p.Position + (normalized.HeadOnly ? Delta(p) : default)) + normalized.Plane.W;
-                float dq = Vector3.Dot(n, q.Position + (normalized.HeadOnly ? Delta(q) : default)) + normalized.Plane.W;
                 if (MathF.Abs(dp) < 1e-5f) hit.Add(Add(Edge(p, q, 0, component, fallbackBone)));
                 else if ((dp < 0) != (dq < 0)) hit.Add(Add(Edge(p, q, dp / (dp - dq), component, fallbackBone)));
             }
-            Intersect(a, b); Intersect(b, c); Intersect(c, a);
+            Intersect(a, b, da, db); Intersect(b, c, db, dc); Intersect(c, a, dc, da);
             var unique = hit.Distinct().ToArray();
             if (unique.Length != 2 || unique[0] == unique[1]) continue;
             adjacent[unique[0]].Add(unique[1]); adjacent[unique[1]].Add(unique[0]);
         }
+        float Distance(in Vertex vertex) =>
+            Vector3.Dot(n, vertex.Position + (normalized.HeadOnly ? Delta(vertex) : default)) + normalized.Plane.W;
         if (points.Count < 3) return null;
         var reference = MathF.Abs(n.X) < 0.8f ? Vector3.UnitX : Vector3.UnitZ;
         var u = Vector3.Normalize(reference - n * Vector3.Dot(reference, n));
@@ -361,9 +363,11 @@ internal static partial class NativeSectionGeometry
         var outward = n * -normalized.KeepSide;
         var result = new List<Vertex>();
         var sectionSkin = new SectionSkin(normalized.FullBody ? source.Select(point => point.Position + Delta(point)).ToArray() : [], n);
+        int unprocessedRimPoints = total;
         for (int contour = 0; contour < rims.Count; contour++)
         {
         var rim = rims[contour].Points;
+        unprocessedRimPoints -= rim.Count;
         int allotted = normalized.FullBody ? Math.Max(3, Math.Min(budget - 3 * (rims.Count - contour - 1), 2048 * rim.Count / total)) : 512;
         if (rim.Count > allotted)
         {
@@ -374,7 +378,7 @@ internal static partial class NativeSectionGeometry
         var middle = rim.Aggregate(Vector3.Zero, (sum, p) => sum + p.Position) / rim.Count;
         var middleMorph = rim.Aggregate(Vector3.Zero, (sum, p) => sum + p.Morph) / rim.Count;
         var inset = normalized.FullBody ? Insets(rim, n, u, v) : null;
-        var depths = inset is not null ? SectionDepths(rim, inset, n * normalized.KeepSide, sectionSkin) : null;
+        var depths = inset is not null ? SectionDepths(rim, inset, n * normalized.KeepSide, sectionSkin, backingDepth) : null;
         Vertex At(int index, int band)
         {
             var point = rim[index];
@@ -410,15 +414,21 @@ internal static partial class NativeSectionGeometry
         if (normalized.FullBody)
         {
             var floor = Enumerable.Range(0, rim.Count).Select(i => At(i, 3)).ToArray();
+#if BRUTALITY_STOCK_MASTER
+            if (bindBacking is not null)
+                for (int i = 0; i < floor.Length; i++) floor[i] = bindBacking(floor[i]);
+#endif
             var triangles = SectionTriangles(floor, u, v);
             var outline = rim.Select(p => p.Position + p.Morph).ToArray();
-            AppendSectionBacking(floor, triangles, outline, normalized, sectionSkin, 32768 - result.Count - 15 * budget, Triangle);
+            // Reserve only vertices that later contours can actually use.
+            int reserve = 15 * Math.Min(budget, unprocessedRimPoints);
+            AppendSectionBacking(floor, triangles, outline, normalized, sectionSkin, backingDepth, 32768 - result.Count - reserve, Triangle);
             // Reserve the remaining contours' flesh first, so a bone detail can never overflow the shared cap buffer.
             if (!mechanical) AppendLimbBoneSection(floor, triangles, outline, groups, normalized, u, v,
-                32768 - result.Count - 15 * budget, Triangle, bloodColour);
+                32768 - result.Count - reserve, Triangle, bloodColour);
         }
         }
-        if (normalized.FullBody) FitSectionBacking(result, normalized, sectionSkin);
+        if (normalized.FullBody) FitSectionBacking(result, normalized, sectionSkin, backingDepth);
         return result.Count > 0 ? result.ToArray() : null;
     }
 

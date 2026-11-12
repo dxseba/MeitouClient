@@ -17,7 +17,7 @@ public sealed record BodyWoundState(IReadOnlyList<BodyWoundEntry> Entries, int B
     {
         var wound = entry.Mark; var shape = wound.Shape;
         bool Finite(float value) => float.IsFinite(value);
-        return entry.Region is >= -1 and <= 2 && (entry.Region == -1 ? wound.Segment is >= 0 and <= 9 : wound.Segment == -1)
+        return entry.Region is >= -1 and <= 2 && (entry.Region == -1 ? WoundSegments.IsValid(wound.Segment) : wound.Segment == -1)
             && Finite(wound.T) && wound.T is >= 0 and <= 1 && float.IsFinite(wound.Side.LengthSquared())
             && (entry.Region >= 0 || wound.Side.LengthSquared() is >= .5f and <= 1.5f)
             && Finite(shape.Cosine) && Finite(shape.Sine) && MathF.Abs(shape.Cosine * shape.Cosine + shape.Sine * shape.Sine - 1) <= .01f
@@ -60,7 +60,11 @@ public sealed partial class WoundBody
     }
 
     /// <summary>The pinned event-placement formulas adapted to the immutable post-armour observer payload.</summary>
-    public bool Apply(in CombatHit hit, BodyPartTemplate part, float maximum, CombatWoundMechanism mechanism, int weaponCategory)
+    public bool Apply(in CombatHit hit, BodyPartTemplate part, float maximum, CombatWoundMechanism mechanism, int weaponCategory) =>
+        Apply(hit, part, maximum, mechanism, weaponCategory, detailedSites: false);
+
+    internal bool Apply(in CombatHit hit, BodyPartTemplate part, float maximum, CombatWoundMechanism mechanism, int weaponCategory,
+        bool detailedSites)
     {
         if (hit.Source != CombatHitSource.Melee || hit.CutDirection < 0 || !hit.VictimWasAlive) return false;
         Now = hit.Tick;
@@ -72,27 +76,50 @@ public sealed partial class WoundBody
         if (thrust) cut = 4; else if (crush && cut == 4) cut = 0;
         float cutting = crush ? 0 : hit.Damage.Cut > 0 ? hit.Damage.Cut + hit.Damage.Blunt * .5f : 0;
         float blunt = crush ? hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce : hit.Damage.Blunt;
+        float received = crush ? blunt : hit.Damage.Cut + hit.Damage.Pierce;
+        float size = WoundPolicy.VisualSize(received, maximum, mechanism, weaponCategory);
         var input = new WoundInput(cut, WoundAttack.Front, false, true, cutting, blunt, crush ? 0 : hit.Damage.Pierce,
-            maximum * .3f, Size: Math.Clamp(.7f + (cutting + hit.Damage.Pierce + (crush ? blunt * .3f : 0)) / 14, .7f, 1.8f), WeaponCategory: weaponCategory);
+            maximum * .3f, Size: size, WeaponCategory: weaponCategory);
         if (part.LimbSlot is >= 0 and <= 3 and var limb)
         {
             ulong roll = Rng.Hash((ulong)hit.Tick, (ulong)(uint)hit.Victim.Slot, default, (ulong)hit.Part);
             int segment = (limb switch { 0 => 0, 1 => 2, 2 => 4, _ => 6 }) + (int)(roll & 1);
             float t = ((roll >> 8) & 0xFFFF) / 65535f, tilt = (((roll >> 24) & 0xFFFF) / 65535f * 2 - 1) * .44f;
-            var local = Vector2.Normalize(new Vector2(forward.Y * direction2.X - forward.X * direction2.Y, Vector2.Dot(forward, direction2)) + new Vector2(0, 1e-6f));
-            return ApplyLimb(segment, t, new(-local.X, 0, -local.Y), tilt, input);
+            if (detailedSites && !crush && segment is 1 or 3 && (roll >> 40 & 3) == 0)
+            {
+                bool distal = (roll >> 42 & 3) == 0;
+                segment = limb == 0
+                    ? distal ? WoundSegments.LeftDistalHand : WoundSegments.LeftHand
+                    : distal ? WoundSegments.RightDistalHand : WoundSegments.RightHand;
+            }
+            return ApplyLimb(segment, t, ContactSide(forward, direction2), tilt, input);
         }
         var region = part.StringId == "101-gamedata.quack" ? WoundRegion.Chest : part.StringId == GorePartIds.Stomach ? WoundRegion.Abdomen : WoundRegion.Unknown;
         if (region == WoundRegion.Unknown)
         {
             ulong roll = Rng.Hash((ulong)hit.Tick, (ulong)(uint)hit.Victim.Slot, default, (ulong)hit.Part);
-            return ApplyLimb(8, .3f + ((roll >> 8) & 0xFF) / 255f * .5f, new(0, 0, behind ? -1 : 1), 0, input);
+            float t = .3f + ((roll >> 8) & 0xFF) / 255f * .5f;
+            if (detailedSites && !crush && part.Type == BodyPartType.Head && !behind && (roll & 3) != 0)
+            {
+                int segment = cut == 5 || (roll & 3) == 3 ? WoundSegments.Jaw : WoundSegments.Cheek;
+                var side = ContactSide(forward, direction2);
+                if (MathF.Abs(side.X) < .18f)
+                    side = Vector3.Normalize(new((roll & 4) == 0 ? -.43f : .43f, 0, side.Z));
+                return ApplyLimb(segment, t, side, 0, input);
+            }
+            return ApplyLimb(8, t, new(0, 0, behind ? -1 : 1), 0, input);
         }
         ulong placement = Rng.Hash((ulong)hit.Tick, (ulong)(uint)hit.Victim.Slot, default, (ulong)hit.Part + 77);
         float across = ((placement >> 8) & 0xFFFF) / 65535f * 2 - 1, height = ((placement >> 24) & 0xFFFF) / 65535f;
         float along = region == WoundRegion.Chest ? .5f + height * .42f : .12f + height * .42f;
         bool applied = ApplyLimb(9, along, Vector3.Normalize(new(across * 2.5f, 0, behind ? -1 : 1)), 0, input);
-        if (applied && region == WoundRegion.Abdomen && !crush && input.Size >= 1.6f) BellyHits++;
+        if (applied && region == WoundRegion.Abdomen && !crush && cutting + hit.Damage.Pierce >= 12.6f) BellyHits++;
         return applied;
+    }
+
+    static Vector3 ContactSide(Vector2 forward, Vector2 travel)
+    {
+        var local = new Vector2(forward.X * travel.Y - forward.Y * travel.X, -Vector2.Dot(forward, travel));
+        return local.LengthSquared() > 1e-12f ? Vector3.Normalize(new(local.X, 0, local.Y)) : Vector3.UnitZ;
     }
 }

@@ -1,7 +1,9 @@
+using Meitou.Simulation.Player;
 using System.Reflection;
 using HarmonyLib;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay.Ai;
+using Meitou.Data.Save;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Saving;
@@ -15,6 +17,8 @@ internal static class StockTargetSave
     const TaskType SavedRow = (TaskType)(-0x42544149);
     const string SitePrefix = "dxseba.brutality.aim/";
     const int MaxPart = 1023, MaxTemplateLength = 512;
+    /// <summary>The converted integrated row carries a stable part template but no part index.</summary>
+    const int LegacyPartKind = -1, LegacyPartIndex = LegacyPartKind - 1;
     static readonly MethodInfo queueAdd = AccessTools.Method(typeof(OrderQueue), "Add", [typeof(OrderEntry)]);
     sealed record Scope(World World, Dictionary<int, StockTargetSystem.Focus> Details);
     [ThreadStatic] static Scope? active;
@@ -26,6 +30,7 @@ internal static class StockTargetSave
         var methods = new (MethodInfo? Original, string? Prefix, string? Postfix, string? Finalizer)[]
         {
             (AccessTools.Method(typeof(OrderSave), nameof(OrderSave.Write)), null, nameof(Written), null),
+            (AccessTools.Method(typeof(OrderSave), nameof(OrderSave.Read)), null, nameof(ReadLegacy), null),
             (AccessTools.Method(typeof(OrderSave), "Restore"), nameof(BeforeRestore), nameof(Restored), nameof(AfterRestore)),
             (AccessTools.Method(typeof(World), "OrderOwnerOf", [typeof(TaskType)]), nameof(ResolveOwner), null, null),
         };
@@ -74,6 +79,26 @@ internal static class StockTargetSave
         }
     }
 
+    /// <summary>Upgrades integrated exact aims before a stock restore or a save of the still-pending queue.</summary>
+    static void ReadLegacy(FcsRecord ai, CharacterCold cold)
+    {
+        if (!Ready || cold.SavedOrders is not { } orders) return;
+        SavedOrder[]? rewritten = null;
+        for (int i = 0; i < orders.Count; i++)
+        {
+            var row = orders[i];
+            if (row.Row != TaskType.FocusedMeleeAttack || row.Kind != 1
+                || !ai.Strings.TryGetValue("meitou tjobD" + i, out var template)) continue;
+
+            bool valid = !row.Lost && row.Site is null && row.Hand.RecordType == FcsRecordType.Character
+                && Hand.IsComplete(ai, "tjobT" + i) && template.Length is > 0 and <= MaxTemplateLength;
+            rewritten ??= orders.ToArray();
+            rewritten[i] = row with { Row = SavedRow, Kind = LegacyPartKind, Site = valid ? SitePrefix + template : null, Lost = !valid };
+        }
+
+        if (rewritten is not null) cold.SavedOrders = rewritten;
+    }
+
     static void BeforeRestore(World world, CharacterCold cold, out Scope? __state)
     {
         __state = active;
@@ -85,7 +110,7 @@ internal static class StockTargetSave
         {
             var row = rewritten[i];
             if (row.Row != SavedRow) continue;
-            if (row.Lost || row.Hand.RecordType != FcsRecordType.CHARACTER || row.Kind is < 0 or > MaxPart + 1
+            if (row.Lost || row.Hand.RecordType != FcsRecordType.Character || row.Kind is < LegacyPartKind or > MaxPart + 1
                 || row.Site is not { } site || !site.StartsWith(SitePrefix, StringComparison.Ordinal)
                 || site.Length > SitePrefix.Length + MaxTemplateLength || (site.Length == SitePrefix.Length) != (row.Kind == 0))
             {
@@ -117,11 +142,34 @@ internal static class StockTargetSave
         cold.OrderQueue.Clear();
         foreach (var row in rows)
         {
-            if (row.Row != SavedRow) queueAdd.Invoke(cold.OrderQueue, [row]);
-            else if (row is { Owner: StockTargetSystem, Detail: StockTargetSystem.Focus })
-                queueAdd.Invoke(cold.OrderQueue, [new OrderEntry(TaskType.FOCUSED_MELEE_ATTACK, row.Owner)
-                { Target = row.Target, Point = row.Point, Detail = row.Detail }]);
+            if (row.Row != SavedRow)
+            {
+                queueAdd.Invoke(cold.OrderQueue, [row]);
+                continue;
+            }
+
+            if (row is not { Owner: StockTargetSystem, Detail: StockTargetSystem.Focus focus }) continue;
+            var selected = focus.Part == LegacyPartIndex ? ResolveLegacyFocus(world, row.Target, focus.Template) : focus;
+            if (selected is not null)
+                queueAdd.Invoke(cold.OrderQueue, [new OrderEntry(TaskType.FocusedMeleeAttack, row.Owner)
+                { Target = row.Target, Point = row.Point, Detail = selected }]);
         }
+    }
+
+    /// <summary>Uses an older aim only when its target still has one part with that exact template.</summary>
+    static StockTargetSystem.Focus? ResolveLegacyFocus(World world, CharacterId target, string? template)
+    {
+        var table = world.Characters;
+        if (template is null || !table.TryResolveNext(target, out int slot) || table.Cold(slot)?.Medical is not { } medical) return null;
+        int found = -1;
+        for (int i = 0; i < medical.Parts.Count; i++)
+        {
+            if (medical.Parts[i].Template.StringId != template) continue;
+            if (found >= 0) return null;
+            found = i;
+        }
+
+        return found is >= 0 and <= MaxPart ? new(found, template) : null;
     }
 
     static Exception? AfterRestore(Exception? __exception, Scope? __state)

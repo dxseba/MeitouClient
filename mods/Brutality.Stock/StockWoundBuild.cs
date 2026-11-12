@@ -1,27 +1,28 @@
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 using Meitou.Brutality.Rendering;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality;
 
 internal static class StockWoundBuild
 {
+    static readonly bool trace = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS") == "1";
     internal sealed record WoundSpill(SkeletonRig Rig, Vertex[] Anchor);
     internal readonly record struct HeadBounds(int Bone, Vector3 Centre, Vector3 HalfExtent);
     internal sealed record Geometry(OgreMesh? Body, IReadOnlyList<(OgreMesh Mesh, string Label)> Tissue,
         IReadOnlyList<(CharacterPart Part, OgreMesh? Mesh)> Equipment, Geometry? Detached = null, WoundSpill? Spill = null,
-        Vertex[]? PunchExit = null, HeadBounds? Bounds = null, Vertex[]? PunchEntry = null);
+        Vertex[]? PunchExit = null, HeadBounds? Bounds = null, Vertex[]? PunchEntry = null, StockVestTears.Payload? VestTears = null);
 
     internal static Geometry? Build(string folder, CharacterRigs rigs, CharacterAppearance look, StockWoundRules.View view,
-        CharacterAppearance? looseHead, CancellationToken cancellation)
+        CharacterAppearance? looseHead, CancellationToken cancellation, GarmentDamageActor? garments = null)
     {
         if (look.Animal is not null || rigs.FindMesh(look.BodyMesh) is not { } path) return null;
         var body = OgreMeshReader.ReadFile(path);
         if (body.SkeletonName is not { } skeleton || rigs.Rig(skeleton) is not { } rig) return null;
         return BuildCore(folder, rigs, look, view, body, rig, look.Parts.Select(part => (part, (OgreMesh?)null)).ToArray(),
-            looseHead, cancellation, out _);
+            looseHead, cancellation, out _, garments);
     }
 
     internal static Geometry? BuildRetained(string folder, CharacterRigs rigs, CharacterAppearance look, StockWoundRules.View view,
@@ -31,7 +32,7 @@ internal static class StockWoundBuild
 
     static Geometry? BuildCore(string folder, CharacterRigs rigs, CharacterAppearance look, StockWoundRules.View view,
         OgreMesh body, SkeletonRig rig, IReadOnlyList<(CharacterPart Part, OgreMesh? Mesh)> sourceEquipment,
-        CharacterAppearance? looseHead, CancellationToken cancellation, out CutVolume? punchVolume)
+        CharacterAppearance? looseHead, CancellationToken cancellation, out CutVolume? punchVolume, GarmentDamageActor? garments = null)
     {
         cancellation.ThrowIfCancellationRequested();
         punchVolume = null;
@@ -40,7 +41,7 @@ internal static class StockWoundBuild
         // opaque crush cards can cover clothes or hover over a missing head. Keep the actual cuts.
         bool headRetained = !look.Headless && view.AttachedHead is null;
         var recent = new BodyWoundState(view.Body.Entries.Where(entry => entry.Mark.Shape.Kind is WoundKind.Slash or WoundKind.Thrust
-                && (headRetained || entry.Mark.Segment != 8))
+                && (headRetained || !WoundSegments.IsHead(entry.Mark.Segment)))
             .OrderByDescending(entry => entry.Mark.Age).Take(6).ToArray(), view.Body.BellyHits);
         var ordinary = BodyWoundGeometry.Build(body, rig, look, recent);
         WoundSpill? spill = null;
@@ -78,9 +79,10 @@ internal static class StockWoundBuild
         if (punch is not null) volumes.Add(punch.Skin);
         var rules = new List<CutHalfspace>(severe?.Rules ?? []);
         bool robot = look.Race.GetBool("is robot");
+        bool organicNeck = !robot && view.AttachedHead is { Mode: HeadCutMode.NeckDetach };
         Vector4? split = view.AttachedHead is { } cut ? HeadPlane(body, rig, look, cut.Plane) : null;
         if (view.AttachedHead is not null && split is null) return null;
-        if (split is { } retain) rules.Add(new(retain, -1, 7, MorphedDistance: true));
+        if (split is { } retain) rules.Add(new(retain, -1, organicNeck ? -1 : 7, MorphedDistance: true));
         OgreMesh? skin = null;
         bool shaved = look.Character?.GetBool("shaved") == true;
         var flesh = robot ? new Vector4(.14f, .15f, .16f, 1) : StockTissuePalette.For(look).Flesh;
@@ -90,12 +92,16 @@ internal static class StockWoundBuild
             if (!clipped.HasTriangles) return null;
             skin = clipped.Skin;
         }
-        if (skin is null && tissue.Count == 0) return null;
+        if (view.Bruises is { HasAny: true } bruises && StockBruiseGeometry.Build(skin ?? body, rig, look, bruises) is { } bruise)
+        {
+            tissue.Add((bruise, "skin bruise"));
+            if (trace) Console.WriteLine($"Brutality stock skin bruise mesh ready marks={bruises.Entries.Count}");
+        }
 
         var equipment = new List<(CharacterPart Part, OgreMesh? Mesh)>(sourceEquipment.Count);
         bool retainLimbEquipment = StockHeadMeshes.IsGeneratedBody(look);
-        var clothing = retainLimbEquipment ? [] : ordinary.Clothing;
-        var punchedClothing = punch is null ? clothing : clothing.Append(punch.Clothing).ToArray();
+        var punchedClothing = punch is null ? [] : new[] { punch.Clothing };
+        bool equipmentChanged = false;
         foreach (var (part, previous) in sourceEquipment)
         {
             cancellation.ThrowIfCancellationRequested();
@@ -106,40 +112,92 @@ internal static class StockWoundBuild
             }
             bool hair = part.Slot is AttachSlot.Hair or AttachSlot.Beard;
             var pockets = hair ? retainLimbEquipment ? [] : severe?.Hair ?? []
-                : part.Slot is AttachSlot.Body or AttachSlot.Shirt or AttachSlot.Legs or AttachSlot.Neck ? punchedClothing : clothing;
-            if (pockets.Count == 0)
+                : part.Slot is AttachSlot.Body or AttachSlot.Shirt or AttachSlot.Legs or AttachSlot.Neck ? punchedClothing : [];
+            var marks = garments?.Items.FirstOrDefault(item => item.Parts.Any(worn => ReferenceEquals(worn, part)
+                || worn.Record.StringId == part.Record.StringId && worn.Slot == part.Slot && worn.Field == part.Field))?.Marks;
+            if (pockets.Count == 0 && marks is not { Length: > 0 })
             {
                 equipment.Add((part, previous));
                 continue;
             }
-            OgreMesh? source = previous;
-            if (source is null && rigs.FindMesh(part.Mesh) is { } partPath)
-            {
-                try { source = OgreMeshReader.ReadFile(partPath); }
-                catch (Exception error) when (error is IOException or InvalidDataException or OgreFormatException or UnauthorizedAccessException) { }
-            }
-            if (source is null || source.Bounds is { } bounds && !pockets.Any(pocket => Intersects(bounds.Min, bounds.Max, pocket.Bounds)))
+            OgreMesh? source = previous ?? ReadEquipment(part);
+            if (source is null)
             {
                 equipment.Add((part, previous));
                 continue;
             }
-            var clipped = MeshCut.Clip(source, rig, [], removeVolumes: pockets, buildCaps: false);
-            if (!clipped.HasTriangles) continue;
-            equipment.Add((part, clipped.RemovedSurface ? clipped.Skin : previous));
+            OgreMesh? changed = previous;
+            if (pockets.Count > 0 && (source.Bounds is not { } bounds || pockets.Any(pocket => Intersects(bounds.Min, bounds.Max, pocket.Bounds))))
+            {
+                var clipped = MeshCut.Clip(source, rig, [], removeVolumes: pockets, buildCaps: false);
+                if (!clipped.HasTriangles) { equipmentChanged = true; continue; }
+                if (clipped.RemovedSurface) changed = clipped.Skin;
+            }
+            if (marks is { Length: > 0 })
+            {
+                var wear = StockGarmentDamageMesh.Build(changed ?? source, rig, look, marks, () => UnderLayers(part.Slot), cancellation);
+                changed = wear.Mesh ?? changed;
+                if (wear.Detail is { } detail) tissue.Add((detail, "garment wear"));
+                if (trace && (wear.Mesh is not null || wear.Detail is not null))
+                    Console.WriteLine($"Brutality stock garment visual record={part.Record.StringId} marks={marks.Length} material={marks[^1].Material}");
+            }
+            equipmentChanged |= !ReferenceEquals(previous, changed);
+            equipment.Add((part, changed));
         }
-        if (split is not { } plane) return new(skin, tissue, equipment, Spill: spill, PunchExit: punch?.Exit, PunchEntry: punch?.Entry);
+
+        OgreMesh? ReadEquipment(CharacterPart part)
+        {
+            if (rigs.FindMesh(part.Mesh) is not { } path) return null;
+            try { return OgreMeshReader.ReadFile(path); }
+            catch (Exception error) when (error is IOException or InvalidDataException or OgreFormatException or UnauthorizedAccessException) { return null; }
+        }
+
+        IEnumerable<OgreMesh> UnderLayers(AttachSlot? shell)
+        {
+            yield return body;
+            var layer = shell switch
+            {
+                AttachSlot.Body => AttachSlot.Shirt,
+                AttachSlot.Boots => AttachSlot.Legs,
+                AttachSlot.Hat => AttachSlot.Hair,
+                _ => AttachSlot.None,
+            };
+            if (layer == AttachSlot.None) yield break;
+            foreach (var (part, mesh) in sourceEquipment)
+                if (part.Slot == layer && part.Mode == AttachMode.SharedSkeleton && (mesh ?? ReadEquipment(part)) is { } under)
+                    yield return under;
+        }
+
+        var vestTears = garments is not null ? StockVestTears.Build(body, rig, look, garments) : null;
+        if (trace && vestTears is not null) Console.WriteLine("Brutality stock vest tear ready");
+        if (skin is null && tissue.Count == 0 && !equipmentChanged && vestTears is null) return null;
+        if (split is not { } plane) return new(skin, tissue, equipment, Spill: spill, PunchExit: punch?.Exit,
+            PunchEntry: punch?.Entry, VestTears: vestTears);
 
         var detachedTissue = new List<(OgreMesh Mesh, string Label)>();
-        // Back the cavity slightly inside both exposed faces so the outer edge and the fitted
-        // brain have depth instead of being covered by one flat plane.
-        var headOnly = MeshCut.Clip(body, rig, [new(new(0, 1, 0, 1_000_000), 1, 7, true)], look.PoseWeights, shaved, buildCaps: false);
-        if (Backing(-1) is { } cover) tissue.Insert(0, (cover, "fracture surface"));
-        AddSplitInterior(folder, body, look, rig, plane, tissue, detachedTissue, cancellation);
-        if (looseHead is null) return new(skin, tissue, equipment, Spill: spill, PunchExit: punch?.Exit, PunchEntry: punch?.Entry);
-        var detached = MeshCut.Clip(body, rig, [new(plane, 1, 7, true, MorphedDistance: true)],
-            look.PoseWeights, shaved, buildCaps: false);
-        if (!detached.HasTriangles) return null;
-        if (Backing(1) is { } face) detachedTissue.Insert(0, (face, "fracture surface"));
+        var looseRule = new CutHalfspace(plane, 1, organicNeck ? -1 : 7, RejectOtherGroups: !organicNeck, MorphedDistance: true);
+        var detached = looseHead is null ? null
+            : MeshCut.Clip(body, rig, [looseRule], look.PoseWeights, shaved, buildCaps: false);
+        if (detached is { HasTriangles: false }) return null;
+        CutMeshResult? headOnly = organicNeck ? null
+            : MeshCut.Clip(body, rig, [new(new(0, 1, 0, 1_000_000), 1, 7, true)], look.PoseWeights, shaved, buildCaps: false);
+        IReadOnlyList<Vertex[]> neckRings = [];
+        if (organicNeck)
+        {
+            neckRings = StockSectionContours.Read(skin!, rig, look, looseRule with { KeepSide = -1 });
+            // Both halves use the same cut plane and skin weights. A mesh seam may break a loop on only one side.
+            if (detached is not null)
+            {
+                var looseRings = StockSectionContours.Read(detached.Skin, rig, look, looseRule);
+                if (LargestRing(looseRings) > LargestRing(neckRings) * 1.05f) neckRings = looseRings;
+            }
+        }
+        string label = organicNeck && neckRings.Count > 0 ? "neck muscle and bone section" : "fracture surface";
+        if ((organicNeck ? NeckBacking(-1) : Backing(-1)) is { } cover) tissue.Insert(0, (cover, label));
+        if (!organicNeck) AddSplitInterior(folder, body, look, rig, plane, tissue, detachedTissue, cancellation);
+        if (looseHead is null || detached is null) return new(skin, tissue, equipment, Spill: spill, PunchExit: punch?.Exit,
+            PunchEntry: punch?.Entry, VestTears: vestTears);
+        if ((organicNeck ? NeckBacking(1) : Backing(1)) is { } face) detachedTissue.Insert(0, (face, label));
         var accessories = new List<(CharacterPart Part, OgreMesh? Mesh)>();
         foreach (var part in looseHead.Parts)
         {
@@ -157,16 +215,49 @@ internal static class StockWoundBuild
         }
         HeadBounds? detachedBounds = rig.Handle("Bip01 Head") is int head
             ? new(head, (detached.Min + detached.Max) * .5f, (detached.Max - detached.Min) * .5f) : null;
-        return new(skin, tissue, equipment, new(detached.Skin, detachedTissue, accessories, Bounds: detachedBounds), spill, punch?.Exit, PunchEntry: punch?.Entry);
+        return new(skin, tissue, equipment, new(detached.Skin, detachedTissue, accessories, Bounds: detachedBounds), spill, punch?.Exit,
+            PunchEntry: punch?.Entry, VestTears: vestTears);
+
+        OgreMesh? NeckBacking(int side)
+        {
+            var rule = new CutHalfspace(plane, side, MorphedDistance: true);
+            int? anchor = rig.Handle(side < 0 ? "Bip01 Neck" : "Bip01 Head");
+            var vertices = new List<Vertex>();
+            if (anchor is >= 0 and <= byte.MaxValue)
+            {
+                var palette = StockTissuePalette.For(look);
+                foreach (var contour in neckRings)
+                    StockLimbSections.Append(vertices, contour, rig, null, plane, side, anchor.Value, palette);
+            }
+            if (trace) Console.WriteLine($"Brutality stock neck section side={side} triangles={vertices.Count / 3}");
+            var section = vertices.Count > 0 ? MeshCut.FromTriangles(vertices, body.SkeletonName)
+                : MeshCut.Clip(body, rig, [rule], look.PoseWeights, shaved, capColour: flesh, capWeldDistance: .002f).Wound;
+            if (section is not null) OgreMeshWeld.Apply(section);
+            return section;
+        }
 
         OgreMesh? Backing(int side)
         {
-            if (!headOnly.HasTriangles) return null;
+            if (headOnly is not { HasTriangles: true }) return null;
             if (StockHeadAnatomy.SkinBacking(headOnly.Skin, rig, look, plane, side, flesh) is { } lining) return lining;
             var recessed = plane with { W = plane.W - side * .16f };
             return MeshCut.Clip(headOnly.Skin, rig, [new(recessed, side, MorphedDistance: true)],
                 look.PoseWeights, shaved, capColour: flesh).Wound;
         }
+    }
+
+    static float LargestRing(IReadOnlyList<Vertex[]> rings)
+    {
+        float largest = 0;
+        foreach (var ring in rings)
+        {
+            var origin = ring[0].Position;
+            var area = Vector3.Zero;
+            for (int i = 1; i + 1 < ring.Length; i++)
+                area += Vector3.Cross(ring[i].Position - origin, ring[i + 1].Position - origin);
+            largest = MathF.Max(largest, area.LengthSquared());
+        }
+        return largest;
     }
 
     internal static Vector4? HeadPlane(OgreMesh body, SkeletonRig rig, CharacterAppearance look, Vector4 plane)

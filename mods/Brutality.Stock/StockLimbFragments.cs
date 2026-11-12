@@ -1,3 +1,5 @@
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Frame;
 using System.Collections;
 using System.Diagnostics;
 using System.Numerics;
@@ -6,10 +8,9 @@ using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Brutality.Effects;
 using Meitou.Brutality.Physics;
+using Meitou.Brutality.Ui;
 using Meitou.Data.Characters;
-using Meitou.Engine;
 using Meitou.Modding;
-using Meitou.Rendering;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Items;
@@ -24,7 +25,7 @@ internal sealed class StockLimbFragments
     static StockLimbFragments? installed;
     readonly ModContext context;
     readonly ConditionalWeakTable<object, Display> displays = new();
-    readonly FieldInfo session, epoch, states, assets, stamp, bones, previous, posed, seen, frozen, parts;
+    readonly FieldInfo session, states, assets, stamp, bones, previous, posed, seen, frozen, parts;
     readonly FieldInfo nativeFalls, fallingItem, hiddenGround, hiddenKeys, groundPoses;
     readonly MethodInfo renderer, rigs, drawKey, lastDrawn, groundKey;
     readonly Type stateType;
@@ -42,6 +43,8 @@ internal sealed class StockLimbFragments
         public readonly Dictionary<CharacterId, HashSet<(int Slot, long Tick)>> Spawned = [];
         public readonly List<Detached> Detached = [];
         public readonly HashSet<int> ShownItems = [];
+        public readonly Dictionary<int, StockNativeLimbLabels.LimbLabel> NativeLabels = [];
+        public readonly List<BrutalityPartLabel> LooseLabels = [];
         public Pending? Pending;
         public double? PreviousTime;
         public long Serial;
@@ -79,21 +82,22 @@ internal sealed class StockLimbFragments
     StockLimbFragments(ModContext context, Type host, Type chars)
     {
         this.context = context;
-        session = Field(host, "session"); epoch = Field(host, "worldEpoch");
+        session = Field(host, "Session");
         renderer = AccessTools.PropertyGetter(host, "ActiveCharacters") ?? throw new MissingMemberException("ActiveCharacters");
         rigs = AccessTools.PropertyGetter(chars, "Rigs") ?? throw new MissingMemberException("CharacterRenderer.Rigs");
         drawKey = Method(host, "DrawKey", typeof(CharacterId));
         lastDrawn = Method(chars, "LastDrawn", typeof(long), typeof(string));
-        groundKey = Method(host, "GroundId", typeof(int));
-        states = Field(chars, "states"); assets = Field(chars, "assets"); stamp = Field(chars, "updateStamp");
+        groundKey = Method(StockHostParts.GroundItems.FieldType, "GroundId", typeof(int));
+        states = Field(chars, "_states"); assets = Field(chars, "_assets"); stamp = Field(chars, "_updateStamp");
         stateType = states.FieldType.GetGenericArguments()[1];
         bones = Field(stateType, "Bones"); previous = Field(stateType, "Previous");
         posed = Field(stateType, "Posed"); seen = Field(stateType, "Seen"); frozen = Field(stateType, "Frozen");
         parts = Field(assets.FieldType.GetGenericArguments()[1], "Parts");
-        nativeFalls = Field(host, "falls");
+        nativeFalls = Field(StockHostParts.Debris.FieldType, "Falls");
         fallingItem = Field(nativeFalls.FieldType.GetGenericArguments()[0], "Ground");
-        hiddenGround = Field(host, "hiddenGround"); hiddenKeys = Field(host, "hiddenGroundKeys");
-        groundPoses = Field(host, "groundPoses");
+        var ground = StockHostParts.GroundItems.FieldType;
+        hiddenGround = Field(ground, "HiddenGround"); hiddenKeys = Field(ground, "HiddenGroundKeys");
+        groundPoses = Field(ground, "_groundPoses");
     }
 
     internal static bool Install(ModContext context)
@@ -102,12 +106,12 @@ internal sealed class StockLimbFragments
         try
         {
             var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new TypeLoadException("GameHost");
-            var chars = AccessTools.TypeByName("Meitou.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
+            var chars = AccessTools.TypeByName("Meitou.Game.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
             var hook = new StockLimbFragments(context, host, chars);
             context.Harmony.Patch(Method(host, "FillDrawListCore", typeof(CharacterDrawList)), postfix: Patch(nameof(Frame)));
-            context.Harmony.Patch(Method(host, "UpdateBlood"), prefix: Patch(nameof(FilterDebris)),
+            context.Harmony.Patch(Method(StockHostParts.Debris.FieldType, "UpdateDebris", typeof(World), typeof(float)), prefix: Patch(nameof(FilterDebris)),
                 finalizer: Patch(nameof(RestoreDebris)));
-            context.Harmony.Patch(Method(host, "UpdateGroundVisibility"), postfix: Patch(nameof(KeepNativeHidden)));
+            context.Harmony.Patch(Method(StockHostParts.GroundItems.FieldType, "UpdateGroundVisibility"), postfix: Patch(nameof(KeepNativeHidden)));
             context.Harmony.Patch(Method(host, "Run"), finalizer: Patch(nameof(Finished)));
             installed = hook;
             return true;
@@ -127,8 +131,13 @@ internal sealed class StockLimbFragments
 
     static void Frame(object __instance, CharacterDrawList list) => installed?.Draw(__instance, list);
     static void Finished(object __instance) => installed?.Reset(__instance);
-    static void FilterDebris(object __instance, out DebrisFilter? __state) => __state = installed?.SuppressNative(__instance);
-    static void KeepNativeHidden(object __instance) => installed?.HideWorldPlacements(__instance);
+    static void FilterDebris(object __instance, out DebrisFilter? __state) =>
+        __state = installed is { } hooks && StockHostParts.HostOf(__instance) is { } host ? hooks.SuppressNative(host) : null;
+
+    static void KeepNativeHidden(object __instance)
+    {
+        if (installed is { } hooks && StockHostParts.HostOf(__instance) is { } host) hooks.HideWorldPlacements(host);
+    }
     static Exception? RestoreDebris(Exception? __exception, DebrisFilter? __state)
     {
         if (__state is not { } filter) return __exception;
@@ -146,7 +155,7 @@ internal sealed class StockLimbFragments
         if (!StockLimbRules.Enabled || session.GetValue(host) is not WorldSession shown
             || (!displays.TryGetValue(host, out _) && !StockLimbRules.HasCuts(shown.World))
             || renderer.Invoke(host, null) is not { } chars || states.GetValue(chars) is not IDictionary drawn) return;
-        int generation = (int)epoch.GetValue(host)!;
+        int generation = StockHostParts.WorldEpoch(host);
         if (!displays.TryGetValue(host, out var display) || display.Epoch != generation || !ReferenceEquals(display.Renderer, chars)
             || !ReferenceEquals(display.World, shown.World))
         {
@@ -166,6 +175,8 @@ internal sealed class StockLimbFragments
         }
         display.PreviousTime = time;
         display.ShownItems.Clear();
+        display.NativeLabels.Clear();
+        display.LooseLabels.Clear();
         for (int i = display.Detached.Count - 1; i >= 0; i--)
         {
             var detached = display.Detached[i];
@@ -205,6 +216,8 @@ internal sealed class StockLimbFragments
             }
         if (display.Pending is not null) Prepare(host, display, list, shown, drawn, time);
         else Begin(host, display, list, shown, drawn);
+        StockNativeLimbLabels.Publish(shown.World, display.NativeLabels);
+        StockPartLabels.Publish(shown.World, "limbs", display.LooseLabels);
     }
 
     static bool HasStump(CharacterSnapshot actor, int slot) => (LimbState)((actor.LimbBits >> (slot * 2)) & 3) == LimbState.Stump;
@@ -375,15 +388,20 @@ internal sealed class StockLimbFragments
                 spawned.Add((request.Shape.LimbSlot, request.Tick));
                 continue;
             }
-            var poses = (Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)>)groundPoses.GetValue(host)!;
+            var poses = (Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)>)groundPoses.GetValue(StockHostParts.GroundItems.GetValue(host))!;
             var limb = new Detached(stage.Key, item, stage.Look, build.Rig, world, limbInverse, sourcePalette,
                 new Matrix4x4[build.Rig.BoneCount], new Matrix4x4[piece.Definition.Bodies.Length], physics, current.Blood, time + 9,
                 poses.TryGetValue(item, out var nativePose) ? nativePose : null, request);
             display.Detached.Add(limb);
             PublishPose(display, limb, time);
             if (!request.Restoring)
+            {
                 StockRobotDebris.BeginLimb(host, request, pending.Source, build.Rig, piece.Plane,
                     pending.World, pending.Birth, physics, () => display.Detached.Contains(limb), time);
+                if (!request.Robot)
+                    StockDetachedPools.Limb(host, shown, item, stage.Key, pending.Source.Race, request.Shape.LimbSlot >= 2,
+                        () => display.Physics.PoolContact(physics, display.Ground), () => display.Detached.Contains(limb));
+            }
             else if (trace) Console.WriteLine($"Brutality stock restored detached limb owner={request.Owner} slot={request.Shape.LimbSlot} item={item}");
             spawned.Add((request.Shape.LimbSlot, request.Tick));
             // The host has already assembled this frame's debris. Draw the replacement next frame after hiding that item.
@@ -410,9 +428,13 @@ internal sealed class StockLimbFragments
                 return;
             }
             var old = display.Detached[oldIndex];
+            if (old.Item >= 0)
+                StockDetachedPools.ReturnLimbToNative(host, old.Item, display.Physics.PoolContact(old.Piece, display.Ground));
             PublishPose(display, old, time);
             Release(host, display, old, drawn, restorePose: false);
             display.ShownItems.Remove(old.Item);
+            if (old.Item >= 0) display.NativeLabels.Remove(old.Item);
+            else display.LooseLabels.RemoveAll(label => label.Owner == old.Cut.Owner && label.Piece == LimbLabelId(old));
             display.Detached.RemoveAt(oldIndex);
             list.Items.RemoveAll(item => item.Key == old.Key);
             if (trace) Console.WriteLine($"Brutality stock limb returned settled fragment to native item={old.Item}");
@@ -439,7 +461,7 @@ internal sealed class StockLimbFragments
 
     void DrawDetached(object host, Display display, Detached limb, CharacterDrawList list, IDictionary drawn)
     {
-        if (limb.Item >= 0 && ((HashSet<int>)hiddenGround.GetValue(host)!).Contains(limb.Item)) return;
+        if (limb.Item >= 0 && ((HashSet<int>)hiddenGround.GetValue(StockHostParts.GroundItems.GetValue(host))!).Contains(limb.Item)) return;
         AdvancedFragmentScene.FillStockPalette(limb.Piece, limb.Rig, limb.Birth, limb.World, limb.Inverse, limb.Palette, limb.Motion);
         var root = limb.Piece.Pose[limb.Piece.Definition.Root];
         if (drawn[limb.Key] is not { } state || frozen.GetValue(state) is not true)
@@ -455,20 +477,34 @@ internal sealed class StockLimbFragments
         previous.SetValue(state, limb.Palette);
         list.Add(new CharacterInstance(limb.Key, limb.Look, root.Position, 0, [])
             { World = limb.World, FreezeFrom = limb.Key, Blood = limb.Blood });
-        if (limb.Item < 0) return;
+        string name = limb.Cut.Shape.LimbSlot switch
+        {
+            0 => "Left arm",
+            1 => "Right arm",
+            2 => "Left leg",
+            _ => "Right leg",
+        };
+        if (limb.Item < 0)
+        {
+            display.LooseLabels.Add(new(limb.Cut.Owner, LimbLabelId(limb), name, root.Position));
+            return;
+        }
         display.ShownItems.Add(limb.Item);
+        display.NativeLabels[limb.Item] = new(root.Position, name);
         if (limb.NativePose is { } fallback)
         {
-            var poses = (Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)>)groundPoses.GetValue(host)!;
+            var poses = (Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)>)groundPoses.GetValue(StockHostParts.GroundItems.GetValue(host))!;
             if (poses.ContainsKey(limb.Item)) poses[limb.Item] = (root.Position, root.Rotation, fallback.Key);
         }
     }
 
+    static int LimbLabelId(Detached limb) => 10 + limb.Cut.Shape.LimbSlot;
+
     DebrisFilter? SuppressNative(object host)
     {
         if (!displays.TryGetValue(host, out var display) || display.ShownItems.Count == 0) return null;
-        var falls = (IList)nativeFalls.GetValue(host)!;
-        var hidden = (HashSet<int>)hiddenGround.GetValue(host)!;
+        var falls = (IList)nativeFalls.GetValue(StockHostParts.Debris.GetValue(host))!;
+        var hidden = (HashSet<int>)hiddenGround.GetValue(StockHostParts.GroundItems.GetValue(host))!;
         var filter = new DebrisFilter(falls, [], hidden, []);
         foreach (int id in display.ShownItems)
             if (hidden.Add(id)) filter.Added.Add(id);
@@ -485,7 +521,7 @@ internal sealed class StockLimbFragments
     void HideWorldPlacements(object host)
     {
         if (!displays.TryGetValue(host, out var display) || display.ShownItems.Count == 0) return;
-        var keys = (HashSet<string>)hiddenKeys.GetValue(host)!;
+        var keys = (HashSet<string>)hiddenKeys.GetValue(StockHostParts.GroundItems.GetValue(host))!;
         foreach (int id in display.ShownItems)
             if (groundKey.Invoke(null, [id]) is string key) keys.Add(key);
     }
@@ -496,7 +532,7 @@ internal sealed class StockLimbFragments
         display.Physics.Remove(limb.Piece);
         StockHeadMeshes.Retire(limb.Look);
         if (!restorePose || limb.NativePose is not { } pose) return;
-        var poses = (Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)>)groundPoses.GetValue(host)!;
+        var poses = (Dictionary<int, (Vector3 At, Quaternion Rotation, string Key)>)groundPoses.GetValue(StockHostParts.GroundItems.GetValue(host))!;
         if (poses.ContainsKey(limb.Item)) poses[limb.Item] = pose;
     }
 
@@ -507,11 +543,13 @@ internal sealed class StockLimbFragments
         if (display.Pending is { } pending)
             _ = pending.Work.ContinueWith(task => { _ = task.Exception; pending.Cancellation.Dispose(); }, TaskScheduler.Default);
         foreach (var retained in display.Owners.Values) StockHeadMeshes.Retire(retained.Look);
-        bool sameWorld = (int)epoch.GetValue(host)! == display.Epoch
+        bool sameWorld = StockHostParts.WorldEpoch(host) == display.Epoch
             && session.GetValue(host) is WorldSession shown && ReferenceEquals(shown.World, display.World);
         if (states.GetValue(display.Renderer) is IDictionary drawn)
             foreach (var detached in display.Detached) Release(host, display, detached, drawn, sameWorld);
         display.Physics.Dispose();
+        display.NativeLabels.Clear();
+        display.LooseLabels.Clear();
         displays.Remove(host);
     }
 

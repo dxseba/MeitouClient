@@ -1,7 +1,7 @@
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality.Rendering.Surface;
 
@@ -199,6 +199,7 @@ internal static class ChestHoleGeometry
                 vertices.Add(b); vertices.Add(d); vertices.Add(c);
             }
         }
+        if (!mechanical) AddStockInterior(vertices, grid, frame, palette);
         var direction = frame.Axis;
         exit = Rim(rows - 1, direction);
         entry = Rim(0, -direction);
@@ -207,6 +208,98 @@ internal static class ChestHoleGeometry
 
         Vertex[] Rim(int row, Vector3 normal) => [grid[0, row] with { Normal = normal },
             grid[Around / 3, row] with { Normal = normal }, grid[Around * 2 / 3, row] with { Normal = normal }];
+    }
+
+    // The wall has skinned cross-sections on both sides. Root the remaining tissue in those sections,
+    // leaving the middle of the tunnel open so both entrances still read as a perforation.
+    static void AddStockInterior(List<Vertex> output, Vertex[,] wall, ChestHoleFrame frame, StockTissuePalette palette)
+    {
+        var (major, minor) = frame.Basis();
+        var lateral = Vector3.Normalize(Vector3.Cross(frame.Axis, Vector3.UnitY));
+        var up = Vector3.UnitY;
+        float tilt = .12f * MathF.Sin(frame.Seed * .73f);
+        if (frame.Region == ChestHoleState.Abdomen)
+        {
+            var fold = Vector4.Lerp(palette.Organ(5), palette.Organ(4), .16f);
+            Add(lateral - up * (.46f + tilt), 5, .41f, .29f, .25f, fold, bone: false);
+            Add(-lateral - up * (.62f - tilt), 7, .37f, .31f, .21f, fold, bone: false);
+            Add(-up - lateral * .20f, 5, .27f, .27f, .28f, palette.Organ(4), bone: false);
+            return;
+        }
+
+        var ivory = Vector4.Lerp(palette.Bone, Vector4.One, .23f);
+        Add(lateral - up * (.20f + tilt), 4, .52f, .17f, .12f, ivory, bone: true);
+        Add(-lateral + up * (.16f - tilt), 8, .49f, .16f, .13f, ivory, bone: true);
+        Add(lateral + up * .43f, 8, .33f, .14f, .11f, ivory, bone: true);
+        var lung = Vector4.Lerp(palette.Organ(2), palette.Organ(6), .18f);
+        Add(-lateral - up * .69f, 5, .36f, .29f, .27f, lung, bone: false);
+        Add(lateral - up * .72f, 7, .31f, .29f, .23f, lung, bone: false);
+
+        void Add(Vector3 wallDirection, int station, float reach, float width, float depth, Vector4 colour, bool bone)
+        {
+            float angle = MathF.Atan2(Vector3.Dot(wallDirection, minor) * frame.Aspect,
+                Vector3.Dot(wallDirection, major) / frame.Aspect);
+            int column = ((int)MathF.Round(angle * Around / MathF.Tau) + Around) % Around;
+            var anchor = wall[column, station];
+            float along = Vector3.Dot(anchor.Position - frame.Centre, frame.Axis);
+            var radial = anchor.Position - frame.Centre - frame.Axis * along;
+            float radius = radial.Length();
+            if (radius < .035f) return;
+            var inward = -radial / radius;
+            var tangent = Vector3.Cross(frame.Axis, -inward);
+            // Cross-sections stay parallel to the local tunnel wall. The thinnest part of a
+            // shallow torso controls depth so tips do not emerge in front of the skin.
+            float front = Vector3.Dot(anchor.Position - wall[column, 0].Position, frame.Axis);
+            float back = Vector3.Dot(wall[column, wall.GetLength(1) - 1].Position - anchor.Position, frame.Axis);
+            float axial = MathF.Min(radius * depth, .42f * MathF.Min(front, back));
+            if (axial < .008f) return;
+            float breadth = radius * width;
+            float curve = radius * (bone ? .13f : -.19f);
+            const int sides = 7, rows = 3;
+            Span<Vertex> rings = stackalloc Vertex[rows * sides];
+            for (int row = 0; row < rows; row++)
+            {
+                float t = row * .5f;
+                var centre = Centre(t);
+                float size = row == 1 ? 1 : row == 0 ? .84f : bone ? .62f : .45f;
+                for (int point = 0; point < sides; point++)
+                {
+                    float turn = point * MathF.Tau / sides;
+                    float c = MathF.Cos(turn), s = MathF.Sin(turn);
+                    float uneven = .94f + .13f * MathF.Sin(3 * turn + frame.Seed + station * .8f);
+                    var direction = Vector3.Normalize(tangent * c + frame.Axis * s + inward * (.37f * t));
+                    var position = centre + (tangent * (breadth * c) + frame.Axis * (axial * s)) * (size * uneven);
+                    if (bone && row == rows - 1) position += inward * (radius * .045f * MathF.Sin(3 * turn + station));
+                    rings[row * sides + point] = Shaped(position, direction, colour * (.74f + .16f * t + .10f * uneven));
+                }
+            }
+
+            for (int point = 0; point < sides; point++)
+            {
+                int next = (point + 1) % sides;
+                for (int row = 0; row < rows - 1; row++)
+                {
+                    var a = rings[row * sides + point]; var b = rings[row * sides + next];
+                    var c = rings[(row + 1) * sides + point]; var d = rings[(row + 1) * sides + next];
+                    output.Add(a); output.Add(c); output.Add(b);
+                    output.Add(b); output.Add(c); output.Add(d);
+                }
+                var end = rings[(rows - 1) * sides + point];
+                var following = rings[(rows - 1) * sides + next];
+                if (bone) { end.Normal = inward; following.Normal = inward; }
+                var tip = Shaped(Centre(1) + inward * (radius * (bone ? .012f : .045f)), inward,
+                    bone ? Vector4.Lerp(colour, palette.Marrow, .33f) : colour);
+                output.Add(end); output.Add(tip); output.Add(following);
+            }
+
+            Vector3 Centre(float t) => anchor.Position + inward * (radius * (reach * t - .075f * (1 - t)))
+                + tangent * (curve * t * t) + frame.Axis * (axial * .28f * t);
+
+            Vertex Shaped(Vector3 position, Vector3 normal, Vector4 tint) => anchor with
+            {
+                Position = position, Normal = normal, Tangent = new(tangent, 1), Colour = tint with { W = 1 },
+            };
+        }
     }
 
     static bool FillStockGaps((Crossing Entry, Crossing Exit)?[] sides, in ChestHoleFrame frame,

@@ -1,5 +1,5 @@
 // Adapted from integrated GPL-3.0-or-later source 3a15eeb9f5523b9d106b40fd0ec99ccdb2658efa.
-using Meitou.Rendering;
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 
 namespace Meitou.Brutality.Rendering.Surface;
@@ -9,9 +9,9 @@ internal static partial class NativeSectionGeometry
     // Internal backing is separate from the shallow flesh rim. Its UV band is metadata, not an asset texture coordinate.
     internal const float BackingBand = 3;
 
-    static float SectionDepth(Vector3 origin, Vector3 kept, SectionSkin skin)
+    static float SectionDepth(Vector3 origin, Vector3 kept, SectionSkin skin, float backingDepth)
     {
-        float depth = ExposureDepth + 0.35f;
+        float depth = backingDepth;
         bool hit = false;
         var source = skin.Vertices;
         foreach (int triangle in skin.Candidates(origin))
@@ -37,7 +37,7 @@ internal static partial class NativeSectionGeometry
     }
 
     static void AppendSectionBacking(Vertex[] floor, List<(int A, int B, int C)> triangles, Vector3[] outline, in NativeSectionCut cut,
-        SectionSkin skin, int remaining, Action<Vertex, Vertex, Vertex> emit)
+        SectionSkin skin, float backingDepth, int remaining, Action<Vertex, Vertex, Vertex> emit)
     {
         if (remaining < 3 || triangles.Count == 0) return;
         var n = new Vector3(cut.Plane.X, cut.Plane.Y, cut.Plane.Z);
@@ -59,7 +59,7 @@ internal static partial class NativeSectionGeometry
         {
             if (!recessed.TryGetValue(vertex.Position, out var p))
             {
-                p = vertex.Position + kept * SectionDepth(vertex.Position + kept * 0.001f, kept, skin);
+                p = vertex.Position + kept * SectionDepth(vertex.Position + kept * 0.001f, kept, skin, backingDepth);
                 recessed[vertex.Position] = p;
             }
             return vertex with { Position = p, Normal = -kept, Tangent = new(p, Layer) };
@@ -71,6 +71,7 @@ internal static partial class NativeSectionGeometry
         }
         var pending = new Stack<(Vertex A, Vertex B, Vertex C, int Depth)>();
         foreach (var (a, b, c) in triangles) pending.Push((polygon[a], polygon[b], polygon[c], 0));
+        const float targetEdge = .65f, maximumEdge = 1.3f;
         int used = 0;
         while (pending.TryPop(out var triangle))
         {
@@ -81,7 +82,7 @@ internal static partial class NativeSectionGeometry
                 && Inside((c.Position + a.Position) * 0.5f) && Inside((a.Position + b.Position + c.Position) / 3);
             float longest = MathF.Max(ab, MathF.Max(bc, ca));
             // Subdivide long ears locally, and clip ears of a near-touching concave contour to the actual original outline.
-            if ((longest > 0.65f * 0.65f || !contained && longest > 0.015f * 0.015f) && depth < 12 && used + 3 * (pending.Count + 2) <= remaining)
+            if ((longest > targetEdge * targetEdge || !contained && longest > 0.015f * 0.015f) && depth < 12 && used + 3 * (pending.Count + 2) <= remaining)
             {
                 if (ab >= bc && ab >= ca)
                 {
@@ -100,7 +101,8 @@ internal static partial class NativeSectionGeometry
                 }
                 continue;
             }
-            if (!contained) continue;
+            // An unresolved ear can span several joints and form a sheet as the piece bends.
+            if (!contained || longest > maximumEdge * maximumEdge) continue;
             if (used + 3 > remaining) break;
             emit(Recess(a), Recess(b), Recess(c));
             used += 3;

@@ -1,3 +1,5 @@
+using Meitou.Game.Rendering.Frame;
+using System.Collections.Immutable;
 using System.Numerics;
 using Meitou.Brutality.Anatomy;
 using Meitou.Brutality.Physics;
@@ -5,7 +7,6 @@ using Meitou.Brutality.Rendering;
 using Meitou.Brutality.Ui;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
-using Meitou.Rendering;
 using Meitou.Simulation;
 using Meitou.Simulation.Ragdolls;
 
@@ -13,9 +14,26 @@ namespace Meitou.Brutality.Effects;
 
 internal sealed record BowelAsset(Vertex[] Source, BowelSkinning Skinning, Vector3 HalfExtent);
 internal sealed record BowelAssetSet(BowelAsset? Whole, BowelAsset[] Halves);
+internal sealed record SavedBowelPiece(int Half, bool Whole, uint BloodColour, double Age, bool KeepAttached, float Depth, SavedBowelRig Rig)
+{
+    internal bool IsValid => Half is 0 or 1 && BloodColour <= 0xFFFFFF && double.IsFinite(Age) && Age is >= 0 and < BowelPresentation.Lifetime
+        && float.IsFinite(Depth) && Depth is >= 0 and <= 100 && Rig is { IsValid: true, PinNode: -1 or 0 }
+        && (!Whole || Half == 0 && !KeepAttached && Rig.PinNode < 0);
+}
+
+internal sealed record SavedBowelOwner(ImmutableArray<SavedBowelPiece> Pieces)
+{
+    // A spent spill cannot create another prop when its wound or cut is rendered after loading.
+    internal static readonly SavedBowelOwner Spent = new([]);
+    internal bool IsValid => !Pieces.IsDefault && Pieces.Length <= 2 && Pieces.All(piece => piece is { IsValid: true })
+        && (Pieces.Length < 2 || !Pieces[0].Whole && !Pieces[1].Whole && Pieces[0].Half != Pieces[1].Half);
+}
+
 internal sealed record BowelRenderPiece(long Key, Vector3 Centre, Vertex[] Vertices, uint BloodColour, long Version)
 {
     public bool Mechanical { get; init; }
+    internal BowelSkinning? Skinning { get; init; }
+    internal Matrix4x4[]? Pose { get; init; }
 #if BRUTALITY_STOCK_MASTER
     public Vector4? Albedo { get; init; }
 #endif
@@ -36,7 +54,7 @@ internal sealed record BowelRenderPiece(long Key, Vector3 Centre, Vertex[] Verti
 }
 
 /// <summary>Two anatomical bowel sections feed from independently posed cut faces and retain the pin's attachment/sleep policy.</summary>
-internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPreparation? preparation = null) : IDisposable
+internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPreparation? preparation = null, bool gpuSkinning = false) : IDisposable
 {
     public const float Lifetime = 600;
     internal const float OrganBaseRed = .46f;
@@ -53,8 +71,8 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPrepar
         public required Vector4 Albedo;
 #endif
         public required double Born;
-        public bool KeepAttached, Broken, Physical;
-        public bool InitialReport, SettledReport;
+        public bool Whole, KeepAttached, Broken, Physical;
+        public bool InitialReport, MotionReport, SettledReport;
         public float Depth;
         public BowelPose? LastPose;
         public Matrix4x4[] LastTransforms = [];
@@ -116,14 +134,15 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPrepar
                 float floor = environment.GroundHeight(contact.Position.X, contact.Position.Z, contact.Position.Y);
                 position = contact.Position with { Y = float.IsFinite(floor) ? floor + asset.Skinning.Geometry.Radius : contact.Position.Y };
             }
-            var piece = new Piece { Owner = owner, Half = half, Key = Interlocked.Increment(ref nextKey), Asset = asset, Deformed = new Vertex[asset.Source.Length],
+            var piece = new Piece { Owner = owner, Half = half, Key = Interlocked.Increment(ref nextKey), Asset = asset, Deformed = DeformationBuffer(asset),
                 BloodColour = bloodColour, Born = born, KeepAttached = keep, Depth = depth, Broken = !attached,
 #if BRUTALITY_STOCK_MASTER
                 Albedo = StockTissuePalette.For(appearance).Organ(5),
 #endif
             };
+            var spin = age < GutEmergence.FeedAge ? Vector3.Cross(contact.Normal, tangent) * .9f : Vector3.Zero;
             piece.Physical = physics.Add(piece.Key, asset.Skinning.Geometry, position, rotation, velocity, resting: !attached,
-                pinNode: attached ? 0 : -1, preserveAttachment: keep);
+                pinNode: attached ? 0 : -1, preserveAttachment: keep, launchSpin: spin);
             if (!piece.Physical) continue;
             pieces.Add((owner, half), piece);
             spawned = true;
@@ -155,16 +174,63 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPrepar
             float support = -asset.Source.Min(v => Vector3.Transform(v.Position, rotation).Y);
             position.Y = float.IsFinite(floor) ? floor + MathF.Max(asset.Skinning.Geometry.Radius, support) : position.Y;
         }
-        var piece = new Piece { Owner = owner, Half = 0, Key = Interlocked.Increment(ref nextKey), Asset = asset,
-            Deformed = new Vertex[asset.Source.Length], BloodColour = bloodColour, Born = born, Broken = true,
+        var piece = new Piece { Owner = owner, Half = 0, Whole = true, Key = Interlocked.Increment(ref nextKey), Asset = asset,
+            Deformed = DeformationBuffer(asset), BloodColour = bloodColour, Born = born, Broken = true,
 #if BRUTALITY_STOCK_MASTER
             Albedo = StockTissuePalette.For(appearance).Organ(5),
 #endif
         };
+        var tumbleAxis = Vector3.Cross(normal, MathF.Abs(normal.Y) < .9f ? Vector3.UnitY : Vector3.UnitX);
+        var tumble = Vector3.Normalize(tumbleAxis) * 2.6f;
         piece.Physical = physics.Add(piece.Key, asset.Skinning.Geometry, position, rotation,
-            resting ? Vector3.Zero : normal * 1.5f, resting: resting);
+            resting ? Vector3.Zero : normal * 1.5f, resting: resting, launchSpin: tumble);
         if (!piece.Physical) return false;
         pieces.Add((owner, 0), piece); Remember(owner); return true;
+    }
+
+    internal Dictionary<CharacterId, SavedBowelOwner> Capture(double now)
+    {
+        var saved = new Dictionary<CharacterId, SavedBowelOwner>(spilled.Count);
+        foreach (var owner in spilled) saved.Add(owner, SavedBowelOwner.Spent);
+        foreach (var piece in pieces.Values)
+        {
+            if (physics.Capture(piece.Key) is not { } rig) continue;
+            var row = new SavedBowelPiece(piece.Half, piece.Whole, piece.BloodColour, Math.Max(0, now - piece.Born),
+                piece.KeepAttached, piece.Depth, rig);
+            if (row.IsValid)
+                saved[piece.Owner] = new((saved.GetValueOrDefault(piece.Owner) ?? SavedBowelOwner.Spent).Pieces.Add(row));
+        }
+        return saved;
+    }
+
+    // A visible owner can arrive before the asynchronous mesh preparation finishes. The caller retries then.
+    internal bool TryRestore(CharacterId owner, CharacterAppearance appearance, SkeletonRig rig, double now, SavedBowelOwner saved)
+    {
+        if (disposed || owner.IsNone || HasSpilled(owner) || HasOwner(owner) || !saved.IsValid || !double.IsFinite(now)) return true;
+        if (saved.Pieces.IsEmpty || appearance.Race.GetBool("is robot"))
+        {
+            Remember(owner);
+            return true;
+        }
+        if (Assets(rig) is not { } assets) return false;
+        while (pieces.Count + saved.Pieces.Length > BowelRagdollScene.Capacity)
+            Remove(pieces.MinBy(pair => pair.Value.Born).Key);
+        foreach (var row in saved.Pieces)
+        {
+            var asset = row.Whole ? assets.Whole : row.Half < assets.Halves.Length ? assets.Halves[row.Half] : null;
+            if (asset is null) continue;
+            long key = Interlocked.Increment(ref nextKey);
+            if (!physics.Restore(key, asset.Skinning.Geometry, row.Rig, row.KeepAttached)) continue;
+            pieces.Add((owner, row.Half), new Piece { Owner = owner, Half = row.Half, Whole = row.Whole, Key = key, Asset = asset,
+                Deformed = DeformationBuffer(asset), BloodColour = row.BloodColour, Born = now - row.Age, Physical = true,
+                KeepAttached = row.KeepAttached, Broken = row.Rig.PinNode < 0, Depth = row.Depth,
+#if BRUTALITY_STOCK_MASTER
+                Albedo = StockTissuePalette.For(appearance).Organ(5),
+#endif
+            });
+        }
+        Remember(owner);
+        return true;
     }
 
     void Remember(CharacterId owner)
@@ -202,7 +268,7 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPrepar
         foreach (var piece in pieces.Values)
         {
             if (physics.PoseOf(piece.Key) is not { } pose) continue;
-            if (!ReferenceEquals(piece.LastPose, pose))
+            if (!gpuSkinning && !ReferenceEquals(piece.LastPose, pose))
             {
                 if (!piece.LastTransforms.AsSpan().SequenceEqual(pose.Transforms))
                 {
@@ -211,13 +277,19 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPrepar
                 }
                 piece.LastPose = pose;
             }
-            if (BowelDiagnostics.Trace && (!piece.InitialReport || !piece.SettledReport && now - piece.Born >= 3))
+            double age = now - piece.Born;
+            if (BowelDiagnostics.Trace && (!piece.InitialReport || !piece.MotionReport && age >= .2 || !piece.SettledReport && age >= 3))
             {
-                BowelDiagnostics.Piece(piece.Owner, piece.Half, now - piece.Born, physics.IsAttached(piece.Key), piece.Asset, piece.Deformed, pose);
-                piece.InitialReport = true; piece.SettledReport |= now - piece.Born >= 3;
+                if (gpuSkinning && !piece.Asset.Skinning.Deform(pose.Transforms, piece.Deformed)) continue;
+                BowelDiagnostics.Piece(piece.Owner, piece.Half, age, physics.IsAttached(piece.Key), piece.Asset, piece.Deformed, pose);
+                piece.InitialReport = true;
+                piece.MotionReport |= age >= .2;
+                piece.SettledReport |= age >= 3;
             }
-            rendered.Add(new(piece.Key, pose.Centre, piece.Deformed, piece.BloodColour, piece.Version)
+            rendered.Add(new(piece.Key, pose.Centre, gpuSkinning ? piece.Asset.Source : piece.Deformed, piece.BloodColour, piece.Version)
             {
+                Skinning = gpuSkinning ? piece.Asset.Skinning : null,
+                Pose = gpuSkinning ? pose.Transforms : null,
 #if BRUTALITY_STOCK_MASTER
                 Albedo = piece.Albedo,
 #endif
@@ -257,6 +329,8 @@ internal sealed class BowelPresentation(AnatomyLibrary anatomy, BowelAssetPrepar
         if (BowelDiagnostics.Trace) BowelDiagnostics.Assets(scale, assets);
         return assets;
     }
+
+    Vertex[] DeformationBuffer(BowelAsset asset) => gpuSkinning && !BowelDiagnostics.Trace ? [] : new Vertex[asset.Source.Length];
 
     void Remove((CharacterId, int) key) { if (pieces.Remove(key, out var piece)) physics.Remove(piece.Key); }
     static Quaternion Turn(Vector3 from, Vector3 to)

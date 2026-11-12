@@ -39,6 +39,13 @@ internal sealed partial class AdvancedFragmentScene
         if (!Valid(saved) || saved.Definition != DefinitionKeyOf(piece.Definition) || saved.Pose.Length != piece.Definition.Bodies.Length
             || !saved.Bones.SequenceEqual(piece.Definition.Bodies.Select(body => body.Name)) || !Finite(offset, 10_000_000)
             || saved.Anchors is { } anchors && anchors.Length != piece.Definition.BodyOfBone.Length) return false;
+#if BRUTALITY_STOCK_MASTER
+        if (!saved.Carried && saved.Dynamic.Any(dynamic => !dynamic))
+        {
+            var connected = piece.StockGripBodies ??= ConnectedRoot(piece.Definition);
+            if (saved.Dynamic.Where((dynamic, b) => !dynamic && connected[b]).Any()) return false;
+        }
+#endif
         if (piece.Frozen) Impulse(piece, -1, Vector3.Zero);
         foreach (var joint in piece.Joints) physics.Simulation.Solver.Remove(joint);
         piece.Joints.Clear();
@@ -66,7 +73,9 @@ internal sealed partial class AdvancedFragmentScene
         && saved.Pose.Length == saved.Bones.Length && saved.Linear.Length == saved.Pose.Length && saved.Angular.Length == saved.Pose.Length && saved.Dynamic.Length == saved.Pose.Length
         && saved.Bones.All(name => name is { Length: > 0 and <= 128 }) && saved.Bones.Distinct(StringComparer.Ordinal).Count() == saved.Bones.Length
         && float.IsFinite(saved.Age) && saved.Age is >= 0 and <= 1_000_000_000 && !(saved.Frozen && saved.Carried)
+#if !BRUTALITY_STOCK_MASTER
         && (saved.Carried || saved.Dynamic.All(dynamic => dynamic))
+#endif
         && saved.Pose.All(at => Finite(at.Position, 10_000_000) && float.IsFinite(at.Rotation.LengthSquared()) && MathF.Abs(at.Rotation.LengthSquared() - 1) <= .01f)
         && saved.Linear.All(v => Finite(v, 10000)) && saved.Angular.All(v => Finite(v, 10000))
         && (saved.Anchors is null && saved.Offsets is null || saved.Anchors is { Length: > 0 and <= 1024 } && saved.Offsets is not null

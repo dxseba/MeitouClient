@@ -1,22 +1,26 @@
 #if BRUTALITY_STOCK_SAVE_PROBE
+using Meitou.Game.Host;
+using Meitou.Simulation.Population;
 using System.Reflection;
 using HarmonyLib;
 using Meitou.Data.Save;
-using Meitou.Engine;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Saving;
 
 namespace Meitou.Brutality;
 
-internal sealed class StockTorsoSaveProbe(Type host)
+internal sealed class StockTorsoSaveProbe(Type host, Type saves, Type mods)
 {
     static StockTorsoSaveProbe? installed;
-    readonly FieldInfo session = AccessTools.Field(host, "session");
-    readonly FieldInfo population = AccessTools.Field(host, "popData");
-    readonly MethodInfo captureOptions = AccessTools.Method(host, "CaptureOptions");
-    readonly MethodInfo captureModData = AccessTools.Method(host, "CaptureModData");
-    readonly MethodInfo swapInSave = AccessTools.Method(host, "SwapInSave");
+    readonly FieldInfo session = AccessTools.Field(host, "Session");
+    readonly FieldInfo population = AccessTools.Field(host, "PopData");
+    readonly FieldInfo saveState = AccessTools.Field(host, "Saves");
+    readonly FieldInfo modState = AccessTools.Field(host, "Modding");
+    readonly FieldInfo savesHost = AccessTools.Field(saves, "<host>P");
+    readonly MethodInfo captureOptions = AccessTools.Method(saves, "CaptureOptions");
+    readonly MethodInfo captureModData = AccessTools.Method(mods, "CaptureModData");
+    readonly MethodInfo swapInSave = AccessTools.Method(saves, "SwapInSave");
     readonly string? folder = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_SAVE_PROBE");
     readonly string? load = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_LOAD_PROBE");
     readonly bool offscreen = Environment.GetCommandLineArgs().Contains("--screenshot", StringComparer.Ordinal);
@@ -26,19 +30,26 @@ internal sealed class StockTorsoSaveProbe(Type host)
     {
         if (AccessTools.TypeByName("Meitou.Game.GameHost") is not { } host
             || !Environment.GetCommandLineArgs().Contains("--sandbox", StringComparer.Ordinal)) return;
-        var probe = new StockTorsoSaveProbe(host);
+        var saves = AccessTools.TypeByName("Meitou.Game.Host.GameSaves");
+        var mods = AccessTools.TypeByName("Meitou.Modding.GameMods");
+        var probe = new StockTorsoSaveProbe(host, saves, mods);
         if (!string.IsNullOrWhiteSpace(probe.folder))
-            context.Harmony.Patch(AccessTools.Method(host, "UpdateModHits"),
+            context.Harmony.Patch(AccessTools.Method(host, "UpdateFrameEffects"),
                 postfix: new HarmonyMethod(typeof(StockTorsoSaveProbe), nameof(Update)));
         else if (!string.IsNullOrWhiteSpace(probe.load))
-            context.Harmony.Patch(AccessTools.Method(host, probe.offscreen ? "UpdateModHits" : "HandleSaves"),
-                postfix: new HarmonyMethod(typeof(StockTorsoSaveProbe), nameof(Reload)));
+            context.Harmony.Patch(
+                probe.offscreen ? AccessTools.Method(host, "UpdateFrameEffects") : AccessTools.Method(saves, "HandleSaves"),
+                postfix: new HarmonyMethod(typeof(StockTorsoSaveProbe), probe.offscreen ? nameof(Reload) : nameof(ReloadInteractive)));
         else return;
         installed = probe;
     }
 
     static void Update(object __instance) => installed?.Check(__instance);
     static void Reload(object __instance) => installed?.CheckLoad(__instance);
+    static void ReloadInteractive(object __instance)
+    {
+        if (installed is { } probe && probe.savesHost.GetValue(__instance) is { } host) probe.CheckLoad(host);
+    }
 
     void CheckLoad(object host)
     {
@@ -48,7 +59,7 @@ internal sealed class StockTorsoSaveProbe(Type host)
         {
             shown.SettleAhead();
             object?[] args = [Task.FromResult(SaveGame.Load(load!)), !offscreen, null, null, null];
-            ((Task)swapInSave.Invoke(host, args)!).GetAwaiter().GetResult();
+            ((Task)swapInSave.Invoke(saveState.GetValue(host), args)!).GetAwaiter().GetResult();
             Console.WriteLine($"Brutality stock native load probe {args[2]}");
             var world = shown.World;
             if (world.Squads.Find(world.Player.Squad) is { Leader.IsNone: false } squad && StockProgression.For(world) is { } progress)
@@ -72,8 +83,8 @@ internal sealed class StockTorsoSaveProbe(Type host)
             shown.SettleAhead();
             var clock = shown.Clock;
             var game = SaveCapture.Capture(shown.World, data, new SaveClock((int)clock.Day, clock.Hour, clock.Minute),
-                options: (SaveCaptureOptions?)captureOptions.Invoke(host, null));
-            captureModData.Invoke(host, [shown.World, game]);
+                options: (SaveCaptureOptions?)captureOptions.Invoke(saveState.GetValue(host), null));
+            captureModData.Invoke(modState.GetValue(host), [shown.World, game]);
             game.Write(folder!);
             var count = game.Characters.Count(actor => actor.GameState?.Strings.ContainsKey("dxseba brutality torso") == true);
             var heads = game.Characters.Count(actor => actor.GameState is { } state &&

@@ -1,3 +1,5 @@
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Frame;
 using System.Collections;
 using System.Diagnostics;
 using System.Numerics;
@@ -8,9 +10,7 @@ using Meitou.Brutality.Rendering;
 using Meitou.Brutality.Ui;
 using Meitou.Content;
 using Meitou.Data.Characters;
-using Meitou.Engine;
 using Meitou.Modding;
-using Meitou.Rendering;
 using Meitou.Simulation;
 using Meitou.Simulation.Ragdolls;
 using Meitou.Simulation.Saving;
@@ -24,7 +24,7 @@ internal sealed class StockHeadFragments
     readonly ConditionalWeakTable<object, Display> displays = new();
     readonly ModContext context;
     readonly string? installRoot = GameInstall.Locate()?.Root;
-    readonly FieldInfo heads, epoch, session, states, bones, assets, assetParts, nativeKey;
+    readonly FieldInfo decapitation, heads, session, states, bones, assets, assetParts, nativeKey;
     readonly Type characterState;
     readonly FieldInfo rendererStamp, previousBones, posed, seen, frozen;
     readonly MethodInfo renderer, rigs, lastDrawn, drawKey;
@@ -36,6 +36,7 @@ internal sealed class StockHeadFragments
         public readonly int Epoch = epoch;
         public readonly StockHeadShardPhysics Physics = new(new WalkabilityEnvironment(world.Walkability));
         public readonly List<Fragment> Active = [];
+        public readonly List<BrutalityPartLabel> Labels = [];
         public readonly Dictionary<long, NativeMotion> Native = [];
         public long NativeFrame;
         public readonly Dictionary<CharacterId, Split> Splits = [];
@@ -56,11 +57,13 @@ internal sealed class StockHeadFragments
         public long Seen;
         public long NextCapture;
         public StockHeadSplitSave.Pose? Settled;
+        public Vector3? PoolFloor;
     }
 
     sealed record Fragment(long Key, CharacterId Owner, PreparedHeadBurstShard Piece, CharacterAppearance Look, ulong Blood)
     {
         public StockHeadSplitSave.Pose? Settled;
+        public Vector3? PoolFloor;
     }
     sealed class Split(StockHeadRules.CutRequest request, Matrix4x4[] palette, Fragment first, Fragment second, double started)
     {
@@ -93,19 +96,19 @@ internal sealed class StockHeadFragments
     StockHeadFragments(ModContext context, Type host, Type characterRenderer)
     {
         this.context = context;
-        heads = Field(host, "heads");
-        epoch = Field(host, "worldEpoch");
-        session = Field(host, "session");
+        decapitation = StockHostParts.Decapitation;
+        heads = Field(decapitation.FieldType, "_heads");
+        session = Field(host, "Session");
         renderer = AccessTools.PropertyGetter(host, "ActiveCharacters") ?? throw new MissingMethodException(host.Name, "ActiveCharacters");
         drawKey = Method(host, "DrawKey", typeof(CharacterId));
-        var head = AccessTools.Inner(host, "FallingHead") ?? throw new MissingMemberException(host.Name, "FallingHead");
+        var head = AccessTools.Inner(decapitation.FieldType, "FallingHead") ?? throw new MissingMemberException("Decapitation", "FallingHead");
         nativeKey = Field(head, "Key");
-        states = Field(characterRenderer, "states");
-        assets = Field(characterRenderer, "assets");
+        states = Field(characterRenderer, "_states");
+        assets = Field(characterRenderer, "_assets");
         assetParts = Field(assets.FieldType.GetGenericArguments()[1], "Parts");
         characterState = AccessTools.Inner(characterRenderer, "CharState") ?? throw new MissingMemberException(characterRenderer.Name, "CharState");
         bones = Field(characterState, "Bones");
-        rendererStamp = Field(characterRenderer, "updateStamp");
+        rendererStamp = Field(characterRenderer, "_updateStamp");
         previousBones = Field(characterState, "Previous");
         posed = Field(characterState, "Posed");
         seen = Field(characterState, "Seen");
@@ -120,11 +123,11 @@ internal sealed class StockHeadFragments
         try
         {
             var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new TypeLoadException("GameHost");
-            var characters = AccessTools.TypeByName("Meitou.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
+            var characters = AccessTools.TypeByName("Meitou.Game.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
             var instance = new StockHeadFragments(context, host, characters);
-            context.Harmony.Patch(Method(host, "CutHead", typeof(CharacterSnapshot), typeof(CharacterAppearance)),
+            context.Harmony.Patch(Method(StockHostParts.Decapitation.FieldType, "CutHead", typeof(CharacterSnapshot), typeof(CharacterAppearance)),
                 postfix: new HarmonyMethod(typeof(StockHeadFragments), nameof(HeadCut)));
-            context.Harmony.Patch(Method(host, "AddHeads", typeof(CharacterDrawList)),
+            context.Harmony.Patch(Method(StockHostParts.Decapitation.FieldType, "AddHeads", typeof(CharacterDrawList)),
                 postfix: new HarmonyMethod(typeof(StockHeadFragments), nameof(HeadsListed)));
             context.Harmony.Patch(Method(host, "Run"),
                 finalizer: new HarmonyMethod(typeof(StockHeadFragments), nameof(HostFinished)));
@@ -146,17 +149,21 @@ internal sealed class StockHeadFragments
 
     static void HeadCut(object __instance, CharacterSnapshot c, CharacterAppearance look)
     {
-        if (look.Headless) installed?.Begin(__instance, c.Id, look, new(c.Knockdown.X, c.Knockdown.Z));
+        if (look.Headless && installed is { } hooks && StockHostParts.HostOf(__instance) is { } host)
+            hooks.Begin(host, c.Id, look, new(c.Knockdown.X, c.Knockdown.Z));
     }
 
-    static void HeadsListed(object __instance, CharacterDrawList list) => installed?.Draw(__instance, list);
+    static void HeadsListed(object __instance, CharacterDrawList list)
+    {
+        if (installed is { } hooks && StockHostParts.HostOf(__instance) is { } host) hooks.Draw(host, list);
+    }
     static void HostFinished(object __instance) => installed?.Reset(__instance);
 
     void Begin(object host, CharacterId victim, CharacterAppearance source, Vector2 travel)
     {
         if (session.GetValue(host) is not WorldSession shown
             || !StockHeadRules.TryGet(shown.World, victim, shown.ShownTick, out var request)
-            || heads.GetValue(host) is not IList falling) return;
+            || heads.GetValue(decapitation.GetValue(host)) is not IList falling) return;
         if (!StockHeadMeshes.CanCreate)
         {
             if (StockHeadMeshes.TorsoCapacity(new(1, 1)) == StockHeadMeshes.Capacity.LiveLimit)
@@ -209,6 +216,8 @@ internal sealed class StockHeadFragments
         if (session.GetValue(host) is not WorldSession shown
             || !displays.TryGetValue(host, out _) && !StockHeadSplitSave.Has(shown.World)) return;
         var display = For(host, shown);
+        display.Labels.Clear();
+        StockPartLabels.Publish(shown.World, "heads", display.Labels);
         if (renderer.Invoke(host, null) is not { } characters) return;
         foreach (var owner in display.Attempts.Keys.Where(id => !StockHeadRules.TryGet(shown.World, id, shown.ShownTick, out _)).ToArray())
             display.Attempts.Remove(owner);
@@ -232,12 +241,8 @@ internal sealed class StockHeadFragments
             }
             list.Add(new CharacterInstance(fragment.Key, fragment.Look, pose.Position, 0, [])
                 { World = pose.Transform, FreezeFrom = fragment.Key, Blood = fragment.Blood });
+            display.Labels.Add(Label(fragment, pose.Position));
         }
-        StockPartLabels.Publish(shown.World, "heads", display.Active
-            .Select(fragment => (Fragment: fragment, Position: DrawPose(display, fragment)?.Position))
-            .Where(item => item.Position is not null)
-            .Select(item => new BrutalityPartLabel(item.Fragment.Owner, 300 + item.Fragment.Piece.Key,
-                item.Fragment.Piece.Brain ? "Brain fragment" : "Head fragment", item.Position!.Value)).ToArray());
         if (display.Pending is not { } pending) return;
         if (pending.Abandoned)
         {
@@ -339,6 +344,7 @@ internal sealed class StockHeadFragments
                     fragment.Settled = null;
                 list.Add(new CharacterInstance(fragment.Key, fragment.Look, at.Position, 0, [])
                     { World = at.Transform, FreezeFrom = fragment.Key, Blood = fragment.Blood });
+                display.Labels.Add(Label(fragment, at.Position));
             }
             CommitSplit(display, pending, time);
             StockHeadSplitSave.Restored(display.World, pending.Owner, saved);
@@ -372,17 +378,28 @@ internal sealed class StockHeadFragments
                 return;
             }
         }
-        var falling = (IList)heads.GetValue(host)!;
+        var falling = (IList)heads.GetValue(decapitation.GetValue(host))!;
         for (int i = falling.Count - 1; i >= 0; i--)
             if (nativeKey.GetValue(falling[i]) is long key && key == pending.Native) { falling.RemoveAt(i); break; }
+        StockDetachedPools.ReplaceHead(host, pending.Native);
         if (index >= 0) list.Items.RemoveAt(index);
         foreach (var fragment in pending.Staged)
-            list.Add(whole with { Key = fragment.Key, Appearance = fragment.Look,
-                Position = display.Physics.Position(fragment.Key)!.Value, World = display.Physics.Transform(fragment.Key),
-                FreezeFrom = fragment.Key });
+        {
+            var position = display.Physics.Position(fragment.Key)!.Value;
+            list.Add(whole with { Key = fragment.Key, Appearance = fragment.Look, Position = position,
+                World = display.Physics.Transform(fragment.Key), FreezeFrom = fragment.Key });
+            display.Labels.Add(Label(fragment, position));
+        }
         display.Active.AddRange(pending.Staged);
         if (split)
         {
+            foreach (var fragment in pending.Staged)
+            {
+                long key = fragment.Key;
+                StockDetachedPools.Head(host, shown, key, whole.Appearance.Race, .5f,
+                    () => fragment.Settled is not null ? fragment.PoolFloor : display.Physics.PoolContact(key),
+                    () => display.Active.Contains(fragment));
+            }
             CommitSplit(display, pending, time);
             CaptureSplits(display, time);
         }
@@ -423,6 +440,10 @@ internal sealed class StockHeadFragments
             || display.Physics.Position(head.Key) is not { } at) return head;
         var motion = new NativeMotion(owner, cut, palette.ToArray(), head.Blood);
         display.Native.Add(head.Key, motion);
+        long key = head.Key;
+        StockDetachedPools.Head(host, shown, key, head.Appearance.Race, 1,
+            () => motion.Settled is not null ? motion.PoolFloor : display.Physics.PoolContact(key),
+            () => display.Native.ContainsKey(key));
         if (display.Physics.SavePose(head.Key) is { } pose) CaptureLoose(display, head.Key, motion, pose);
         return head with { Position = at, World = transform };
     }
@@ -489,6 +510,7 @@ internal sealed class StockHeadFragments
             motion.NextCapture = display.World.Tick + 8;
         }
         if (pose.Moving is not null) return;
+        motion.PoolFloor = display.Physics.PoolContact(key);
         motion.Settled = pose;
         display.Physics.Remove(key);
     }
@@ -600,6 +622,8 @@ internal sealed class StockHeadFragments
                 split.First.Blood, first, second);
             split.CaptureNext = time + .25;
             if (first.Moving is not null || second.Moving is not null) continue;
+            split.First.PoolFloor = display.Physics.PoolContact(split.First.Key);
+            split.Second.PoolFloor = display.Physics.PoolContact(split.Second.Key);
             split.First.Settled = first;
             split.Second.Settled = second;
             display.Physics.Remove(split.First.Key);
@@ -609,7 +633,7 @@ internal sealed class StockHeadFragments
 
     Display For(object host, WorldSession shown)
     {
-        int currentEpoch = (int)epoch.GetValue(host)!;
+        int currentEpoch = StockHostParts.WorldEpoch(host);
         if (displays.TryGetValue(host, out var display) && display.Epoch == currentEpoch && ReferenceEquals(display.World, shown.World))
             return display;
         Reset(host);
@@ -630,6 +654,17 @@ internal sealed class StockHeadFragments
         display.Physics.Dispose();
         StockPartLabels.Publish(display.World, "heads", []);
         displays.Remove(host);
+    }
+
+    static BrutalityPartLabel Label(Fragment fragment, Vector3 position)
+    {
+        string part = fragment.Piece.Key switch
+        {
+            20 => "Head half 1",
+            21 => "Head half 2",
+            _ => fragment.Piece.Brain ? "Brain fragment" : "Head fragment",
+        };
+        return new(fragment.Owner, 300 + fragment.Piece.Key, part, position);
     }
 
     static void Abandon(Display display)

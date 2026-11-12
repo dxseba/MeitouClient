@@ -47,13 +47,22 @@ public static class HeadCutPolicy
         if (!BrutalityPolicy.CanDecapitate(brutality, mechanism) || !float.IsFinite(cut) || cut <= 0) return null;
         float choice = Rng.Float(visualSeed), tilt = Rng.Float(Rng.Mix(visualSeed));
         float offset = Rng.Float(Rng.Mix(visualSeed ^ 0x484541444F464653UL));
-        var across = Across(travel, victimYaw, visualSeed);
-
 #if BRUTALITY_STOCK_MASTER
-        if (brutality >= 80 && cutDirection is (1 or 2 or 3 or 7 or 9))
-            return SkilledSlash(cutDirection, cut, choice, tilt, offset, across);
-#endif
+        var across = Across(travel, victimYaw, visualSeed, wider: true);
+        bool descending = cutDirection is 1 or 7;
+        bool sweeping = cutDirection is 2 or 3 or 9;
+        bool skilled = brutality >= 80 && (descending || sweeping);
+        if (skilled ? choice < .82f : descending || sweeping && choice >= .45f)
+        {
+            float detachChance = skilled ? .24f : descending ? .20f : 0;
+            var mode = cut >= 70 && choice < detachChance ? HeadCutMode.DetachedSplit : HeadCutMode.AttachedSplit;
+            float profile = Rng.Float(Rng.Mix(visualSeed ^ 0x4845414450524F46UL));
+            return SkullSlash(cutDirection, across, tilt, offset, profile, visualSeed, mode);
+        }
 
+        return NeckSlash(across, tilt, offset);
+#else
+        var across = Across(travel, victimYaw, visualSeed);
         if (cutDirection is 1 or 7)
         {
             bool complete = cut >= 70 && choice < .20f;
@@ -72,34 +81,44 @@ public static class HeadCutPolicy
         // A low neck plane includes continuous oblique angles; executions and unsupported technique axes retain whole-head detachment.
         float neckTilt = .04f + tilt * .20f;
         return Plane(new(across.X * neckTilt, 1, across.Y * neckTilt), .84f + offset * .10f, HeadCutMode.NeckDetach);
+#endif
     }
 
 #if BRUTALITY_STOCK_MASTER
-    static HeadCutState SkilledSlash(int direction, float cut, float choice, float tilt, float offset, Vector2 across)
+    static HeadCutState SkullSlash(int direction, Vector2 across, float tilt, float offset, float profile, ulong seed, HeadCutMode mode)
     {
-        // Reserve an unmistakable slice through the skull even for the common side swings.
-        // These families affect geometry only, after the usual decapitation eligibility check.
-        const float DetachedChance = .24f, NearAxialEnd = .54f, NeckStart = .82f;
-        if (choice >= NeckStart)
+        // Left and right swings use opposing slopes. A rear sweep loses its side in the native direction code.
+        bool mirror = direction == 3 || (direction is 1 or 7 or 9 && (Rng.Mix(seed ^ 0x4845414453494445UL) & 1) != 0);
+        if (mirror) across = -across;
+
+        if (direction is 1 or 7)
         {
-            float neckTilt = .04f + tilt * .20f;
-            return Plane(new(across.X * neckTilt, 1, across.Y * neckTilt), .84f + offset * .10f, HeadCutMode.NeckDetach);
+            float lean = profile switch
+            {
+                < .40f => .02f + tilt * .21f,
+                < .75f => .28f + tilt * .28f,
+                _ => .60f + tilt * .32f,
+            };
+            float sideways = (offset - .5f) * .44f;
+            // Keep the steeper planes crossing the cranium and both fragments large enough to render.
+            return Plane(new(across.X, lean, across.Y), -sideways - lean * .16f, mode);
         }
 
-        bool descending = direction is 1 or 7;
-        bool detached = cut >= 70 && choice < DetachedChance;
-        bool nearAxial = choice < NearAxialEnd && (!detached || tilt < .60f);
-        var mode = detached ? HeadCutMode.DetachedSplit : HeadCutMode.AttachedSplit;
-        if (descending)
+        float slope = profile switch
         {
-            float rise = nearAxial ? tilt * .09f : .48f + tilt * .36f;
-            return Plane(new(across.X, rise, across.Y), (offset - .5f) * .30f, mode);
-        }
+            < .32f => .04f + tilt * .25f,
+            < .72f => .33f + tilt * .39f,
+            _ => .76f + tilt * .38f,
+        };
+        float height = .06f + offset * .27f;
+        return Plane(new(across.X * slope, 1, across.Y * slope), -height, mode);
+    }
 
-        float side = direction == 3 ? -1 : 1;
-        float slope = side * (nearAxial ? .02f + tilt * .08f : .52f + tilt * .52f);
-        float height = nearAxial ? -.10f - offset * .16f : (offset - .5f) * .28f;
-        return Plane(new(across.X * slope, 1, across.Y * slope), height, mode);
+    static HeadCutState NeckSlash(Vector2 across, float tilt, float offset)
+    {
+        // The plane pivots within the base of the head so the complete head still falls.
+        float lean = (tilt * 2 - 1) * .24f;
+        return Plane(new(across.X * lean, 1, across.Y * lean), .84f + offset * .10f, HeadCutMode.NeckDetach);
     }
 #endif
 
@@ -125,6 +144,10 @@ public static class HeadCutPolicy
     public static HeadCutState? Preview(string style, int cutDirection = 1, ulong visualSeed = 0, Vector2 travel = default, float victimYaw = 0)
     {
         var across = Across(travel, victimYaw, visualSeed);
+#if BRUTALITY_STOCK_MASTER
+        float tilt = Rng.Float(Rng.Mix(visualSeed));
+        float offset = Rng.Float(Rng.Mix(visualSeed ^ 0x484541444F464653UL));
+#endif
         return style.ToLowerInvariant() switch
         {
             "auto" => Candidate(100, CombatWoundMechanism.Slash, cutDirection, 300, visualSeed, travel, victimYaw),
@@ -134,6 +157,12 @@ public static class HeadCutPolicy
             "oblique" => Plane(new(across.X * .7f, .7f, across.Y * .7f), 0, HeadCutMode.AttachedSplit),
             "vertical" => Plane(new(across.X, 0, across.Y), 0, HeadCutMode.AttachedSplit),
             "split" => Plane(new(across.X, 0, across.Y), 0, HeadCutMode.DetachedSplit),
+#if BRUTALITY_STOCK_MASTER
+            "vertical-angled" => SkullSlash(1, across, tilt, offset, .2f, visualSeed, HeadCutMode.AttachedSplit),
+            "oblique-angled" => SkullSlash(3, across, tilt, offset, .9f, visualSeed, HeadCutMode.AttachedSplit),
+            "split-angled" => SkullSlash(2, across, tilt, offset, .9f, visualSeed, HeadCutMode.DetachedSplit),
+            "neck-angled" => NeckSlash(across, tilt, offset),
+#endif
             _ => null,
         };
     }
@@ -144,7 +173,7 @@ public static class HeadCutPolicy
         return new(new(normal / length, offset / length), mode);
     }
 
-    static Vector2 Across(Vector2 travel, float victimYaw, ulong seed)
+    static Vector2 Across(Vector2 travel, float victimYaw, ulong seed, bool wider = false)
     {
         float length = travel.LengthSquared();
         if (!float.IsFinite(length) || length < 1e-8f || !float.IsFinite(victimYaw)) travel = -Vector2.UnitY;
@@ -155,7 +184,7 @@ public static class HeadCutPolicy
             travel = new(cosine * travel.X - sine * travel.Y, sine * travel.X + cosine * travel.Y);
         }
 
-        float angle = (Rng.Float(Rng.Mix(seed ^ 0x48454144414E474CUL)) * 2 - 1) * MathF.PI / 12;
+        float angle = (Rng.Float(Rng.Mix(seed ^ 0x48454144414E474CUL)) * 2 - 1) * MathF.PI / (wider ? 7.5f : 12);
         var across = new Vector2(travel.Y, -travel.X);
         return new(across.X * MathF.Cos(angle) - across.Y * MathF.Sin(angle),
             across.X * MathF.Sin(angle) + across.Y * MathF.Cos(angle));

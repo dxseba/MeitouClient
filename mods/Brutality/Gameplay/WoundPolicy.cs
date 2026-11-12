@@ -1,3 +1,5 @@
+using Meitou.Data.Gameplay.Combat;
+
 namespace Meitou.Brutality;
 
 public enum WoundKind { None, Slash, Thrust, Crush }
@@ -67,11 +69,48 @@ public static class WoundPolicy
         float dose = Clamp(prior + Clamp(accepted / input.Maximum, 0, 1.75f), 0, MaxDose);
         var shape = ShapeForDirection(input.CutDirection, Clamp(dose / 1.2f, 0, 1));
         shape = shape with { Kind = kind, WeaponCategory = input.WeaponCategory };
-        if (kind == WoundKind.Slash && input.WeaponCategory is 3 or 4) shape = shape with { Aspect = 0.38f };
-        else if (kind == WoundKind.Slash && input.WeaponCategory == 0) shape = shape with { Aspect = 0.12f };
+        if (kind == WoundKind.Slash)
+        {
+            float aspect = (WeaponCategory)input.WeaponCategory switch
+            {
+                WeaponCategory.Katanas => .12f,
+                WeaponCategory.Sabres => .21f,
+                WeaponCategory.Hackers => .32f,
+                WeaponCategory.Heavy => .38f,
+                WeaponCategory.Blunt => .28f,
+                WeaponCategory.Polearms => .17f,
+                _ => shape.Aspect,
+            };
+            shape = shape with { Aspect = aspect };
+        }
         if (kind == WoundKind.Crush) shape = shape with { Aspect = 0.85f };
         return new WoundResult(true, kind, shape, accepted, dose, Math.Min(input.LocalHits + 1, MaxHits));
     }
+
+    /// <summary>Scales a fresh wound by the fraction of part health lost and the striking surface of the weapon.</summary>
+    internal static float VisualSize(float received, float partMaximum, CombatWoundMechanism mechanism, int weaponCategory)
+    {
+        if (!float.IsFinite(received) || !float.IsFinite(partMaximum) || partMaximum <= 0) return .5f;
+
+        float dose = Math.Clamp(received / partMaximum, 0, 1.4f);
+        float weapon = (WeaponCategory)weaponCategory switch
+        {
+            WeaponCategory.Katanas => .94f,
+            WeaponCategory.Hackers => 1.10f,
+            WeaponCategory.Heavy => 1.24f,
+            WeaponCategory.Blunt when mechanism == CombatWoundMechanism.Crush => 1.12f,
+            WeaponCategory.Unarmed => .86f,
+            WeaponCategory.Polearms when mechanism == CombatWoundMechanism.Thrust => .82f,
+            WeaponCategory.Polearms => 1.05f,
+            _ => 1f,
+        };
+        return Math.Clamp((.48f + 1.27f * MathF.Sqrt(dose)) * weapon, .42f, 2.10f);
+    }
+
+    /// <summary>Keeps the old stored turn for wounds that predate their recorded hit tick.</summary>
+    internal static float VisualTurn(in Wound mark) => mark.Born == 0
+        ? (mark.Age * 2.399963f % MathF.Tau - MathF.PI) / MathF.PI * .35f
+        : 0;
 
     static float Hash(float x, float y)
     {

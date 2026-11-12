@@ -30,7 +30,7 @@ internal static class StockHeadRules
 
     static readonly ConditionalWeakTable<World, Requests> worlds = new();
     static readonly string? preview = Environment.GetCommandLineArgs().Contains("--sandbox", StringComparer.Ordinal)
-        ? Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_HEAD_PREVIEW") : null;
+        ? Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_STOCK_HEAD_PREVIEW")?.ToLowerInvariant() : null;
     static readonly bool trace = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS") == "1";
     internal static bool Enabled { get; set; }
 
@@ -98,11 +98,7 @@ internal static class StockHeadRules
         if (worlds.TryGetValue(world, out var requests))
             foreach (var pair in requests.Hits)
                 if (world.Tick - pair.Value.Tick > RequestLifetime) requests.Hits.TryRemove(pair.Key, out _);
-#if BRUTALITY_STOCK_SAVE_PROBE
-        if (preview is not ("burst" or "split" or "neck" or "vertical") || world.Tick < 90 || requests is { Previewed: true }) return;
-#else
-        if (preview is not ("burst" or "split" or "neck") || world.Tick < 90 || requests is { Previewed: true }) return;
-#endif
+        if (preview is null || world.Tick < 90 || requests is { Previewed: true }) return;
 
         // Opt-in sandbox probe. The native debug command exercises the same decapitation and snapshot refresh.
         var table = world.Characters;
@@ -121,7 +117,7 @@ internal static class StockHeadRules
             if (shape.Mode is HeadCutMode.NeckDetach or HeadCutMode.AttachedSplit) StockWoundRules.RecordHeadCut(world, id, shape);
             else requests.Hits[id] = new(world.Tick, seed, shape);
             world.Commands.Enqueue(new DebugDamage([id], 5000, head.Template.StringId) { Tick = world.Tick + 1 });
-            Console.WriteLine($"Brutality stock head preview mode={shape.Mode} target={id} tick={world.Tick}");
+            Console.WriteLine(FormattableString.Invariant($"Brutality stock head preview mode={shape.Mode} target={id} tick={world.Tick} plane={shape.Plane}"));
             break;
         }
     }

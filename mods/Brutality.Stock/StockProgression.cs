@@ -168,7 +168,7 @@ internal sealed class StockProgression(GameConstants constants, BodyOptions opti
 
     internal static byte[] MigrationBytes(IEnumerable<(Hand Key, float Experience)> source)
     {
-        var rows = source.OrderBy(row => (row.Key.Type, row.Key.C, row.Key.CS, row.Key.I, row.Key.S)).ToArray();
+        var rows = source.OrderBy(row => (row.Key.Type, row.Key.C, row.Key.Cs, row.Key.I, row.Key.S)).ToArray();
         using var stream = new MemoryStream();
         WriteRows(stream, rows.Length, rows);
         return stream.ToArray();
@@ -181,7 +181,7 @@ internal sealed class StockProgression(GameConstants constants, BodyOptions opti
         writer.Write(count);
         foreach (var (key, experience) in rows)
         {
-            writer.Write(key.Type); writer.Write(key.C); writer.Write(key.CS); writer.Write(key.I); writer.Write(key.S);
+            writer.Write(key.Type); writer.Write(key.C); writer.Write(key.Cs); writer.Write(key.I); writer.Write(key.S);
             writer.Write(experience);
         }
     }
@@ -221,11 +221,11 @@ internal sealed class StockProgression(GameConstants constants, BodyOptions opti
         foreach (var (key, actor) in SavedRows())
         {
             if (active.Contains(actor) || !(actor.Progress.Experience > 0)) continue;
-            hash.Add(key.Type); hash.Add(key.C); hash.Add(key.CS); hash.Add(key.I); hash.Add(key.S);
+            hash.Add(key.Type); hash.Add(key.C); hash.Add(key.Cs); hash.Add(key.I); hash.Add(key.S);
             actor.Progress.Hash(ref hash);
         }
     }
 
     IEnumerable<KeyValuePair<Hand, Actor>> SavedRows() =>
-        durable.OrderBy(pair => (pair.Key.Type, pair.Key.C, pair.Key.CS, pair.Key.I, pair.Key.S));
+        durable.OrderBy(pair => (pair.Key.Type, pair.Key.C, pair.Key.Cs, pair.Key.I, pair.Key.S));
 }

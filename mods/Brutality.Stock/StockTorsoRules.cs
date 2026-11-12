@@ -74,7 +74,7 @@ internal static class StockTorsoRules
 
         ulong seed = TorsoBisectionPolicy.VisualSeedFor(world.Seed, hit.Victim, hit.Attacker, counter);
         var travel = new Vector2(hit.Travel.X, hit.Travel.Z);
-        var shape = TorsoBisectionPolicy.StateForHit(part, hit.CutDirection, seed, travel, hit.VictimYaw);
+        var shape = TorsoBisectionPolicy.StateForHit(part, hit.CutDirection, seed, travel, hit.VictimYaw, lowStrike: hit.LowStrike);
         if (!shape.IsValid) return;
         var request = new CutRequest(hit.Victim, hit.Tick, seed, shape, travel, hit.Damage.Cut, hit.Part, race.BloodColour, race.IsRobot);
         if (worlds.GetOrCreateValue(world).Cuts.TryAdd(hit.Victim, request) && trace)
@@ -141,6 +141,7 @@ internal static class StockTorsoRules
         {
             "transverse" => (TorsoBisectionStyle.Transverse, 2, ArmourData.ChestPartId),
             "vertical" => (TorsoBisectionStyle.Vertical, 1, ArmourData.ChestPartId),
+            "near-vertical" => (TorsoBisectionStyle.NearVertical, 1, ArmourData.ChestPartId),
             "diagonal" => (TorsoBisectionStyle.Diagonal, 7, ArmourData.ChestPartId),
             "oblique" => (TorsoBisectionStyle.Oblique, 3, ArmourData.ChestPartId),
 #if BRUTALITY_STOCK_SAVE_PROBE

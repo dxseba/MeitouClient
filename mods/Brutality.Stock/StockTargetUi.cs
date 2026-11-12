@@ -1,7 +1,7 @@
+using Meitou.Game.Host;
 using System.Numerics;
 using System.Reflection;
 using HarmonyLib;
-using Meitou.Engine;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -10,19 +10,20 @@ namespace Meitou.Brutality;
 
 internal static class StockTargetUi
 {
-    static FieldInfo? session, menu, mouse;
+    static FieldInfo? player, session, menu, mouse;
     static MethodInfo? buildMenu;
 
     internal static void Install(ModContext context)
     {
-        if (AccessTools.TypeByName("Meitou.Game.PlayerInterface") is not { } ui) return;
-        session = ui.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .SingleOrDefault(field => field.FieldType == typeof(WorldSession));
-        menu = AccessTools.Field(ui, "contextMenu");
-        mouse = AccessTools.Field(ui, "mouse");
-        buildMenu = AccessTools.Method(ui, "Menu", [typeof(string), typeof(Vector2), typeof(List<(string, Action)>)]);
-        var verbs = AccessTools.Method(ui, "Verbs", [typeof(CharacterSnapshot)]);
-        if (session is null || menu is null || mouse is null || buildMenu is null || verbs is null)
+        if (AccessTools.TypeByName("Meitou.Game.PlayerInterface") is not { } ui
+            || AccessTools.TypeByName("Meitou.Game.Ui.ContextMenuWindow") is not { } window) return;
+        player = AccessTools.Field(window, "<player>P");
+        session = AccessTools.Field(ui, "Session");
+        menu = AccessTools.Field(window, "OpenMenu");
+        mouse = AccessTools.Field(ui, "Mouse");
+        buildMenu = AccessTools.Method(window, "Menu", [typeof(string), typeof(Vector2), typeof(List<(string, Action)>)]);
+        var verbs = AccessTools.Method(window, "Verbs", [typeof(CharacterSnapshot)]);
+        if (player is null || session is null || menu is null || mouse is null || buildMenu is null || verbs is null)
         { context.Log("Brutality body-part menu unavailable on this host"); return; }
         context.Harmony.Patch(verbs, postfix: new HarmonyMethod(typeof(StockTargetUi), nameof(TargetVerbs)));
     }
@@ -37,14 +38,15 @@ internal static class StockTargetUi
 
     static void TargetVerbs(object __instance, CharacterSnapshot target, List<(string Caption, Action Give)> __result)
     {
-        if (!CanTarget(target) || session?.GetValue(__instance) is not WorldSession active || Attackers(active, target).Length == 0) return;
+        if (!CanTarget(target) || player?.GetValue(__instance) is not { } ui
+            || session?.GetValue(ui) is not WorldSession active || Attackers(active, target).Length == 0) return;
         __result.RemoveAll(verb => verb.Caption is "Attack Target" or "Attack All" or "Attack Unprovoked");
         __result.Add(("Attack body part...", () => Open(__instance, target.Id)));
     }
 
-    static void Open(object ui, CharacterId id)
+    static void Open(object window, CharacterId id)
     {
-        if (session?.GetValue(ui) is not WorldSession active
+        if (player?.GetValue(window) is not { } ui || session?.GetValue(ui) is not WorldSession active
             || active.CurrentSnapshot.Characters.FirstOrDefault(actor => actor.Id == id) is not { } target || !CanTarget(target)) return;
         var attackers = Attackers(active, target);
         if (attackers.Length == 0) return;
@@ -70,6 +72,6 @@ internal static class StockTargetUi
                 if (parts[index].Present) Add(parts[index].Name, index, parts[index].Template);
         }
         var at = mouse?.GetValue(ui) is Vector2 cursor ? cursor : Vector2.Zero;
-        menu?.SetValue(ui, buildMenu?.Invoke(ui, [target.Name + " — Attack", at, entries]));
+        menu?.SetValue(window, buildMenu?.Invoke(window, [target.Name + " — Attack", at, entries]));
     }
 }

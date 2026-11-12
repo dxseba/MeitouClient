@@ -61,7 +61,7 @@ internal static class StockSaveMigration
             ? BrutalityStateCodec.Read(new MemoryStream(actorBytes, writable: false)) : LegacyGoreSave.Read(save);
         if (rows.Count > MaxActors) throw new InvalidDataException("Too many older Brutality characters to migrate.");
 
-        var actors = save.Characters.Where(actor => actor.Handle.RecordType == FcsRecordType.CHARACTER)
+        var actors = save.Characters.Where(actor => actor.Handle.RecordType == FcsRecordType.Character)
             .GroupBy(actor => SaveIdentityAdapter.KeyFor(actor.Handle)!, StringComparer.Ordinal)
             .Where(group => group.Count() == 1).ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
         var accepted = rows.Where(row => actors.ContainsKey(row.Key)).GroupBy(row => row.Key, StringComparer.Ordinal)
@@ -78,12 +78,12 @@ internal static class StockSaveMigration
         // Encode the stock envelope first. The old records stay in the save and this conversion only changes the in-memory load.
         byte[] stock = write(entries);
         foreach (var (actor, state) in accepted) ApplyCuts(actor, state);
-        if (StockTorsoRules.Enabled) ImportLowerHalves(older, actors, accepted, sidecar is null);
+        if (StockTorsoRules.Enabled) ImportTorsoCarries(older, actors, accepted, sidecar is null);
         save.ModData[StockId] = stock;
         if (trace) Console.WriteLine($"Brutality stock imported older save actors={accepted.Length} weaponSidecar={entries.Any(entry => entry.Item1 == WeaponBlood)}");
     }
 
-    static void ImportLowerHalves(IReadOnlyDictionary<string, byte[]> older, IReadOnlyDictionary<string, SaveCharacter> actors,
+    static void ImportTorsoCarries(IReadOnlyDictionary<string, byte[]> older, IReadOnlyDictionary<string, SaveCharacter> actors,
         IReadOnlyList<(SaveCharacter Actor, BrutalityDurableState State)> accepted, bool integratedSave)
     {
         var owners = accepted.Where(row => row.State.Torso is not null && row.Actor.Medical?.Bools.GetValueOrDefault("dead") == true)
@@ -110,15 +110,24 @@ internal static class StockSaveMigration
             return;
         }
         if (!integratedSave) return;
-        // Integrated builds wrote the lower half as a native character carry plus a side discriminator (1 is the upper half).
+        // Integrated builds wrote both halves as native character carries. Only the lower half needs a new proxy link.
         var integrated = actors.Values.Where(actor => actor.GameState is { } state && state.Bools.GetValueOrDefault("carrying")
-                && state.Ints.GetValueOrDefault(CarrySide) != 1)
-            .Select(actor => (Carrier: actor, Target: SaveIdentityAdapter.KeyFor(Hand.Read(actor.GameState!, "carrying"))))
-            .Where(row => row.Target is not null && owners.ContainsKey(row.Target))
-            .GroupBy(row => row.Target!, StringComparer.Ordinal).Where(group => group.Count() == 1).Select(group => group.Single());
-        foreach (var (carrier, target) in integrated)
+                && Hand.IsComplete(state, "carrying") && actor.Medical?.Bools.GetValueOrDefault("dead") != true)
+            .Select(actor => (Carrier: actor, Target: SaveIdentityAdapter.KeyFor(Hand.Read(actor.GameState!, "carrying")),
+                Side: actor.GameState!.Ints.GetValueOrDefault(CarrySide)))
+            .Where(row => row.Side is 0 or 1 && row.Target is not null && owners.TryGetValue(row.Target, out var owner)
+                && !ReferenceEquals(owner, row.Carrier))
+            .GroupBy(row => (row.Target, row.Side)).Where(group => group.Count() == 1).Select(group => group.Single());
+        foreach (var (carrier, target, side) in integrated)
         {
             var owner = owners[target!];
+            if (side == 1)
+            {
+                // The native link can restore the upper half once its owner is spawned, even if its saved platoon is remote.
+                if (owner.GameState is { } body) StockTorsoSave.RequireMigratedOwner(body);
+                continue;
+            }
+
             if (ValidPosition(owner.Position)) StockTorsoProxySave.MigratePosition(owner, owner.Position);
             MigrateCarry(owner, carrier);
         }

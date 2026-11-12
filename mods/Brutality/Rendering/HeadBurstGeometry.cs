@@ -1,7 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality.Rendering;
 

@@ -19,9 +19,15 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
 {
     internal sealed record View(BodyWoundState Body, SevereHeadWoundState Head, ChestHoleState? Hole = null, HeadCutState? AttachedHead = null)
     {
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public BodyWoundState? Bruises { get; init; }
         [System.Text.Json.Serialization.JsonIgnore]
         public long? PunchTick { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        internal bool HasVisual => Body.HasAny || Bruises?.HasAny == true || Head.Kind != SevereHeadWoundKind.None
+            || Hole is not null || AttachedHead is not null;
     }
+    internal static readonly View EmptyView = new(BodyWoundState.Empty, new(0));
     internal sealed record Frame(long Tick, IReadOnlyDictionary<CharacterId, View> Actors);
     sealed record SavedWound(Hand Owner, View Wound);
     sealed record Document(int Version, SavedWound[] Rows);
@@ -29,12 +35,21 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
     {
         public Hand? Owner;
         public WoundBody Body = new();
+        public WoundBody Bruises = new();
         public SevereHeadWoundState Head = new(0);
         public ChestHoleState? Hole;
         public HeadCutState? AttachedHead;
         public long? PunchTick;
-        public View Snapshot() => new(Body.Snapshot(), Head, Hole, AttachedHead) { PunchTick = PunchTick };
-        public void Restore(View view) { Body = WoundBody.From(view.Body); Head = view.Head; Hole = view.Hole; AttachedHead = view.AttachedHead ?? AttachedHead; }
+        public View Snapshot() => new(Body.Snapshot(), Head, Hole, AttachedHead)
+            { PunchTick = PunchTick, Bruises = Bruises.Snapshot() is { HasAny: true } bruises ? bruises : null };
+        public void Restore(View view)
+        {
+            Body = WoundBody.From(view.Body);
+            Bruises = WoundBody.From(view.Bruises);
+            Head = view.Head;
+            Hole = view.Hole;
+            AttachedHead = view.AttachedHead ?? AttachedHead;
+        }
     }
 
     const int SaveLimit = 100_000;
@@ -101,21 +116,29 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
             || world.Characters.Cold(attacker)?.Fighter is not { } fighter
             || !StockTrainingHook.TryGetPartMaximum(world, hit, out float maximum)
             || For(world) is not { } state) return;
-        var delivered = new DamagePacket(hit.Damage.Cut, hit.Damage.Blunt, hit.Damage.Pierce, hit.Damage.ExtraStun, 1, 0);
-        var mechanism = CombatWoundMechanisms.Classify(fighter, delivered, hit.CutDirection);
+        var contact = StockHeadGate.PacketFor(world, hit) ?? new DamagePacket(hit.Damage.Cut + hit.Absorbed.Cut,
+            hit.Damage.Blunt + hit.Absorbed.Blunt, hit.Damage.Pierce + hit.Absorbed.Pierce, hit.Damage.ExtraStun, 1, 0);
+        var mechanism = CombatWoundMechanisms.Classify(fighter, contact, hit.CutDirection);
         if (mechanism == CombatWoundMechanism.Unspecified) return;
 
         var actor = state.Find(hit.Victim, cold);
         var part = medical.Parts[hit.Part].Template;
-        // Blunt blows still drive the major wounds below. Only actual cuts need a stock relief mesh;
-        // recording a crush in the same slot could also replace an earlier useful cut.
-        if (mechanism != CombatWoundMechanism.Crush && (part.Type != BodyPartType.Head || !medical.Decapitated))
-            state.changed |= actor.Body.Apply(hit, part, maximum, mechanism, fighter.TechniqueCategory);
+        bool covered = StockGarmentHits.Observe(world, hit, cold, part, maximum, contact, mechanism, fighter.TechniqueCategory);
         float damage = hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce;
+        int punchRegion = ChestHolePolicy.RegionOf(part.StringId);
+        if (part.Type != BodyPartType.Head || !medical.Decapitated)
+        {
+            if (mechanism == CombatWoundMechanism.Crush && !race.IsRobot
+                && (punchRegion < 0 || !covered || cold.Appearance?.BodyLayers.Count is not > 0)
+                && damage >= Math.Max(3, maximum * .04f))
+                state.changed |= actor.Bruises.Apply(hit, part, maximum, mechanism, fighter.TechniqueCategory);
+            else if (mechanism != CombatWoundMechanism.Crush
+                && hit.Damage.Cut + hit.Damage.Pierce >= StockGarmentHits.MinimumSkinCut(maximum, covered))
+                state.changed |= actor.Body.Apply(hit, part, maximum, mechanism, fighter.TechniqueCategory, detailedSites: !race.IsRobot);
+        }
         var punch = new ChestHoleInput(hit.Source, mechanism, fighter.TechniqueCategory, part.StringId,
             damage, maximum, hit.VictimWasAlive, medical.Dead, actor.Hole is not null, false, race.IsRobot, false);
         bool punchesThrough = ChestHolePolicy.Qualifies(punch, state.punchRule);
-        int punchRegion = ChestHolePolicy.RegionOf(part.StringId);
         if (trace && fighter.Unarmed && punchRegion >= 0 && actor.Hole is null)
             Console.WriteLine(FormattableString.Invariant($"Brutality stock punch check actor={hit.Victim} part={part.Name} damage={damage:F1}/{maximum:F1} required={state.punchRule.DamageFraction:P0} enabled={state.punchRule.Enabled} lethalOnly={state.punchRule.LethalOnly} lethal={medical.Dead} qualifies={punchesThrough}"));
         if (punchesThrough)
@@ -188,6 +211,7 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
 
     public void Schedule(World world)
     {
+        StockBowelSave.ObserveSpawns(world);
         punchRule = punchSettings();
         worlds.GetValue(world, _ => this);
         if (saved.Count == 0 || lastSpawn == world.Characters.Spawns) return;
@@ -211,16 +235,22 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
         {
             lastHeal = world.Tick / 3000;
             foreach (var actor in active.Values.Concat(saved.Values).Distinct())
+            {
                 if (actor.Body.Snapshot() is { HasAny: true })
                 {
                     if (!actor.Body.Heal(.01f)) actor.Body = new();
                     changed = true;
                 }
+                if (actor.Bruises.Snapshot() is { HasAny: true })
+                {
+                    if (!actor.Bruises.Heal(.03f)) actor.Bruises = new();
+                    changed = true;
+                }
+            }
         }
         if (!changed) return;
         var views = active.ToDictionary(pair => pair.Key, pair => pair.Value.Snapshot());
-        foreach (var id in views.Where(pair => !pair.Value.Body.HasAny && pair.Value.Head.Kind == SevereHeadWoundKind.None
-            && pair.Value.Hole is null && pair.Value.AttachedHead is null)
+        foreach (var id in views.Where(pair => !pair.Value.HasVisual)
             .Select(pair => pair.Key).ToArray())
             views.Remove(id);
         history.Enqueue(new(world.Tick + 1, views));
@@ -361,7 +391,7 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
         var rows = source.Select(row => new SavedWound(row.Key, new View(row.State.Wounds, row.State.SevereHead, row.State.ChestHole,
                 row.State.Head is { Mode: HeadCutMode.NeckDetach or HeadCutMode.AttachedSplit } cut ? cut : null)))
             .Where(row => row.Wound.Body.HasAny || row.Wound.Head.HeavyHits > 0 || row.Wound.Hole is not null || row.Wound.AttachedHead is not null)
-            .OrderBy(row => (row.Owner.Type, row.Owner.C, row.Owner.CS, row.Owner.I, row.Owner.S)).ToArray();
+            .OrderBy(row => (row.Owner.Type, row.Owner.C, row.Owner.Cs, row.Owner.I, row.Owner.S)).ToArray();
         return JsonSerializer.SerializeToUtf8Bytes(new Document(1, rows), json);
     }
 
@@ -373,6 +403,7 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
         if (document is not { Version: 1, Rows.Length: <= SaveLimit }) return;
         foreach (var row in document.Rows)
             if (row is { Owner.IsNull: false, Wound: { Body.IsValid: true, Head.IsValid: true } wound }
+                && (wound.Bruises is null || wound.Bruises is { IsValid: true })
                 && (wound.Hole is null || wound.Hole.Value.IsValid)
                 && (wound.AttachedHead is null || wound.AttachedHead is { IsValid: true, Mode: HeadCutMode.NeckDetach or HeadCutMode.AttachedSplit }))
             {
@@ -383,16 +414,16 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
         changed = true;
     }
 
-    IEnumerable<SavedWound> SavedRows() => saved.OrderBy(pair => (pair.Key.Type, pair.Key.C, pair.Key.CS, pair.Key.I, pair.Key.S))
+    IEnumerable<SavedWound> SavedRows() => saved.OrderBy(pair => (pair.Key.Type, pair.Key.C, pair.Key.Cs, pair.Key.I, pair.Key.S))
         .Select(pair => new SavedWound(pair.Key, pair.Value.Snapshot()))
-        .Where(row => row.Wound.Body.HasAny || row.Wound.Head.HeavyHits > 0 || row.Wound.Hole is not null || row.Wound.AttachedHead is not null);
+        .Where(row => row.Wound.HasVisual || row.Wound.Head.HeavyHits > 0);
 
     public void Hash(ref StateHasher hash)
     {
         foreach (var (id, actor) in active.OrderBy(pair => Rng.Key(pair.Key)))
         {
             var view = actor.Snapshot();
-            if (!view.Body.HasAny && view.Head.HeavyHits == 0 && view.Hole is null && view.AttachedHead is null) continue;
+            if (!view.HasVisual && view.Head.HeavyHits == 0) continue;
             hash.Add(id);
             HashWound(ref hash, view);
         }
@@ -400,7 +431,7 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
         foreach (var row in SavedRows())
         {
             if (live.Contains(saved[row.Owner])) continue;
-            hash.Add(row.Owner.Type); hash.Add(row.Owner.C); hash.Add(row.Owner.CS); hash.Add(row.Owner.I); hash.Add(row.Owner.S);
+            hash.Add(row.Owner.Type); hash.Add(row.Owner.C); hash.Add(row.Owner.Cs); hash.Add(row.Owner.I); hash.Add(row.Owner.S);
             HashWound(ref hash, row.Wound);
         }
     }
@@ -422,5 +453,6 @@ internal sealed class StockWoundRules(Func<ChestHoleRule> punchSettings) : ITick
         }
         hash.Add(wound.AttachedHead is not null);
         if (wound.AttachedHead is { } attached) attached.Hash(ref hash);
+        if (wound.Bruises is { HasAny: true } bruises) hash.Add(bruises.StateKey());
     }
 }

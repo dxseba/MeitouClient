@@ -1,7 +1,7 @@
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 using Meitou.Brutality.Physics;
 using Meitou.Brutality.Rendering;
-using Meitou.Rendering;
 using Meitou.Simulation;
 
 namespace Meitou.Brutality.Effects;
@@ -27,8 +27,12 @@ internal static class BowelDiagnostics
     public static void Piece(CharacterId owner, int half, double age, bool attached, BowelAsset asset, Vertex[] vertices, BowelPose pose)
     {
         var centre = pose.Centre;
-        var nodes = pose.RestNodes.Select((node, i) => centre + Vector3.Transform(node, pose.Transforms[i]));
-        Console.WriteLine($"Brutality bowel pose: owner={owner}, half={half}, age={age:F3}, attached={attached}, mesh {Bounds(vertices.Select(v => centre + v.Position))}, nodes {Bounds(nodes)}, rest {Bounds(asset.Source.Select(v => v.Position))}");
+        var nodes = pose.RestNodes.Select((node, i) => centre + Vector3.Transform(node, pose.Transforms[i])).ToArray();
+        float flex = 0;
+        for (int a = 0; a < nodes.Length; a++)
+            for (int b = a + 1; b < nodes.Length; b++)
+                flex = MathF.Max(flex, MathF.Abs(Vector3.Distance(nodes[a], nodes[b]) - Vector3.Distance(pose.RestNodes[a], pose.RestNodes[b])));
+        Console.WriteLine($"Brutality bowel pose: owner={owner}, half={half}, age={age:F3}, attached={attached}, flex={flex:F3}, mesh {Bounds(vertices.Select(v => centre + v.Position))}, nodes {Bounds(nodes)}, rest {Bounds(asset.Source.Select(v => v.Position))}");
     }
 
     static string Bounds(IEnumerable<Vector3> points)

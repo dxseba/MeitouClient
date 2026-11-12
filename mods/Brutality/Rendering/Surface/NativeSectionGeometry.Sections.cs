@@ -1,5 +1,5 @@
 // Adapted from integrated GPL-3.0-or-later source 3a15eeb9f5523b9d106b40fd0ec99ccdb2658efa.
-using Meitou.Rendering;
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 
 namespace Meitou.Brutality.Rendering.Surface;
@@ -7,13 +7,13 @@ namespace Meitou.Brutality.Rendering.Surface;
 internal static partial class NativeSectionGeometry
 {
     // Stay behind the installed anatomy's exposure window, but inside the opposite skin of a thin arm/chest slab.
-    static float[] SectionDepths(List<Point> rim, Vector3[] inset, Vector3 kept, SectionSkin skin)
+    static float[] SectionDepths(List<Point> rim, Vector3[] inset, Vector3 kept, SectionSkin skin, float backingDepth)
     {
         var result = new float[rim.Count];
         for (int i = 0; i < rim.Count; i++)
         {
             var origin = rim[i].Position + rim[i].Morph + inset[i] + kept * 0.001f;
-            result[i] = SectionDepth(origin, kept, skin);
+            result[i] = SectionDepth(origin, kept, skin, backingDepth);
         }
         return result;
     }

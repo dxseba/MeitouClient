@@ -37,8 +37,15 @@ public sealed class BrutalityMod : IMod
         StockCutEquipment.Install(context);
         if (StockLimbRules.Enabled) StockLimbSave.Install(context);
         StockWeaponStains.Install(context);
+        StockGarmentDamage.Install(context);
         StockTargetHooks.Install(context);
         StockWoundRules.Install(context, () => settings.ChestHoleRule);
+        if (StockDetachedPools.Install(context))
+        {
+            StockNativeLimbPools.Install(context);
+            StockNativeHeadPools.Install(context);
+        }
+        StockBowelSave.Install(context);
 #if BRUTALITY_STOCK_SAVE_PROBE
         StockTorsoSaveProbe.Install(context);
         StockSandboxCombatProbe.Install(context);

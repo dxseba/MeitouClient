@@ -1,3 +1,5 @@
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Frame;
 using System.Collections;
 using System.Diagnostics;
 using System.Numerics;
@@ -8,9 +10,7 @@ using Meitou.Brutality.Effects;
 using Meitou.Brutality.Physics;
 using Meitou.Brutality.Ui;
 using Meitou.Data.Characters;
-using Meitou.Engine;
 using Meitou.Modding;
-using Meitou.Rendering;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Ragdolls;
@@ -23,11 +23,13 @@ internal sealed class StockTorsoFragments
 {
     // Physics separately limits awake bodies; settled pieces remain visible within the mesh budget.
     const int MaxCuts = 24, MaximumRetries = 2, MaximumGeometryJobs = 2;
+    const int TorsoLimbLabelBase = 1024;
     static StockTorsoFragments? installed;
     readonly ConditionalWeakTable<object, Display> displays = new();
     readonly ModContext context;
-    readonly FieldInfo session, epoch, states, assets, stamp, bones, previous, attach, previousAttach, posed, seen, frozen;
-    readonly FieldInfo parts, attachCount, attachIndex, partBone, partOffset, buildEye;
+    readonly FieldInfo session, states, assets, stamp, bones, previous, attach, previousAttach, posed, seen, frozen;
+    readonly FieldInfo parts, attachCount, attachIndex, partBone, partOffset, buildEye, stateWorld;
+    readonly bool motionHistory;
     readonly MethodInfo renderer, rigs, drawKey, lastDrawn, bonePosition, prefetch;
     readonly Type stateType;
     readonly bool trace = Environment.GetEnvironmentVariable("MEITOU_BRUTALITY_TRACE_HITS") == "1";
@@ -46,6 +48,7 @@ internal sealed class StockTorsoFragments
         public readonly Dictionary<CharacterId, Dormant> DormantCuts = [];
         public readonly HashSet<long> HiddenDormant = [];
         public readonly List<Pending> Pending = [];
+        public readonly List<BrutalityPartLabel> Labels = [];
         public bool NeedsSharedRoom;
         public long RehydrateAfter;
         public double? PreviousTime;
@@ -78,13 +81,23 @@ internal sealed class StockTorsoFragments
     sealed record Staged(long Key, int Side, CharacterAppearance Look);
     sealed record Attachment(int Slot, int Bone, Matrix4x4 Offset);
     sealed record Piece(Staged Look, AdvancedFragmentScene.Piece Physics, Matrix4x4[] Palette, Matrix4x4[] ActorMotion,
-        Matrix4x4[] Attachments, Attachment[] Tags, int CutBone, Vector3 Centre)
+        Matrix4x4[] Attachments, Attachment[] Tags, int CutBone, IReadOnlyList<FragmentLimbLabels.Anchor> LimbLabels)
     {
         public long DrawKey = Look.Key;
         public CharacterId Target = CharacterId.None;
         public CharacterId Holder = CharacterId.None;
-        public Quaternion HoldRotation = Quaternion.Identity;
+        public AdvancedFragmentScene.StockCarryGrip? CarryGrip;
         public bool HasRestingPalette;
+        public readonly Matrix4x4[] PreviousPalette = new Matrix4x4[Palette.Length];
+        public readonly Matrix4x4[] PreviousAttachments = new Matrix4x4[Attachments.Length];
+        public long MotionFrame = -1;
+        public object? MotionState;
+
+        public void RememberPalette()
+        {
+            Palette.CopyTo(PreviousPalette, 0);
+            Attachments.CopyTo(PreviousAttachments, 0);
+        }
     }
     sealed record Split(CharacterId Owner, long OwnerKey, Matrix4x4 World, Matrix4x4 Inverse,
         SkeletonRig Rig, Matrix4x4[] Birth, Piece[] Pieces, Vector3 CutPoint, Vector3 CutNormal, CharacterInstance Template, StockHeadMeshes.Cost Cost)
@@ -96,19 +109,21 @@ internal sealed class StockTorsoFragments
     StockTorsoFragments(ModContext context, Type host, Type chars)
     {
         this.context = context;
-        session = Field(host, "session"); epoch = Field(host, "worldEpoch");
+        session = Field(host, "Session");
         renderer = AccessTools.PropertyGetter(host, "ActiveCharacters") ?? throw new MissingMemberException("ActiveCharacters");
         rigs = AccessTools.PropertyGetter(chars, "Rigs") ?? throw new MissingMemberException("CharacterRenderer.Rigs");
         prefetch = Method(chars, "Prefetch", typeof(CharacterAppearance));
         drawKey = Method(host, "DrawKey", typeof(CharacterId));
         lastDrawn = Method(chars, "LastDrawn", typeof(long), typeof(string));
         bonePosition = Method(chars, "BonePosition", typeof(long), typeof(string));
-        states = Field(chars, "states"); assets = Field(chars, "assets"); stamp = Field(chars, "updateStamp");
+        states = Field(chars, "_states"); assets = Field(chars, "_assets"); stamp = Field(chars, "_updateStamp");
         stateType = states.FieldType.GetGenericArguments()[1];
-        buildEye = Field(chars, "buildEye");
+        buildEye = Field(chars, "_buildEye");
         bones = Field(stateType, "Bones"); previous = Field(stateType, "Previous");
         attach = Field(stateType, "Attach"); previousAttach = Field(stateType, "PreviousAttach");
         posed = Field(stateType, "Posed"); seen = Field(stateType, "Seen"); frozen = Field(stateType, "Frozen");
+        stateWorld = Field(stateType, "World");
+        motionHistory = StockTorsoMotion.Install(chars, context);
         var asset = assets.FieldType.GetGenericArguments()[1];
         parts = Field(asset, "Parts"); attachCount = Field(asset, "AttachCount");
         var part = parts.FieldType.GetGenericArguments()[0];
@@ -121,9 +136,9 @@ internal sealed class StockTorsoFragments
         try
         {
             var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new TypeLoadException("GameHost");
-            var chars = AccessTools.TypeByName("Meitou.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
+            var chars = AccessTools.TypeByName("Meitou.Game.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
             var hooks = new StockTorsoFragments(context, host, chars);
-            context.Harmony.Patch(Method(host, "AddHeads", typeof(CharacterDrawList)),
+            context.Harmony.Patch(Method(StockHostParts.Decapitation.FieldType, "AddHeads", typeof(CharacterDrawList)),
                 postfix: new HarmonyMethod(typeof(StockTorsoFragments), nameof(HeadsListed)));
             context.Harmony.Patch(Method(host, "Run"),
                 finalizer: new HarmonyMethod(typeof(StockTorsoFragments), nameof(HostFinished)));
@@ -140,7 +155,10 @@ internal sealed class StockTorsoFragments
     static FieldInfo Field(Type type, string name) => AccessTools.Field(type, name) ?? throw new MissingFieldException(type.Name, name);
     static MethodInfo Method(Type type, string name, params Type[] args) => AccessTools.Method(type, name, args) ?? throw new MissingMethodException(type.Name, name);
     static void HostFinished(object __instance) => installed?.Reset(__instance);
-    static void HeadsListed(object __instance, CharacterDrawList list) => installed?.Draw(__instance, list);
+    static void HeadsListed(object __instance, CharacterDrawList list)
+    {
+        if (installed is { } hooks && StockHostParts.HostOf(__instance) is { } host) hooks.Draw(host, list);
+    }
 
     internal static void RequestRoom(object host)
     {
@@ -158,7 +176,7 @@ internal sealed class StockTorsoFragments
         bool hasCuts = StockTorsoRules.HasCuts(shown.World);
         if (!hasCuts && !displays.TryGetValue(host, out _)) return;
         if (renderer.Invoke(host, null) is not { } chars || states.GetValue(chars) is not IDictionary drawn) return;
-        int currentEpoch = (int)epoch.GetValue(host)!;
+        int currentEpoch = StockHostParts.WorldEpoch(host);
         if (displays.TryGetValue(host, out var display)
             && (!ReferenceEquals(display.Renderer, chars) || !ReferenceEquals(display.World, shown.World) || display.Epoch != currentEpoch))
         {
@@ -218,11 +236,35 @@ internal sealed class StockTorsoFragments
             // A streamed-out split must not flicker back to an intact native corpse.
             list.Items.RemoveAll(item => display.HiddenDormant.Contains(item.Key));
         }
-        StockPartLabels.Publish(shown.World, "torso", display.Active.SelectMany(split => split.Pieces.Select(piece =>
-            new BrutalityPartLabel(split.Owner, piece.Look.Side > 0 ? 0 : 1,
-                MathF.Abs(split.CutNormal.Y) >= .75f ? piece.Look.Side > 0 ? "Upper body" : "Lower body" :
-                piece.Look.Side > 0 ? "Body half 1" : "Body half 2",
-                piece.Physics.Pose[piece.Physics.Definition.Root].Position))).ToArray());
+        PublishLabels(display);
+    }
+
+    void PublishLabels(Display display)
+    {
+        display.Labels.Clear();
+        long frame = (long)stamp.GetValue(display.Renderer)!;
+        foreach (var split in display.Active)
+            foreach (var piece in split.Pieces)
+            {
+                if (piece.MotionFrame != frame) continue;
+                bool positive = piece.Look.Side > 0;
+                int key = positive ? 0 : 1;
+                var definition = piece.Physics.Definition;
+                bool rootNamed = false;
+                foreach (var limb in piece.LimbLabels)
+                {
+                    int body = definition.BodyOfBone[limb.Bone];
+                    int limbKey = limb.Root ? key : TorsoLimbLabelBase + limb.Bone * 2 + key;
+                    display.Labels.Add(new(split.Owner, limbKey, limb.Name, piece.Physics.Pose[body].Position));
+                    rootNamed |= limb.Root;
+                }
+                if (rootNamed) continue;
+                string name = MathF.Abs(split.CutNormal.Y) >= .75f
+                    ? positive ? "Upper body" : "Lower body"
+                    : positive ? "Body half 1" : "Body half 2";
+                display.Labels.Add(new(split.Owner, key, name, piece.Physics.Pose[definition.Root].Position));
+            }
+        StockPartLabels.Publish(display.World, "torso", display.Labels);
     }
 
     void Begin(object host, Display display, CharacterDrawList list, WorldSession shown, bool allowDormant)
@@ -440,9 +482,10 @@ internal sealed class StockTorsoFragments
             var anchor = definition.Bodies.Where(body => body.Name.StartsWith("Bip01 Spine", StringComparison.Ordinal)
                 || body.Name is "Bip01 Pelvis" or "Bip01")
                 .MinBy(body => Vector3.DistanceSquared(body.Bind.Position, cutPoint)) ?? definition.Bodies[definition.Root];
+            IReadOnlyList<FragmentLimbLabels.Anchor> limbLabels = request.Shape.FullBody
+                ? FragmentLimbLabels.For(definition, AdvancedFragmentScene.StockBoneComponents(definition, rig)) : [];
             pieces.Add(new(look, physical, new Matrix4x4[rig.BoneCount], new Matrix4x4[definition.Bodies.Length],
-                new Matrix4x4[(int)attachCount.GetValue(asset)!], attachments, anchor.Bone,
-                ready.Cut.Pieces.First(piece => piece.Side == stage.Side).Centre));
+                new Matrix4x4[(int)attachCount.GetValue(asset)!], attachments, anchor.Bone, limbLabels));
         }
         if (!request.Restoring) display.Physics.SeparateTorsoPair(pieces[0].Physics, pieces[1].Physics);
         var split = new Split(request.Victim, pending.Key, world, inverse, rig, skin.ToArray(), pieces.ToArray(), cutPoint, localNormal, original, pending.Cost!.Value);
@@ -507,21 +550,28 @@ internal sealed class StockTorsoFragments
         {
             var target = piece.Look.Side > 0 ? split.Owner
                 : frame?.TryProxy(split.Owner, out var proxy) == true ? proxy : CharacterId.None;
+            var lastHolder = piece.Holder;
+            var oldKey = piece.DrawKey;
             var snapshot = actors.FirstOrDefault(actor => actor.Id == target);
             if (snapshot is not null && !snapshot.CarriedBy.IsNone)
                 PlaceOnArm(host, display, split, piece, snapshot, actors);
-            else if (!piece.Holder.IsNone)
+            else if (piece.Physics.Carried)
             {
                 piece.Holder = CharacterId.None;
-                display.Physics.Impulse(piece.Physics, -1, Vector3.Zero);
+                display.Physics.ReleaseCarried(piece.Physics, preserveDynamic: true);
                 split.SavedFrozen = false;
             }
             if (original.Hidden && piece.Holder.IsNone) continue;
+            var frameNumber = (long)stamp.GetValue(display.Renderer)!;
+            bool consecutive = motionHistory && piece.MotionFrame >= 0 && piece.MotionFrame + 1 == frameNumber && lastHolder == piece.Holder;
+            if (consecutive) piece.RememberPalette();
             var world = FrameWorld(split, piece, out var inverse);
             bool resting = piece.Physics.Frozen && piece.Holder.IsNone;
             if (!resting || !piece.HasRestingPalette)
             {
                 AdvancedFragmentScene.FillStockPalette(piece.Physics, split.Rig, split.Birth, split.World, inverse, piece.Palette, piece.ActorMotion);
+                if (piece.CarryGrip is { } grip)
+                    AdvancedFragmentScene.ApplyStockCarryPalette(piece.Physics, grip, inverse, piece.Palette, piece.ActorMotion);
                 foreach (var tag in piece.Tags)
                 {
                     var bone = StockTorsoPhysics.Bind(split.Rig, tag.Bone) * piece.Palette[tag.Bone];
@@ -545,15 +595,25 @@ internal sealed class StockTorsoFragments
             {
                 state = Activator.CreateInstance(stateType, nonPublic: true)!;
                 frozen.SetValue(state, true);
-                var now = stamp.GetValue(display.Renderer);
-                posed.SetValue(state, now);
-                seen.SetValue(state, now);
+                posed.SetValue(state, frameNumber);
+                seen.SetValue(state, frameNumber);
                 drawn[key] = state;
             }
+            bool continuous = consecutive && key == oldKey && ReferenceEquals(piece.MotionState, state)
+                && (long)seen.GetValue(state)! == frameNumber;
+            if (!continuous)
+            {
+                // Rebase both halves of the velocity calculation when the palette history is unavailable.
+                if (motionHistory) piece.RememberPalette();
+                stateWorld.SetValue(state, world);
+            }
+            if (motionHistory && !ReferenceEquals(piece.MotionState, state)) StockTorsoMotion.Mark(state);
+            piece.MotionState = state;
+            piece.MotionFrame = frameNumber;
             bones.SetValue(state, piece.Palette);
-            previous.SetValue(state, piece.Palette);
+            previous.SetValue(state, motionHistory ? piece.PreviousPalette : piece.Palette);
             attach.SetValue(state, piece.Attachments);
-            previousAttach.SetValue(state, piece.Attachments);
+            previousAttach.SetValue(state, motionHistory ? piece.PreviousAttachments : piece.Attachments);
             list.Add(original with
             {
                 Key = key, Appearance = piece.Look.Look, World = world, FreezeFrom = key, Bones = null,
@@ -565,37 +625,59 @@ internal sealed class StockTorsoFragments
     void PlaceOnArm(object host, Display display, Split split, Piece piece, CharacterSnapshot body, IReadOnlyList<CharacterSnapshot> actors)
     {
         if (body.Carry is not { } native || actors.FirstOrDefault(actor => actor.Id == body.CarriedBy) is not { } carrier) return;
-        var (fallback, orientation) = native.World(carrier.Position, carrier.Yaw);
-        var destination = fallback;
+        var (destination, orientation) = native.World(carrier.Position, carrier.Yaw);
+        var forward = new Vector3(MathF.Sin(carrier.Yaw), 0, MathF.Cos(carrier.Yaw));
+        var outside = Vector3.Cross(Vector3.UnitY, forward);
+        const float outwardBias = .4f;
+        var armNormal = Vector3.Normalize(Vector3.UnitY + outside * outwardBias);
         if (drawKey.Invoke(host, [carrier.Id]) is long carrierKey
             && bonePosition.Invoke(display.Renderer, [carrierKey, "Bip01 L UpperArm"]) is Vector3 shoulder
             && bonePosition.Invoke(display.Renderer, [carrierKey, "Bip01 L Forearm"]) is Vector3 elbow)
         {
             var direction = elbow - shoulder;
-            destination = (elbow + shoulder) * .5f + Vector3.UnitY * .35f;
-            if (direction.LengthSquared() > .01f)
+            float length = direction.Length();
+            if (length > .01f)
             {
-                var outside = Vector3.Cross(Vector3.UnitY, Vector3.Normalize(direction));
-                if (outside.LengthSquared() > .01f)
-                {
-                    outside = Vector3.Normalize(outside);
-                    if (Vector3.Dot(outside, shoulder - carrier.Position) < 0) outside = -outside;
-                    destination += outside * .35f;
-                }
+                var chest = bonePosition.Invoke(display.Renderer, [carrierKey, "Bip01 Spine1"]) is Vector3 at ? at : carrier.Position;
+                var away = shoulder - chest;
+                away.Y = 0;
+                float side = Vector3.Dot(away, outside);
+                if (MathF.Abs(side) > .01f) outside *= MathF.CopySign(1, side);
+                var armAxis = direction / length;
+                var top = Vector3.UnitY - armAxis * armAxis.Y;
+                var edge = outside - armAxis * Vector3.Dot(outside, armAxis);
+                var radial = top + edge * outwardBias;
+                if (radial.LengthSquared() < .01f) radial = edge;
+                if (radial.LengthSquared() > .01f) armNormal = Vector3.Normalize(radial);
+                destination = (elbow + shoulder) * .5f + armNormal * Math.Clamp(length * .23f, .45f, 1.15f);
             }
         }
         if (!float.IsFinite(destination.LengthSquared()) || !float.IsFinite(orientation.LengthSquared())) return;
-        var turn = piece.Holder == body.CarriedBy
-            ? Quaternion.Normalize(orientation * Quaternion.Conjugate(piece.HoldRotation)) : Quaternion.Identity;
-        piece.HoldRotation = orientation;
+        if (piece.CarryGrip is null)
+        {
+            var pelvis = Bone("Bip01 Pelvis") ?? Bone("Bip01") ?? Vector3.Zero;
+            var neck = Bone("Bip01 Neck") ?? Bone("Bip01 Spine2") ?? Bone("Bip01 Head") ?? pelvis + Vector3.UnitY;
+            var leftKnee = Bone("Bip01 L Calf");
+            var rightKnee = Bone("Bip01 R Calf");
+            var knees = leftKnee is { } left && rightKnee is { } right ? (left + right) * .5f : leftKnee ?? rightKnee;
+            var spine = neck - pelvis;
+            var upperLegs = knees is { } knee ? pelvis - knee : spine;
+            piece.CarryGrip = AdvancedFragmentScene.BuildStockGrip(piece.Physics, split.World, spine, upperLegs,
+                rigs.Invoke(display.Renderer, null) as CharacterRigs, split.Template.Appearance, split.Template.Build);
+
+            Vector3? Bone(string name) => split.Rig.Handle(name) is int bone
+                ? Vector3.Transform(split.Rig.BindPosition[bone], split.Birth[bone]) : null;
+        }
+        var grip = piece.CarryGrip;
+        bool entering = piece.Holder != body.CarriedBy;
         piece.Holder = body.CarriedBy;
-        var world = FrameWorld(split, piece, out var inverse);
-        AdvancedFragmentScene.FillStockPalette(piece.Physics, split.Rig, split.Birth, split.World, inverse, piece.Palette, piece.ActorMotion);
-        int rootBone = piece.Physics.Definition.Bodies[piece.Physics.Definition.Root].Bone;
-        var point = Vector3.Transform(piece.Centre, piece.Palette[rootBone] * world);
-        if (!float.IsFinite(point.LengthSquared())) return;
-        display.Physics.Freeze(piece.Physics);
-        display.Physics.MoveStockGrip(piece.Physics, point, destination, turn);
+        var drape = grip.Drape(orientation, forward);
+        display.Physics.CarryStockGrip(piece.Physics, grip, destination, drape, armNormal, entering);
+        if (trace && entering)
+        {
+            var axis = Vector3.Transform(grip.LengthAxis, drape);
+            Console.WriteLine(FormattableString.Invariant($"Brutality stock carry support side={piece.Look.Side} clip={grip.CarrySkin is not null} axisY={axis.Y:F3} axisForward={Vector3.Dot(axis, forward):F3} supportUp={armNormal.Y:F3}"));
+        }
         split.SavedFrozen = false;
     }
 
@@ -660,6 +742,7 @@ internal sealed class StockTorsoFragments
         if (states.GetValue(display.Renderer) is IDictionary drawn)
             foreach (var split in display.Active) Release(display, split, drawn);
         display.Physics.Dispose();
+        StockPartLabels.Publish(display.World, "torso", []);
         displays.Remove(host);
     }
 

@@ -37,12 +37,12 @@ internal sealed class StockCutEquipment(CharacterRigs? rigs, Action<CharacterCol
     {
         try
         {
-            var assemblyType = typeof(World).Assembly.GetType("Meitou.Simulation.CharacterAssembly", throwOnError: true)!;
+            var assemblyType = typeof(World).Assembly.GetType("Meitou.Simulation.Bodies.CharacterAssembly", throwOnError: true)!;
             var assembly = Activator.CreateInstance(assemblyType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                 null, [context.Population], null)!;
             var refresh = AccessTools.Method(assemblyType, "RefreshEquipment", [typeof(CharacterCold)])
                 .CreateDelegate<Action<CharacterCold>>(assembly);
-            var rigField = AccessTools.Field(typeof(RagdollSystem), "rigs");
+            var rigField = AccessTools.Field(typeof(RagdollSystem), "_rigs");
             context.AddSystem("cut-equipment", build => new StockCutEquipment(
                 build.Find<RagdollSystem>() is { } ragdolls ? rigField?.GetValue(ragdolls) as CharacterRigs : null,
                 refresh, build.Data.BodyOptions), SystemAnchor.AfterPart(StandardParts.Animation));
@@ -120,7 +120,7 @@ internal sealed class StockCutEquipment(CharacterRigs? rigs, Action<CharacterCol
     void DropUnsupported(World world, CharacterId owner, CharacterCold cold, int missing, TorsoBisectionState? torso)
     {
         var inventory = cold.Inventory!;
-        var weapons = inventory.Items.Where(item => item.Type is FcsRecordType.WEAPON or FcsRecordType.CROSSBOW
+        var weapons = inventory.Items.Where(item => item.Type is FcsRecordType.Weapon or FcsRecordType.Crossbow
             && item.Section is "hip" or "back").ToArray();
         if (weapons.Length == 0) return;
         var drawn = held.GetValueOrDefault(owner) ?? Drawn(cold);
@@ -200,6 +200,6 @@ internal sealed class StockCutEquipment(CharacterRigs? rigs, Action<CharacterCol
         if (cold.DrawnWeapon != bow) return fighter.Weapon is not null ? StockWeaponItems.InSlot(cold, fighter.WeaponIsBack) : null;
         if (fighter.Crossbow is not { } crossbow || cold.Inventory is not { } inventory) return null;
         string section = crossbow.AtBack ? "back" : "hip";
-        return inventory.Items.Find(item => item.Type == FcsRecordType.CROSSBOW && item.Section == section && item.Record == crossbow.Data.StringId);
+        return inventory.Items.Find(item => item.Type == FcsRecordType.Crossbow && item.Section == section && item.Record == crossbow.Data.StringId);
     }
 }

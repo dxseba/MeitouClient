@@ -1,9 +1,9 @@
+using Meitou.Game.Host;
 using System.Globalization;
 using System.Reflection;
 using HarmonyLib;
 using Meitou.Brutality.Ui;
 using Meitou.Data.Ui;
-using Meitou.Engine;
 using Meitou.Modding;
 using Meitou.Simulation;
 
@@ -15,7 +15,9 @@ internal sealed class StockProgressionUi(Type ui)
     static StockProgressionUi? installed;
     readonly FieldInfo? session = AccessTools.GetDeclaredFields(ui).SingleOrDefault(field => field.FieldType == typeof(WorldSession));
     readonly MethodInfo? lead = AccessTools.Method(ui, "Lead", Type.EmptyTypes);
-    readonly PropertyInfo? title = AccessTools.Property(ui, "TitleOpen"), editor = AccessTools.Property(ui, "EditorOpen");
+    readonly PropertyInfo? title = AccessTools.Property(ui, "TitleOpen");
+    readonly PropertyInfo editor = StockHostParts.Property(ui, "CharacterEditor");
+    readonly PropertyInfo editorOpen = StockHostParts.Property(StockHostParts.Property(ui, "CharacterEditor").PropertyType, "EditorOpen");
 
     internal static void Install(ModContext context)
     {
@@ -36,7 +38,7 @@ internal sealed class StockProgressionUi(Type ui)
 
     void Bind(object player, UiBindings bindings)
     {
-        if (session?.GetValue(player) is not WorldSession shown || title?.GetValue(player) is true || editor?.GetValue(player) is true) return;
+        if (session?.GetValue(player) is not WorldSession shown || title?.GetValue(player) is true || editorOpen.GetValue(editor.GetValue(player)) is true) return;
         bindings.Text["brutality.available"] = "1";
         if (lead?.Invoke(player, null) is not CharacterSnapshot actor || StockProgression.For(shown.World) is not { } progression) return;
 

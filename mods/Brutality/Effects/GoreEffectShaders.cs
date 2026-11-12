@@ -13,15 +13,30 @@ internal static class GoreEffectShaders
         uniform mat4 uViewProjection;
         uniform vec3 uEye;
         uniform vec3 uCentre;
+        uniform int uTissueSkinned;
+        uniform mat4 uTissuePose[9];
         out vec2 vUv;
         out vec4 vColour;
         out vec3 vWorld;
         out vec3 vNormal;
         flat out vec3 vLiquidEnds;
         void main() {
-            vec3 p = aPosition + uCentre;
+            vec3 position = aPosition;
+            vec3 normal = aNormal;
+            if (uTissueSkinned != 0) {
+                // Tissue does not sample UVs. They carry the first two weights, with the third and node IDs in the auxiliary channel.
+                int packedNodes = int(aLiquidEnds.y);
+                ivec4 nodes = (ivec4(packedNodes) >> ivec4(0, 4, 8, 12)) & ivec4(15);
+                vec3 w = vec3(aUv, aLiquidEnds.x);
+                mat4 skin = uTissuePose[nodes.x] * w.x + uTissuePose[nodes.y] * w.y
+                          + uTissuePose[nodes.z] * w.z + uTissuePose[nodes.w] * (1.0 - w.x - w.y - w.z);
+                position = (skin * vec4(aPosition, 1.0)).xyz;
+                vec3 posedNormal = mat3(skin) * aNormal;
+                if (dot(posedNormal, posedNormal) > 1e-12) normal = normalize(posedNormal);
+            }
+            vec3 p = position + uCentre;
             gl_Position = uViewProjection * vec4(p, 1.0);
-            vUv = aUv; vColour = aColour; vWorld = p + uEye; vLiquidEnds = aLiquidEnds; vNormal = aNormal;
+            vUv = aUv; vColour = aColour; vWorld = p + uEye; vLiquidEnds = aLiquidEnds; vNormal = normal;
         }
         """;
 
@@ -127,8 +142,17 @@ internal static class GoreEffectShaders
                 vec3 ambient = mix(uBowelGround, uBowelSky, 0.5 + 0.5 * n.y);
                 vec3 direction = normalize(vec3(uSunDirection.x, max(uSunDirection.y, 0.02), uSunDirection.z));
                 float diffuse = max(dot(n, direction), 0.0);
+                vec3 sunlight = diffuse * uBowelSun;
+                vec3 light = ambient + sunlight;
+                if (vLiquidEnds.z > 0.5) {
+                    // Match the daylight range of the world HDR target, whose exposure is applied after this pass.
+                    float daylight = smoothstep(-0.025, 0.36, uSunDirection.y);
+                    float skyFacing = 0.5 + 0.5 * n.y;
+                    vec3 bounce = vec3(mix(1.09, 1.28, skyFacing));
+                    light = mix(light, bounce + 0.48 * sunlight, daylight);
+                }
                 float wet = pow(max(dot(reflect(-direction, n), view), 0.0), 32.0);
-                return albedo * (ambient + diffuse * uBowelSun) + (0.04 * diffuse * wet) * uBowelSun;
+                return albedo * light + (0.04 * diffuse * wet) * uBowelSun;
             }
 
             vec4 map = vec4(1.0, 1.0, 1.0, 0.5);

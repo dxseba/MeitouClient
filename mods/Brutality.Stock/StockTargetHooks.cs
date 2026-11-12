@@ -1,3 +1,4 @@
+using Meitou.Simulation.Player;
 using System.Numerics;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -14,8 +15,8 @@ internal static class StockTargetHooks
 {
     static readonly FieldInfo Down = AccessTools.Field(typeof(CombatSlot), nameof(CombatSlot.Down));
     static readonly FieldInfo Target = AccessTools.Field(typeof(CombatSlot), nameof(CombatSlot.TargetSlot));
-    static readonly FieldInfo Read = AccessTools.Field(typeof(CombatSystem), "read");
-    static readonly MethodInfo Cold = AccessTools.Method(typeof(CharacterTable), nameof(CharacterTable.Cold), [typeof(int)]);
+    static readonly FieldInfo Read = AccessTools.Field(typeof(CombatSystem), "_read");
+    static readonly MethodInfo Characters = AccessTools.PropertyGetter(typeof(World), nameof(World.Characters));
     static readonly MethodInfo Incapacitated = AccessTools.PropertyGetter(typeof(MedicalState), nameof(MedicalState.Incapacitated));
     internal static bool ZoneAimReady { get; private set; }
 
@@ -30,7 +31,7 @@ internal static class StockTargetHooks
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static))
             .SingleOrDefault(method => method.Name.StartsWith("<Scan>", StringComparison.Ordinal)
                 && zone is not null && method.GetParameters().Select(p => p.ParameterType).SequenceEqual([typeof(int), zone.MakeByRefType()]));
-        var act = AccessTools.Method(combat, nameof(CombatSystem.Act));
+        var act = AccessTools.Method(combat, "ReviewTarget");
         var mode = AccessTools.Method(combat, "ChooseMode");
         var apply = AccessTools.Method(combat, nameof(CombatSystem.Apply), [typeof(World), typeof(Effect).MakeByRefType()]);
         var choose = AccessTools.Method(typeof(MedicalState), nameof(MedicalState.ChoosePart),
@@ -90,7 +91,6 @@ internal static class StockTargetHooks
             || !StockTargetSystem.Allowed(world.Characters, attacker, order, focus)
             || !StockTargetSystem.GroundTarget(world, order.Target));
 
-    static CodeInstruction Copy(CodeInstruction instruction) => new(instruction.opcode, instruction.operand);
     static CodeInstruction Call(string name) => new(OpCodes.Call, AccessTools.Method(typeof(StockTargetHooks), name));
     static int Single(List<CodeInstruction> code, Func<int, bool> match, string name)
     {
@@ -101,15 +101,12 @@ internal static class StockTargetHooks
     static IEnumerable<CodeInstruction> AllowInAct(IEnumerable<CodeInstruction> instructions)
     {
         var code = instructions.ToList();
-        int cold = code.FindIndex(op => op.Calls(Cold)); // The first Cold call loads the current attacker from the partition.
-        if (cold < 2) throw new InvalidOperationException("The stock attacker local was not found.");
         int down = Single(code, i => i >= 4 && code[i].LoadsField(Down)
-            && code[i - 2].LoadsField(Target) && code[i - 4].LoadsField(Read), "Act target Down");
-        int medical = Single(code, i => code[i].Calls(Incapacitated), "Act target Incapacitated");
-        var table = code[cold - 2];
-        var attacker = code[cold - 1];
-        var slot = code[down - 3];
-        CodeInstruction[] Query() => [Copy(table), Copy(attacker), Copy(slot), new(OpCodes.Ldfld, Target), Call(nameof(Unavailable))];
+            && code[i - 2].LoadsField(Target) && code[i - 4].LoadsField(Read), "ReviewTarget Down");
+        int medical = Single(code, i => code[i].Calls(Incapacitated), "ReviewTarget Incapacitated");
+        // ReviewTarget receives World, attacker and the current CombatSlot by reference.
+        CodeInstruction[] Query() => [new(OpCodes.Ldarg_1), new(OpCodes.Callvirt, Characters), new(OpCodes.Ldarg_2),
+            new(OpCodes.Ldarg_3), new(OpCodes.Ldfld, Target), Call(nameof(Unavailable))];
         code.InsertRange(medical + 1, Query());
         code.InsertRange(down + 1, Query());
         return ExpandBranches(code);

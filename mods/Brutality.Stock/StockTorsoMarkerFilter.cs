@@ -1,9 +1,9 @@
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Overlays;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
-using Meitou.Engine;
 using Meitou.Modding;
-using Meitou.Rendering;
 using Meitou.Simulation;
 
 namespace Meitou.Brutality;
@@ -18,7 +18,7 @@ internal static class StockTorsoMarkerFilter
         try
         {
             var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new TypeLoadException("GameHost");
-            session = AccessTools.Field(host, "session") ?? throw new MissingFieldException(host.FullName, "session");
+            session = StockHostParts.Field(host, "Session");
             var draw = AccessTools.Method(host, "DrawMarkers", [typeof(DebugOverlay), typeof(int), typeof(int)])
                 ?? throw new MissingMethodException(host.FullName, "DrawMarkers");
             context.Harmony.Patch(draw, transpiler: new(typeof(StockTorsoMarkerFilter), nameof(Filter)));

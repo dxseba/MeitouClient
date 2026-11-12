@@ -151,12 +151,20 @@ score and the 0.75 falloff spread them). Work distance: [below](#work-distance).
 100 copper rocks, 140 hybrid stone mines. Which tasks reach their building through `isAtLocation` is **Observed** only through
 the goal conditions (the call is virtual). Meitou applies the height limit above wherever it applies the reach range of the same function: builders, fetchers, machine operators, haulers and corpse carriers (`SiteReach.AtHeight`; rocks and turret posts keep their own arrival test).
 
+Meitou's NPC town workers (189, 190, and a player slave's work, `AiSystem.AtWork`): within the building functionality's `use range` (30
+without one) of the building's position, doubled once its velocity is nearly 0, so a worker held off by the rock short of the reach has arrived
+(standing in for the touching test; the usage nodes of `getPositionMarker` are not read: engine choice). **Observed** (Meitou, Rebirth, before
+this rule: a fixed 30): every worker that reached its mine stood 57 to 71 units from the mine's position with its walk never over, and never mined;
+with it (the mines' `use range` 40) all 15 that reached their rock work at its clip. They still gather at the same point of each rock, where the
+original's spread round it (the usage nodes).
+
 Meitou (`SiteReach`): builders 40 (walls 60), operators and storage fetches the `use range`, doubled once stopped, measured
 to the building's footprint hull (engine choice standing in for touching; a building without collision uses its parts' bounds
-hull) or, unknown, its position. A rock's operator has arrived inside its mesh's bounds box as the instance places it, scaled 1.2
-(a circle of 1.2 x its radius without the mesh), or within the `use range` (doubled once stopped) of the box's centre, which
+hull) or, unknown, its position. A rock's operator has arrived inside its mesh's footprint (the convex hull of its vertices
+seen from above) as the instance places it, scaled 1.2 about the box's middle (a circle of 1.2 x its radius without the mesh; the bounds box without the movement flag let
+miners work a scattered or long rock from 20 m off, #332), or within the `use range` (doubled once stopped) of the box's centre, which
 stands in for the position marker (engine choice; a rock's origin can lie off its pile); it faces that centre. Taking its ore
-measures 40 to the box's edge. Height: Meitou has no floor id, so `SiteReach.AtHeight` requires |dy| below the limit above (130 door, 15 inside a building, else 45; slot 0x428 not read) for every site goal.
+measures 40 to the footprint's edge. Height: Meitou has no floor id, so `SiteReach.AtHeight` requires |dy| below the limit above (130 door, 15 inside a building, else 45; slot 0x428 not read) for every site goal.
 
 Repair (**Verified**, Building slot 0x328 `FUN_1400f6b70`, `Task_Build` `FUN_14034a440`): a building needs repair when
 `progress < target`; building health is construction progress. Orders 2 and 95 are both `Task_Build`, which pushes the
@@ -374,7 +382,7 @@ short; a piece runs from its position along its own +Z for `link length` x `scal
 - **Controls**: click the start, move, click the end (no hold-drag). The first click starts a line for a normal wall, or
   for a single only when snapped (unsnapped singles and selected subsections place as one ordinary ghost). The second
   click queues every piece and, unless the end snapped or the wall is a single, a new line starts at the far end (clicks
-  chain a polyline). Right click drops the line. The first click posts "Blue arrows point outwards, towards enemy.";
+  chain a polyline). Right click drops the line; with no line, Meitou's right click on empty ground drops the chosen item (ghost and list highlight, queue stays; original **Unknown**, [level-editor](level-editor.md)). The first click posts "Blue arrows point outwards, towards enemy.";
   arrows (`arrow.mesh`, "bluebuilding", at rot x (0, 30, len/2), turned 180 deg, scale 2) mark each piece; the mesh's tip is at -X (see
   [perception](perception.md#spotting-a-sneaker)), which way it ends up facing is **Unknown**. A global flag `DAT_1421337b8` can block the first click (**Unknown**).
 - **Pieces** (`FUN_14042b660`): the wall and its `wall subsections`; connector and lower wedge kept apart, the rest with a
@@ -551,7 +559,7 @@ Status `+0x468` of a `ProductionBuilding` (production, furnace, generator, wind,
   an unmet !63 into rows 92 Collecting resource (`Task_EmptyMachine`; A: 66, !63, !169) and 113 (A: !63, 105, !66, !89), which achieve it: the worker takes the output into its own inventory (B 82 room; 114 ditching makes it) before operating.
 - **Crafting** (`FUN_1402bcac0`, **Observed**): after a finished item is stored, status 1 when the output has become full (not when it could not be stored).
 
-Meitou: `Machine.Status` (hashed, not saved, a producer starts at 2), `HasEmptyInputs`, `OutputBlocked`, `Jammed`; `ProductionSystem.SlowWorld` clears 1 / 0 for a producer that takes operators, an operator's or automatic machine's step sets them. The panel reads the word chain
+Meitou: `Machine.Status` (hashed, not saved, a producer starts at 2), `HasEmptyInputs`, `OutputBlocked`, `Jammed`; `ProductionSystem.ClearBlocked` (its serial step) clears 1 / 0 for a producer that takes operators, an operator's or automatic machine's step sets them. The panel reads the word chain
 (`ProductionStatus`). Planner: `Holds` evaluates 62 / 63 / 64 for a `Targets.Machine` target, which no finder gives yet; 65, 105, 106, the farm and bench variants and the 87 to 92 plan are not modelled (the job system's `HasWork` / `Room` is the engine reading of the blocked start).
 
 ### Item furnace
@@ -772,7 +780,9 @@ to `FUN_140836b70`: contribution k of the frame is x 0.6^k (counter `+0x174`, cl
   research load zero it (**Verified**, `FUN_140834390`, `FUN_140836cb0`, `FUN_1408360f0`). Available (`FUN_1408333b0`): not `blueprint only`, not finished or queued,
   `level` <= tech level, requirements met leniently (`FUN_140832fa0` with its flag set, **Verified**: a RESEARCH finished, another record
   unlocked, or else that record's own `requirements` all met strictly, one level, an empty list passing; blueprint learning `FUN_1402b65d0`
-  checks strictly), grouped by `category`.
+  checks strictly), grouped by `category`. The research window's queue click (`FUN_1404976c0`) checks leniently too (**Verified**, disassembly: flags 1, 1;
+  "Cannot research '{1}'. Requirements not met." otherwise), so a research one unfinished requirement away queues and completes: base Tech Level 2 needs the research
+  Small House, which needs nothing (#363). The fourth flag's extra test (`+0xd8` set, `FUN_140832e50`, only when global `+0x2a0` is set) is **Unknown**; Meitou skips it.
 - **Queue** (`FUN_1408348a0`): needs `level` <= bench level (`FUN_140830a30` names the missing level) and the cost
   paid (`FUN_1408343c0`): `cost` items (of the repetition, below) summed over the inventories of the
   player's research benches (**Verified**: `FUN_14082e750` runs a `BuildingFinderNearestAllies_Function` at the position of the camera focus node
@@ -893,7 +903,7 @@ and `power capacity` (battery store, "in seconds" per fcs.def), plus research ([
     thunk `1400525e5`, the only caller of `FUN_140786100`), so it is reached indirectly, if at all.
   - Not read by production (slot 150 `FUN_140298700`, slot 109 `FUN_140296e00`), power (slots 163, 166, `FUN_140299370`), `Task_OperateMachine`, or the
     engineers' finder (slot 101 `FUN_1400f6b70`: progress below target).
-  Meitou: `Machine.Broken`, saved as `broken`, set and cleared by the dismantle, build, completion and ruin steps; the header (`PlayerInterface.BuildingLines`) and
+  Meitou: `Machine.Broken`, saved as `broken`, set and cleared by the dismantle, build, completion and ruin steps; the header (`BuildingSelection.SiteStatus`) and
   turret manning read it, and a town turret's saved `broken` (below). A player-built cage's or safe's lock is a fixture of its own ([locks](locks.md#lock-object)); a broken machine keeps its fixtures registered (doors, cage, bed) and its own lock counts as broken.
 - **What damages a building** (**Verified**, decompile): hits go to slot 62, which is `FUN_1402972c0` (returns 1, no effect) for every UseableStuff class (machines,
   turrets, storages, lights) and `FUN_1400d20b0` (returns 0, no effect either) for plain and gate buildings; only WallBuilding (`FUN_14029d560`, [walls](#walls)) and doors (`FUN_14029d690`)
@@ -935,7 +945,7 @@ is lost once a part moves):
 - Data (**Verified**, probe of the merged data): Wind Generator (I, II) head 25°/s, blades 90°/s, wind 10 to 50; Small Wind Generator body
   25°/s, blades 180°/s wind 4 to 25 (its share), dynamo wind 5 to 25; refinery spinners 16, drills 100, generator spinner 100, looms 90.
 
-Meitou (`RotorSpec`, `WorldObjectRenderer.AdvanceRotors`): the renderer turns the parts it draws by the game frame time and the scheduled
+Meitou (`RotorSpec`, `RotatingParts.Advance`): the renderer turns the parts it draws by the game frame time and the scheduled
 wind; a level building's mult comes from its data as its sound emitter's efficiency does (generator output x 0.01, batteries and machines
 needing neither operators nor power their `output rate`, other machines 0; engine choice).
 

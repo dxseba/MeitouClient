@@ -3,15 +3,14 @@
     <AssemblyName>Brutality</AssemblyName>
     <RootNamespace>Meitou.Brutality</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
     <DefineConstants>$(DefineConstants);BRUTALITY_STOCK_MASTER</DefineConstants>
 
     <DefineConstants Condition="'$(StockSaveProbe)' == 'true'">$(DefineConstants);BRUTALITY_STOCK_SAVE_PROBE</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />
     <Compile Include="../Brutality/Gameplay/BrutalityStateCodec.cs;../Brutality/Bridge/LegacyGoreSave.cs" />
-    <ProjectReference Include="../../src/Meitou.Modding/Meitou.Modding.csproj" Private="false" />
-    <ProjectReference Include="../../src/Meitou.Rendering/Meitou.Rendering.csproj" Private="false" />
-    <ProjectReference Include="../../src/Meitou.Engine/Meitou.Engine.csproj" Private="false" />
     <Compile Include="../Brutality/Effects/EffectContracts.cs;../Brutality/Effects/GoreEffectRenderer.cs;../Brutality/Effects/GoreEffectShaders.cs;../Brutality/Effects/LiquidBlood*.cs;../Brutality/Effects/RobotBreakExplosionGeometry.cs;../Brutality/Effects/RobotDischarge*.cs;../Brutality/Effects/RobotVisualRandom.cs" />
     <Compile Include="../Brutality/Gameplay/BrutalityProgress.cs;../Brutality/Gameplay/BrutalityPolicy.cs;../Brutality/Gameplay/CombatWoundMechanism.cs" />
     <Compile Include="../Brutality/Rendering/MeshCut.cs;../Brutality/Rendering/HeadBurstGeometry.cs;../Brutality/Physics/RagdollPhysics.cs;../Brutality/Physics/RagdollHull.cs;../Brutality/AnatomyAssets.cs;../Brutality/Anatomy/AnatomyFile.cs;../Brutality/Gameplay/HeadCut.cs" />
@@ -28,7 +27,7 @@
     <Compile Include="../Brutality/Gameplay/LimbCutState.cs;../Brutality/Gameplay/LimbCutPolicy.cs;../Brutality/Gameplay/PairedLimbPolicy.cs;../Brutality/Physics/RagdollSeverance.cs" />
     <Compile Include="../Brutality/Effects/RobotScrapSimulation.cs" />
     <Compile Include="../Brutality/Physics/CutWeaponDrops.cs;../Brutality/Physics/RagdollSkinSurface.Equipment.cs" />
-    <Compile Include="../Brutality/Ui/BrutalityUiExtension.cs" />
+    <Compile Include="../Brutality/Ui/BrutalityUiExtension.cs;../Brutality/Ui/FragmentLimbLabels.cs" />
     <None Update="meitou.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../LICENSE;../../LICENSE-EXCEPTION.md" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../Brutality/assets/effects/**/*" Link="assets/effects/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

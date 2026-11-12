@@ -6,7 +6,7 @@ Labels as in [../README.md](../README.md).
 
 Sources: `kenshi_x64.exe` (the camera rig's set-up, its input, zoom, pitch, pan and ground-clearance steps, the settings loader;
 decompiled outside the repository on 2026-10-05 and 2026-10-17), the install's `settings.cfg` and `controls.cfg`, `fcs.def`.
-Implemented as facts in `Meitou.Data.World.KenshiCamera` and `Meitou.Engine.Cameras.StrategyCamera`. Nothing here was compared
+Implemented as facts in `Meitou.Data.World.KenshiCamera` and `Meitou.Game.Host.Cameras.StrategyCamera`. Nothing here was compared
 against the running game; the signs and rates come from reading the code.
 
 ## The strategy camera (Verified: `kenshi_x64.exe`)
@@ -84,8 +84,9 @@ not the game speed, so the camera works while the game is paused. Several inputs
   direction is not touched. The pivot then closes on its goal: a gap of 0.1 or less at once, else at **10 × the gap per second**, the
   speed taken when the goal changes (a moving goal is followed with a lag of about 0.1 s). A pivot or eye starting inside geometry
   leaves the height alone (**Observed**). Placing the camera finds the goal at once. Engine: every building's floor-0 ordinary parts
-  within 400 units are the pivot's ground, and a building in the interior view's parts up to the viewed floor (others stay at floor
-  0, the +0x330 re-cast read as "not the viewed building"); the highest at the point, without the 3000 cap, the sweep, the group-14
+  within 400 units are the pivot's ground, a ruin's on its `destroyed collision` as the game's ray meets it ([collision](collision.md);
+  without them close zoom put the eye inside a ruin's raised base, issue #483), and a building in the interior view's parts up to the viewed
+  floor (others stay at floor 0, the +0x330 re-cast read as "not the viewed building"); the highest at the point, without the 3000 cap, the sweep, the group-14
   ray or the eye's lowering ray. A building's collision is read on a worker, so the first frames near it keep to the terrain; a runtime placement
   added or removed (a building; not a ground item's drop or pick-up, which leaves the lists alone, issue #204, **Observed** by code, not measured) lists the zone's buildings again while the known floors keep answering
   (the pivot does not drop to the terrain meanwhile), and an unchanged building keeps its collision.

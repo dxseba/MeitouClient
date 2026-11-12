@@ -73,18 +73,18 @@ internal static class StockHeadGate
         }
     }
 
-    static void BeginMelee(World world, in Effect e, CombatTechnique[] ___techniques, out Contact? __state)
+    static void BeginMelee(World world, in Effect e, CombatTechnique[] ____techniques, out Contact? __state)
     {
         __state = active;
         active = null;
         int technique = (int)e.Position.X;
-        if (e.Kind != CombatSystem.BlowEffect || (uint)technique >= (uint)___techniques.Length) return;
+        if (e.Kind != CombatSystem.BlowEffect || (uint)technique >= (uint)____techniques.Length) return;
         var table = world.Characters;
         var prev = table.Previous;
         if ((uint)e.Source >= (uint)prev.Length || (uint)e.Target >= (uint)prev.Length) return;
         var a = prev[e.Source];
         var d = prev[e.Target];
-        int direction = HitOutcomes.Facing(___techniques[technique].DirectionOf(e.Arg), HitOutcomes.Behind(a.Position, d.Position, d.Yaw));
+        int direction = HitOutcomes.Facing(____techniques[technique].DirectionOf(e.Arg), HitOutcomes.Behind(a.Position, d.Position, d.Yaw));
         active = Begin(world, e.Source, e.Target, CombatHitSource.Melee, direction, (int)e.Amount, e.Arg);
     }
 
@@ -158,4 +158,8 @@ internal static class StockHeadGate
         && ReferenceEquals(contact.World, world) && contact.Victim == hit.Victim && contact.Attacker == hit.Attacker
         && contact.Part == hit.Part && contact.Sequence == hit.Sequence && contact.Blow == hit.Blow
         && contact.Source == hit.Source && contact.Medical.Decapitated ? contact.Accepted : null;
+
+    internal static DamagePacket? PacketFor(World world, in CombatHit hit) => active is { } contact
+        && ReferenceEquals(contact.World, world) && contact.Victim == hit.Victim && contact.Attacker == hit.Attacker
+        && contact.Sequence == hit.Sequence && contact.Blow == hit.Blow && contact.Source == hit.Source ? contact.Packet : null;
 }

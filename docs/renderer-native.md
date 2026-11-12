@@ -1,6 +1,6 @@
 # Native renderer
 
-Current API: `src/Meitou.Rendering/Gpu/` (Core/Shaders included), windowing in Rendering.Display.
+Current API: `src/Meitou.Game/Rendering/Gpu/` (Core/Shaders included), windowing in `Rendering/Display/`.
 Vulkan only; engine contracts below are checked against the named source, not game-format facts.
 Feature algorithms: render-* docs/[index](README.md).
 
@@ -24,6 +24,13 @@ Texture sizes cluster (2026-11-01 town: 541 world textures in 15 sizes, 216 atla
 of play): with variable-size carving in shared 64 MB blocks, 1286 MB was free but scattered over 64 blocks that long-lived images pinned.
 PipelineLibrary caches explicit descriptions and records late creation (LatePipelines). `Prepare` has no caller: the loading warm-up draws what makes them, with the reflection and cloud passes forced on ([bench](bench.md) "Play benchmark").
 CommandList records bindings/draw/dispatch/transfer/dynamic rendering, preserving host pass order.
+
+Lost device: submissions, fence waits, acquire and present go through `VulkanDevice.Check`, which writes `DeviceFault`'s report to the log once
+before the call throws (`vulkan    device lost at ...`: frames, video memory, then VK_EXT_device_fault's description, fault addresses and vendor
+codes where the device has the extension). `MEITOU_DIAG_FAULT=1` adds what the addresses need to be read: `GpuAddressLog` (the ranges the driver
+reports bound and unbound, VK_EXT_device_address_binding_report, plus the allocator's placement of each image and buffer in its block; the last
+16384 unbound of each are kept) and `PassMarkers` (a host-visible word filled when the pre-frame buffer and each native segment begins, another
+when it ends: per frame slot, the pass the GPU began and finished last).
 
 ## Synchronization and shaders
 
@@ -67,6 +74,9 @@ BindlessTable has seven typed sampler arrays (BindlessKind bindings0..6). Per-sl
 journal replays at begin/before submission; freed indices wait for consumers. Updating an index
 changes every submitted draw using it, including already-recorded draws. Use new indices for
 mid-frame binding changes. Tables/views/globals are render-thread state.
+`ScalarOf` lists the integer `InternalFormat`s (unsigned or signed samplers); all others sample as
+float. Verified by `BindlessTests.Integer_textures_read_back_exact_values_through_the_bindless_arrays`
+(integer routing and texels).
 
 ## Parallel recording and validation
 

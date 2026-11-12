@@ -1,7 +1,7 @@
+using Meitou.Game.Rendering.Frame;
 using System.Numerics;
 using Meitou.Brutality.Rendering;
 using Meitou.Data.Ogre;
-using Meitou.Rendering;
 
 namespace Meitou.Brutality;
 

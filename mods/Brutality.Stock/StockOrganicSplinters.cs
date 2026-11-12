@@ -3,8 +3,8 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Data.Ogre;
-using Meitou.Rendering;
-using Meitou.Rendering.Gpu;
+using Meitou.Game.Rendering.Gpu;
+using Meitou.Game.Rendering.Objects;
 
 namespace Meitou.Brutality.Effects;
 
@@ -15,10 +15,10 @@ internal sealed class StockOrganicSplinters(Type host, Type graphics, Type chara
     const double MaxAge = 8;
     readonly FieldInfo debris = AccessTools.Field(graphics, "Debris");
     readonly FieldInfo output = AccessTools.Field(graphics, "DebrisPieces");
-    readonly FieldInfo art = AccessTools.GetDeclaredFields(host).Single(field => field.FieldType == typeof(AssetLocator));
-    readonly FieldInfo context = AccessTools.Field(typeof(DebrisRenderer), "gpu");
-    readonly FieldInfo content = AccessTools.Field(characters, "content");
-    readonly FieldInfo materials = AccessTools.Field(AccessTools.Field(characters, "content").FieldType, "resolver");
+    readonly FieldInfo art = AccessTools.Field(host, "Assets");
+    readonly FieldInfo context = AccessTools.Field(typeof(DebrisRenderer), "_gpu");
+    readonly FieldInfo content = AccessTools.Field(characters, "_content");
+    readonly FieldInfo materials = AccessTools.Field(AccessTools.Field(characters, "_content").FieldType, "_resolver");
     readonly Queue<Request> pending = [];
     readonly List<Piece> pieces = [];
     readonly ConditionalWeakTable<DebrisRenderer, Meshes> meshes = new();

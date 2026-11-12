@@ -1,9 +1,10 @@
 # Code mods (C#)
 
-**Status: implemented, code-mod API version 1 (2026-11-04).** Meitou's own in-process loader, Lib.Harmony shipped by the game as the
-sanctioned patching library, and a registration surface kept to the cases where a patch would silently break an invariant. No BepInEx.
-The RE_Kenshi decision ([rekenshi](formats/rekenshi.md)) stands and its DLLs stay ignored. Code: `src/Meitou.Modding` (contract and
-loader), `GameHost.Mods.cs` (host wiring), `SimulationExtensions` (engine hooks).
+**Status: implemented, code-mod API version 2 (1 still runs; 2 adds [dependencies](modding-dependencies.md)).** Meitou's own in-process loader,
+Lib.Harmony shipped by the game as the sanctioned patching library, and a registration surface kept to the cases where a patch would silently
+break an invariant. No BepInEx.
+The RE_Kenshi decision ([rekenshi](formats/rekenshi.md)) stands and its DLLs stay ignored. Code: `src/Meitou.Game/Mods` (contract and
+loader), `GameMods` (host wiring), `SimulationExtensions` (engine hooks).
 
 ## Why this shape
 
@@ -20,8 +21,10 @@ loader), `GameHost.Mods.cs` (host wiring), `SimulationExtensions` (engine hooks)
 
 ## Writing a mod
 
-A class library for `net10.0` referencing the release's `Meitou.Modding.dll`, `Meitou.Simulation.dll`, `Meitou.Core.dll`,
-`Meitou.Data.dll` (and `Meitou.Ui.dll` for interface work) and `0Harmony.dll`, all with `Private="false"`: the game supplies them.
+A class library for `net10.0` referencing the release's `MeitouClient.dll` (the game: the mod contract `Meitou.Modding`, the interface
+`Meitou.Game.Ui`), `Meitou.Simulation.dll`, `Meitou.Core.dll`, `Meitou.Data.dll` and `0Harmony.dll`, all with `Private="false"`: the game
+supplies them. Releases after v0.17.1 ship these four Meitou assemblies, not the earlier eleven, and most namespaces follow folders
+(`Meitou.Simulation.Population`, `Meitou.Game.Rendering.Terrain`): a code mod built against v0.17.1 or earlier must be rebuilt.
 
 ```csharp
 public sealed class MyMod : IMod
@@ -42,17 +45,17 @@ Folder: `mods/MyMod/MyMod.mod` (the data mod, may be empty of records), `meitou.
 - A mod carries code when its folder has `meitou.json`: `{ "id", "apiVersion", "assemblies": ["Foo.dll"], "entry": "Foo.FooMod" }`
   (`CodeModManifest`). `id`: letters, digits, `. _ -`, at most 64; it keys the mod's save data, Harmony instance and log lines.
   `assemblies`: DLL file names in the mod folder, loaded in order. `entry`: the full name of the `IMod` type. Comments and trailing
-  commas are allowed.
+  commas are allowed. API 2 adds optional `version`, `dependencies`, `loadAfter`, `incompatible` and `gameVersion`
+  ([dependencies](modding-dependencies.md)).
 - `ModInfo.HasCode` reports it beside `HasNativePlugin`; the launcher marks such mods.
 - Load set: the enabled mods of `mods.cfg` in order, filtered to those with a manifest. A disabled mod's DLL is never opened. Changes take
   effect at the next launch, like data mods.
 
 ## Trust
 
-A workshop DLL is arbitrary code running as the user, as with RE_Kenshi. No sandboxing: .NET has none. The game loads a code mod's code
-only when its mod name is in `trustedCodeMods` of `meitou.user.json` (`UserConfig.TrustedCodeMods`); otherwise its data loads, its
-code does not, and the game shows a notice. The launcher's Play asks for each enabled code mod not yet allowed ([launcher](launcher.md)).
-The game itself cannot ask: mods initialize on the boot worker before the interface exists.
+A workshop DLL is arbitrary code running as the user, as with RE_Kenshi. No sandboxing: .NET has none. Installing and enabling a code mod
+is the consent, as in RimWorld: the game loads every enabled code mod's code, with no allow list or question. An older game's
+`trustedCodeMods` in `meitou.user.json` is no longer read.
 
 ## Loading
 
@@ -60,6 +63,8 @@ The game itself cannot ask: mods initialize on the boot worker before the interf
 - Resolution by simple name: an assembly on the game's trusted platform list (`Meitou.*`, the framework, Bepu, `0Harmony`) comes from
   the game even when the mod folder has a copy; anything else comes from the mod folder, so two mods may ship different versions of a
   library. Listing a game assembly in `assemblies` refuses the mod. Native libraries resolve from the mod folder first.
+- Between the two: an assembly a declared dependency exports comes from that dependency's context, so a framework loads once
+  ([dependencies](modding-dependencies.md#assembly-resolution)).
 - **One Harmony, loaded by the game.** **Observed** ([pardeike/Harmony #741](https://github.com/pardeike/Harmony/issues/741), open since
   2025-10): outside Unity, Harmony loaded in several load contexts duplicates `HarmonySharedState`, and two mods can no longer patch the
   same method. The game references Lib.Harmony 2.4.3 (`0Harmony.dll` with MonoMod merged in) and the resolution rule hands every mod
@@ -70,7 +75,9 @@ The game itself cannot ask: mods initialize on the boot worker before the interf
 - Constraint: the game stays a JIT publish, never `PublishTrimmed`, `PublishAot` or single-file. **Verified**
   (`tools/scripts/package-release.ps1`): the game publishes self-contained with `Meitou.*.dll` beside the executable, and `meitou-tools`
   with it. **Observed** (2026-11-04, win-x64 publish of the three programs into one folder): `0Harmony.dll` and `Meitou.Modding.dll` are
-  there, the game's 228 files are byte-identical to a game-only publish, and the published `meitou-tools.exe mod-check` runs.
+  there, the game's 228 files are byte-identical to a game-only publish, and the published `meitou-tools.exe mod-check` runs. Since the four-project layout
+  (2026-11-08) the viewer and `meitou-tools` reference the game and bring copies of its runtimeconfig and deps, so the game publishes last;
+  **Observed** (win-x64, tools then game into one folder): `MeitouClient.runtimeconfig.json` is the game's own.
 
 ## Lifecycle
 
@@ -79,7 +86,8 @@ The game itself cannot ask: mods initialize on the boot worker before the interf
   removes its Harmony patches (`UnpatchAll` of its id).
 - Worlds are built again for every new game and load, so systems are registered as factories and made per world.
 - `ModContext`: `Id`, `Name`, `Folder`, `Manifest`, the merged `Data` (`GameDatabase`), `Population` (`PopulationData`), `Log`/`LogError`,
-  `RngPurpose`, `Harmony`, `Tick` and `Enqueue(SimCommand)` for the running world (dropped and logged before the first world).
+  `RngPurpose`, `Harmony`, `Tick` and `Enqueue(SimCommand)` for the running world (dropped and logged before the first world),
+  `Dependency<T>(id)` and `HasDependency(id)` for declared dependencies ([dependencies](modding-dependencies.md#using-a-dependency)).
 - `RngPurpose` is `StableHash(id) | 0x80000000` cast to `RngPurpose`, so it never equals a vanilla purpose.
 
 ## Registration surface
@@ -103,7 +111,7 @@ holds refuses the second mod.
   collision; pre-damage part health is not supplied. Callbacks run serially in system order, may read the world and change their own
   hashed state, and queue later commands for gameplay changes; they must not mutate world state or call combat recursively. A
   throwing callback is logged (the mod id and the system's registered name) and disabled for that world; others continue. Melee callbacks run in Commit, projectile callbacks in
-  `CombatSystem.Schedule` (`FlyProjectiles`), both before every `SlowWorld` of the tick; execution callbacks run in the captives'
+  `CombatSystem.Schedule` (`ProjectileFlight.Fly`), both before every `SlowWorld` of the tick; execution callbacks run in the captives'
   `SlowWorld`, which has no anchor, so a system draining its own hit queue in `SlowWorld` sees them the same tick only at
   `SystemAnchor.End`, else the next tick. Faulted registrations enter the state hash. Without observers or a hit feed, no payload or event
   queue is made; either way no additional rolls occur (the pre-hit flags are reads).
@@ -129,7 +137,7 @@ holds refuses the second mod.
   `DebugCommandContext` (field, selection, camera target, tick, `Enqueue`) on the host thread while a tick may be in flight, so it must
   not touch the world; it returns the status line, and a throw shows as the status.
 - **Settings:** `AddSettings(object)`, once per mod: the object's public get/set properties marked `[Setting(label, Hint, Min, Max, Step, Options)]`
-  (`ModSettings.cs`) become one group, in declaration order, on the Settings screen's Mod settings page ([native UI](native-ui.md#settings)): `bool`
+  (`ModSettings.cs`) become one group, in declaration order, under the mod's row on the Settings screen's Mods page ([native UI](native-ui.md#settings)): `bool`
   an Off | On switch, `int`/`float`/`double` a slider (Min and Max required; Step 0 = 1 for `int`, a hundredth of the range otherwise), an enum or a
   `string` with Options a list. Another type, a number without a range, a list whose value is not one of its options, a struct (the page would
   change a copy) or no marked property refuses the mod. The player's values are kept in `meitou.user.json` (`modSettings`: mod id, key, invariant
@@ -149,7 +157,8 @@ holds refuses the second mod.
 - **Observed** ([Harmony docs](https://harmony.pardeike.net/articles/patching-edgecases.html)): an inlined method cannot be patched; the
   patch silently does nothing. Patch methods large enough not to be inlined, or their callers. `Rng` helpers are `AggressiveInlining`.
 - **Observed** (2026-11-04, scratch run): Harmony finds a patch method again by module identity, so the same DLL file loaded by two mods
-  makes their patches resolve to one copy. A helper library shared by several mods must not hold patch methods.
+  makes their patches resolve to one copy. A helper library copied into several mods must not hold patch methods; a framework shared
+  as a [dependency](modding-dependencies.md) loads once and may.
 
 ## Determinism contract
 
@@ -166,8 +175,7 @@ headless with the enabled code mods, or only the `--mod` folders (their code; th
 it three times: twice on one thread and once on `--threads` (default 4), for `--ticks` (default 600). It compares `World.StateHash`
 after every tick and reports the first differing tick of each pair and the `IStateHashed` systems that differ there, a mod's by id and
 name. One-thread runs differing points at unseeded randomness or the clock; thread counts differing, at a threading mistake. On a
-difference it runs the game without mods: if that differs too, the fault is the game's. Running the command is consent to run the mods'
-code, so `trustedCodeMods` is not consulted.
+difference it runs the game without mods: if that differs too, the fault is the game's.
 
 - Walkability is the open terrain, not the navmesh (whose zones load on threads), paths are answered in the tick and the population works
   in it, so runs repeat; the world differs from play in where characters walk.
@@ -180,7 +188,9 @@ code, so `trustedCodeMods` is not consulted.
 
 ## Versioning
 
-- `ModApi.Version` (1) must equal the manifest's `apiVersion`; a mismatch refuses the mod at load with a message.
+- The manifest's `apiVersion` must lie in `ModApi.MinimumVersion` (1) to `ModApi.Version` (2); otherwise the mod is refused at load with a
+  message. 2 added `version`, `dependencies`, `loadAfter`, `incompatible`, `gameVersion`, `ModContext.Dependency<T>` and
+  `IModDependents`; an API 1 mod loads unchanged. `gameVersion` ties a mod to the engine releases it was built against.
 - Harmony patches non-public members; compile-time references need public types or a publicizer. Open: which simulation types to make
   public, or ship publicized reference assemblies; ship reference assemblies per release so modders build without a game install.
 

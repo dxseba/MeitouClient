@@ -10,32 +10,35 @@ internal readonly record struct StockTissuePalette(uint Blood, bool Hiver, bool 
     {
         string race = look.Race.Name;
         uint blood = unchecked((uint)look.Race.GetInt("blood colour", 0x800000)) & 0xFFFFFF;
+        bool humanPrefix = string.Equals(look.Race.GetString("filenames prefix"), "hu", StringComparison.OrdinalIgnoreCase);
         return new(blood, race.Contains("Hive", StringComparison.OrdinalIgnoreCase),
-            race.Contains("Shek", StringComparison.OrdinalIgnoreCase), new(BowelColour(race, blood), 1));
+            race.Contains("Shek", StringComparison.OrdinalIgnoreCase), new(BowelColour(race, blood, humanPrefix), 1));
     }
 
     // FCS defines the fluid colour, not tissue. Keep bowel albedo muted and distinct even for species sharing red blood.
-    static Vector3 BowelColour(string race, uint blood) => race switch
+    static Vector3 BowelColour(string race, uint blood, bool humanPrefix) => race switch
     {
-        "Greenlander" => new(.34f, .24f, .23f),
-        "Scorchlander" => new(.31f, .21f, .20f),
-        "Cannibal" or "Cannibal Skav" => new(.32f, .23f, .20f),
-        "Shek" => new(.31f, .26f, .285f),
-        "Hive Queen" or "Hive Prince" or "Hive Worker Drone" or "Hive Soldier Drone" => new(.29f, .33f, .22f),
-        "Hive Prince South Hive" or "Hive Worker Drone South Hive" or "Hive Soldier Drone South Hive" => new(.33f, .29f, .22f),
-        "Deadhive Worker" or "Deadhive Soldier" => new(.31f, .33f, .29f),
-        "Deadhive Prince" => new(.40f, .34f, .16f),
-        "Fishman" or "Alpha Fishman" or "King Fishman" => new(.24f, .30f, .29f),
+        "Greenlander" => new(.85f, .50f, .56f),
+        "Scorchlander" => new(.82f, .47f, .52f),
+        "Cannibal" or "Cannibal Skav" => new(.84f, .48f, .52f),
+        "Shek" => new(.42f, .33f, .39f),
+        "Hive Queen" or "Hive Prince" or "Hive Worker Drone" or "Hive Soldier Drone" => new(.35f, .44f, .27f),
+        "Hive Prince South Hive" or "Hive Worker Drone South Hive" or "Hive Soldier Drone South Hive" => new(.46f, .38f, .26f),
+        "Hive Worker South Hive" or "Hive Soldier South Hive" when blood == 0x800000 => new(.46f, .38f, .26f),
+        "Deadhive Worker" or "Deadhive Soldier" => new(.38f, .43f, .37f),
+        "Deadhive Prince" => new(.51f, .43f, .21f),
+        "Fishman" or "Alpha Fishman" or "King Fishman" => new(.29f, .43f, .40f),
+        _ when humanPrefix && blood == 0x800000 => new(.85f, .50f, .56f),
         _ => CustomBowelColour(blood),
     };
 
     static Vector3 CustomBowelColour(uint blood)
     {
-        var tissue = new Vector3(.32f, .24f, .23f);
+        var tissue = new Vector3(.40f, .31f, .32f);
         if (blood == 0x800000) return tissue;
         var pigment = new Vector3(blood >> 16 & 255, blood >> 8 & 255, blood & 255) / 255f;
         float peak = MathF.Max(.18f, MathF.Max(pigment.X, MathF.Max(pigment.Y, pigment.Z)));
-        return Vector3.Lerp(tissue, pigment * (.34f / peak), .32f);
+        return Vector3.Lerp(tissue, pigment * (.42f / peak), .32f);
     }
 
     internal Vector4 Bone => new(.66f, .55f, .39f, 1);

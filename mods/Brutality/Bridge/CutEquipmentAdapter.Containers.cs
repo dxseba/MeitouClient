@@ -50,9 +50,10 @@ public sealed partial class CutEquipmentAdapter
         string? tagged = text; ContainerWritten(shop.Stock, ref tagged);
         if (tagged is not null) platoon.Strings["meitou shop"] = tagged;
     }
-    static void BuildingContainersWritten(string buildingInstance, FcsRecord state, bool __result, Dictionary<string, List<Fixture>> ___byBuilding)
+    static void BuildingContainersWritten(string buildingInstance, FcsRecord state, bool __result, FixtureRegistry __instance)
     {
-        if (!__result || !___byBuilding.TryGetValue(buildingInstance, out var fixtures)) return;
+        if (!__result) return;
+        var fixtures = __instance.OfBuilding(buildingInstance);
         foreach (var fixture in fixtures)
             if (fixture.Contents is { } inventory && containerKey?.Invoke(null, [fixture, buildingInstance]) is string key && state.Strings.TryGetValue(key, out var text))
             {

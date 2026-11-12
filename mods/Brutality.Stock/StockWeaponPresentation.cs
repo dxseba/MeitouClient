@@ -1,3 +1,5 @@
+using Meitou.Game.Host;
+using Meitou.Game.Rendering.Frame;
 using System.Collections;
 using System.Numerics;
 using System.Reflection;
@@ -8,9 +10,7 @@ using Meitou.Brutality.Rendering;
 using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
 using Meitou.Data.Textures;
-using Meitou.Engine;
 using Meitou.Modding;
-using Meitou.Rendering;
 using Meitou.Simulation;
 
 namespace Meitou.Brutality;
@@ -50,14 +50,14 @@ internal sealed class StockWeaponPresentation
 
     StockWeaponPresentation(Type host, Type characters)
     {
-        session = Field(host, "session");
+        session = Field(host, "Session");
         contentAssets = AccessTools.GetDeclaredFields(host).Single(field => field.FieldType == typeof(AssetLocator));
         graphicsOptions = AccessTools.GetDeclaredFields(host).Single(f => f.FieldType.Name == "WorldOptions");
         blood = Field(graphicsOptions.FieldType, "MeitouBlood");
         renderer = AccessTools.PropertyGetter(host, "ActiveCharacters") ?? throw new MissingMethodException("GameHost.ActiveCharacters");
         rigs = AccessTools.PropertyGetter(characters, "Rigs") ?? throw new MissingMethodException("CharacterRenderer.Rigs");
         drawKey = Method(host, "DrawKey", typeof(CharacterId));
-        loadedAssets = Field(characters, "assets");
+        loadedAssets = Field(characters, "_assets");
         assetParts = Field(loadedAssets.FieldType.GetGenericArguments()[1], "Parts");
     }
 
@@ -65,7 +65,7 @@ internal sealed class StockWeaponPresentation
     {
         if (!StockHeadMeshes.Install(context)) return false;
         var host = AccessTools.TypeByName("Meitou.Game.GameHost") ?? throw new TypeLoadException("GameHost");
-        var characters = AccessTools.TypeByName("Meitou.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
+        var characters = AccessTools.TypeByName("Meitou.Game.Rendering.Characters.CharacterRenderer") ?? throw new TypeLoadException("CharacterRenderer");
         var hooks = new StockWeaponPresentation(host, characters);
         context.Harmony.Patch(Method(host, "FillDrawListCore", typeof(CharacterDrawList)),
             postfix: new HarmonyMethod(typeof(StockWeaponPresentation), nameof(DrawListed)));
