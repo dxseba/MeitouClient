@@ -1,6 +1,6 @@
 # Brutality for stock MeitouClient
 
-Built for upstream MeitouClient `0938b0360eac51e53cee540b6db7189bfd3f557f` on Windows (`v0.17.2-nightly.20261110` plus four commits). Copy the whole `Brutality` folder into the configured Kenshi installation’s `mods` folder. Enable `Brutality.mod` and trust its code in Meitou. Keep one Brutality build active per installation. The DLL loads through the stock code mod loader and uses the stock Meitou assemblies.
+Built against upstream MeitouClient `0938b0360eac51e53cee540b6db7189bfd3f557f` with the official `0.17.2.0` assembly version. Verified on Windows with `v0.17.5-nightly.20261112` (`e85d0d54`). Copy the whole `Brutality` folder into the configured Kenshi installation’s `mods` folder. Enable `Brutality.mod` and trust its code in Meitou. Keep one Brutality build active per installation. The DLL loads through the stock code mod loader and uses the stock Meitou assemblies.
 
 Open Meitou’s mod settings to enable or disable Brutality and restart to apply. The in-game Brutality panel shows progression, unlocks and the current cleave chance. It also has switches for the HUD and Alt labels. Enable native Decapitation and Advanced Ragdolls for their corresponding effects. With developer tools enabled, use F10 **Brutality level (0-100)** or **Gore preview (selected)** to test the selected character.
 
