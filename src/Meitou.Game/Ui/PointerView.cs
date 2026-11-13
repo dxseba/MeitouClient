@@ -188,8 +188,9 @@ sealed class PointerView(PlayerInterface player)
                 return (player.Furniture.ContainerPointer(container), null);
             case WorldPicking.Picked.Door when player.Furniture.PickDoor(player.Mouse) is { } door:
                 return (player.Furniture.DoorPointer(door), null);
-            // a bed's slot 130 pointer (UseableStuff, no inventory)
-            case WorldPicking.Picked.Bed or WorldPicking.Picked.Cage or WorldPicking.Picked.Dummy or WorldPicking.Picked.Seat:
+            // a bed's slot 130 pointer (UseableStuff, no inventory); a town turret's (TurretBuilding, as Storage)
+            case WorldPicking.Picked.Bed or WorldPicking.Picked.Cage or WorldPicking.Picked.Dummy or WorldPicking.Picked.Seat
+                or WorldPicking.Picked.TownTurret:
                 return ("use", null);
             // a resource rock a right click would mine (the original's `mine` pointer)
             case WorldPicking.Picked.Rock:
@@ -262,9 +263,9 @@ sealed class PointerView(PlayerInterface player)
         var width = UiTooltips.Arrange(lines, TooltipKind.Floating, player.Width, player.Height, player.Mouse, null,
             (text, wrap) => painter.MeasureText(TooltipRuntime.TooltipFont, text, player.Height, wrap, minimum) is var s
                 ? new(s.Width, s.Height)
-                : default).Panel.Width;
+                : default, player.InterfaceScale).Panel.Width;
 
-        var bottomRight = new Vector2(player.Mouse.X + width / 2, player.Mouse.Y - PointerChanceRise * player.Height / 1080f);
+        var bottomRight = new Vector2(player.Mouse.X + width / 2, player.Mouse.Y - PointerChanceRise * player.UiScale);
         player.TooltipRuntime.PlaceTooltip(controls, painter, lines, TooltipKind.Floating, null, "pointer-chance", bottomRight, [colour]);
     }
 
@@ -318,7 +319,7 @@ sealed class PointerView(PlayerInterface player)
     /// </summary>
     public void DrawPointerBeside(string name, Vector2 at, int width, int height, DebugOverlay.OverlayPass? pass = null)
     {
-        if (name != "arrow") player.UiPainter?.DrawPointerBeside(name, at + BesideOffset * (height / 1080f), width, height, pass);
+        if (name != "arrow") player.UiPainter?.DrawPointerBeside(name, at + BesideOffset * player.UiScale, width, height, pass);
     }
 
     /// <summary>

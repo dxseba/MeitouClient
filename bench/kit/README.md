@@ -4,7 +4,7 @@ Reproduce the Meitou daily benchmark on your own machine (Linux, Windows or macO
 
 ## What it measures, and why it is comparable
 
-Meitou is a C#/.NET 10 Vulkan reimplementation of Kenshi (upstream: github.com/VlcekM/MeitouClient). The maintainers run one fixed benchmark after every update of upstream master. This kit runs the same one:
+Meitou is a C#/.NET 11 Vulkan reimplementation of Kenshi (upstream: github.com/VlcekM/MeitouClient). The maintainers run one fixed benchmark after every update of upstream master. This kit runs the same one:
 
 - **Play benchmark** (the game's own `--play-bench`): after a `settle` step that is not counted, the segments `idle`, `orbit`, `zoom`, `pan` (about 44 s). Reports frame-time statistics and the slow-world simulation tick.
 - **Base switch** (`bases` scenario): the segments `idle` and `return` (10 s each); 1 s and 6 s into each, the script double-taps `2` then `1`, which centres the camera on the character at base 2, then at base 1. Four switches; it measures streaming and drawing of the other base.
@@ -27,7 +27,7 @@ Total game time is about 8 minutes (plus about 35 s of loading per run).
 ## Prerequisites (all platforms)
 
 - **Python 3.10 or newer** (standard library only; nothing to `pip install`). The commands below say `python3`; on Windows it is usually `py -3` or `python`.
-- **git** and the **.NET 10 SDK** (`dotnet --list-sdks` shows a `10.x`), to build the current benchmark target.
+- **git** and the **.NET 11 SDK** (`dotnet --list-sdks` shows an `11.x`), to build the current benchmark target; targets from before the move to .NET 11 (2026-11-11) need the **.NET 10 SDK** instead.
 - A Kenshi install with **clean data: no mods** installed or active (a fresh GOG or Steam copy). Its folder holds `data/` and `save/`; this is `KENSHI_PATH` below. Kenshi's data are not included in Meitou; you need your own copy.
 - About 6 GB free RAM and 1 GB disk (a copy of the save is made).
 - The benchmark save (step 3).
@@ -49,7 +49,7 @@ Total game time is about 8 minutes (plus about 35 s of loading per run).
 
 ### macOS
 
-- **Meitou's macOS state, from its docs (`docs/macos-port.md`, `docs/launcher.md`, `docs/metal-backend.md`):** it runs on Apple silicon through MoltenVK (Vulkan on Metal); there is also a native Metal renderer, but `--play-bench` is **Vulkan-only**, so the benchmark always uses the Vulkan path (the kit passes `--renderer vulkan`). You install the Vulkan loader and MoltenVK yourself: `brew install molten-vk vulkan-loader`. The kit finds `libvulkan.1.dylib` under Homebrew (`/opt/homebrew/lib`, `/usr/local/lib`), `$VULKAN_SDK/lib` or `MAC_VULKAN_DIR`, puts that folder on `DYLD_LIBRARY_PATH` for the game and sets `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1` (both as upstream documents). Upstream's release README calls the macOS build experimental and untested; only Apple silicon is reported as verified (an M1 Pro).
+- **Meitou's macOS state, from its docs (`docs/macos-port.md`, `docs/launcher.md`, `docs/metal-backend.md`):** it runs on Apple silicon through MoltenVK (Vulkan on Metal); there is also a native Metal renderer. `--play-bench` runs on Metal too, but Metal does not apply `--benchmark-baseline`, so the kit keeps the Vulkan path for comparable numbers (it passes `--renderer vulkan`). You install the Vulkan loader and MoltenVK yourself: `brew install molten-vk vulkan-loader`. The kit finds `libvulkan.1.dylib` under Homebrew (`/opt/homebrew/lib`, `/usr/local/lib`), `$VULKAN_SDK/lib` or `MAC_VULKAN_DIR`, puts that folder on `DYLD_LIBRARY_PATH` for the game and sets `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1` (both as upstream documents). Upstream's release README calls the macOS build experimental and untested; only Apple silicon is reported as verified (an M1 Pro).
 - **Kenshi has no macOS version**, and Steam on macOS cannot install it. Meitou only needs the data folder (it must contain `data/gamedata.base`). Upstream's `docs/kenshi-on-macos.md` lists the ways: copy the `Kenshi` folder of a Windows install, or install it in a CrossOver/Whisky bottle, or the GOG offline installer in a Wine prefix. For this benchmark the data must be clean (no mods). Whether data obtained in each of these ways gives identical benchmark numbers has not been checked (**Unknown**).
 - Keys are sent with CoreGraphics (`CGEventPost`). macOS only allows this if the app that runs the script (Terminal, iTerm, VS Code, ...) is switched on in **System Settings > Privacy & Security > Accessibility**. The script checks it and says so; without it only the play scenario runs. The game is brought to the front with `osascript` (also needs that permission).
 - The build is ad-hoc signed by `build.py` (as upstream's release script does) because Apple silicon refuses unsigned code, and the quarantine flag is removed. Needs the Xcode command line tools (`xcode-select --install`) for `codesign`.

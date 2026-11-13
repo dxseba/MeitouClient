@@ -85,9 +85,9 @@ public sealed record BuildingFootprint(Vector2[] Hull, float YMin, float YMax)
 }
 
 /// <summary>
-/// A placed building's footprint in the world.
+/// A placed building's footprint in the world, and its BUILDING record.
 /// </summary>
-public readonly record struct PlacedFootprint(string Id, Vector2[] Hull);
+public readonly record struct PlacedFootprint(string Id, Vector2[] Hull, string Record = "");
 
 /// <summary>
 /// A level-data building with the footprint of its record (in its own space), for picking; <paramref name="Plot"/> when it is the
@@ -360,12 +360,33 @@ public sealed class BuildingFootprints
     readonly ConcurrentDictionary<string, (Vector3 Min, Vector3 Max)?> _partBounds = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The bounds box of a building part's mesh in its own space (the mesh file's bounds chunk, read once); null when the file is not found or has
-    /// none.
+    /// The bounds box of a building part's mesh in its own space, cached by path. Falls back to the structural reader when stored chunk lengths
+    /// prevent a fast bounds read; null when the file is missing, unreadable or has no bounds.
     /// </summary>
-    public (Vector3 Min, Vector3 Max)? PartBounds(string meshPath) => _partBounds.GetOrAdd(meshPath, path =>
-        Data.Physics.CollisionPaths.Resolve(_install, path) is { } file && Data.Ogre.OgreMeshReader.TryReadBounds(file,
-                out var b) && b.Max.X >= b.Min.X ? (b.Min, b.Max) : null);
+    public (Vector3 Min, Vector3 Max)? PartBounds(string meshPath) => _partBounds.GetOrAdd(meshPath, ReadPartBounds);
+
+    /// <summary>
+    /// Reads a part's stored bounds without trusting exporter chunk lengths when the fast walk fails.
+    /// </summary>
+    (Vector3 Min, Vector3 Max)? ReadPartBounds(string meshPath)
+    {
+        if (Data.Physics.CollisionPaths.Resolve(_install, meshPath) is not { } file) return null;
+
+        try
+        {
+            var bounds = Data.Ogre.OgreMeshReader.TryReadBounds(file, out var fast)
+                ? fast
+                : Data.Ogre.OgreMeshReader.ReadFile(file).Bounds;
+            if (bounds is not { } b) return null;
+            if (!float.IsFinite(b.Min.X + b.Min.Y + b.Min.Z + b.Max.X + b.Max.Y + b.Max.Z)) return null;
+
+            return b.Max.X >= b.Min.X && b.Max.Y >= b.Min.Y && b.Max.Z >= b.Min.Z ? (b.Min, b.Max) : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or Data.Ogre.OgreFormatException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// Whether a BUILDING is a farm (it names a <c>farm data</c>): the level buildings without collision that a click still selects, by their
@@ -463,7 +484,15 @@ public sealed class BuildingFootprints
     /// <paramref name="terrainHeight"/> sets a placement that has no height of its own.
     /// </summary>
     public IEnumerable<(string Key, string Record, Vector3 Position, Quaternion Rotation)> LinkedAround(Vector2 centre, float radius, Func<double,
-            double, float> terrainHeight)
+            double, float> terrainHeight) =>
+        PlacedAround(centre, radius, record => _db.Find(record)?.GetBool("links together") == true, terrainHeight);
+
+    /// <summary>
+    /// The level data's buildings whose record passes <paramref name="record"/>, placed within <paramref name="radius"/> of <paramref name="centre"/>
+    /// (X, Z), with their absolute position and turn. <paramref name="terrainHeight"/> sets a placement that has no height of its own.
+    /// </summary>
+    public IEnumerable<(string Key, string Record, Vector3 Position, Quaternion Rotation)> PlacedAround(Vector2 centre, float radius,
+        Func<string, bool> record, Func<double, double, float> terrainHeight)
     {
         if (_levels is null) yield break;
         var map = Index();
@@ -478,11 +507,74 @@ public sealed class BuildingFootprints
                     if (b.TargetsZoneRecord || b.Position == Vector3.Zero
                             || Vector2.DistanceSquared(new Vector2(b.Position.X, b.Position.Z), centre) > radius * radius)
                         continue;
-                    if (_db.Find(b.BuildingId)?.GetBool("links together") == true
-                            && BuildingPlacements.Resolve(b, _db, _levels, terrainHeight) is { } r)
+                    if (record(b.BuildingId) && BuildingPlacements.Resolve(b, _db, _levels, terrainHeight) is { } r)
                         yield return (b.Key, b.BuildingId, r.Position, b.Rotation);
                 }
             }
+    }
+
+    /// <summary>
+    /// Where the collision of the level data's buildings placed within <paramref name="radius"/> of <paramref name="centre"/> cuts the horizontal
+    /// plane at <paramref name="y"/>: X/Z segments (walls, piers and posts standing in the water at the water's height). Reads the records'
+    /// collision as it goes (any thread); a building with no collision has none.
+    /// </summary>
+    public List<(Vector2 A, Vector2 B)> PlaneCut(Vector2 centre, float radius, float y)
+    {
+        var segments = new List<(Vector2, Vector2)>();
+        var map = Index();
+        const float reach = 200;
+        var home = WorldLayout.ZoneOf(centre.X, centre.Y);
+        int span = (int)MathF.Ceiling((radius + reach) / WorldLayout.ZoneSize);
+        for (int dz = -span; dz <= span; dz++)
+        {
+            for (int dx = -span; dx <= span; dx++)
+            {
+                if (!map.TryGetValue(new ZoneCoordinate(home.X + dx, home.Y + dz), out var list)) continue;
+
+                foreach (var b in list)
+                {
+                    if (b.TargetsZoneRecord || b.Position == Vector3.Zero
+                        || Vector2.DistanceSquared(new Vector2(b.Position.X, b.Position.Z), centre) > (radius + reach) * (radius + reach))
+                        continue;
+
+                    if (Wait(b.BuildingId) is not { } footprint || y < b.Position.Y + footprint.YMin - 1 || y > b.Position.Y + footprint.YMax + 1)
+                        continue;
+
+                    Cut(Mesh(b.BuildingId), b.Position, b.Rotation, y, segments);
+                }
+            }
+        }
+
+        return segments;
+    }
+
+    /// <summary>
+    /// The segments where the triangles, placed at <paramref name="position"/> turned by <paramref name="rotation"/>, cross the plane at
+    /// <paramref name="y"/>.
+    /// </summary>
+    static void Cut(IReadOnlyList<(Vector3[] Vertices, int[] Indices)> shapes, Vector3 position, Quaternion rotation, float y,
+        List<(Vector2, Vector2)> into)
+    {
+        var q = rotation.LengthSquared() < 1e-12f ? Quaternion.Identity : Quaternion.Normalize(rotation);
+        Span<Vector2> hits = stackalloc Vector2[3];
+        foreach (var (vertices, indices) in shapes)
+        {
+            for (int t = 0; t + 2 < indices.Length; t += 3)
+            {
+                int n = 0;
+                for (int e = 0; e < 3; e++)
+                {
+                    var a = Vector3.Transform(vertices[indices[t + e]], q) + position;
+                    var b = Vector3.Transform(vertices[indices[t + (e + 1) % 3]], q) + position;
+                    if ((a.Y - y) * (b.Y - y) > 0 || a.Y == b.Y) continue;
+
+                    float s = (y - a.Y) / (b.Y - a.Y);
+                    if (n < 3) hits[n++] = new Vector2(a.X + s * (b.X - a.X), a.Z + s * (b.Z - a.Z));
+                }
+
+                if (n >= 2) into.Add((hits[0], hits[1]));
+            }
+        }
     }
 
     /// <summary>
@@ -525,7 +617,7 @@ public sealed class BuildingFootprints
                             || Vector2.DistanceSquared(new Vector2(b.Position.X, b.Position.Z), centre) > (radius + reach) * (radius + reach))
                         continue;
                     if (Of(b.BuildingId) is { } footprint)
-                        yield return new PlacedFootprint(b.Key, footprint.Place(b.Position, b.Rotation));
+                        yield return new PlacedFootprint(b.Key, footprint.Place(b.Position, b.Rotation), b.BuildingId);
                 }
             }
     }

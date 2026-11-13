@@ -15,10 +15,11 @@ public readonly record struct FallSource(CharacterId Character, string Bone, lon
 /// An item lying in the world, as the host draws it (docs/simulation.md "Ground items"): a saved one by its whole <see cref="Rotation"/>, a
 /// <see cref="Dropped"/> one turned by it about Y and laid flat on the ground by the host. <see cref="Type"/>, <see cref="Level"/> and
 /// <see cref="Quality"/> are the item's, for its label's grade colour, <see cref="OwnedBy"/> <see cref="GroundItem.OwnedBy"/>. <see cref="Fall"/> is
-/// set for a severed limb, which the host drops from its stump.
+/// set for a severed limb, which the host drops from its stump. <see cref="Material"/> is the item's <c>material sid</c> (a weapon's model: its
+/// look).
 /// </summary>
 public readonly record struct GroundItemSnapshot(int Id, string Record, string Name, Vector3 Position, Quaternion Rotation, bool Dropped,
-    Data.Fcs.FcsRecordType Type = default, int Level = 0, float Quality = 0, int OwnedBy = -1, FallSource? Fall = null);
+    Data.Fcs.FcsRecordType Type = default, int Level = 0, float Quality = 0, int OwnedBy = -1, FallSource? Fall = null, string Material = "");
 
 /// <summary>
 /// One loose item: where it lies and how it is turned (a saved item's whole rotation, written back as read; a dropped one turned about Y).
@@ -34,8 +35,9 @@ public sealed record GroundItem(int Id, ItemInstance Item, Vector3 Position, Qua
     /// </summary>
     public string? Slot { get; init; }
     /// <summary>
-    /// The faction of its saved <c>ownedby</c> owner (-1: none, or a <c>not real</c> faction; <see cref="Saving.GroundItemSave"/>): taking it is
-    /// stealing for another faction (label red, pick-up "Steal", the item marked stolen).
+    /// The faction owning it (-1: none, or a <c>not real</c> faction): its saved <c>ownedby</c> owner's (<see cref="Saving.GroundItemSave"/>), its
+    /// slot's building's, or for an item dropped in play the one it was stolen from. Taking it is stealing for another faction (label red, pick-up
+    /// "Steal", the item marked stolen).
     /// </summary>
     public int OwnedBy { get; init; } = -1;
     /// <summary>
@@ -96,11 +98,14 @@ public sealed class GroundItems
     public long Revision { get; private set; }
 
     /// <summary>
-    /// Drops an item made in play, turned <paramref name="yaw"/> about Y; <paramref name="fall"/> is the stump a severed limb falls from.
+    /// Drops an item made in play, turned <paramref name="yaw"/> about Y; <paramref name="fall"/> is the stump a severed limb falls from. A stolen
+    /// item lies owned by the faction it was stolen from: the original keeps the item's <c>ownedby</c> on the ground (<b>Observed</b>,
+    /// docs/game/ui-input.md "Ground item labels").
     /// </summary>
     public void Drop(ItemInstance item, Vector3 position, float yaw, FallSource? fall = null)
     {
-        _items.Add(new GroundItem(_nextId++, item, position, Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw)) { Dropped = true, Fall = fall });
+        var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw);
+        _items.Add(new GroundItem(_nextId++, item, position, rotation) { Dropped = true, Fall = fall, OwnedBy = item.Mark.Faction });
         for (int extra = _items.Count(Capped) - _limit; extra > 0; extra--) _items.RemoveAt(_items.FindIndex(Capped));
         Revision++;
     }
@@ -172,7 +177,7 @@ public sealed class GroundItems
             (_published,
                     _publishedAt) = ([.. _items.Select(i
                             => new GroundItemSnapshot(i.Id, i.Item.Record, i.Item.Name, i.Position, i.Rotation, i.Dropped, i.Item.Type, i.Item.Level,
-                                    i.Item.Quality, i.OwnedBy, i.Fall))], Revision);
+                                    i.Item.Quality, i.OwnedBy, i.Fall, i.Item.MaterialId))], Revision);
         return _published;
     }
     /// <summary>

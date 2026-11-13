@@ -84,7 +84,7 @@ characters) on the player interface (`FUN_140791830`; kind 3 is loot/inspect, `F
 (`FUN_1407918a0`) with no distance test and no walk, so the trade opens where the conversation stands. Only item moves are range-checked (above).
 
 Meitou (engine choices): window moves to and from a machine or storage need the character within `ProductionSettings.TransferReach` 40 of the building's footprint hull (for the
-bounds radius + 40), to and from a container within `ContainerAccess.TradingRange` 60; both post "Out of trading range.". The loot window closes beyond 1.5 x the carry reach, or over 20 units apart in height (Meitou: the reach is on the body's floor, and the looter walks to that floor, #292; the height is the body's root or the floor under it, as a big ragdoll's root rests well off the ground: a downed Cleanser Unit 67 over the terrain, **Observed** on a player save). A held item given to a
+bounds radius + 40) or within 60 of its position (so a small storage is never stricter than the original; a General Storage Chest's hull is about 14 x 9, **Observed** with the probe, #505), to and from a container within `ContainerAccess.TradingRange` 60; both post "Out of trading range.". The loot window closes beyond 1.5 x the carry reach, or over 20 units apart in height (Meitou: the reach is on the body's floor, and the looter walks to that floor, #292; the height is the body's root or the floor under it, as a big ragdoll's root rests well off the ground: a downed Cleanser Unit 67 over the terrain, **Observed** on a player save). A held item given to a
 character: within `HeldItems.GiveRange` 1000 of its window's owner, `StealRange` 60 out of a non-player window. No faction or floor test, no sound (`gui_notrade` is in no bank, [audio](../audio.md)).
 
 ### Who trades
@@ -546,6 +546,7 @@ decompile's `DialogActionEnum` / `DialogConditionEnum` / `EventTriggerEnum`, com
   anywhere is **Unknown** (nothing in its data does). Bounty Hunters is the only base FACTION of `fundamental type` ADVENTURER with a
   `legal system` (**Verified** by probe; the others with one: Medics Guild, Traders Guild, Slave Traders, Free Traders, Tech Hunters,
   Empire Peasants, Machinists -> United Cities; the empires point at themselves).
+- **Animals never spot** (**Verified**, decompile of `FUN_140856f00`): its first test is the looker's vfunc `0x248` (the animal test, also used by DA 29); an animal looker, one in combat mode, or a target that is carried or imprisoned makes it return at once, so an animal never recognises a bounty, fires event 44 or starts a hunt. The base "Bounty hunters" squads (wandering between towns, rebirth "Bounty hunters", "Empire Bounty hunters") carry a Bonedog in `animals`, in the squad's faction, so they pass the faction test of `CrimeFactions.Hunts`. They fight the target only as squad mates: DA 6 tags the target as the squad's temporary enemy and mates join through their enemy scan. Meitou: the spotting and disguise loops (`ArrestSystem.Spot`, `Disguise`) skip animal lookers. In-combat lookers are **not modelled** (unchanged).
 
 ### 12. Slaves, prisoners, animals
 
@@ -666,10 +667,14 @@ Roll convention: a `rand()` draw in [0, 1) against the chance p; the thief gets 
   home town (vfunc 0x98, `Ownerships::_homeTown` +0x30) is not the town the trader is in (vfunc 0x78, `getCurrentTownLocation`). Otherwise p = lerp(thievery/100, 0.4, 1.25), x0.5 when the
   owner's faction is the trader's, x0.5 again when the owner is in the trader's platoon (`C` only).
   Meitou (`TradeSystem.FenceOdds`): the owner is `ItemInstance.Owner` with the squad it was in when robbed (`OwnerSquad`, standing for `C`/`CS`), set where taking from a character is a
-  theft (`CarrySystem`, `HeldItems`). A mark from a container or the ground names only a faction: no owner early-out applies and the home-town test reads it as another town (what the
-  original's handle is there is **Unknown**). The trader's town is `AiSystem.TownAt`, the owner's home town its squad's `Town`. Saved as the robbed character's handle in `ownedby` (the
-  null handle when that character is not saved); loading marks an item whose `ownedby` names a character of another faction than its holder's as stolen from that faction, and from the
-  character once it is in the world (`SavedPopulation.NoteOwners`).
+  theft (`CarrySystem`, `HeldItems`). A theft of a building's goods (an item of its container, a loose item of its slot) names the building's owner too: the original's
+  `ownedby` is the bar's barman, the first member of the squad living there (**Observed**, plain game, The Hub's bar: the barrel's item had a null `ownedby` before the theft and the barman's
+  handle after it, "Stolen from: Barman"; the bar's loose items name him before any theft); whether that is the squad's leader or another member is **Unknown**. Meitou
+  (`CrimeSystem.OwnerMark`) names the leader of the building's resident squad of the owning faction; with none the mark names only the faction, which no owner early-out applies to
+  and the home-town test reads as another town. The trader's town is `AiSystem.TownAt`, the owner's home town its squad's `Town`. Saved as the robbed character's handle in
+  `ownedby` (the null handle when that character is not saved) and the robbed faction's id in Meitou's `meitou stolen from` (any mark; the only trace of a faction-only one or of
+  a robbed character the save does not hold). Loading marks an item whose `ownedby` names a character of another faction than its holder's as stolen from that faction, and from
+  the character once it is in the world (`SavedPopulation.NoteOwners`); else one whose `meitou stolen from` names another faction, from that faction.
 - **Prompt and roll** (`FUN_140715290`, `FUN_140793770`, **Observed**): both skip an item whose owner is in the seller's platoon, that the trader's squad does not fence, or whose owner does
   not resolve to a character; so a shop that buys stolen goods asks and rolls only for goods stolen from its own squad. Meitou: `TradeSystem.Fences`; the prompt and the hover box
   ([ui-screens](ui-screens.md)) show the same p the roll uses.

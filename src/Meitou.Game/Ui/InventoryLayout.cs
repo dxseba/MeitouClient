@@ -18,14 +18,14 @@ sealed class InventoryLayout(PlayerInterface player)
     /// </summary>
     internal void BindInventoryGeometry(string id, UiBindings b)
     {
-        b.TemplateScale = player.InventoryScale;
-        if (id is "bag" or "loot-bag")
+        b.TemplateScale = player.UiScale;
+        if (InventoryWindows.ScreenKind(id) is "bag" or "loot-bag")
         {
-            var owner = id == "bag" ? player.InventoryWindows.InventoryOwner() : player.TradeWindows.LootBody();
+            var owner = player.InventoryWindows.WindowCharacter(id);
             if (owner?.ItemGrid is { } bag)
             {
-                b.Positions["Root"] = new(0, 0, bag.BagWidth * player.InventoryCell + 40 * player.InventoryScale,
-                    Math.Min(player.Height * 0.8f, bag.BagHeight * player.InventoryCell + 108 * player.InventoryScale));
+                b.Positions["Root"] = new(0, 0, bag.BagWidth * player.InventoryCell + 40 * player.UiScale,
+                    Math.Min(player.Height * 0.8f, bag.BagHeight * player.InventoryCell + 108 * player.UiScale));
             }
         }
 
@@ -71,7 +71,7 @@ sealed class InventoryLayout(PlayerInterface player)
         var row = new[] { "limbs", "bag", "inventory", "loot", "loot-bag" }.Where(roots.ContainsKey).ToArray();
         if (row.Length < 2) return;
 
-        float gap = 6 * player.InventoryScale;
+        float gap = 6 * player.UiScale;
         float total = row.Sum(s => roots[s].Width) + gap * (row.Length - 1);
         if (total > player.Width)
         {
@@ -136,7 +136,7 @@ sealed class InventoryLayout(PlayerInterface player)
         var move = new Vector2(-window.X, (player.Height - window.Height) / 2 - window.Y);
         player.FaithfulScreens.SetOffset(id, player.FaithfulScreens.GetOffset(id) + move);
         float left = new[] { "bag", "inventory" }.Where(roots.ContainsKey).Select(s => roots[s].X).DefaultIfEmpty(float.MaxValue).Min();
-        float push = window.Width + 6 * player.InventoryScale - left;
+        float push = window.Width + 6 * player.UiScale - left;
         if (push <= 0) return;
 
         foreach (string screen in new[] { "inventory", "bag" })
@@ -153,7 +153,7 @@ sealed class InventoryLayout(PlayerInterface player)
         var roots = WindowRoots();
         if (!roots.TryGetValue(id, out var other) || !roots.TryGetValue(anchor, out var own)) return;
 
-        float gap = 6 * player.InventoryScale;
+        float gap = 6 * player.UiScale;
         float x = left ? own.X - other.Width - gap : own.X + own.Width + gap;
 
         // Make room for the pair before the screen host clamps either window to the viewport.
@@ -244,6 +244,32 @@ sealed class InventoryLayout(PlayerInterface player)
     }
 
     /// <summary>
+    /// Adds the mods' equipment slots (<see cref="ModSlots"/>, docs/modding.md "Equipment slots") to a character window that has the belt slot: each
+    /// a copy of the belt slot's widget, named by its section, sized in cells and placed at its offset from the window's top-left corner, clipped
+    /// to the window.
+    /// </summary>
+    internal void AddModSlots(List<UiControl> controls)
+    {
+        if (ModSlots.All.Count == 0) return;
+        int belt = controls.FindIndex(c => c.Name == "belt");
+        if (belt < 0 || controls.FirstOrDefault(c => c.Type == "Window") is not { } window) return;
+
+        var template = controls[belt];
+        float cell = player.InventoryCell;
+        string tile = FormattableString.Invariant($"{cell} {cell}");
+
+        // The belt's clip is its own panel's; a mod slot may lie anywhere in the window.
+        var clip = window.Clip is { } c ? window.Bounds.Intersect(c) : window.Bounds;
+        foreach (var slot in ModSlots.All)
+        {
+            var bounds = new UiRect(window.Bounds.X + slot.X * player.UiScale, window.Bounds.Y + slot.Y * player.UiScale, slot.Width * cell,
+                slot.Height * cell);
+            var properties = new Dictionary<string, string>(template.Properties) { ["TileSize"] = tile, ["State"] = "normal" };
+            controls.Insert(++belt, template with { Name = slot.Section, Bounds = bounds, Clip = clip, Properties = properties });
+        }
+    }
+
+    /// <summary>
     /// The player's own animal's inventory window ends where its "-INVENTORY-" label would start, with no main grid, so its death items stay out of
     /// sight (<b>Observed</b>, original: a bought Garru with meat and skins in its save, and a dog). The loot window keeps the grid.
     /// </summary>
@@ -280,7 +306,7 @@ sealed class InventoryLayout(PlayerInterface player)
         var root = controls.FirstOrDefault(c => c.Type == "Window");
         if (index < 0 || root is null) return;
 
-        float scale = player.InventoryScale;
+        float scale = player.UiScale;
         float cell = player.InventoryCell;
         var r = root.Bounds;
         float top = above * scale;
@@ -329,7 +355,7 @@ sealed class InventoryLayout(PlayerInterface player)
         if (lead.ItemGrid?.CarryCapacity is { } capacity) weight += "/" + ((int)capacity).ToString(CultureInfo.InvariantCulture);
 
         var (burdenWord, burdenColour) = BurdenText(lead.Hud?.Encumbrance ?? lead.ItemGrid?.Burden ?? 1);
-        player.AddLines(controls, "datapanel", InventorySummaryLines(lead, weight, burdenWord, burdenColour), 20 * player.InventoryScale);
+        player.AddLines(controls, "datapanel", InventorySummaryLines(lead, weight, burdenWord, burdenColour), 20 * player.UiScale);
     }
 
     /// <summary>

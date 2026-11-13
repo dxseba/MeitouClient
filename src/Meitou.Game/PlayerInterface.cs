@@ -290,16 +290,18 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// </summary>
     internal float StandardPixels => UiMode == UiMode.Faithful && UiPainter is { } painter
         ? painter.StandardTextPixels(Height)
-        : StandardTextPixels * Height / 1080f;
+        : StandardTextPixels * UiScale;
 
     /// <summary>
-    /// The inventory's scale: the window's height over 1080 lines.
+    /// The interface's scale: the window's height over the 1080 lines the layouts' pixel sizes and fonts are made for, times
+    /// <see cref="InterfaceScale"/>.
     /// </summary>
-    internal float InventoryScale => Height / 1080f;
+    internal float UiScale => Height / 1080f * InterfaceScale;
+
     /// <summary>
     /// An inventory cell's size, pixels: 25 at 1080 lines.
     /// </summary>
-    internal float InventoryCell => 25 * InventoryScale;
+    internal float InventoryCell => 25 * UiScale;
 
     #endregion
 
@@ -309,6 +311,11 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// The value behind <see cref="FontSize"/>.
     /// </summary>
     float _fontSize = KenshiFontSize.DefaultSetting;
+
+    /// <summary>
+    /// The value behind <see cref="InterfaceScale"/>.
+    /// </summary>
+    float _interfaceScale = 1;
 
     /// <summary>
     /// The "Show damage floaters" option. Off hides the damage numbers only: the original's texts (a pick roll, a stealth knock-out, "Ate", a machine
@@ -337,6 +344,19 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         {
             _fontSize = value;
             if (UiPainter is not null) UiPainter.FontSizeSetting = value;
+        }
+    }
+
+    /// <summary>
+    /// The Interface scale setting: the UI's size over the window height's own (1 = 100%; applied to the painter once it exists).
+    /// </summary>
+    public float InterfaceScale
+    {
+        get => _interfaceScale;
+        set
+        {
+            _interfaceScale = value;
+            if (UiPainter is not null) UiPainter.InterfaceScale = value;
         }
     }
 
@@ -517,6 +537,12 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         string? Tooltip = null, string? Action = null, float ButtonWidth = 0.5f, IReadOnlyList<(string Key, string Value)>? TooltipRows = null)
     {
         /// <summary>
+        /// With a value, the line is a progress line (<see cref="ProgressLine"/>) filled by it: the value centred over the bar, no label.
+        /// </summary>
+        public float? Fill { get; init; }
+
+
+        /// <summary>
         /// The line's tooltip user strings (the HUD's Fixed tooltip), null for none; a text tooltip wins over rows.
         /// </summary>
         public Dictionary<string, string>? TipProperties => Tooltip is { Length: > 0 } tip ? UiTooltips.TextProperties(Loc.Tr(tip), "fixed")
@@ -560,6 +586,12 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         {
             var tipProperties = lines[i].TipProperties;
             var row = new UiRect(area.X + area.Width * 0.03f, area.Y + top + i * rowHeight, area.Width * 0.93f, rowHeight);
+            if (lines[i].Fill is { } fill)
+            {
+                AddProgressLine(controls, $"{panel}-progress-{i}", row, lines[i], fill, valueProperties, host.Clip);
+                continue;
+            }
+
             if (lines[i].Action is { } action)
             {
                 // The button holds the value; the row's label (if any) stays text on its left.
@@ -605,6 +637,19 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                 properties["FontPixels"] = Math.Max(8, (int)MathF.Round(p)).ToString(CultureInfo.InvariantCulture);
             return properties;
         }
+    }
+
+    /// <summary>
+    /// A progress line over <paramref name="row"/>: the bar filled by <paramref name="fill"/>, then the line's value centred over it.
+    /// </summary>
+    void AddProgressLine(List<UiControl> controls, string name, UiRect row, HudLine line, float fill, Dictionary<string, string> face, UiRect? clip)
+    {
+        ProgressLine.Add(controls, UiResources, Width, Height, row, fill, name + "-", clip);
+
+        var textProperties = new Dictionary<string, string>(face) { ["TextAlign"] = "HCenter Top",
+            ["TextColour"] = line.ValueColour ?? MyGuiColours.TemplateInk(UiResources, "Kenshi_TextboxStandardText") };
+        controls.Add(new(name + "-value", "TextBox", row, Loc.Tr(line.Value), "", "Kenshi_TextboxStandardText", true, textProperties, Vector4.Zero,
+            Pickable: false, Clip: clip));
     }
 
     #endregion
@@ -672,7 +717,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// </summary>
     internal const double DoubleTapSeconds = 0.5;
     /// <summary>
-    /// Ctrl and Alt as the host last saw them: they turn the pointer over a downed character into the carry and loot pointers.
+    /// Ctrl and the Highlight key (Alt by default) as the host last saw them: they turn the pointer over a downed character into the carry and loot
+    /// pointers, and Highlight lets an order steal or pick a lock.
     /// </summary>
     public bool CtrlHeld, AltHeld;
     /// <summary>
@@ -839,6 +885,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (kind == WorldPicking.Picked.Seat && Furniture.SeatPress(p)) return;
         if (kind == WorldPicking.Picked.Cage && Furniture.CageClick(p)) return;
         if (kind == WorldPicking.Picked.Dummy && Furniture.DummyPress(p)) return;
+        if (kind == WorldPicking.Picked.TownTurret && Furniture.TownTurretPress(p)) return;
         if (kind == WorldPicking.Picked.Rock && Furniture.RockPress(p)) return;
         if (kind is WorldPicking.Picked.Site or WorldPicking.Picked.None && Build.SitePress(p)) return;
         if (Ray(p) is { } ray && Picking.MoveHit(ray.Origin, ray.Direction) is { } hit)
@@ -1133,12 +1180,28 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     }
 
     /// <summary>
+    /// The character the camera centres on for <paramref name="c"/>: a carried body is centred where its carrier stands, however deep the chain.
+    /// </summary>
+    CharacterSnapshot Carrier(CharacterSnapshot c)
+    {
+        for (int depth = 0; depth < 8 && !c.CarriedBy.IsNone; depth++)
+        {
+            if (Session.CurrentSnapshot.Characters.FirstOrDefault(k => k.Id == c.CarriedBy) is not { } carrier) break;
+
+            c = carrier;
+        }
+
+        return c;
+    }
+
+    /// <summary>
     /// Places the camera's pivot on a character, keeping the view, and follows it (unless <paramref name="follow"/> is false).
     /// </summary>
     internal void CentreOn(CharacterId id, bool follow = true)
     {
         if (Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } c) return;
         var view = Session.Camera.Current;
+        c = Carrier(c);
         Session.Camera.Place(new Vector2(c.Position.X, c.Position.Z), view.Yaw, view.Pitch, view.Distance);
         Follow = follow ? id : null;
     }

@@ -165,6 +165,9 @@ worker, when they differ); 31 `Contract_HiredAlly::vfunc_8` (betrayal); 36 the w
 (economy.md 11.2): Burglary 2 and Terrorism 7 → 43; Theft 3, Looting 10, Fencing 13 → 42, or 8 when the victim is in the witness's
 platoon; Trespassing 11 → 17 (also fired by perception when it sets the crime, economy.md 11.2); Crop theft 14 → 57; Enslaving 1, Kidnapping 15 → 58; Uniform theft 16 → 34; the rest 41. Each case has
 further tests that return without firing (partly read).
+Event 17's guard dialogue `intruder law` (64870-rebirth.mod: monologue, no conditions, repetition limit 0; "Intruder!", "Infiltration!",
+...) has one line whose effect is DA 6 ATTACK_CHASE_FOREVER; packages `Npc MILITARY Law 3` and `Empire Noble Bodyguard` (inherited) and the
+Samurai Sergeant / Elite, Traders Guard and Fark Guard characters carry it (**Verified** by probe against the base data).
 
 ### Choosing a line
 
@@ -201,7 +204,7 @@ child's (`FUN_1406ad9d0`).
    packages), `is character` (the speaker's record), `target carrying character` (for each listed character in turn, the first
    member of the target's squad, the target or one the speaker perceives, that carries it becomes the target, [retargeting](#retargeting);
    any hit passes), `world state` (all equal their bool), `target has item type` / `target has item` (one ordered
-   pass over the target's squad, see below; retargets), `target race` (**Verified**, `FUN_140678f30`: the target alone first, passing with no side effect; else per listed race in turn the first eligible squad member of that race becomes the target, [retargeting](#retargeting), so the last race with a hit decides; any hit passes; the one caller with the flag set, `FUN_14067a530`, a text preview, does not retarget), `my race`,
+   pass over the target's squad, see below; retargets), `target race` (**Verified**, `FUN_140678f30`: the target alone first, passing with no side effect; else per listed race in turn the first eligible squad member of that race becomes the target, [retargeting](#retargeting), so the last race with a hit decides; any hit passes; the one caller with the flag set, `FUN_14067a530` (the [token](#tokens) expansion), does not retarget), `my race`,
    `my subrace`. Each list is OR within itself. The race tests (`my race`, `target race`, the +2 below, T_TARGET_WITH_RACE, DA 47) match
    a race when the listed RACE is that race or any race of its RACE_GROUP (`FUN_14042ecd0`; the group's `races` set race +0x120, a race in
    two groups keeps the last loaded, `FUN_140430070`); `my subrace` is an exact RACE compare (**Verified**, decompile). The four squad tests count only the target and members the speaker perceives
@@ -235,7 +238,12 @@ check's `me` is the conversation's NPC (an interjector candidate's own state is 
 `FUN_140672bf0`: T_ME and T_WHOLE_SQUAD the owner (how WHOLE_SQUAD fans out is **Unknown**); T_TARGET the target; T_TARGET_IF_PLAYER
 the target if it is a player-faction character, else the line is skipped; T_INTERJECTOR1-3 the stored interjectors; T_TARGET_WITH_RACE
 for each listed `target race` in turn, the first member of the target's squad (squad order, no perception test) whose race matches it
-(**Verified**, `FUN_140672bf0`).
+(**Verified**, `FUN_140672bf0`). The token walk's flag (**Verified**, `FUN_140672bf0`, `FUN_14067a0c0` :55-60) only drops overrides through the
+dialogue's `+0x2a0` handle: unflagged, T_ME and T_WHOLE_SQUAD resolve to it while the current event (`+0x188`) is NONE, and a T_TARGET speaker
+that is the walk's target becomes it; flagged, T_TARGET becomes it only when the target is the owner (event NONE), else the owner / target as above.
+`+0x2a0` is cleared at construction (`FUN_140673d30`) and conversation end (`FUN_140674830`), written when an event fires or a conversation starts
+(`FUN_140684990`, `FUN_140683f90`), and is `FUN_1406717c0`'s fallback when the target is the owner; what it holds is **Unknown**. Meitou models no
+`+0x2a0`, so its speakers are the flagged path in every walk.
 
 Interjectors (`FUN_140679bc0`): members of the **owner's own squad**, awake, not the owner, not an animal, not talking, not already an
 interjector, passing the node's check as speaker. A `dumb` character qualifies only when the node's `is character` lists it, an empty list failing (fcs.def
@@ -328,7 +336,8 @@ candidates are members not unconscious, not carried, not in a bed or prison, not
 sensing an enemy (`numEnemies` > 0) stops it, tested only for members that are up, free, not animals and not in melee combat mode (`FUN_1407ffe40` :100-117; the in-town and on-screen filters come after it, so an in-town member still aborts). With 2 or more candidates every candidate x every `arrival dialog` DIALOGUE is scored (`Dialogue::scoreCustomDialog`) and the best
 runs (`runCustomDialog`). A `dumb` speaker (CHARACTER record flag, `FUN_1405e89c0`; Agnu and Ray in the base data) scores only when the DIALOGUE's `is character`
 lists it, an empty list failing; any other speaker needs the list only when it is non-empty (**Verified**, `FUN_14067e060`, `FUN_140684d70`). Meitou: `DialogueSystem.ListsSpeaker` for interjections and the arrival banter; the line check tests only a non-empty list. Meitou (`AreaArrivalDialogue.Arrive`): the first dialogue, speaker
-(with that rule, `MaySpeak`) and partner in squad order with a line win; "on screen" is not tested.
+(with that rule, `MaySpeak`) and partner in squad order with a line win; "on screen" is the camera view test (`MedicalClock.OnScreen`), so a member
+travelling alone far from its squad gets no banter (#430: without it the mate was out of sight and the speaker seemed to talk to itself).
 
 **Retry** (**Verified**, `FUN_140801540` called every frame from `FUN_140787940`, `FUN_1408015d0`, `FUN_140800eb0`): hiding the banner stores the group and the real-time stamp (`FUN_14025b3b0` x 1e-6 seconds) and runs the first try; each frame the stored record is cleared when the group under the camera pivot (`FUN_1408f5770`) differs, else more than 10 s (`DAT_14167fad4`) after the stamp the stamp is renewed and the banter run again; the record is cleared only when the banter returns non-zero: a squad of under 2 members or a line started (zero: an enemy sensed, under 2 candidates or no pair with a line). Meitou: `AreaArrival` carries a serial, `AreaArrivalDialogue.Arrive` publishes (serial, forget) and the Biome UI (`PlayerInterface.RetryArrival`) keeps the group and the wall-clock stamp.
 
@@ -336,7 +345,7 @@ lists it, an empty list failing; any other speaker needs the list only when it i
 
 `/NAME/` pairs are expanded until none is left (`FUN_14067a530`). Built in: `COST` (val0 of the line's first DA 8 or 9, else of its
 first DC 2), `MYNAME` (speaker), `YOURNAME` (target, else "you"), `TARGETFACTION` (target's faction, else "you"), `PLAYERFACTION`. Any
-other name: the WORD_SWAPS record of that trimmed name, its lines chosen by the full line walk `FUN_14067a0c0` in token mode (**Verified**, `FUN_14067a530` :168-220: each line's speaker resolved, race bonus, interjections and roots as usual; walk target = the conversation target, or the passed one when that is the owner); run a second time when the first finds nothing; the picked line, its parents (the swap, a root it came through) are stamped used (`FUN_140675630`), so the repetition limit applies later; one text; no match → empty. Meitou: `DialogueSystem.Token`.
+other name: the WORD_SWAPS record of that trimmed name, its lines chosen by the full line walk `FUN_14067a0c0` in token mode (**Verified**, `FUN_14067a530` :168-220: each line's speaker resolved, race bonus, interjections and roots as usual; walk target = the conversation target, or the passed one when that is the owner); run a second time when the first finds nothing; the picked line, its parents (the swap, a root it came through) are stamped used (`FUN_140675630`), so the repetition limit applies later; one text; no match → empty. **Observed** (1.0.68, Hive Trader): the walk retargets nobody, but a race hit in the squad still passes; a Shek squad member talking to the trader keeps the conversation with a Greenlander member beside her or outside the shop, and with him beside her RACENAME gave "Shek" 4 and "Human" 4 times in 8 tries. The flag (**Verified**, `FUN_14067a530` :212-213 passes 1 to `FUN_14067a0c0`, which hands it to every line check :61, nested walk :120 and [speaker](#speakers) :52) gates only `target race`'s retarget in the line check; Meitou passes it through `Pick`. Meitou: `DialogueSystem.Token`.
 A token at the start or after ". ", "! ", "? " is capitalised. Every DA 8 effect of a line appends one " [c.N]" (N its own val0, `c.{1,num}`; DA 9 none), in effect order, to the text of a said line and of a choice button alike (`FUN_140675320`, called with flag 1 by `FUN_1406839a0` and flag 0 by `FUN_140680130`; the loop is not gated by the flag; the literals " [" and "]" **Verified** from `DAT_141686eec`, `DAT_14168d3f0`); **Observed**: the text is built before the tokens are expanded (Meitou appends after, the same result). Meitou: `MoneySuffix` on said lines (windows and bubbles) and choices. The `censorship` setting swaps a
 fixed list of swear words. **Verified** by probe: 289 token names in the data, `HIM`, `OUTLANDER`, `FLATSKIN`, `BROTHER`, `YOURNAME`
 the most used.

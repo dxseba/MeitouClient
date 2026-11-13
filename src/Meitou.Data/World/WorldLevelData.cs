@@ -133,10 +133,16 @@ public sealed class WorldLevelData
     /// <summary>
     /// Loads the install's world with its outdoor buildings stood on the ground (<see cref="PlaceOnGround"/>).
     /// </summary>
-    public static WorldLevelData Load(GameInstall install, bool includeInteriors = false)
+    public static WorldLevelData Load(GameInstall install, bool includeInteriors = false) =>
+        Load(install, LoadOrder.FromInstall(install), includeInteriors);
+
+    /// <summary>
+    /// <see cref="Load(GameInstall, bool)"/> under another load order (a feedback report's, for the probe tools).
+    /// </summary>
+    public static WorldLevelData Load(GameInstall install, LoadOrder order, bool includeInteriors = false)
     {
         string directory = Path.Combine(install.DataDirectory, RelativeDirectory);
-        var world = Load(directory, LoadOrder.FromInstall(install).Entries, includeInteriors);
+        var world = Load(directory, order.Entries, includeInteriors);
         return OnGround(world, install);
     }
 
@@ -463,6 +469,12 @@ public sealed record BuildingPlacement(
         (exterior ? ExteriorLayout : InteriorLayout) ?? state?.GetString(exterior ? ResidentRuins.ExteriorKey : ResidentRuins.InteriorKey) ?? "";
 
     /// <summary>
+    /// A loose weapon's model (its instance's <c>material sid</c>, a MATERIAL_SPECS_WEAPON): its look instead of the resolver's pick; null or empty
+    /// for none.
+    /// </summary>
+    public string? ItemMaterial { get; init; }
+
+    /// <summary>
     /// A loose item's mesh and scale when not its record's own (a nest's numbered debris piece, docs/game/factions-squads-towns.md "Nest furniture").
     /// </summary>
     public string? ItemMesh { get; init; }
@@ -491,6 +503,11 @@ public sealed record BuildingPlacement(
     /// The building it was placed in (<see cref="PlacedMesh.ContainerId"/>), when known.
     /// </summary>
     public string? ContainerId { get; init; }
+
+    /// <summary>
+    /// Laid out the same wherever it stands: no town's material, its parts' variants chosen as at a fixed place (the character editor's bar).
+    /// </summary>
+    public bool Standalone { get; init; }
 
     /// <summary>
     /// The zone file holding <see cref="StateId"/> when it is not <see cref="Zone"/>: a copy of a level building placed elsewhere (the Meitou

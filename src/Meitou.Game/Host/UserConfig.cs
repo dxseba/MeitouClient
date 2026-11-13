@@ -115,9 +115,17 @@ sealed class UserConfig
     /// </summary>
     public const float MinFontSize = -10, MaxFontSize = 32;
     /// <summary>
+    /// The range of <see cref="InterfaceScale"/> (50 … 200%).
+    /// </summary>
+    public const float MinInterfaceScale = 0.5f, MaxInterfaceScale = 2;
+    /// <summary>
     /// The ranges of <see cref="CameraMoveSpeed"/> (150 … 1000) and <see cref="CameraZoomSpeed"/> (10 … 200), the original's.
     /// </summary>
     public const float MinCameraMoveSpeed = 150, MaxCameraMoveSpeed = 1000, MinCameraZoomSpeed = 10, MaxCameraZoomSpeed = 200;
+    /// <summary>
+    /// The range and default of <see cref="ShiftPanMultiplier"/>.
+    /// </summary>
+    public const float MinShiftPanMultiplier = 1.25f, MaxShiftPanMultiplier = 5, DefaultShiftPanMultiplier = 2;
 
     /// <summary>
     /// The file's layout: <see cref="CurrentVersion"/>, or the newer one of a later release whose file this is (kept, so that release does not
@@ -144,6 +152,34 @@ sealed class UserConfig
     /// (<c>FrameGeneration</c>). Off by default; read at start-up, so a change takes effect after a restart.
     /// </summary>
     public bool FrameGeneration { get; set; }
+
+    /// <summary>
+    /// HDR10 output where the display offers it (read at start-up; not with frame generation; docs/render-post.md "HDR output"). Off by default.
+    /// </summary>
+    public bool Hdr { get; set; }
+
+    /// <summary>
+    /// HDR output: the nits of the picture's white (the interface, sunlit ground).
+    /// </summary>
+    public float HdrPaperNits { get; set; }
+
+    /// <summary>
+    /// The picture's white in nits this frame: <see cref="HdrPaperNits"/>, or under <see cref="HdrPaperAuto"/> what Windows shows SDR white at (200
+    /// where it cannot say).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public float HdrPaperNitsNow => HdrPaperNits >= HdrPaperAuto ? HdrPaperNits : Rendering.Display.WindowsHdr.SdrWhiteNits() ?? 200;
+
+    /// <summary>
+    /// A <see cref="HdrPaperNits"/> below this is automatic.
+    /// </summary>
+    public const float HdrPaperAuto = 80;
+
+    /// <summary>
+    /// HDR output: the nits of the display's peak.
+    /// </summary>
+    public float HdrPeakNits { get; set; } = 1000;
+
     /// <summary>
     /// Whose frame generation <see cref="FrameGeneration"/> turns on: FSR 3 (the default) or DLSS (Windows, RTX 40 or later, through Streamline; read
     /// at start-up).
@@ -183,6 +219,11 @@ sealed class UserConfig
     /// </summary>
     public SpeedUnit SpeedUnit { get; set; } = SpeedUnit.Mph;
     /// <summary>
+    /// The Interface scale (Interface settings, Meitou's own; 1 = 100%): the whole UI, its text, skins and layout-sized windows, is this much
+    /// larger than the window height alone makes it.
+    /// </summary>
+    public float InterfaceScale { get; set; } = 1;
+    /// <summary>
     /// The damage floaters (Interface settings): the original's <c>floaters</c> option, Simple by default; Meitou also floats a green "+N" over a
     /// player character that heals.
     /// </summary>
@@ -207,9 +248,13 @@ sealed class UserConfig
     /// </summary>
     public bool SplashScreens { get; set; }
     /// <summary>
-    /// The sky arrival's flight over a load from the title (Meitou UI only; <see cref="Title.SkyArrival"/>), on by default.
+    /// The sky arrival's flight over a load from the title (Meitou main menu only; <see cref="Title.SkyArrival"/>), on by default.
     /// </summary>
     public bool MainMenuTransitions { get; set; } = true;
+    /// <summary>
+    /// The title screen (Interface settings), independent of <see cref="UiMode"/>: on, Meitou's menu over the staged world scene; off, the original's picture.
+    /// </summary>
+    public bool MeitouMainMenu { get; set; } = true;
     /// <summary>
     /// The sky arrival's flight over a load during play (Meitou UI only), on by default.
     /// </summary>
@@ -318,12 +363,13 @@ sealed class UserConfig
     /// </summary>
     public bool AdvancedRagdolls { get; set; } = true;
     /// <summary>
-    /// A loaded or imported save starts paused (Advanced settings, a plain on/off switch outside the Faithful / Meitou sides; off by default: it runs
-    /// at once, as in the game). <c>--load</c> is not paused.
+    /// A loaded or imported save starts paused (Advanced settings, a Faithful / Meitou switch; on by default, Meitou: in the game it runs at once).
+    /// <c>--load</c> is not paused.
     /// </summary>
-    public bool PauseOnLoad { get; set; }
+    public bool PauseOnLoad { get; set; } = true;
     /// <summary>
-    /// The player's animals pick up loose items into their bags (Advanced settings, a plain on/off switch; off by default;
+    /// The player's animals pick up loose items into their bags (Advanced settings, a Faithful / Meitou switch whose
+    /// Faithful side is on, as the game lets animals pick up; off by default, Meitou;
     /// <c>PlayerSystem.AnimalsPickUp</c>).
     /// </summary>
     public bool AnimalsPickUp { get; set; }
@@ -372,6 +418,20 @@ sealed class UserConfig
     /// first used, then taken from the install's settings.cfg.
     /// </summary>
     public bool? EdgeScroll { get; set; }
+    /// <summary>
+    /// The strategy camera's turn and tilt ease in and out as the original's always do (Controls settings; the original has no such option).
+    /// </summary>
+    public bool CameraSmoothing { get; set; } = true;
+    /// <summary>
+    /// Shift held with the pan keys multiplies the strategy camera's pan speed by <see cref="ShiftPanMultiplier"/> (Controls settings, a Faithful /
+    /// Meitou switch; Faithful off: the game has no such boost).
+    /// </summary>
+    public bool ShiftPanBoost { get; set; } = true;
+    /// <summary>
+    /// The pan speed factor while Shift is held (Controls settings, <see cref="MinShiftPanMultiplier"/> … <see cref="MaxShiftPanMultiplier"/>,
+    /// default 2).
+    /// </summary>
+    public float ShiftPanMultiplier { get; set; } = DefaultShiftPanMultiplier;
     /// <summary>
     /// The in-game tutorials (the original's <c>tutorials</c>, default on; Gameplay settings); null until first used, then taken from the install's
     /// settings.cfg.
@@ -545,8 +605,10 @@ sealed class UserConfig
     {
         camera.InvertX = InvertX ?? camera.InvertX;
         camera.InvertY = InvertY ?? camera.InvertY;
+        camera.Smoothing = CameraSmoothing;
         camera.MoveSpeed = CameraMoveSpeed ?? camera.MoveSpeed;
         camera.ZoomSpeed = CameraZoomSpeed ?? camera.ZoomSpeed;
+        camera.ShiftPanFactor = ShiftPanBoost ? ShiftPanMultiplier : 1;
     }
 
     #endregion

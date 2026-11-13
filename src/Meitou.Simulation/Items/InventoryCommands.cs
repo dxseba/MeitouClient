@@ -11,9 +11,10 @@ namespace Meitou.Simulation.Items;
 /// </summary>
 public sealed record InventoryItemToken(int Index, string Record, string Section, int X, int Y, int Quantity, float Quality);
 /// <summary>
-/// The inventory window's ARRANGE (<c>FUN_14070f740</c>): <see cref="InventoryCommands.Arrange"/> on the character's grids.
+/// The inventory window's ARRANGE (<c>FUN_14070f740</c>): <see cref="InventoryCommands.Arrange(Inventory, bool)"/> on the grid of the window
+/// pressed: the character's main grid, or the worn bag's when <paramref name="Bag"/>.
 /// </summary>
-public sealed record ArrangeInventory(CharacterId Character) : SimCommand;
+public sealed record ArrangeInventory(CharacterId Character, bool Bag = false) : SimCommand;
 
 /// <summary>
 /// Moving items between inventory sections and grids, and the sections' rules.
@@ -21,10 +22,10 @@ public sealed record ArrangeInventory(CharacterId Character) : SimCommand;
 public static class InventoryCommands
 {
     /// <summary>
-    /// Whether <paramref name="section"/> is a worn item's (equipment) section.
+    /// Whether <paramref name="section"/> is a worn item's (equipment) section, a mod's (<see cref="ModSlots"/>) included.
     /// </summary>
     public static bool IsEquipmentSection(string section) => section is "back" or "hip" or "shirt" or "head" or "legs" or "boots" or "armour"
-            or "belt" or "backpack_attach";
+            or "belt" or "backpack_attach" || ModSlots.Of(section) is not null;
 
     /// <summary>
     /// An equipment section disabled for <paramref name="wearer"/> (<c>CharacterHuman::validateInventorySections</c> <c>FUN_1406218f0</c>,
@@ -117,7 +118,7 @@ public static class InventoryCommands
             => section switch { "left_arm_replace" => 0, "right_arm_replace" => 1, "left_leg_replace" => 2, "right_leg_replace" => 3, _ => -1 };
 
     /// <summary>
-    /// Engine slot capacities, in inventory cells. Clothing and backpack slots hold one item.
+    /// Engine slot capacities, in inventory cells, a mod slot's its own (<see cref="ModSlots"/>). Clothing and backpack slots hold one item.
     /// </summary>
     public static (int Width, int Height) SectionSize(string section) => section switch
     {
@@ -129,7 +130,7 @@ public static class InventoryCommands
         "legs" => (4, 5),
         "armour" => (4, 6),
         "belt" => (2, 2),
-        _ => (0, 0),
+        _ => ModSlots.Of(section) is { } mod ? (mod.Width, mod.Height) : (0, 0),
     };
 
     /// <summary>
@@ -275,10 +276,22 @@ public static class InventoryCommands
     /// by its area, then by its width, largest first (a stable sort); the first order in which everything fits is kept, otherwise every item goes
     /// back where it was (false).
     /// </summary>
-    public static bool Arrange(Inventory root)
+    public static bool Arrange(Inventory root) => Arrange([(root, "main"), (root.Backpack?.Contents, "backpack_content")]);
+
+    /// <summary>
+    /// The ARRANGE button of one window (<c>FUN_14070f740</c>, <b>Observed</b>: it arranges only the inventory its window shows, its vtable
+    /// <c>+0x70</c>): the main grid, or the worn bag's when <paramref name="bag"/>; as <see cref="Arrange(Inventory)"/> otherwise.
+    /// </summary>
+    public static bool Arrange(Inventory root, bool bag) =>
+        Arrange(bag ? [(root.Backpack?.Contents, "backpack_content")] : [(root, "main")]);
+
+    /// <summary>
+    /// Arranges <paramref name="sections"/> (a grid and the section of it arranged; a missing grid is skipped) as <see cref="Arrange(Inventory)"/>.
+    /// </summary>
+    static bool Arrange((Inventory? Grid, string Section)[] sections)
     {
         var grids = new List<(Inventory Grid, string Section, ItemInstance[] Items)>();
-        foreach (var (grid, section) in new[] { (root, "main"), (root.Backpack?.Contents, "backpack_content") })
+        foreach (var (grid, section) in sections)
             if (grid is not null) grids.Add((grid, section, [.. grid.Items]));
         var saved = grids.SelectMany(g => g.Items).Select(i => (Item: i, i.X, i.Y, i.Quantity, i.Charges)).ToArray();
         void Restore()

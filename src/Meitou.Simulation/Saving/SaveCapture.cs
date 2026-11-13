@@ -53,6 +53,12 @@ public sealed class SaveCaptureOptions
     /// record keeps what it had.
     /// </summary>
     public SavedView? View { get; init; }
+
+    /// <summary>
+    /// Told, once the capture has written every character, the handle each character in the world was saved under (the key of Meitou-only state kept
+    /// beside the save, such as the weapon blood: docs/game/blood-decals.md "On weapons and gear").
+    /// </summary>
+    public Action<IReadOnlyDictionary<CharacterId, Hand>>? HandlesWritten { get; init; }
 }
 
 /// <summary>
@@ -110,6 +116,7 @@ public static partial class SaveCapture
         var game = builder.Game;
         s_memoryPass = new MemoryPass();
         SavedKit.OwnerNotes = s_memoryPass.Owners;
+        SavedKit.Factions = data.Factions;
 
         WriteCamera(game, world, data, clock, options);
         var factionsPopulation = world.Systems.OfType<PopulationSystem>().FirstOrDefault();
@@ -130,6 +137,7 @@ public static partial class SaveCapture
         // or sector.
         WriteWild(builder, world, data, options, clock, buildings, races, campItems);
 
+        options.HandlesWritten?.Invoke(s_memoryPass?.Handles ?? []);
         WriteMemories();
         game.UpdateDerived();
         return game;
@@ -195,6 +203,7 @@ public static partial class SaveCapture
         var buildings = HeldSave.BuildingStates(game);
         WriteLocks(game, world, buildings, options.Levels);
         world.Fixtures.WriteResets(buildings);
+        world.Fixtures.WriteResidents(data, buildings);
         ResearchSave.Write(game.Research, world.Research);
         var outposts = data.PlayerFaction >= 0
             ? BuildingSave.Write(game, world, data.Factions[data.PlayerFaction].Id, options.Seed)
@@ -204,6 +213,8 @@ public static partial class SaveCapture
         buildings = HeldSave.BuildingStates(game);
         MachineSave.Write(game, world);
         TownMachineSave.Write(game.Camera.Record, world);
+        if (world.Systems.OfType<Production.ProductionSystem>().FirstOrDefault() is { } production)
+            RockMachineSave.Write(game.Camera.Record, world, production);
         world.Systems.OfType<Combat.CombatSystem>().FirstOrDefault()?.WriteTurretShots(world, buildings);
         var campItems = GroundItemSave.Write(game, world, data.Items);
         return (outposts, buildings, campItems);
@@ -327,6 +338,7 @@ public static partial class SaveCapture
 
         // Stolen items name the robbed character (`ownedby`); one not saved leaves the null handle the item was written with.
         SavedKit.OwnerNotes = null;
+        SavedKit.Factions = null;
         foreach (var (item, owner) in pass.Owners)
         {
             if (item.Written is { } record && pass.Handles.TryGetValue(owner, out var hand)) hand.Write(record, "ownedby");
@@ -1321,6 +1333,7 @@ public static partial class SaveCapture
             var record = platoon.Record;
 
             if (into is null) SetTown(record, town, templateId, roaming, homeBuilding, package);
+            else if (homeBuilding is not null) NameResidents(record, homeBuilding, templateId);
 
             record.Bools["imprisoned"] = imprisoned;
             record.Bools["dead"] = dead;
@@ -1356,6 +1369,18 @@ public static partial class SaveCapture
             // Its town and home building by handle, as the original names them (docs/formats/save.md "NPC platoons").
             if (_townHands.TryGetValue(site.InstanceId, out var townHand)) townHand.Write(record, "hometown");
             if (homeBuilding is { } home && HomeHandle(_game, home) is { } homeHand) homeHand.Write(record, "homebuilding");
+            if (homeBuilding is not null) NameResidents(record, homeBuilding, templateId);
+        }
+
+        /// <summary>
+        /// The home's saved record names this platoon as its <c>residents</c> when the building carries the platoon's template (the original's
+        /// building keeps the handle and the template of the same squad, Observed: a template is saved exactly on the states with a handle).
+        /// </summary>
+        void NameResidents(FcsRecord platoon, TownBuilding home, string templateId)
+        {
+            if (!_buildings.TryGetValue(home.Key, out var state) || _world.Fixtures.ResidentsTemplate(home) != templateId) return;
+
+            Hand.Read(platoon, "handle").Write(state, "residents");
         }
 
         /// <summary>

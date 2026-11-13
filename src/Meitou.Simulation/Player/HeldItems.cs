@@ -427,7 +427,7 @@ sealed class HeldItems(PopulationData? data)
             refusal = "Can't wear that item.";
         if (refusal is null && target.Section == "main"
                 && InventoryCommands.MainClosed(target.Owner)) refusal = "";   // a live animal's grid (the original leaves it out of the window)
-        if (refusal is null && target.Machine is { Data.IsStorage: true } storage && !storage.Data.Accepts(item.Record, item.Type))
+        if (refusal is null && target.Machine is { Data.IsStorage: true } storage && !storage.Data.TakesByHand(item.Record, item.Type))
             refusal = "Invalid container type.";
         if (refusal is null && InventoryCommands.LimbSlotOf(target.Section) is >= 0 and var limbSlot
             && (data?.Items.Limb(item.Record)?.LimbSlot != limbSlot
@@ -753,14 +753,30 @@ sealed class HeldItems(PopulationData? data)
     }
 
     /// <summary>
-    /// The ground ahead of a character where an item it drops lands.
+    /// How far ahead of a character an item it drops lands, and the most its ground may differ in height from the character's there (engine
+    /// choices).
+    /// </summary>
+    const float DropReach = 3, DropStep = 4;
+
+    /// <summary>
+    /// The ground ahead of a character where an item it drops lands: <see cref="DropReach"/> units ahead, nearer (to its feet) while the spot is
+    /// not one it could stand on at about its own height. Past the edge of a walkway or against a wall the height there is the ground far below or
+    /// the wall's top, and the item was out of sight and reach.
     /// </summary>
     static Vector3 AheadOf(World world, int slot)
     {
         ref var hot = ref world.Characters.Next[slot];
-        var at = hot.Position + new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw)) * 3;
-        at.Y = world.Walkability.GroundHeight(at.X, at.Z, hot.Position.Y);
-        return at;
+        var ahead = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
+        for (float reach = DropReach; reach > 0; reach -= 0.5f)
+        {
+            var at = hot.Position + ahead * reach;
+            if (!world.Walkability.TryStand(at.X, at.Z, hot.Position.Y, out float y) || MathF.Abs(y - hot.Position.Y) > DropStep) continue;
+
+            at.Y = y;
+            return at;
+        }
+
+        return hot.Position;
     }
 
     /// <summary>

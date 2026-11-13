@@ -55,8 +55,8 @@ sealed class StatsWindow(PlayerInterface player)
     /// </summary>
     internal void BindStatsGeometry(MyGuiLayout layout, UiBindings bindings)
     {
-        bindings.TemplateScale = player.InventoryScale;
-        bindings.Positions["Root"] = new(0, 0, 980 * player.InventoryScale, 650 * player.InventoryScale);
+        bindings.TemplateScale = player.UiScale;
+        bindings.Positions["Root"] = new(0, 0, 980 * player.UiScale, 650 * player.UiScale);
         bindings.Hidden.Add("lbDerivedStats");
 
         // The installed layout includes an unused derived-statistics column. The runtime screen
@@ -84,7 +84,7 @@ sealed class StatsWindow(PlayerInterface player)
     internal void AddStatsContent(List<UiControl> controls)
     {
         var lead = player.Selected().FirstOrDefault();
-        float scale = player.InventoryScale, rowHeight = 20 * scale;
+        float scale = player.UiScale, rowHeight = 20 * scale;
 
         // The skill columns sit in Kenshi_GenericTextBoxSkin frames (the attributes column's frame has no text colour and keeps its grey).
         string statInk = MyGuiColours.TemplateInk(player.UiResources, "Kenshi_GenericTextBoxSkin");
@@ -111,8 +111,9 @@ sealed class StatsWindow(PlayerInterface player)
                 string colour = column == 0 ? "0.4 0.380392 0.356863" : statInk;
                 bool wrapLabel = stat is StatsEnumerated.FriendlyFire or StatsEnumerated.SmithingBow;
                 Text($"{name}-label-{i}", label, font, colour, "Left VCenter", action, wrap: wrapLabel);
-                Text($"{name}-value-{i}", (lead?.AllSkills.ElementAtOrDefault((int)stat) ?? 0).ToString("0", CultureInfo.InvariantCulture),
-                    font, colour, "Right VCenter", action);
+                // The whole level, truncated like the next-level bar's split (rounding showed 12.5 as 13 with the bar at 50 %, #514).
+                float level = MathF.Floor(lead?.AllSkills.ElementAtOrDefault((int)stat) ?? 0);
+                Text($"{name}-value-{i}", level.ToString("0", CultureInfo.InvariantCulture), font, colour, "Right VCenter", action);
                 y += column == 0 ? 20 * scale : rowHeight * (wrapLabel ? 2 : 1);
             }
 
@@ -154,7 +155,7 @@ sealed class StatsWindow(PlayerInterface player)
         var stat = (StatsEnumerated)selected;
         var help = StatHelp.For(stat);
         string statInk = MyGuiColours.TemplateInk(player.UiResources, "Kenshi_GenericTextBoxSkin");
-        float scale = player.InventoryScale;
+        float scale = player.UiScale;
         float row = Math.Min(20 * scale, (left.Bounds.Height - 4 * scale) / Math.Max(1, 3 + help.Affected.Count + help.Training.Count));
         AddStatHelpRows(controls, left, lead, stat, help, statInk, scale, row);
 

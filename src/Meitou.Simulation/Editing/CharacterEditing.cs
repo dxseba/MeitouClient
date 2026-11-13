@@ -214,6 +214,8 @@ public static class CharacterEditing
         {
             var prosthetics = Prosthetics(cold.Medical);
             var (raceData, stats, medical) = data.Bodies.Create(proposedRace, data.Db.Find(cold.RecordId), world.Seed, Rng.Key(id));
+            if (!raceData.IsRobot && cold.Medical is { } previous) medical.Hunger = previous.Hunger;
+
             foreach (var (limb, item) in prosthetics) medical.FitReplacement(limb, item);
             cold.Race = raceData;
             cold.Stats = stats;
@@ -230,7 +232,7 @@ public static class CharacterEditing
 
         // Stumps and prosthetics stay on the edited look.
         if (kit is not null) SavedKit.SetLimbs(kit, cold.Medical, data.Db);
-        if (kit is not null && data.Appearances?.Create(cold.RecordId, kit) is { } updated)
+        if (kit is not null && data.Appearances?.Create(cold.RecordId, kit, cold.Shaved) is { } updated)
         {
             cold.Appearance = updated;
             cold.LookEdited = true;

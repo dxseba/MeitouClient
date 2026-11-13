@@ -30,11 +30,6 @@ public sealed class ProductionSettings
     /// </summary>
     public float ResearchOption { get; init; } = 1;
     /// <summary>
-    /// A turret's gunner whose path has ended counts as at its spot within this much more (engine choice). Operators work within the machine's <c>use
-    /// range</c> (<see cref="SiteReach"/>).
-    /// </summary>
-    public float SettleReach { get; init; } = 150;
-    /// <summary>
     /// The footprint radius of a BUILDING record (the host knows it); null: 0.
     /// </summary>
     public Func<string, float>? Footprint { get; init; }
@@ -45,7 +40,7 @@ public sealed class ProductionSettings
     /// <summary>
     /// A character gives or takes items from within this far (X/Z) of a building's footprint, else "Out of trading range." (the original: the
     /// building's bounds radius + 40 from its position for an item out of it, 60 for one out of a character's inventory, docs/game/economy.md
-    /// "Trading range"; engine choice: 40 from the footprint both ways).
+    /// "Trading range"; engine choice: 40 from the footprint both ways, or 60 from the position, <see cref="ContainerAccess.TradingRange"/>).
     /// </summary>
     public float TransferReach { get; init; } = 40;
     /// <summary>
@@ -143,6 +138,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     public ProductionSystem(PopulationData data, ProductionSettings? settings = null)
         : this(data.Db, data.Bodies.Constants, data.BodyOptions, data.Items, data.Biomes, settings, data.ResourceNodes)
     {
+        _towns = data;
     }
 
     /// <summary>
@@ -270,7 +266,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
             foreach (var (m, s) in swapped) Rebuild(world, m, s);
         List<Machine>? gone = null;
         foreach (var m in world.Machines.All)
-            if (Site(world, m.Site) is null) (gone ??= []).Add(m);
+            if (Site(world, m.Site) is null && !RockAwaited(m.Site)) (gone ??= []).Add(m);
         if (gone is null) return;
         foreach (var m in gone)
         {
@@ -360,9 +356,10 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     #region Orders and the operators' walk
 
     /// <summary>
-    /// The gunner spots of the player's turrets, as their walks found them (derived from the site and the ground; not saved, not hashed).
+    /// The gunner spots of the player's turrets, as their walks found them, with each turret's <c>use range</c> (derived from the site and the
+    /// ground; not saved, not hashed).
     /// </summary>
-    readonly Dictionary<string, Vector2> _turretSpots = [];
+    readonly Dictionary<string, (Vector3 Spot, float Range)> _turretSpots = [];
 
     /// <summary>
     /// The clip a turret's gunner holds.
@@ -450,12 +447,14 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     }
 
     /// <summary>
-    /// The nearest able one of the order's characters mans the turret (the original's <c>Task_UseTurret</c>): it operates it, walking to its gunner
-    /// spot (engine choice: one gunner, the original's pick among several is Unknown); someone else at it already: "is already in use".
+    /// The nearest able one of the order's characters mans the turret, the player's or a town's (<see cref="TownTurret"/>; the original's
+    /// <c>Task_UseTurret</c>): it operates it, walking to its gunner spot (engine choice: one gunner, the original's pick among several is Unknown);
+    /// someone else at it already: "is already in use".
     /// </summary>
     void UseTurret(World world, UseTurretOrder order)
     {
-        if (Site(world, order.Site) is not { Complete: true } site || TurretPostOf(site) is not { } post || Ensure(world, site) is not { } m) return;
+        var target = Site(world, order.Site) ?? TownTurret(world, order.Site);
+        if (target is not { Complete: true } site || TurretPostOf(site) is not { } post || Ensure(world, site) is not { } m) return;
         var spot = AiSystem.TurretSpot(world, post);
         var table = world.Characters;
         int best = -1;
@@ -473,8 +472,8 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     /// <summary>
     /// The orders of machines (operate 87, training 97, turret gunner 146, a haul trip to a storage 124) and prospecting (150): a player character's
     /// (else the order leaves the queue) on a complete site that has its machine (or a turret's post); one already working that machine needs nothing
-    /// more; the character must be able to work (<see cref="Able"/>), the machine have a free operator place ("is already in use", posted), and a
-    /// prospector must not swim.
+    /// more; the character must be able to work (<see cref="Able"/>), the machine have a free operator place ("is already in use", posted) and, to
+    /// operate or man it (rows 87 and 146), power (state 93, <see cref="Powered"/>; its text "It needs electricity." said); a prospector must not swim.
     /// </summary>
     OrderCheck IOrderOwner.CanRun(World world, int slot, OrderEntry order)
     {
@@ -487,7 +486,29 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         if (cold.OperateSite == id) return OrderCheck.Run;
         if (!Able(cold)) return OrderCheck.Blocked();
         if (IsSeat(m) && SeatOccupied(world, site)) return OrderCheck.Blocked($"{site.Name} is already in use.", posted: true);
-        return OperatorsOf(world, id) >= m.Data.MaxOperators ? OrderCheck.Blocked($"{site.Name} is already in use.", posted: true) : OrderCheck.Run;
+        if (OperatorsOf(world, id) >= m.Data.MaxOperators) return OrderCheck.Blocked($"{site.Name} is already in use.", posted: true);
+        return Unpowered(world, order, site, m) ? OrderCheck.Blocked(Loc.Tr("It needs electricity.")) : OrderCheck.Run;
+    }
+
+    /// <summary>
+    /// A running operate or turret order stops when its machine loses power (state 93, <see cref="Unpowered"/>).
+    /// </summary>
+    bool IOrderOwner.StillHolds(World world, int slot, OrderEntry order) =>
+        order.Site is not { } id || Site(world, id) is not { } site || world.Machines.Find(id) is not { } m || !Unpowered(world, order, site, m);
+
+    /// <summary>
+    /// Whether the order operates or mans a machine (rows 87 and 146, which need state 93) that has no power (<see cref="Powered"/>).
+    /// </summary>
+    bool Unpowered(World world, OrderEntry order, BuildSite site, Machine m) =>
+        order.Row is TaskType.OperateMachinery or TaskType.UseTurret && !Powered(world, site, m);
+
+    /// <summary>
+    /// A loaded order's machine is made as the live order makes it (<see cref="Inputs"/>): a rock's, a town dummy's or a seat's is not saved, and
+    /// without it <see cref="IOrderOwner.CanRun"/> drops the order (#598).
+    /// </summary>
+    void IOrderOwner.Restored(World world, OrderEntry order)
+    {
+        if (order.Site is { } id && Site(world, id) is { Complete: true } site) Ensure(world, site);
     }
 
     /// <summary>
@@ -537,7 +558,8 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         if (m.Data.Function == Meitou.Data.World.ObjectRanges.TurretFunction && TurretPostOf(site) is { } post)
         {
             var spot = AiSystem.TurretSpot(world, post);
-            return _turretSpots[site.Id] = new Vector2(spot.X, spot.Z);
+            _turretSpots[site.Id] = (spot, post.UseRange);
+            return new Vector2(spot.X, spot.Z);
         }
 
         var at = world.Walkability.FloorNear(site.Position.X, site.Position.Z, site.Position.Y, MovementSystem.FloorSlack) ?? site.Position;
@@ -600,16 +622,18 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     static bool IsIndoors(MachineData data, BuildSite? site) => data.InteriorFurniture && site?.Parent is not null;
 
     /// <summary>
-    /// Whether the operator is at the machine: a turret's gunner at its spot, a rock's within its footprint or use range, else within reach of
-    /// the site.
+    /// Whether the operator is at the machine: a turret's gunner at its spot or within the turret's use range, a rock's within its footprint or use
+    /// range, else within reach of the site; a gunner also at its spot's height, a machine's operator at the site's.
     /// </summary>
     bool AtSite(World world, in CharacterHot n, BuildSite site, Machine m)
     {
-        // A turret's gunner stands at its spot (once its walk has found it).
-        if (_turretSpots.TryGetValue(site.Id, out var spot))
+        // A turret's gunner walks to its spot (once its walk has found it) and mans the turret from within its use range of the turret, doubled when
+        // stopped, as any machine (AI::isWithinChoppingRange has no settle slack; a 150 slack let gunners man turrets from 15 m off, #580). The height
+        // is the spot's, which may stand above the turret's origin.
+        if (_turretSpots.TryGetValue(site.Id, out var turret))
         {
-            float off = Vector2.Distance(new Vector2(n.Position.X, n.Position.Z), spot);
-            return off <= AiSystem.TurretSlack || ((n.Flags & (ushort)MoveFlags.AnyPath) == 0 && off <= AiSystem.TurretSlack + Settings.SettleReach);
+            bool near = Gap(n.Position, turret.Spot) <= AiSystem.TurretSlack || SiteReach.Within(n, Gap(n.Position, site.Position), turret.Range);
+            return near && MathF.Abs(n.Position.Y - turret.Spot.Y) < SiteReach.HeightLimit(door: false, site.Parent is not null);
         }
 
         // A rock: inside its footprint scaled 1.2, or within its use range of the box's centre (the original measures to its position marker; a
@@ -1811,7 +1835,8 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     #region Items in and out
 
     /// <summary>
-    /// Whether the player character is within reach of the site (else posts it is out of range).
+    /// Whether the player character is within reach of the site (else posts it is out of range): <see cref="ProductionSettings.TransferReach"/> of
+    /// its footprint, or <see cref="ContainerAccess.TradingRange"/> of its position, so a small storage is never stricter than the original (#505).
     /// </summary>
     bool Near(World world, CharacterId who, BuildSite site, out CharacterCold cold)
     {
@@ -1819,7 +1844,11 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         var table = world.Characters;
         if (!table.TryResolveNext(who, out int slot) || table.Cold(slot) is not { IsPlayer: true } c || c.Inventory is null) return false;
         cold = c;
-        if (GapTo(site, table.Next[slot].Position) <= Settings.TransferReach) return true;
+
+        var at = table.Next[slot].Position;
+        float centre = Vector2.Distance(new Vector2(at.X, at.Z), new Vector2(site.Position.X, site.Position.Z));
+        if (GapTo(site, at) <= Settings.TransferReach || centre <= ContainerAccess.TradingRange) return true;
+
         world.Post("Out of trading range.");
         return false;
     }
@@ -1862,7 +1891,8 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     /// <summary>
     /// Take an item (<see cref="TakeFromMachine.Count"/> units) out of a container into the character's inventory
     /// (<see cref="InventoryCommands.MoveInto"/>); what does not fit stays in the container. Taken from another faction's container it is stolen from
-    /// that faction: a Theft and the steal roll (<see cref="Crime.CrimeSystem.Steal"/>), caught, nothing moves.
+    /// its owner (<see cref="Crime.CrimeSystem.OwnerMark"/>): a Theft and the steal roll (<see cref="Crime.CrimeSystem.Steal"/>), caught, nothing
+    /// moves.
     /// </summary>
     void TakeFromContainer(World world, Locks.Fixture container, CharacterCold cold, TakeFromMachine take)
     {
@@ -1874,7 +1904,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         var mark = item.Mark;
         if (container.Owner >= 0 && container.Owner != cold.Faction && Crime.CrimeSystem.IsStealing(world, container)
             && mark == StolenMark.None)
-            item.StolenFrom = container.Owner;
+            item.Mark = Crime.CrimeSystem.OwnerMark(world, container.Building, container.Owner);
 
         int moved = InventoryCommands.MoveInto(storage, item, InventoryCommands.ClickCount(item, take.Count), cold.Inventory!, take.BagFirst,
             out bool worn, cold);
@@ -1931,7 +1961,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         else
         {
             if (m.Storage is not { } storage || m.Closed || item.Contents is not null && item.Section == "backpack_attach") return;
-            if (m.Data.IsStorage && !m.Data.Accepts(item.Record, item.Type))
+            if (m.Data.IsStorage && !m.Data.TakesByHand(item.Record, item.Type))
             {
                 world.Post($"{m.Data.Name} does not take {item.Name}.");
                 return;

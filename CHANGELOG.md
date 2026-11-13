@@ -3,6 +3,86 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.18.0
+
+- Town residents move into the same homes, shops and house layouts as in a vanilla new game; signs the original never shows are gone
+- A building remembers the last squad made at it, as the original's: For sale shows its home, and saves keep it
+- Pack animals show the bag they wear (Garru Backpack, Bull Backpack) (#581)
+- Swamp House floors are no longer black (#583)
+- Camera: the scroll wheel sets the free camera's speed, shown for 3 s; Shift pans faster (200%, Faithful / Meitou switch)
+- Camera turning lags less above 60 fps; Controls gets a Camera smoothing toggle (#531)
+- Pause after loading and Animals pick up items are Faithful / Meitou switches; Meitou pauses after a load and keeps animals from picking up
+- Space resumes the game after the pause button
+- Bloody footprints after walking through blood
+- Turret gunners man the turret from within its use range, not from 15 m off (#580)
+- Locked gates hold on tilted buildings and slanted doors, such as the Ancient Lab Ramp Gate (#560)
+- Stealth KO on an unconscious target ends at once, with no swing or assassination XP, as the original's
+- Fighters attack targets standing just off the navmesh edge (#559)
+- Eaten limbs leave no severed limb item (#564)
+- Saves: a character from a removed mod loads as an Exile, as the original's (#577)
+- The Slaves start keeps its escaped slaves, and new player slaves get the Obedient Slave job; Rebirth's hunger and escapes match the original (#515)
+- A town building's Open to public line reads the flag its residents set, so private homes no longer show Public
+- Trading with your own squad member no longer closes the window (#511); a race word in a trader's line no longer switches the speaker (#567)
+- Town furniture and camp buildings are selected with a left click, and selected furniture shows its town (#512)
+- Fitted prosthetic limbs can be taken from loot windows (#554); dismissing a character onto the squad panel works again (#556)
+- The sand at the Watchtower's foot no longer counts as indoors (#578); windmills no longer sink when placed (#557)
+- The Settings window scales up to fill high-DPI screens (#573); the empty general storage heading is hidden (#561)
+- Code mods can add equipment slots (#570)
+- --headless plays no sound
+- macOS: loading fixed, and blood decals land where the fight is, outdoors too (#586); separate .NET 10 packages for older Macs (Ventura) (#555)
+- Metal: smoother frames (shaders compile in the background, the GPU starts before the display is free), and an Auto memory budget sized to the Mac (#584)
+- Contributors panel redrawn
+
+## v0.17.4
+
+- Stolen items stay stolen when dropped and picked up, and through a save, even from empty houses or towns that have unloaded (#544)
+- Town turrets can be manned with a right click (#545); town chests and cages are selected with a left click (#512)
+- Unpowered machines refuse operators with "It needs electricity." instead of starting and stopping over and over (#546, #548)
+- Sound no longer cuts out for good in big crowds (#538, #542)
+- No more blows landing through bars or thin walls (#439)
+- A character ordered into a bed they stand next to stays in it (#536)
+- Camera: following a carried character no longer shakes (#534); it follows at the hips and stays above raised floors
+- Walls on the camera's side hide when a floor is opened up; rugs no longer show their texture margins (#530)
+- Mod armour and collars with a vest texture no longer paint the whole body (#533)
+- The boulder at Tower of Abuse's ramp no longer blocks it (#406)
+- Title screen no longer hangs at a short NPC View Range, and the title fight no longer loses that setting
+- Runs on .NET 11; launcher v1.10.0
+
+## v0.17.3
+
+- Bandit camps, nests and homeless squads no longer spawn in water or inside town walls, as the original's spawn spot rules (#496)
+- NPC squads whose leader died follow a living member instead of standing by the corpse (#529)
+- Patrol leaders walk to the patrol point and move on, instead of milling round it (#528)
+- Guards no longer restart an endless chase after an NPC trespasser (#519)
+- Squads over 40 no longer stand idle beside their fight (#412)
+- Fast walkers no longer stutter round corners (#429)
+- Crossbows: reload progress on the State line (#525); unequipping one mid-fight no longer crashes (#526); turret Loaded bar drains during reloads
+- Stats window shows whole skill levels, not rounded up at 50% (#514)
+- Inventory: ARRANGE sorts only its own grid (#524); pinned windows keep their bag and OPEN BAG works on them (#523); no oversized backgrounds
+- Rebuilt town ruins' doors open on screen (#522); characters walk out of a chest on an upper floor (#460)
+- Shaved heads show; birds no longer sink into the ground (#409)
+- Intel macOS: no longer crashes at launch (#461)
+- Contributors panel redrawn
+
+## v0.17.2
+
+- Interface scale setting (50-200%) for fonts, skins, panels and windows; 4K radio buttons and save list columns scale up
+- Main menu style is its own setting: Meitou or Faithful title, whatever the UI style
+- Character draw distance slider (the game's NPC View Range) on Graphics > Characters (#413)
+- Slavery: an unshackled caged slave is shackled before processing, then bandaged by its owners (#508, #509); the slave buy list offers only the slaver's own slaves (#425)
+- Building: ramps snap to walls so turrets mount on them (#459, #431); furniture no longer cuts into walls (#399) or founds an outpost in a bought house
+- Steal, pick-lock and loot follow the Highlight binding, not Alt (#453); controls.cfg bindings are read as defaults (#385)
+- Storage in trading range from its position too (#505); general storage takes armour and weapons by hand again (#503, #493)
+- Saves: buildings listed outside their zone no longer saved twice (#493); empty inventories stay empty; Staying close targets kept (#447)
+- Sleep: a healed sleeper gets up (#500); a broken-legged sleeper lies in the bed (#391)
+- Animals: death items, weight and capacity, stats, inventory rows and pack sleeping as the original (#471, #445)
+- Medics: only reachable kits count (#437), carried characters treat no one (#417), skeletons need Robotics to repair themselves (#407), repair beds heal damage (#395)
+- Dumb NPCs such as Agnu can be talked to again (#446); arrival banter only between squad members on screen (#430)
+- Put in cage and lock picking walk to the cage's floor (#432); Set Free on a prisoner in another faction's open cage (#435)
+- Craft and research queues show with older layouts such as Dark UI (#463); HLP opens the Tutorials (#443); windows may be dragged off screen (#444)
+- Miners haul full output and reach their rock (#388); workmasters keep up with running slaves (#402); trestle bridges walkable underneath (#403)
+- Camera no longer enters a ruin's base at close zoom (#483); long names widen their name tag; AMD device-loss fix (#319)
+
 ## v0.17.1
 
 - Version tag fixed: the build reports v0.17.1, so the feedback button and code mods' game version ranges see the right release (#379)

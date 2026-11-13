@@ -1,6 +1,7 @@
 using System.Numerics;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
+using Meitou.Game.Rendering.Characters;
 using Meitou.Game.Rendering.Frame;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
@@ -18,6 +19,12 @@ sealed class TitleBattle : IDisposable
     /// How much larger than life the fighters are drawn, and their spacing round each centre.
     /// </summary>
     const float DisplayScale = 2.5f;
+
+    /// <summary>
+    /// The fighters' draw-distance multiple: the shortest NPC View Range times this is the longest, so the staged fight shows (and the title's
+    /// loading, which waits for its looks, ends) whatever the range.
+    /// </summary>
+    const float DrawReach = CharacterRenderer.MaxDrawDistance / CharacterRenderer.MinDrawDistance;
 
     /// <summary>
     /// The fight's own world (combat and animation systems only).
@@ -119,12 +126,8 @@ sealed class TitleBattle : IDisposable
             var oldMiddle = (previous[pair].Position + previous[pair + 1].Position) / 2;
             position = _centres[i / 2] + (position - Vector3.Lerp(oldMiddle, middle, alpha)) * DisplayScale;
             position.Y = _world.Walkability.GroundHeight(position.X, position.Z);
-            var poses = c.Animations.Select(layer =>
-            {
-                var old = before.Animations.FirstOrDefault(p => p.Name == layer.Name);
-                return new CharacterPose(layer.Name, old.Name is null ? layer.Time : GameHost.LayerTime(old, layer, alpha),
-                    old.Weight + (layer.Weight - old.Weight) * alpha);
-            }).ToArray();
+            var poses = new CharacterPose[GameHost.DrawnLayerCount(before, c)];
+            GameHost.BlendLayers(before, c, alpha, poses);
             list.Add(new CharacterInstance(long.MinValue + 2 + i, c.Appearance, position,
                 Simulation.Session.Interp.LerpAngle(before.Yaw, c.Yaw, alpha), poses)
             {
@@ -132,6 +135,7 @@ sealed class TitleBattle : IDisposable
                 RangedDrawn = c.RangedDrawn,
                 Shots = c.CrossbowShots,
                 Scale = c.Scale * DisplayScale,
+                DrawDistanceScale = DrawReach,
                 FullRateAnimation = true,
             });
         }

@@ -413,6 +413,7 @@ public sealed partial class PopulationSystem
         var squad = SpawnSquad(world, built with { Home = home }, site, radius, platoonId: fresh.Id, pinned: true);
         squad.Money = p.Money;
         MoveOutOfPlayerWalls(world, squad);
+        if (home is not null) world.Fixtures.StampResidents(home, p.TemplateId);
         fresh.SquadId = squad.Id;
         world.Platoons.Add(fresh);
         Despawn(world, p, release: false);   // its uniques were freed above and the fresh squad holds them
@@ -452,6 +453,7 @@ public sealed partial class PopulationSystem
         var squad = SpawnSquad(world, built with { Home = home }, site, radius, platoonId: p.Id, pinned: true);
         squad.Money = p.Money;
         MoveOutOfPlayerWalls(world, squad);
+        if (home is not null) world.Fixtures.StampResidents(home, p.TemplateId);
         p.Stored = new StoredSquad { Name = _data.Db.Find(p.TemplateId)?.Name ?? p.TemplateId, HomeBuilding = home };
         p.Size = built.Plan.TotalMembers;
         p.Unmade = false;
@@ -647,11 +649,12 @@ public sealed partial class PopulationSystem
         long loadId = state.LoadId;
         ulong seed = world.Seed;
         var walk = world.Walkability;
+        var regions = RegionsOf(world);
         var spots = players;
         if (_work is null)
-            SpawnWild(world, BuildNest(site, loadId, seed, walk, spots, budget));
+            SpawnWild(world, BuildNest(site, loadId, seed, walk, regions, spots, budget));
         else
-            _work.Add(() => _builtWild.Enqueue(BuildNest(site, loadId, seed, walk, spots, budget)));
+            _work.Add(() => _builtWild.Enqueue(BuildNest(site, loadId, seed, walk, regions, spots, budget)));
     }
 
     /// <summary>

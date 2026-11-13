@@ -117,13 +117,21 @@ sealed class PickInspector(PlayerInterface player)
     static string N(float v, string format = "0") => v.ToString(format, CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// The area of <paramref name="polygon"/>.
+    /// The area of <paramref name="polygon"/>, summed from its first vertex (world coordinates in float would round it by hundreds).
     /// </summary>
     static float Area(Vector2[] polygon)
     {
+        if (polygon.Length < 3) return 0;
+
         float a = 0;
-        for (int i = 0; i < polygon.Length; i++)
-            a += polygon[i].X * polygon[(i + 1) % polygon.Length].Y - polygon[(i + 1) % polygon.Length].X * polygon[i].Y;
+        var origin = polygon[0];
+        for (int i = 1; i + 1 < polygon.Length; i++)
+        {
+            var p = polygon[i] - origin;
+            var q = polygon[i + 1] - origin;
+            a += p.X * q.Y - q.X * p.Y;
+        }
+
         return MathF.Abs(a) / 2;
     }
 
@@ -194,7 +202,7 @@ sealed class PickInspector(PlayerInterface player)
         lines.Add(new("Selected characters", player.SelectedIds().Count.ToString(CultureInfo.InvariantCulture)));
         if (InspectorPanel)
         {
-            float scale = player.InventoryScale, row = 20 * scale, width = Math.Min(player.Width * 0.5f, 430 * scale),
+            float scale = player.UiScale, row = 20 * scale, width = Math.Min(player.Width * 0.5f, 430 * scale),
                 height = 16 * scale + row * (lines.Count + 1);
             var box = new UiRect(player.Width - width - 8 * scale, 40 * scale, width, height);
             controls.Add(new("inspector", "Widget", box, "", "", "Kenshi_GenericTextBoxSkin", true, new Dictionary<string, string>(),

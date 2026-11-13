@@ -686,7 +686,8 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
     {
         var reg = world.Buildings;
         if (site.Parent is { } parent && reg.Find(parent) is { } home) return home.Town;
-        if (site.Parent is { } level && LevelTownOf(world, level) is { } centre && DistanceXz(centre, site.Position) <= JoinTownRange) return 0;
+        if (site.Parent is { } level && LevelTownOf(world, level, site.Position) is { } centre && DistanceXz(centre, site.Position) <= JoinTownRange)
+            return 0;
         int faction = world.Player.Faction;
         PlayerTown? nearest = null;
         float best = float.MaxValue;
@@ -719,18 +720,27 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
 
     /// <summary>
     /// The centre of the placed town a level building (its instance id, what a site built in it names as its parent) belongs to; null when it is of
-    /// no town.
+    /// no town. Instance ids are unique only within a zone (a mod's <c>19-rebirth-INGAME</c> is in dozens), so of the buildings with that id the one
+    /// nearest <paramref name="near"/> (X/Z), where the site stands, is meant.
     /// </summary>
-    static Vector3? LevelTownOf(World world, string instance)
+    static Vector3? LevelTownOf(World world, string instance, Vector3 near)
     {
         if (world.SystemOf<PopulationSystem>()?.Data is not { } data) return null;
+
+        Vector3? centre = null;
+        float best = float.MaxValue;
         foreach (var town in data.Sites)
         {
             foreach (var b in town.Buildings)
-                if (b.InstanceId == instance) return town.Position;
+            {
+                if (b.InstanceId != instance) continue;
+
+                float d = DistanceXz(b.Position, near);
+                if (d < best) (best, centre) = (d, town.Position);
+            }
         }
 
-        return null;
+        return centre;
     }
 
     /// <summary>
@@ -983,7 +993,18 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
         SiteReach.Within(n, goal.Site is { } site
             ? SiteReach.Gap(Settings.EdgeGap, site, n.Position)
             : Vector2.Distance(new(n.Position.X, n.Position.Z), new(goal.At.X, goal.At.Z)), goal.Reach)
-        && (goal.Site is not { } high || SiteReach.AtHeight(n, high, world.Fixtures.DoorsByBuilding[high.Id].Any()));
+        && (goal.Site is not { } high || SiteReach.AtHeight(n, high, FloorHeight(world, high), world.Fixtures.DoorsByBuilding[high.Id].Any()));
+
+    /// <summary>
+    /// The height of the floor a site belongs to: a <c>ceiling placement</c> site's is the floor under it (it hangs from the ceiling, and the
+    /// original's same-floor test passes its builder whatever the height, #592), any other's its own.
+    /// </summary>
+    float FloorHeight(World world, BuildSite site)
+    {
+        var at = site.Position;
+        if (Data(site.Record) is not { CeilingPlacement: true }) return at.Y;
+        return world.Walkability.GroundHeight(at.X, at.Z, at.Y);
+    }
 
     /// <summary>
     /// Where a worker goes and from how near it works: the site, or for a fetcher its source (a storage by its machine's <c>use range</c>, the

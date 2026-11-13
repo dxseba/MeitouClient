@@ -57,7 +57,7 @@ sealed class TitleScreen(GameHost host)
     /// The title's characters, streaming, objects and foliage are ready to show.
     /// </summary>
     internal bool TitleSceneReady => TitleCharactersReady && (host.Gpu is null || host.Gpu.Streamer is not { Idle: false } &&
-        !(host.Gpu.Objects?.Pending > 0) && !(host.Gpu.Foliage?.Pending > 0));
+        !(host.Gpu.Objects?.LoadingPending > 0) && !(host.Gpu.Foliage?.Pending > 0));
 
     /// <summary>
     /// Makes the title's own particle renderer (the dust).
@@ -87,7 +87,7 @@ sealed class TitleScreen(GameHost host)
     /// <summary>
     /// The Meitou title shows the live world.
     /// </summary>
-    internal bool TitleVisible => host.Player.TitleOpen && host.Player.UiMode == UiMode.Meitou;
+    internal bool TitleVisible => host.Player.TitleOpen && host.Player.MeitouMainMenu;
 
     /// <summary>
     /// The title's hour: 0.75 h after sunrise.

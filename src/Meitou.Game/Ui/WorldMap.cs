@@ -124,9 +124,9 @@ sealed class WorldMap(PlayerInterface player)
     static Vector3 MapWorld(Vector2 normalized) => new(normalized.X * 2 * MapExtent - MapExtent, 0, normalized.Y * 2 * MapExtent - MapExtent);
 
     /// <summary>
-    /// The UI's scale: 1 at 1080 pixels high.
+    /// The UI scale (<see cref="PlayerInterface.UiScale"/>).
     /// </summary>
-    float UiScale => player.Height / 1080f;
+    float UiScale => player.UiScale;
 
     /// <summary>
     /// Whether the overview shows its Map tab now (the F10 map-teleport hint reads it).
@@ -679,7 +679,7 @@ sealed class WorldMap(PlayerInterface player)
 
         if (trade is null && WindowRightClick(picked.Screen, picked.Control, shift)) return true;
 
-        if (TradeWindows.IsLootScreen(picked.Screen) || !picked.Control.Properties.TryGetValue("InventoryItem", out var index)
+        if (player.InventoryWindows.IsLootWindow(picked.Screen) || !picked.Control.Properties.TryGetValue("InventoryItem", out var index)
             || player.InventoryWindows.WindowCharacter(picked.Screen) is not { ItemGrid: { } grid } lead)
         {
             return false;
@@ -700,15 +700,14 @@ sealed class WorldMap(PlayerInterface player)
         {
             if (!InventoryCommands.IsMovableSection(item.Section)) return false;
 
-            bool otherBag = other == player.InventoryWindows.InventoryOwner()?.Id && player.FaithfulScreens.IsOpen("bag");
+            bool otherBag = player.InventoryWindows.BagShown(other);
             player.Say(new QuickMoveItem(lead.Id, token, shift, false) { Tick = player.Session.World.Tick, Into = other, IntoBag = otherBag });
             return true;
         }
 
         if (MapItemTowns?.Invoke(item.Record) is not null)
             player.Say(new ReadMapItem(lead.Id, token) { Tick = player.Session.World.Tick });
-        else player.Say(new QuickMoveItem(lead.Id, token, shift, player.FaithfulScreens.IsOpen("bag")
-            && !InventoryWindows.IsPinnedInventory(picked.Screen)) { Tick = player.Session.World.Tick });
+        else player.Say(new QuickMoveItem(lead.Id, token, shift, player.InventoryWindows.BagShown(lead.Id)) { Tick = player.Session.World.Tick });
 
         return true;
     }
@@ -719,7 +718,7 @@ sealed class WorldMap(PlayerInterface player)
     /// </summary>
     CharacterId? OtherCharacterWindow(string screen, CharacterId own)
     {
-        if (screen is not ("inventory" or "bag") && !InventoryWindows.IsPinnedInventory(screen)) return null;
+        if (InventoryWindows.ScreenKind(screen) is not ("inventory" or "bag")) return null;
 
         var open = player.FaithfulScreens.OpenScreens;
 
@@ -767,7 +766,7 @@ sealed class WorldMap(PlayerInterface player)
 
         int at = int.Parse(index, CultureInfo.InvariantCulture);
 
-        if (TradeWindows.IsLootScreen(screen))
+        if (player.InventoryWindows.IsLootWindow(screen))
         {
             if (!loot || player.TradeWindows.LootBody()?.ItemGrid?.Items.FirstOrDefault(i => i.Index == at) is not { } looted)
                 return false;

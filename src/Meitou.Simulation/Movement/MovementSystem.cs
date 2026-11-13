@@ -1228,9 +1228,16 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     public const float BodyShare = 0.6f;
 
     /// <summary>
-    /// A character within this distance of a waypoint has reached it.
+    /// The reach of a walker's waypoint tests: half of it passes a corner it can cut (more when fast, <see cref="CornerPass"/>), all of it one its
+    /// velocity has carried past; a closing walk and an occupied goal are tested within it.
     /// </summary>
     public const float ArriveRadius = 10;
+
+    /// <summary>
+    /// The farthest a fast walker passes a corner it can cut from (<see cref="CornerPass"/>; engine choice: a slow-accelerating race's stopping
+    /// distance would otherwise cut corners from far off).
+    /// </summary>
+    const float CornerPassMost = 3 * ArriveRadius;
 
     /// <summary>
     /// How near (units) a walker comes to a corner it may not cut (<see cref="CanCut"/>) before it turns for the next waypoint (engine choice: about
@@ -1623,6 +1630,7 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     void WalkPath(World world, int i, in CharacterHot p, ref CharacterHot n, CharacterCold cold, ref StepState s)
     {
         var walk = world.Walkability;
+        float pass = CornerPass(p, cold);
 
         // A waypoint reached is passed in the same tick: the walker heads on for the next one rather than standing a tick at each.
         Vector3 waypoint;
@@ -1640,8 +1648,8 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
 
             // The last point taken by another body: the walker stops short instead of pushing in (the original's agent, FUN_1401476f0).
             bool occupied = last && cold.ArriveWithin <= 0 && dist <= ArriveRadius && GoalOccupied(world, i, waypoint);
-            reached = occupied || dist <= (last ? cold.ArriveWithin > 0 ? cold.ArriveWithin : FinalArrive : ArriveRadius * 0.5f)
-                && (last || dist <= CornerReach || CanCut(walk, p.Position, cold.Path[n.PathCursor + 1]))
+            reached = occupied || dist <= (last ? cold.ArriveWithin > 0 ? cold.ArriveWithin : FinalArrive : pass)
+                && (last || dist <= CornerReach || CanCut(walk, p.Position, cold.Path[n.PathCursor + 1], 2 * pass))
                 // A corner the agent's velocity has carried past (it turns at its acceleration, not at once) is behind it, not circled.
                 || !last && dist <= ArriveRadius && to.X * p.Velocity.X + to.Y * p.Velocity.Z < 0;
 
@@ -1664,11 +1672,26 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
             if (last)
                 s.Desired = MathF.Min(s.Desired, MathF.Min(MathF.Sqrt(2 * PathAcceleration(cold) * dist), dist / s.Dt));
             else if (!cold.InCombat)
-                (s.Dir, s.Desired) = CornerBrake(p.Velocity, to, s.Dir, s.Desired, PathAcceleration(cold));
+            {
+                var past = PastCorner(p, cold.Path[n.PathCursor + 1]);
+                (s.Dir, s.Desired) = CornerBrake(p.Velocity, past, s.Dir, s.Desired, PathAcceleration(cold));
+            }
         }
 
         // On the provisional part of a long route: ask again (the zones ahead may have loaded), following this one until the answer comes.
         if (n.PathCursor >= cold.PathExact) Reroute(world, ref n, cold);
+    }
+
+    /// <summary>
+    /// How near a walker passes a waypoint but the last it can cut (<see cref="CanCut"/>): half <see cref="ArriveRadius"/>, or its stopping distance
+    /// and <see cref="CornerMargin"/> when longer, up to <see cref="CornerPassMost"/> (engine choice, #429: passed before <see cref="CornerBrake"/>
+    /// engages, a fast walker no longer brakes at every corner it can round).
+    /// </summary>
+    static float CornerPass(in CharacterHot p, CharacterCold cold)
+    {
+        float speed2 = p.Velocity.X * p.Velocity.X + p.Velocity.Z * p.Velocity.Z;
+        float stopping = speed2 / (2 * PathAcceleration(cold)) + CornerMargin;
+        return Math.Clamp(stopping, ArriveRadius * 0.5f, CornerPassMost);
     }
 
     /// <summary>
@@ -1916,7 +1939,8 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     {
         var walk = world.Walkability;
 
-        // One already off every surface near its height (a stale height) is not held there: it steps down onto what is below.
+        // One already off every surface near its height (a stale height) is not held there: it steps down onto what is below, unless it walks out
+        // of a hole along its path (below).
         if (!stands) stands = walk.TryStand(x, z, p.Position.Y, out y);
 
         // On its navmesh path, a drop or climb beyond the stand limits that the corridor itself takes (a stair top short of a floor's edge)
@@ -1927,8 +1951,11 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
         bool offSurface = !stands && !walk.IsWalkable(p.Position.X, p.Position.Z, p.Position.Y);
 
         // Shoved into something that cuts a hole in the mesh (a market stall), it walks out along its path toward the surface the path starts
-        // on, at its own height.
-        bool escaping = offSurface && !s.Steering && !walk.IsWalkable(x, z) && EscapesToward(walk, n, cold, p.Position, x, z);
+        // on, at its own height, also over a floor below the hole (a chest on an upper floor, #460). From the hole's edge, where it still stands,
+        // only once a step there was refused and its path asked again: one merely pushed to the side of a table first gets a path round it.
+        bool inHole = !stands && !walk.IsOnSurface(p.Position.X, p.Position.Z, p.Position.Y);
+        bool held = offSurface || cold.BlockedRepaths > 0;
+        bool escaping = inHole && held && !s.Steering && EscapesToward(walk, n, cold, p.Position, x, z);
         if (escaping) y = p.Position.Y;
 
         if (stands || offSurface && walk.IsWalkable(x, z) || escaping)
@@ -1957,7 +1984,7 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     }
 
     /// <summary>
-    /// Whether a walker off every surface (shoved into something that cuts a hole in the mesh) may step to (<paramref name="x"/>,
+    /// Whether a walker in a hole in the mesh or at its edge (shoved into something that cuts the hole) may step to (<paramref name="x"/>,
     /// <paramref name="z"/>): only nearer its path's current point, and only when that point is a surface it can stand on, so it walks out and never
     /// further in (docs/game/pathfinding.md "Own builder", shoved into furniture).
     /// </summary>
@@ -1974,18 +2001,19 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     }
 
     /// <summary>
-    /// Whether a walker at <paramref name="from"/> can step straight toward <paramref name="to"/> for <see cref="ArriveRadius"/> units, its height
-    /// carried on as each step's is: a corner is cut early only then (engine choice; Observed: zone 22.10, a walker beside a door stair's foot cut
-    /// its corner up the stair's side and stood there).
+    /// Whether a walker at <paramref name="from"/> can step straight toward <paramref name="to"/> for <paramref name="probe"/> units (at least
+    /// <see cref="ArriveRadius"/>), its height carried on as each step's is: a corner is cut early only then (engine choice; Observed: zone 22.10, a
+    /// walker beside a door stair's foot cut its corner up the stair's side and stood there).
     /// </summary>
-    static bool CanCut(IWalkability walk, Vector3 from, Vector3 to)
+    static bool CanCut(IWalkability walk, Vector3 from, Vector3 to, float probe = ArriveRadius)
     {
         var leg = new Vector2(to.X - from.X, to.Z - from.Z);
         float length = leg.Length();
         if (length < 1e-3f) return true;
 
         float y = from.Y;
-        for (float d = 1; d <= MathF.Min(length, ArriveRadius); d += 1)
+        float most = MathF.Min(length, MathF.Max(probe, ArriveRadius));
+        for (float d = 1; d <= most; d += 1)
             if (!walk.TryStand(from.X + leg.X * (d / length), from.Z + leg.Y * (d / length), y, out y)) return false;
 
         return true;
@@ -2013,21 +2041,23 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
 
     /// <summary>
     /// The nav agent's braking for the corner it heads for (<b>Verified</b>, <c>FUN_140147fd0</c> with the corner from <c>FUN_140146a60</c>;
-    /// docs/game/pathfinding.md): once the corner along its heading is within its stopping distance (<see cref="CornerMargin"/> added), its wanted
-    /// speed drops to sqrt(2 a <see cref="CornerLength"/> |sin θ|), θ between its velocity and the way to the corner; when even the wanted speed fits
-    /// under that, it steers square across its velocity toward the corner's side at that speed.
+    /// docs/game/pathfinding.md): once the tested point along its heading is within its stopping distance (<see cref="CornerMargin"/> added), its
+    /// wanted speed drops to sqrt(2 a <see cref="CornerLength"/> |sin θ|), θ between its velocity and the way to that point; when even the wanted
+    /// speed fits under that, it steers square across its velocity toward the point's side at that speed. The tested point is the one past the
+    /// corner (engine reading, #429): tested against the corner itself, every head-on approach braked toward a stop.
     /// </summary>
-    static (Vector2 Dir, float Desired) CornerBrake(Vector3 moving, Vector2 to, Vector2 dir, float desired, float acceleration)
+    static (Vector2 Dir, float Desired) CornerBrake(Vector3 moving, Vector2 tested, Vector2 dir, float desired, float acceleration)
     {
         var velocity = new Vector2(moving.X, moving.Z);
         float speed = velocity.Length();
-        if (speed <= 1e-4f) return (dir, desired);
+        float length = tested.Length();
+        if (speed <= 1e-4f || length <= 1e-4f) return (dir, desired);
 
         var heading = velocity / speed;
-        if (Vector2.Dot(to, heading) - CornerMargin >= speed * speed / (2 * acceleration)) return (dir, desired);
+        if (Vector2.Dot(tested, heading) - CornerMargin >= speed * speed / (2 * acceleration)) return (dir, desired);
 
         var across = new Vector2(heading.Y, -heading.X);
-        float lateral = Vector2.Dot(across, dir);
+        float lateral = Vector2.Dot(across, tested / length);
         float limit = 2 * acceleration * CornerLength * MathF.Abs(lateral);
         if (desired * desired <= limit) return (lateral < 0 ? -across : across, desired);
 
@@ -2035,12 +2065,18 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     }
 
     /// <summary>
+    /// The way from the walker to the point past the corner it heads for, the point <see cref="CornerBrake"/> tests.
+    /// </summary>
+    static Vector2 PastCorner(in CharacterHot p, Vector3 past) => new(past.X - p.Position.X, past.Z - p.Position.Z);
+
+    /// <summary>
     /// Whether a medic's ask to stand still holds the character (<see cref="CharacterCold.StandStillUntil"/>): the original's patient takes 62
-    /// Standing still as an urgent goal, which its orders outrank and whose row needs no attack on it (<c>!isAggressionTowardsMe</c>). Engine
-    /// reading: an NPC (the player's characters move by orders), not fighting or fleeing.
+    /// Standing still as an urgent goal (a tier 3 request, docs/game/ai-tasks.md "Stand still"), which the front of its order queue outranks (the
+    /// chooser's source 1) and which beats its jobs and routine (sources 5 and 6); its row needs no attack on it (<c>!isAggressionTowardsMe</c>).
+    /// So an NPC or a player's character with no order in hand is held; not one fighting or fleeing.
     /// </summary>
     static bool AskedToStandStill(in CharacterHot n, CharacterCold cold, long tick) =>
-        cold.StandStillUntil > tick && !cold.IsPlayer && !cold.InCombat && !cold.Fleeing && cold.CarriedBy.IsNone
+        cold.StandStillUntil > tick && (!cold.IsPlayer || cold.OrderQueue.Count == 0) && !cold.InCombat && !cold.Fleeing && cold.CarriedBy.IsNone
         && n.Task != (byte)CharacterTask.Attack;
 
     /// <summary>

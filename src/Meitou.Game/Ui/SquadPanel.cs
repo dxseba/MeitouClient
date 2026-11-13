@@ -143,7 +143,7 @@ sealed class SquadPanel(PlayerInterface player)
         var byId = snapshot.Characters.Where(c => c.IsPlayer).ToDictionary(c => c.Id);
         var area = panel.Bounds;
         var clip = panel.Clip is { } outer ? area.Intersect(outer) : area;
-        float boxHeight = area.Height * SquadBoxShare, boxWidth = area.Width - SquadScrollBar * player.InventoryScale;
+        float boxHeight = area.Height * SquadBoxShare, boxWidth = area.Width - SquadScrollBar * player.UiScale;
         _squadsScroll = Math.Clamp(_squadsScroll, 0, Math.Max(0, squads.Count * boxHeight - area.Height));
         var focus = player.FaithfulScreens.Focus is { Screen: "overview" } f ? f : default((string, string, int, int, int)?);
         bool dragging = _portraitDrag is { } pressed && Vector2.Distance(pressed.From, player.Mouse) >= PlayerInterface.DragThreshold;
@@ -180,7 +180,7 @@ sealed class SquadPanel(PlayerInterface player)
         // The box shows the squad's name, or what is being typed; a box not being typed in starts from the name when it is next pressed.
         if (!typing) player.FaithfulScreens.SetText("overview", nameBox, squad.Name);
 
-        var b = new UiBindings { TemplateScale = player.InventoryScale };
+        var b = new UiBindings { TemplateScale = player.UiScale };
         b.Text["SquadNameText"] = typing ? player.FaithfulScreens.GetText("overview", nameBox) : squad.Name;
         int count = squad.Members.Count;
         b.Text["SquadSizeText"] = $"{count}/{maxSize}";
@@ -355,10 +355,17 @@ sealed class SquadPanel(PlayerInterface player)
     }
 
     /// <summary>
-    /// Whether <paramref name="p"/> is over DRAG HERE TO DISMISS.
+    /// Whether <paramref name="p"/> is over DRAG HERE TO DISMISS in the top screen. Its transparent ItemBox and mouse-disabled caption cannot
+    /// be identified by the ordinary widget hit test, so use the arranged drop panel's bounds and clip.
     /// </summary>
-    bool OverDismiss(Vector2 p) =>
-        player.FaithfulScreens.HitTest(p) is { Screen: "overview" } hit && hit.Control.Name is "DismissCharPanel" or "lbSquadsDismiss";
+    bool OverDismiss(Vector2 p)
+    {
+        if (player.FaithfulScreens.HitTest(p) is not { Screen: "overview" }) return false;
+
+        var controls = player.FaithfulScreens.LastFrame.FirstOrDefault(f => f.Id == "overview")?.Controls;
+        return controls?.FirstOrDefault(c => c.Name == "DismissCharPanel") is { } panel
+            && panel.Bounds.Contains(p.X, p.Y) && (panel.Clip is null || panel.Clip.Value.Contains(p.X, p.Y));
+    }
 
     /// <summary>
     /// The button let go over the squads screen: a portrait that did not move selects its character; one dragged onto a portrait goes in at its place
@@ -443,7 +450,7 @@ sealed class SquadPanel(PlayerInterface player)
             return false;
         }
 
-        _squadsScroll -= steps * 44 * player.InventoryScale;   // clamped when the list is laid out
+        _squadsScroll -= steps * 44 * player.UiScale;   // clamped when the list is laid out
         return true;
     }
 

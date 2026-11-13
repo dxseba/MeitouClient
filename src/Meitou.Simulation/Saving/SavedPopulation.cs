@@ -266,24 +266,22 @@ public sealed class SavedPopulation
     readonly List<(ItemInstance Item, Hand Owner, StolenMark Interim)> _owners = [];
 
     /// <summary>
-    /// Marks the items of a character just made whose saved <c>ownedby</c> names a character of the save of another faction than
-    /// <paramref name="holderFaction"/>.
+    /// Marks the items of a character just made that were stolen from another faction than <paramref name="holderFaction"/>: the faction of the
+    /// character of the save their <c>ownedby</c> names, else Meitou's <see cref="SaveItem.StolenFromKey"/> (a mark naming no saved character).
     /// </summary>
     internal void NoteOwners(Inventory inventory, int holderFaction, PopulationData data)
     {
         foreach (var item in inventory.All())
         {
-            if (item.Saved is not { } r || Hand.Read(r, "ownedby") is not { Type: (int)FcsRecordType.Character } h
-                || Handles.Character(h) is not { } owner)
-            {
-                continue;
-            }
+            if (item.Saved is not { } r) continue;
 
-            int faction = data.FactionIndex(owner.Platoon.FactionId);
+            var h = Hand.Read(r, "ownedby");
+            var owner = h.Type == (int)FcsRecordType.Character ? Handles.Character(h) : null;
+            int faction = owner is not null ? data.FactionIndex(owner.Platoon.FactionId) : SavedKit.StolenFrom(r, data);
             if (faction < 0 || faction == holderFaction) continue;
 
             item.Mark = StolenMark.OfFaction(faction);
-            lock (_owners) _owners.Add((item, h, item.Mark));
+            if (owner is not null) lock (_owners) _owners.Add((item, h, item.Mark));
         }
     }
 
@@ -350,18 +348,17 @@ internal static class SavedCharacters
     #region Characters
 
     /// <summary>
+    /// The CHARACTER (Exile) a saved character whose record the game data lacks is made from (the original's platoon file load).
+    /// </summary>
+    const string DeletedCharacterStandIn = "136-gamedata.quack";
+
+    /// <summary>
     /// Reads a character's race, stats, medical state, items and look. Null (with a note) when the game data lacks its record.
     /// </summary>
     public static SavedParts? Read(SaveCharacter sc, string platoonName, PopulationData data, IAppearanceSource? appearances,
         Dictionary<string, RaceData?> races, Dictionary<string, BodyPartTemplate?> parts, Action<string>? note)
     {
-        var record = data.Db.Find(sc.RecordId);
-
-        if (record is null)
-        {
-            note?.Invoke($"{platoonName}: character {sc.Name} is made from {sc.RecordId}, which the game data does not have; left out.");
-            return null;
-        }
+        if (RecordOf(sc, platoonName, data.Db, note) is not { } record) return null;
 
         RaceData? race = RaceOf(sc, record, data.Db, races);
         CharacterStats? stats = sc.Stats is null ? null : CharacterStats.ReadSave(sc.Stats.Floats);
@@ -383,10 +380,13 @@ internal static class SavedCharacters
         CharacterAppearance? look = null;
         int serial = handle.S & 0x7FFFFFFF;
 
+        // The shave the character will have (SlaveSave.Read): the saved one, else the record's when it has no state record.
+        bool? shaved = sc.GameState is { } state ? state.Bools.GetValueOrDefault(SlaveSave.ShavedKey) : null;
+
         if (sc.Inventory is not null && appearances is { } source && SavedKit.LoadoutOf(sc.Appearance, savedItems, data.Db, serial) is { } kit)
         {
             SavedKit.SetLimbs(kit, medical, data.Db);
-            look = source.Create(sc.RecordId, kit);
+            look = source.Create(sc.RecordId, kit, shaved);
         }
 
         look ??= appearances?.Create(sc.RecordId, ownerId.Length > 0 ? ownerId : null, serial);
@@ -401,7 +401,7 @@ internal static class SavedCharacters
             if (worn is not null)
             {
                 SavedKit.SetLimbs(worn, medical, data.Db);
-                look = again.Create(sc.RecordId, worn) ?? look;
+                look = again.Create(sc.RecordId, worn, shaved) ?? look;
             }
         }
 
@@ -465,6 +465,9 @@ internal static class SavedCharacters
         else if (race is not null)
             notes?.Add($"{platoonName}: {cold.Name} has no stats or medical state that could be read; it has no body in the world.");
 
+        // A look kept from before (a platoon back in the world) or rolled without a saved appearance shows the shave the character has.
+        assembly.MatchShave(cold);
+
         // What it holds that was stolen (the save's `ownedby`).
         if (cold.Inventory is { } carried) context.NoteOwners(carried, faction, data);
 
@@ -518,6 +521,11 @@ internal static class SavedCharacters
         cold.Bounties = bounties ?? BountySave.Read(sc.GameState, data.Relations, context.Clock, 0, world.TickSeconds);
         CrimeSave.Read(sc.GameState, cold);
         SlaveSave.Read(sc.GameState, cold, data);
+
+        // Without a state record the shave is the CHARACTER's own, as a new character's (CharacterAssembly.Attach).
+        if (sc.GameState is null && data.Db.Find(sc.RecordId) is { Type: FcsRecordType.Character } made)
+            cold.Shaved = made.GetBool("shaved");
+
         DialogueSave.Read(sc.GameState, cold);
         if (cold.IsPlayer && sc.GameState is { } orders) Orders.Read(orders, cold);
 
@@ -547,6 +555,37 @@ internal static class SavedCharacters
             cold.Save.CarryPartner = Hand.Read(carry, "carrying");
             cold.Save.CarryIsCarrier = carry.Bools.GetValueOrDefault("carrying");
         }
+    }
+
+    /// <summary>
+    /// The record a saved character is made from; null (with a note) when the game data lacks it. A saved character (more than four of its six
+    /// state records) whose record is gone, its mod removed, is made from the Exile <see cref="DeletedCharacterStandIn"/> instead, which becomes
+    /// its record (and so what the next save writes), as the original's (docs/formats/save.md "Missing character records").
+    /// </summary>
+    static GameRecord? RecordOf(SaveCharacter sc, string platoonName, GameDatabase db, Action<string>? note)
+    {
+        if (db.Find(sc.RecordId) is { } record) return record;
+
+        bool saved = sc.RecordId.Length > 2 && StateCount(sc) > 4;
+
+        if (saved && db.Find(DeletedCharacterStandIn) is { } standIn)
+        {
+            note?.Invoke($"{platoonName}: character {sc.Name} is made from {sc.RecordId}, which the game data does not have; made as {standIn.Name}.");
+            sc.RecordId = DeletedCharacterStandIn;
+            return standIn;
+        }
+
+        note?.Invoke($"{platoonName}: character {sc.Name} is made from {sc.RecordId}, which the game data does not have; left out.");
+        return null;
+    }
+
+    /// <summary>
+    /// How many of its six state records the saved character has.
+    /// </summary>
+    static int StateCount(SaveCharacter sc)
+    {
+        FcsRecord?[] states = [sc.GameState, sc.Ai, sc.Inventory, sc.Medical, sc.Stats, sc.Appearance];
+        return states.Count(s => s is not null);
     }
 
     /// <summary>

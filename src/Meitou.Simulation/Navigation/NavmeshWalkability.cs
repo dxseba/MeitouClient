@@ -155,6 +155,33 @@ public sealed partial class NavmeshWalkability : IWalkability
         return TryStand(w, x, z, nearY, out _, out bool reachable) && reachable;
     }
 
+    /// <summary>
+    /// As <see cref="IsWalkable(float, float, float)"/>, without the polygon within <see cref="EdgeTolerance"/>: a walker that stands only by it is
+    /// at the edge of a hole in the mesh.
+    /// </summary>
+    public bool IsOnSurface(float x, float z, float nearY)
+    {
+        var w = _world;
+        if (!w.Contains(WorldLayout.ZoneOf(x, z))) return _fallback.IsWalkable(x, z);
+        return TryStand(w, x, z, nearY, out _, out bool reachable, edges: false) && reachable;
+    }
+
+    /// <inheritdoc/>
+    public Vector3 SurfacePoint(Vector3 at, float inset)
+    {
+        var w = _world;
+        if (!w.Contains(WorldLayout.ZoneOf(at.X, at.Z)) || IsOnSurface(at.X, at.Z, at.Y)) return at;
+        if (!w.TryEdgePoint(at.X, at.Z, at.Y, EdgeTolerance, out var edge)) return at;
+
+        // Over the polygon itself (its layer out of reach of the walker's height): no edge to come in from.
+        var inward = new Vector2(edge.X - at.X, edge.Z - at.Z);
+        float off = inward.Length();
+        if (off < 1e-4f) return at;
+
+        inward *= inset / off;
+        return new Vector3(edge.X + inward.X, at.Y, edge.Z + inward.Y);
+    }
+
     /// <inheritdoc/>
     public bool TryStand(float x, float z, float nearY, out float y)
     {
@@ -223,14 +250,15 @@ public sealed partial class NavmeshWalkability : IWalkability
     /// The real surface of the highest mesh layer at (x, z) within <see cref="StandRise"/> above <paramref name="nearY"/> and <see cref="StandDrop"/>
     /// below it (by the mesh's height or the real one: on steep stairs the mesh is up to 20 off, and judged by the real height alone the walker's own
     /// layer could fall out of reach and drop it to a floor far below, Observed at Fallen Tower); with none there, the one of a polygon within
-    /// <see cref="EdgeTolerance"/> (a walker grazing the edge of a hole in a floor); else the lowest. <paramref name="reachable"/>: a layer was
-    /// within reach. False off the mesh.
+    /// <see cref="EdgeTolerance"/> (a walker grazing the edge of a hole in a floor; not when <paramref name="edges"/> is false); else the lowest.
+    /// <paramref name="reachable"/>: a layer was within reach. False off the mesh.
     /// </summary>
-    bool TryStand(NavWorld w, float x, float z, float nearY, out float y, out bool reachable)
+    bool TryStand(NavWorld w, float x, float z, float nearY, out float y, out bool reachable, bool edges = true)
     {
         var heights = s_scratch ??= [];
         heights.Clear();
-        w.HeightsAt(x, z, heights, float.IsFinite(nearY) ? nearY : 0, float.IsFinite(nearY) ? EdgeTolerance : 0);
+        float edge = edges && float.IsFinite(nearY) ? EdgeTolerance : 0;
+        w.HeightsAt(x, z, heights, float.IsFinite(nearY) ? nearY : 0, edge);
         y = float.MinValue;
         reachable = false;
         if (heights.Count == 0) return false;
@@ -246,10 +274,10 @@ public sealed partial class NavmeshWalkability : IWalkability
             y = s;
             reachable = true;
         }
-        if (!reachable && near && w.TryEdgeHeight(x, z, nearY, EdgeTolerance, out float edge))
+        if (!reachable && near && edges && w.TryEdgeHeight(x, z, nearY, EdgeTolerance, out float beside))
         {
-            float s = Snap(w, x, z, edge, out _);
-            if (MathF.Min(edge, s) <= nearY + StandRise && MathF.Max(edge, s) >= nearY - StandDrop)
+            float s = Snap(w, x, z, beside, out _);
+            if (MathF.Min(beside, s) <= nearY + StandRise && MathF.Max(beside, s) >= nearY - StandDrop)
                 (y, reachable) = (s, true);
         }
         if (!reachable) y = lowest;
@@ -344,7 +372,7 @@ public sealed partial class NavmeshWalkability : IWalkability
         if (key is { } known && _unreachable.TryGetValue(known, out var hit) && ReferenceEquals(hit.World, w) && hit.Doors == doors
             && System.Diagnostics.Stopwatch.GetElapsedTime(hit.At).TotalSeconds < UnreachableSeconds
             && new NavQuery(w, Doors).FindPath(from, hit.Nearest, agent, null, out _) is { Found: true } near)
-            return Provisional(w, FromWalker(from, near), to);
+            return Provisional(w, FromWalker(from, near), to, hit.Door);
         var exact = Exact(w, from, to, agent);
         if (exact.Found) return exact;
         // A walker on a region its zone's pruning dropped (its way to a seed leads through a zone not loaded): that region is kept, and the path
@@ -366,22 +394,28 @@ public sealed partial class NavmeshWalkability : IWalkability
         if (!part.Found) return exact;
         if (Vector2.Distance(new(part.Points[^1].X, part.Points[^1].Z), new(to.X, to.Z)) <= NavQuery.GoalSnap)
             return part;
+        // Shut out by a door closed at run time: the tail goes on through that door, so the walker meets it and a locked one stops it (LockSystem);
+        // straight to the goal, it passed beside a locked gate's post (#560).
+        var door = NavQuery.LastSearchMetClosedDoor ? new NavQuery(w, Doors).ClosedDoorOnTheWay(from, to, part.Points[^1], agent) : null;
         // Also after a search cut short by its limit: the exact search would be cut short the same way, so the walker gets this same provisional
         // route.
         if (key is { } found)
         {
             if (_unreachable.Count >= UnreachableLimit) _unreachable.Clear();
-            _unreachable[found] = (w, doors, part.Points[^1], System.Diagnostics.Stopwatch.GetTimestamp());
+            _unreachable[found] = (w, doors, part.Points[^1], door, System.Diagnostics.Stopwatch.GetTimestamp());
         }
-        return Provisional(w, part, to);
+        return Provisional(w, part, to, door);
     }
 
     /// <summary>
-    /// A navmesh part to the nearest reachable point, then on to the goal provisionally (asked again on the way, MovementSystem).
+    /// A navmesh part to the nearest reachable point, then on to the goal provisionally (asked again on the way, MovementSystem), through
+    /// <paramref name="door"/> first when a closed door shuts the goal off.
     /// </summary>
-    PathResult Provisional(NavWorld w, PathResult part, Vector3 to)
+    PathResult Provisional(NavWorld w, PathResult part, Vector3 to, Vector3? door = null)
     {
-        List<Vector3> points = [.. part.Points, to];
+        List<Vector3> points = [.. part.Points];
+        if (door is { } through) points.Add(through);
+        points.Add(to);
         Ahead(w, points, part.Points.Count);
         return new PathResult(points) { Exact = part.Points.Count };
     }
@@ -397,12 +431,12 @@ public sealed partial class NavmeshWalkability : IWalkability
 
     /// <summary>
     /// Goals found unreachable over the loaded zones, by goal polygon and the agent's radius and door rule: the navmesh they were found on (any other
-    /// mesh, after a zone went live or unloaded, asks again), the doors' version (NavDoors.Version), the nearest reachable point and when. Each was
-    /// 300-600 ms of searching, asked again and again by a town's residents walking to a goal they cannot reach (Observed, zone 14.23: a cabinet in a
-    /// building, docs/game/pathfinding.md).
+    /// mesh, after a zone went live or unloaded, asks again), the doors' version (NavDoors.Version), the nearest reachable point, the closed door
+    /// the tail goes through (<see cref="NavQuery.ClosedDoorOnTheWay"/>) and when. Each was 300-600 ms of searching, asked again and again by a
+    /// town's residents walking to a goal they cannot reach (Observed, zone 14.23: a cabinet in a building, docs/game/pathfinding.md).
     /// </summary>
     readonly System.Collections.Concurrent.ConcurrentDictionary<(NavRef Goal, float Radius, bool DoorsClosed), (NavWorld World, int Doors,
-            Vector3 Nearest, long At)> _unreachable = new();
+            Vector3 Nearest, Vector3? Door, long At)> _unreachable = new();
 
     /// <summary>
     /// The key of the goal polygon of <paramref name="to"/> for <paramref name="agent"/>; null when no polygon is within

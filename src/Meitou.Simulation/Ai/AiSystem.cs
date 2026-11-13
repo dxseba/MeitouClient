@@ -1172,10 +1172,7 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         // (docs/game/ai-tasks.md "Precedence", Observed; why its Idleness does not take over is Unknown).
         if (ReferenceEquals(goal, Idle) && table.Cold(slot)!.InSomething == Locks.HeldState.Bed)
         {
-            mind.Plan.Clear();
-            mind.Goal = null;
-            mind.Behaviour = AiBehaviour.None;
-            mind.Version = board.Version;
+            LieOnWithNoGoal(mind, board);
             return;
         }
 
@@ -1184,6 +1181,14 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         var profile = TaskProfiles.Of(type);
         bool fresh = TakeUp(world, slot, mind, goal, type, profile);
         behaviour = Adopt(world, slot, mind, goal, board, type, behaviour, fresh);
+
+        // An animal in a bed has no row that gets it out (116, 208, 257 are not registered for its repertoire): every goal that moves or fights fails
+        // to plan, so it lies on with no goal (docs/game/ai-tasks.md "Animals in beds", Verified).
+        if (behaviour != AiBehaviour.Sleep && Repertoire.StuckInBed(world, table.Cold(slot)!))
+        {
+            LieOnWithNoGoal(mind, board);
+            return;
+        }
 
         // Another goal gets it out of its bed (the get-up step's own think, or the goal's act-out where the plan has none); it stands where it lay.
         if (behaviour != AiBehaviour.Sleep && table.Cold(slot)!.InSomething == Locks.HeldState.Bed
@@ -1198,6 +1203,17 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         if (mind.Resume && Resume(world, slot, mind)) return;
 
         ActOut(world, slot, mind, goal, board, type, behaviour);
+    }
+
+    /// <summary>
+    /// One lying in a bed lies on with no goal: its plan, goal and behaviour cleared, as of the board's version.
+    /// </summary>
+    static void LieOnWithNoGoal(AiMind mind, Blackboard board)
+    {
+        mind.Plan.Clear();
+        mind.Goal = null;
+        mind.Behaviour = AiBehaviour.None;
+        mind.Version = board.Version;
     }
 
     /// <summary>
@@ -1514,19 +1530,23 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
     }
 
     /// <summary>
-    /// A patrol package's route: the leader walks (or runs) to the route's next point, the others follow it; without a route it wanders.
+    /// A patrol package's route: the leader walks (or runs) to the route's next point, the others follow it. Without a route the leader walks to
+    /// the patrol point exactly (<c>Task_Patrol</c>'s move, docs/game/factions-squads-towns.md "Patrol task"), which the population's patrol step
+    /// keeps in <see cref="Squad.HomeCentre"/> and redraws once it is reached; the others follow.
     /// </summary>
     static void ActPatrol(World world, int slot, AiMind mind, Blackboard board)
     {
         var table = world.Characters;
         bool leader = mind.Squad.Leader == table.IdOf(slot);
+        if (!leader)
+        {
+            Become(world, slot, CharacterTask.Follow);
+            return;
+        }
 
         if (board.CurrentClass is PackageClass.Patrol or PackageClass.PatrolRunning && board.RouteIndex < board.Route.Length)
-        {
-            if (!leader) Become(world, slot, CharacterTask.Follow);
-            else WalkTo(world, slot, board.Route[board.RouteIndex], board.CurrentClass == PackageClass.PatrolRunning ? SpeedMode.Run : SpeedMode.Walk);
-        }
-        else Become(world, slot, CharacterTask.Wander);
+            WalkTo(world, slot, board.Route[board.RouteIndex], board.CurrentClass == PackageClass.PatrolRunning ? SpeedMode.Run : SpeedMode.Walk);
+        else WalkTo(world, slot, mind.Squad.HomeCentre, SpeedMode.Walk);
     }
 
     /// <summary>

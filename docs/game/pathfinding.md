@@ -42,7 +42,7 @@ a × dt, a = RACE `pathfind acceleration` (Havok units, ×10 in world units; 24 
 lerp(age, 3a, a); it brakes before corners and its last point to sqrt(2 a d) and snaps onto the goal, arriving within 1 unit; a goal another
 body covers ends the walk short. A re-issued order within 2 units of the last goal is ignored. Facing is instantaneous; the drawn node turns after it at a limited rate ([animation](../animation.md):
 20 rad/s, 4 in the combat stance), animals `turn rate` × 0.1. Meitou: `MovementSystem.PathAcceleration`,
-`FinalArrive`, `GoalOccupied`. A walker out of combat keeps the agent's velocity vector (previous tick's `Velocity`), moving it toward path direction x wanted speed by at most a x dt, so a turn costs the speed the change of direction takes (no cos cut, no turning on the spot); its facing is its velocity's direction (the path direction while it starts; engine reading: facing the path direction while the velocity lags makes it slide sideways through turns) and the drawn body follows it ([animation](../animation.md), drawn facing), and a corner the velocity has carried past counts as reached. Fighters and direct followers keep the older turn cut (engine choice). Corner braking (**Verified**, `FUN_140147fd0`, the corner from the funnel `FUN_140146a60`, constants 0.1 and 2.0 from the decompile's data table): in the walking state, once the distance to the corner along the velocity's direction, less 0.1 Havok units, is under the stopping distance v²/2a, the wanted speed drops to √(2a·|sin θ|) (Havok units), θ between the velocity and the direction to the corner; when the wanted speed already fits under it, the agent steers square across its velocity toward the corner's side at the wanted speed. Meitou: `MovementSystem.CornerBrake` on each waypoint but the last (in world units: 1 unit margin, √(2a·10·|sin θ|)). Whether the funnel's point tested for the distance is the corner or the point past it: **Unknown** (the corner is used). Not yet: animal `turn rate`. A reached waypoint is passed in the same tick.
+`FinalArrive`, `GoalOccupied`. A walker out of combat keeps the agent's velocity vector (previous tick's `Velocity`), moving it toward path direction x wanted speed by at most a x dt, so a turn costs the speed the change of direction takes (no cos cut, no turning on the spot); its facing is its velocity's direction (the path direction while it starts; engine reading: facing the path direction while the velocity lags makes it slide sideways through turns) and the drawn body follows it ([animation](../animation.md), drawn facing), and a corner the velocity has carried past counts as reached. Fighters and direct followers keep the older turn cut (engine choice). Corner braking (**Verified**, `FUN_140147fd0`, the corner from the funnel `FUN_140146a60`, constants 0.1 and 2.0 from the decompile's data table): in the walking state, once the distance to the corner along the velocity's direction, less 0.1 Havok units, is under the stopping distance v²/2a, the wanted speed drops to √(2a·|sin θ|) (Havok units), θ between the velocity and the direction to the corner; when the wanted speed already fits under it, the agent steers square across its velocity toward the corner's side at the wanted speed. Meitou: `MovementSystem.CornerBrake` on each waypoint but the last (in world units: 1 unit margin, √(2a·10·|sin θ|)). Whether the funnel's point tested is the corner or the point past it: **Unknown**; Meitou tests the point past it (engine reading, #429: tested against the corner, θ is about 0 on every head-on approach, so a walker over ~44 u/s braked toward a stop short of each waypoint, Observed in Meitou). A waypoint but the last is passed within 5 units, or within its stopping distance + 1 when longer (up to 30), where the cut to the next point is walkable for twice that (`CornerPass`, engine choice), so a fast walker rounds such corners without braking. Not yet: animal `turn rate`. A reached waypoint is passed in the same tick.
 Combat/follow steering ramps15/s, with turning/backward/arrival caps. Combat-move-speed multiplier
 and water factors 0.75/0.5/0.4 apply separately (`FUN_14065dba0`, by water state 1/2/3; Meitou scales the fight steering by the water factors, `MovementSystem`). No independent slope-speed term was found.
 
@@ -82,10 +82,10 @@ characters round its owner and tests each as a circle (its footprint radius plus
 |---|---|---|
 | Standing, walking, fighting | yes | yes |
 | Crawling / staying low (not ragdolled) | yes (`FUN_1407d1440` is false) | yes |
-| Knocked out or dead (ragdolled) | no | no: root motion, separation, contact, covered goal, fight steering (`MovementSystem`, `AnimationSystem.Relocate`, `CombatSteering.OutOfFlock`) |
+| Knocked out or dead (ragdolled) | no | no: separation, contact, covered goal, fight steering (`MovementSystem`, `AnimationSystem.Relocate`, `CombatSteering.OutOfFlock`) |
 | Carried | no | no |
-| In a bed or cage | no | no for root motion and the fight steering; engine choice: still solid to a walker's contact (a bedded body is never moved) |
-| Sitting (resting on a seat) | no | no for root motion and the fight steering; engine choice: a walker steers past a sitter (separation) but is not blocked |
+| In a bed or cage | no | no for the fight steering; engine choice: still solid to a walker's contact (a bedded body is never moved) |
+| Sitting (resting on a seat) | no | no for the fight steering; engine choice: a walker steers past a sitter (separation) but is not blocked |
 | Beyond the LOD range (`+0x1a9` clear) | no | not modelled (depends on the camera) |
 
 Not modelled: a conscious ragdolled character (a stagger that ragdolls a limb or the whole body) is left out in the original; Meitou keeps it solid unless it is incapacitated.
@@ -113,6 +113,13 @@ Every move of the nav agent, the animation-driven one (root motion, mode 3) incl
   past `BlockedRepathLimit` / `ProvisionalBlockedLimit` ([own builder](#own-builder)) keeps its path, stands and asks again every 5 s (`BlockedRetrySeconds`); a no-path answer
   drops it as the original's state 3 does. Other walks still give up there (engine choice: an AI errand would otherwise stand at a wall for good).
 - **Observed**: the segments are the navmesh's boundary edges (the swept radius is passed in a register the decompile drops; taken as the agent radius).
+- **Verified** (disassembly of `FUN_140147fd0`): the sweep's radius is the agent's `+0x70` (passed in XMM3 to `FUN_1401445d0`; the gather range is `+0x70` + 6). `FUN_1401476f0`, the only body test in this
+  step, yields a push-out direction and strength from characters overlapping the agent (nothing when none do); it does not cut the move short, and the original has no separate "end point must have a surface" test:
+  the sweep alone keeps the agent on the mesh.
+- Meitou root motion (`AnimationSystem.Relocate`): after the slide, an end point with no stand-on surface (`IsWalkable(x, z, y)`: off the mesh, a drop or step beyond `StandRise`/`StandDrop`) keeps the
+  farthest walkable part of the step (bisection) instead of dropping all of it; when no part has one but the ground is within `StandRise`, the step is made (the sweep saw no wall, and the original has no such test), and a body already standing where no surface is (pushed onto a mesh edge or into a hole) is not refused at all
+  (**Observed**, siwa-test6: characters stood for 10+ ticks with every root step refused; `root-log`: 21 refusals over three fights fell to 1). Standing bodies no longer cut a root step short: the original only pushes
+  overlapping characters apart, which `MovementSystem` separation does.
 - Meitou: `IWalkability.Slide` (`NavmeshWalkability.Slide`) for root motion (`AnimationSystem.Relocate`) and the combat approach step (`CombatSystem`): the walls are the edges that lead
   nowhere (no neighbour or tile link, not the zone border, not into a closed door), within `SnapRange` (16) of the walker's height (engine choice: the mesh's own error on stairs);
   the radius is RACE `pathfind footprint radius`. Before, only the end point was tested, and with the 2-unit edge tolerance a step could cross a thin wall (Observed: on the Hub's
@@ -226,10 +233,15 @@ asks again every 5 s, [walls](#blocked-walkers)); a block while a request is in 
 "Gigachad", scratch sim). **Observed** (zone 22.10, save "stuck", scratch sim): a walker on the terrain at
 Y392 beside the Old Storm House's (`6-rebirth-INGAME`) door stair snapped to the stair's corner (Recast corner vertices take the highest neighbouring cell, 408 over
 ground at 395); that polygon's only exits were narrower than the radius, the next start's path was cut up the stair's side, and the walker stood still. With the three rules it enters in 3 s.
-<a id="shoved-into-furniture"></a>A walker off every surface at its height and its next step (shoved into something that cuts a hole in the mesh) may step only nearer its path's current
-point, and only when it can stand there (engine choice, `MovementSystem.EscapesToward`); back on the mesh the normal rule holds. **Observed** (Hub market stall
+<a id="shoved-into-furniture"></a>A walker whose next step finds no surface at its height, itself on none (shoved into something that cuts a hole in the mesh; a floor below the
+hole is not a surface at its height) or only within `EdgeTolerance` of one once a step there was refused and its path asked again (at the hole's edge; one pushed to the side
+of a table first gets a path round it), may step only nearer its path's current point, and only when it can stand there (engine choice, `MovementSystem.EscapesToward`,
+`IWalkability.IsOnSurface`); back on the mesh the normal rule holds. **Observed** (#460, the issue's save, a
+chest on the upper floor of a Storm House at Stack, -55386,1220,-12848, scratch probe): the walker stood within 2 of a floor polygon, the first 1.25 units of its path
+crossed the chest's hole (the ground floor 66 below), every step was refused and it stood for good; with the rule it walks out and arrives. **Observed** (Hub market stall
 -51119,2797, scratch sim, PR #230): its path was found, every step was refused, the GoTo dropped after 3 asks and it stood for good; with the rule it walks out and arrives.
-Inside the Storm House's shop counter and tables the mesh is not cut, so a walker there just walks out. **Unknown** whether the original lets such a walker out (PR #230's author says so).
+Inside the Storm House's shop counter and tables the mesh is not cut, so a walker there just walks out. The original lets such a walker out (**Observed**, Kenshi 1.0.68, #460's save: the walker inside the chest walked out to its saved goal, -55397,-12831,
+read from a quicksave about ten game minutes after the load).
 **No path at all** (the start sits on a pocket of the mesh with no way out: inside a cage whose walls are not a navmesh cut, or a walker shoved into solid geometry): a player's move order
 is kept instead of being dropped when its goal is within 64 units (`StraightOrderReach`) and walkable at the walker's height: the walker heads straight at
 the goal, the step test still refusing what cannot be walked (**engine choice**, `MovementSystem.ApplyAnswers`); a goal further off or off the mesh still drops the
@@ -577,7 +589,8 @@ of it (engine choice; **Observed**, zone 33.28, scratch probe: by the foot of a 
 at ~550, walkers at 7245, -13968 stopped and dropped their order). A polygon under the terrain, more than `StandRise` off a character standing on the terrain with no
 collision surface near it, takes the terrain however far it sags (engine choice; **Observed**, zone 19.34, `--probe -56752,9502`: a planar polygon spanning a
 hillside lies 31 under the ground, its height samples empty there, and the original's polygon 28 under it; the Hub-to-Squin walker stalled); with no layer in range, a
-polygon within `EdgeTolerance` counts. A character already off every layer near its height still steps down.
+polygon within `EdgeTolerance` counts. A character already off every layer near its height still steps down, unless it walks out of a hole along its
+path ([shoved into furniture](#shoved-into-furniture)).
 A path walker whose step finds no layer in reach of its height, more than 4 off its path's height there (the leg to its next point), looks for one at the path's height (engine choice, `MovementSystem.CorridorHeight`; **Observed** before the seam check below, Ancient Lab `28.60:2-`: walkers stood at the edge of its stairwell both ways).
 A path point takes the height of the corridor polygon under it; of stacked ones the corridor crosses, the one nearest the point's own height (`NavQuery.OnSurface`;
 **Observed** with `meitou-tools navmesh --town Squin --path`: a route into a Bughouse and up onto its roof beds ended on the floor below, y 372 for 482).
@@ -598,6 +611,11 @@ nearest reachable point and a straight provisional tail (the terrain search, und
 a way round through an unloaded zone within one block is not found). **Observed**: Hub→(-36000,-6000) and Hub→Squin arrive; "6 dudes"
 save, scratch harness with the host's zone loading: Fog Islands (-80620,-24171) → the squad at (-31620,11420), 60.5k units, arrives
 (17,506 ticks); before, it walked to the nearest reachable point and stopped on a cliff 10.6k short.
+When a door shut for paths at run time (`NavDoors`: its building's doors all locked) turns the search back and the way with every door open crosses
+it, the tail goes first to the point of that door's polygons nearest the reachable end (`NavQuery.ClosedDoorOnTheWay`), so the walker meets the leaf
+and the lock stops it ([doors](../simulation.md#cages-beds-and-locks)); a straight tail can pass beside a gate's post, out of the leaf's reach.
+Engine choice: **Observed** (original 1.0.68, issue #560's save with Universal Wasteland Expansion, a move order to the ramp past the Tower of
+Mist's locked Ancient Lab Ramp Gate): the original does not move the walker at all.
 **Roads** (original, **Observed**): `CharMovement::vfunc_18` (`FUN_140661270`, set destination) tries the road route
 (`FUN_14065f940`, the off-screen mover's [rule](factions-squads-towns.md#off-screen-world), its own gate 10000 units) for trips over 1000
 units when no road path is active, with w from the character's faction `road preference` (CharMovement +0x100, set in `FUN_140661f90`);

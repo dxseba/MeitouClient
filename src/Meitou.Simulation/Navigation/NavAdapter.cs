@@ -41,6 +41,12 @@ sealed class NavAdapter(NavmeshWalkability nav) : IAgentWalkability, Locks.IDoor
     public bool IsWalkable(float x, float z, float nearY) => nav.IsWalkable(x, z, nearY);
 
     /// <inheritdoc/>
+    public bool IsOnSurface(float x, float z, float nearY) => nav.IsOnSurface(x, z, nearY);
+
+    /// <inheritdoc/>
+    public Vector3 SurfacePoint(Vector3 at, float inset) => nav.SurfacePoint(at, inset);
+
+    /// <inheritdoc/>
     public bool TryStand(float x, float z, float nearY, out float y) => nav.TryStand(x, z, nearY, out y);
 
     /// <inheritdoc/>

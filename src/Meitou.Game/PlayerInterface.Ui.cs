@@ -83,6 +83,8 @@ sealed partial class PlayerInterface
     /// The interface is drawn and takes input (F7 and the cinema's clean picture hide it).
     /// </summary>
     public bool UiVisible { get; set; } = true;
+    /// <summary>The title screen is Meitou's (its menu over the staged world) rather than the original's picture; a switch of its own, not <see cref="UiMode"/>.</summary>
+    public bool MeitouMainMenu { get; set; } = true;
 
     /// <summary>
     /// The share of the screen under fully opaque controls in the last drawn UI frame (<see cref="UiPainter.OpaqueCoverage"/>); 0 without a painter.
@@ -177,6 +179,7 @@ sealed partial class PlayerInterface
             if (id == "load") layout = FrontendScreens.WithSaveFilter(layout);
             if (id == "editor") (CharacterEditor.EditorLayout, CharacterEditor.EditorRowsShape) = (layout, "");
             if (id == "inventory") TradeWindows.CharacterInventoryLayout = layout;
+            if (id == "bag") InventoryWindows.BagLayout = layout;
             if (id == "leveleditor") layout = LevelEditorPanel.LevelEditorBar(layout);
             FaithfulScreens.Register(id, layout, modal, centreRoot: id is "file");
         }
@@ -214,7 +217,7 @@ sealed partial class PlayerInterface
     /// </summary>
     public void CreateUiPainter(DebugOverlay overlay, Func<string, string?> resolve)
     {
-        UiPainter = new(overlay, UiResources, resolve) { Mode = UiMode, FontSizeSetting = _fontSize };
+        UiPainter = new(overlay, UiResources, resolve) { Mode = UiMode, FontSizeSetting = _fontSize, InterfaceScale = _interfaceScale };
         CharacterEditor.FindAsset = resolve;
 
         // The screens' pictures are read ahead (the overview's map is 43 MB), so that opening a screen only uploads them.
@@ -260,7 +263,7 @@ sealed partial class PlayerInterface
     {
         // The original sizes the HUD's template parts by height / 1080 (Observed: the squad tabs' 37 px HeaderPlace at 1440 lines,
         // docs/game/ui-screens.md).
-        var b = new UiBindings { TemplateScale = Height / 1080f };
+        var b = new UiBindings { TemplateScale = UiScale };
         var lead = Lead();
         BindStatusTexts(b, lead);
         BindShortcutButtons(b);
@@ -524,13 +527,14 @@ sealed partial class PlayerInterface
     /// </summary>
     void AddScreens(List<UiControl> controls)
     {
+        FaithfulScreens.WindowScale = InterfaceScale;
         foreach (var screen in FaithfulScreens.Arrange(Width, Height, ScreenRouter.BindFaithfulScreen, ScreenRouter.AddFaithfulContent))
         {
             if (FeedbackPanel.ShotWithoutMenus && FeedbackPanel.FeedbackShotHides.Contains(screen.Id)) continue;
             if (screen.Id == "editor") controls.AddRange(CharacterEditor.EditorBackdrop());
-            controls.AddRange(screen.Controls.Where(c => UiMode == UiMode.Faithful ||
+            controls.AddRange(screen.Controls.Where(c => !MeitouMainMenu ||
                 !c.Properties.TryGetValue("ImageResource", out var resource) || resource != "Kenshi_TitleScreen"));
-            if (screen.Id == "title" && UiMode == UiMode.Meitou && !Frontend.ShowCredits) AddTitleMark(controls);
+            if (screen.Id == "title" && MeitouMainMenu && !Frontend.ShowCredits) AddTitleMark(controls);
         }
     }
 

@@ -219,6 +219,10 @@ public sealed class BedSystem(PopulationData data, BedSettings? settings = null)
             if (c.InSomething != HeldState.Bed || c.InWhat != order.Site)
                 TaskStart.Start(world, slot, new TaskRequest(CharacterTask.Sleep, TaskType.UseBed, TaskSource.Order) { Site = order.Site });
 
+            // In the bed now (it stood in reach, or lay there already) the order leaves the queue at once, so the replan it asked for would find no
+            // order and start a job that gets it up again. One that walks there spends that replan on the walk.
+            if (c.InSomething == HeldState.Bed && c.InWhat == order.Site) c.Replan = false;
+
             return;
         }
 
@@ -374,7 +378,9 @@ public sealed class BedSystem(PopulationData data, BedSettings? settings = null)
         var table = world.Characters;
         for (int i = 0; i < table.HighWater; i++)
         {
-            if (table.Next[i].Alive && table.Next[i].Task != (byte)CharacterTask.Sleep && table.Cold(i) is { InSomething: HeldState.Bed } sleeper)
+            // An animal has no row that gets it out (docs/game/ai-tasks.md "Animals in beds").
+            if (table.Next[i].Alive && table.Next[i].Task != (byte)CharacterTask.Sleep && table.Cold(i) is { InSomething: HeldState.Bed } sleeper
+                    && !Ai.Repertoire.StuckInBed(world, sleeper))
                 world.Fixtures.GetOutOfBed(world, table.IdOf(i));
         }
     }

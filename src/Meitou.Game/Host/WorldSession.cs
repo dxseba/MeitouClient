@@ -209,6 +209,11 @@ public sealed class WorldSession : IDisposable
     #region Frame advance
 
     /// <summary>
+    /// The drawn frame's length in seconds, smoothed over the last ten or so frames (the strategy camera's turn and tilt averaging counts in it).
+    /// </summary>
+    double _frameSeconds;
+
+    /// <summary>
     /// A world tick's wall time (ms), smoothed over the last ten or so ticks, whether run in the frame or ahead (the host's dynamic tick ahead reads
     /// it).
     /// </summary>
@@ -223,6 +228,9 @@ public sealed class WorldSession : IDisposable
     /// </summary>
     public int Advance(double realSeconds)
     {
+        _frameSeconds = _frameSeconds == 0 ? realSeconds : _frameSeconds + (realSeconds - _frameSeconds) * 0.1;
+        Camera.Strategy.DrawnFrameSeconds = (float)_frameSeconds;
+
         int n = Ticks.Advance(realSeconds);
         for (int i = 0; i < n; i++) Tick();
         AdvanceSimulation(realSeconds);
@@ -368,8 +376,8 @@ public sealed class WorldSession : IDisposable
         EnsureNotRunning();
         if (_aheadTicks > 0 || Simulation.IsPaused) return;
         // Rounded down (a tick short runs in the next frame; one too many holds the picture a frame), plus a hair: the average nears a steady count
-        // from below.
-        int count = (int)Math.Clamp(Math.Floor(_owedPerFrame + 0.1), 1, Simulation.MaxTicksPerFrame * Simulation.Speed);
+        // from below. The limit at least 1: under half speed (photo mode's slow motion) it fell below the least.
+        int count = (int)Math.Clamp(Math.Floor(_owedPerFrame + 0.1), 1, Math.Max(1, Simulation.MaxTicksPerFrame * Simulation.Speed));
         (_heldPrevious, _heldCurrent, _heldTick, _held) = (World.PreviousSnapshot, World.Snapshot, World.Tick, true);
         // Each tick's start, as SimulationTick sets it (the clock summed tick by tick); the game clock moves when the ticks fall due.
         var starts = new (double Hours, bool Daytime)[count];

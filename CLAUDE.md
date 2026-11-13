@@ -1,7 +1,9 @@
 # MeitouClient
 
-C# / .NET 10 reimplementation of the Kenshi engine (namespace `Meitou`), GPL-3.0-or-later. Goal: a
+C# / .NET 11 reimplementation of the Kenshi engine (namespace `Meitou`), GPL-3.0-or-later. Goal: a
 drop-in replacement that runs original content and mods unchanged.
+
+`CLAUDE.md` is canonical; keep `AGENTS.md` identical whenever either file changes.
 
 ## Research notes: read and keep them current
 

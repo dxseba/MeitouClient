@@ -113,7 +113,7 @@ character_next / prev. Left click queues the ghost. A right click over the world
 
 Meitou's game view (`GameHotkeys`, `InputBindings`): every event action above is an `InputAction` with the table's default
 (select_0..9 are `SelectMember1..10`), rebindable on the settings' Controls page; Medic and Rescue also keep H and J, and Meitou adds Rest (L)
-and Put Down (K). `toggle_help` (F1, `InputAction.ToggleHelp`) opens or closes the Tutorials window (event 7, section 6). A numpad key bound to one of these
+Put Down (K) and Photo Mode (P, [viewer](../viewer.md#photo-mode)). `toggle_help` (F1, `InputAction.ToggleHelp`) opens or closes the Tutorials window (event 7, section 6). A numpad key bound to one of these
 actions is the game's, not the cinema camera's ([viewer](../viewer.md#cinematic-camera)), unless Ctrl is held or the cinema's editor is open;
 `--duel` keeps the whole numpad for the cinema. The orders hotkeys are not given from the free camera (engine choice).
 
@@ -312,7 +312,7 @@ ground-item picks: the ray stops where it meets the building's `interior mask` c
 **Observed** (owner's original-game report): holding Alt highlights building signs in yellow.
 **Observed** (merged installed game data, reader survey): BUILDING `is sign` is true on `993-gamedata.base`
 (Sign Medic) and `3436-otto.mod` (sign3_bar); category `sign` alone is insufficient (`972-gamedata.base`, Weapon Sign, has the flag false).
-Meitou's rebindable `Highlight` action defaults to either Alt key. While held in the focused gameplay view,
+Meitou's rebindable `Highlight` action defaults to either Alt key; it is also the steal and pick-lock modifier, as in the original, and Meitou's loot one. While held in the focused gameplay view,
 real parts whose owning BUILDING has `is sign` receive a yellow tint, including layout objects and both LODs
 during a transition. Release restores their materials. Loading, menus, hidden UI, free camera and cinema suppress it.
 Rendering details: [objects](../render-objects.md#building-sign-highlight).
@@ -367,8 +367,11 @@ of which 84 name a character the save no longer holds (one of them inside a buil
 Meitou (`GroundItemPicks`): with the Highlight gating above, every item within 500 units of the camera's focus not hidden by a
 building, name only, coloured as above; a label picks like its item (pointer `pick_item`, right click picks it up at once: a plain item has no inventory, so `FUN_1407a6bc0` adds no verb and a held press shows no menu; **Verified**, decompile). A click on a label is the item's alone: Meitou's Alt / Ctrl loot and lift of a downed body (an extra; in the original Alt is only Highlight) does not take it, so an item lying beside a corpse can be picked up with Alt held (**Observed**: the label is a widget that takes the click, `FUN_140162950`; whether the original prefers the item over a body behind a label is **Unknown**, nothing was traced). Overlapping
 labels are stacked above the nearer one. No quantity. The owner (`GroundItem.OwnedBy`, `Saving/GroundItemSave`) is read once at load: the `ownedby` character's
-platoon faction, else the `insideBuilding` building's `owner faction ID` (also for the verb, engine choice), none for a `not real` faction; items dropped or
-placed in play have none. Picking up another faction's item marks it stolen from that faction (`StolenFrom`); standing inside a building it also sets a pending Theft against the building's faction ([economy](economy.md#fencing-stealing-and-smuggling)).
+platoon faction, else the `insideBuilding` building's `owner faction ID` (also for the verb, engine choice), none for a `not real` faction; a slot's item has
+its building's (`ItemSlots`); an item dropped in play has the faction it was stolen from, none for one not stolen: the original keeps
+the item's `ownedby` on the ground (**Observed**, plain game: a Dried Meat stolen in The Hub's bar and dropped there is saved with the barman as `ownedby`, its label red like
+the bar's goods). Picking up another faction's item marks it stolen from its owner (`PickUps.OwnerMark`: the mark it carries when that names the owner, a slot's item its
+building's, [economy](economy.md#fencing-stealing-and-smuggling), else the faction alone); standing inside a building it also sets a pending Theft against the building's faction.
 
 ### Hover outline
 
@@ -392,7 +395,7 @@ round the foundations, piers and slab under it. A house's placement height is it
 The original's mouse code, kenshi_x64.exe 1.0.68. The panels a selected building fills: [ui-screens](ui-screens.md#selected-building).
 
 **Buttons** (**Verified**: Controls `DAT_142133370`, actions registered in `FUN_1403636c0`): held flags `mouse_select` +0xf3,
-`mouse_command` +0xf4, `highlight` (Left Alt) +0xf2. Each frame `FUN_140801630` stores edges on PlayerInterface (**Observed**): +0x2f1 select
+`mouse_command` +0xf4, `highlight` (Left Alt) +0xf2 (`DAT_142133462`, the flag the steal and pick-lock tests read, so they follow the highlight binding, not Alt). Each frame `FUN_140801630` stores edges on PlayerInterface (**Observed**): +0x2f1 select
 released, +0x2f2 select pressed, +0x2f3 command released, +0x2f4 command pressed; the two command edges are cleared while the context menu
 is visible or was last frame. Then `FUN_140800f10` (drag box) and, unless a box is being dragged, the pick `FUN_140800250` run every frame, so
 hover and clicks share one pick.
@@ -416,7 +419,9 @@ interior-mask hulls); the hits are sorted nearest first (**Verified**, comparato
   furniture on a hidden floor cannot be picked, whoever owns it. The exception: past a hit on a whole-shown interior of the player's, the objects inside it are
   taken though not visible. The shown floor (`FUN_1407f7230`) is the current floor for a building a player character is in, back to 4
   for one left; the flag of an interior's furniture follows the current floor itself (`FUN_14054a8f0`, +0xa4 against the viewed floor, PlayerInterface +0x1e4). Meitou
-  (containers and beds): one above the viewed floor of a building in the interior view is skipped, its floor from its height (`InteriorVolume.FloorAt`); not modelled:
+  (containers, beds and seats): one above the viewed floor of a building in the interior view is skipped, its floor from its height
+  (`InteriorVolume.FloorAt`); other layout furniture (`TownBuilding.Pieces`) above it by its layout floor and, while the building shows its
+  outside, unless the layout marks it outside, as drawn; not modelled:
   the flag's own test against the current floor in a building left within 10 s (Meitou shows every floor then) and the player's whole-shown interior exception.
 - Characters and ground items on a hidden floor are not visible either (**Verified**, decompile): a character in a building above the floor it shows (`FUN_1405c9f60`); a ground
   item above floor 0 above the floor its building shows, or above the current floor outside one (`FUN_1409fb540`, after each floor change in `FUN_1407f7230`). Meitou: neither
@@ -515,8 +520,10 @@ is drawn (as the original). Selecting or inspecting a character clears it, Shift
 included (the original keeps the slot); a site that disappears clears it. A left click on the ground (no character or building picked) clears it too
 (Advanced → Click away deselects, `DeselectBuildings`, default on; off keeps it, as the original). Selecting plays the building's select sound ([audio](../audio.md#interface)). A house is not focused as its first door, but its panels list the
 first door's lines before the house's, as the door's panel does ([ui-screens](ui-screens.md#selected-building)). World (town) buildings act through their
-fixtures: containers (town storages included, `search` / `scavenge` / `lockpick`), beds, cages and doors are picked, pointed at and ordered like the player's. Not built: the
-machines of a town building (crafting and research benches, generators, a town turret for the player, the furniture of a bought house): machines exist only for the sites of `World.Buildings` (player-built ones and town ruins taken over),
+fixtures: containers (town storages included, `search` / `scavenge` / `lockpick`), beds, cages and doors are picked, pointed at and ordered like the player's. A town turret
+(`TownBuilding.Turret`) is picked on its collision with the `use` pointer, as the table's TurretBuilding (146 whoever owns it): a quick right click mans it (`UseTurretOrder` on its
+`townwork:` site), with Shift the Turret guard job, held the menu's Man Turret (`FurnitureUse.TownTurretPress`). Not built: the
+machines of a town building (crafting and research benches, generators, the furniture of a bought house): machines exist only for the sites of `World.Buildings` (player-built ones and town ruins taken over),
 so they have no window, pointer or order. A door (picked by its collision with the leaf
 where it has slid to, `DoorSpot.Slide` × open amount, `FurnitureUse`) shows `door` / `lock` / `lockpick` as in the table and a quick right click gives `DoorOrder` (the nearest selected
 walks to the door's near side and opens or closes it, "It's locked." at a locked one; another faction's locked door: Alt picks the lock, else the hint
@@ -659,7 +666,7 @@ Rows send `DebugCommand`s, applied in the next tick's Inputs phase: teleport the
 heal (`MedicalState.Heal`; stumps and crushed limbs stay), heal fully (its sub-row: stumps and crushed limbs become the original again first, `MedicalState.RestoreLimbs`; a fitted prosthetic stays), every stat to 100, one cut of n damage (Enter/Right opens a body part list: random as a blow picks, or a part of the first target by template id; others without it are skipped), force hits to a part (the same list from the first target; every blow, melee, bolt or execution, then lands on that template id, else on a part of that name on another body, while a blow could pick it; Off restores the roll; `BodyOptions.ForcedHitPart`, not saved), set the Global damage multiplier of the running world (0 to 100; blows and XP at once, a crossbow when next equipped; not saved), finish every RESEARCH record and repetition (queue emptied), clear bounties (Enter/Right lists each faction with a bounty and its total; All factions or one faction's entries are removed from the selected characters, else from every player character; one left with none is no longer recently wanted). Heal, stats and damage fall back to the inspected character. Names match a record's string id,
 its exact name, else the shortest name containing the text. Replaces the game's F10 key list (the viewer keeps its own).
 Godmode (its own row, a switch) applies to every player character: all stats 1000 (10 x the maximum of 100) and a heal five times a second (`MedicalState.Heal`, stumps and crushed limbs restored, hunger refilled); off, each character gets exactly its own stats back. Boosted stats are never saved (the save writes the kept originals), a character that dies or leaves the player squad gets its stats back at once, one recruited while on is boosted on the next tick, a loaded game starts with it off; training done while on is lost. (`DebugGodmode`, `PlayerState.Godmode`, `DebugCheats.GodTick`.)
-The menu is grouped in labelled sections, each value in one column (typed fields, `on` / `off` for switches): Character (teleport, heal, heal fully, max out skills, godmode, clear bounties), World / Spawn (spawn NPC, give item, money, unlock research), Combat (damage, force hits, damage multiplier), then code mods' rows under Mods ([modding](../modding.md) "Registration surface"), then Tools and Overlays. With the F11 statistics shown the menu stands at the right edge, else below the panels; a long list scrolls to keep the highlighted row in view.
+The menu is grouped in labelled sections, each value in one column (typed fields, `on` / `off` for switches): Character (teleport, heal, heal fully, max out skills, godmode, clear bounties), World / Spawn (spawn NPC, give item, money, unlock research), Combat (damage, force hits, damage multiplier), then code mods' rows under Mods ([modding](../modding.md) "Registration surface"), then World, Tools and Overlays. World holds the time of day (Meitou: Left and Right step it an hour back and forward round midnight, Enter and Space forward; the value is the settings window's Advanced "Time of day" slider, not saved). With the F11 statistics shown the menu stands at the right edge, else below the panels; a long list scrolls to keep the highlighted row in view.
 The Tools and Overlays sections open or switch the debug tools (Enter, Space, Left or Right): the pick & collision inspector's menu (docs/viewer.md "Pick & collision inspector"),
 the interior and level editors (Shift+F12 is the original's `editor_toggle` and opens the level editor), "Teleport on map..." (a switch: while on, every left click on the open Map tab, a press and release within 4 px so panning works, teleports the selected characters there and puts the camera on the spot; it stays on until switched off in the menu; a hint line with the last result shows on the map while on), then under Overlays the navmesh view, the frame statistics, the two tickboxes of the statistics' characters line (Character boxes, Walk paths; the same switches, so panel and menu stay in step, and both stay drawn with the statistics hidden), the fps counter, the VRAM pie (Ctrl+F12) and the profiler; each keeps its own key too.
 

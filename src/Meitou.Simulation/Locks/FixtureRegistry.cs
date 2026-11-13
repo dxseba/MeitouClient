@@ -309,7 +309,7 @@ public sealed partial class FixtureRegistry
     public IReadOnlyList<DoorPick> DoorPicks => _doorPicks
             ??= [.. _all.Where(f => f.Kind == FixtureKind.Door).Select(f
                     => new DoorPick(f.Id, f.Building, f.DoorIndex, f.Owner, DoorSpotOf(f)?.Centre ?? f.Position, DoorSpotOf(f)?.Slide
-                            ?? Vector3.Zero) { HostRecord = f.HostRecordId, Origin = f.Position, Yaw = f.Yaw })];
+                            ?? Vector3.Zero) { HostRecord = f.HostRecordId, Origin = f.Position, Yaw = f.Yaw, Rotation = f.Rotation })];
 
     /// <summary>
     /// The doors of each building, rebuilt with <see cref="DoorPicks"/> (both in the serial phases; read in parallel ones after).
@@ -361,8 +361,11 @@ public sealed partial class FixtureRegistry
             .Select(f
                     => new DoorDetail(f.Motion is DoorMotion.Open or DoorMotion.Opening, f.Lock is { EffectivelyLocked: true }, f.Lock?.Level ?? 0,
                             f.DoorBroken, f.RecordId, f.WantsLock)).ToArray();
-        return new BuildingDetail(instance, doorList, OwnsBuilding(instance, faction),
-                PublicOf(instance)) { SalePrice = SalePrice(instance, faction) };
+        return new BuildingDetail(instance, doorList, OwnsBuilding(instance, faction), PublicOf(instance))
+        {
+            SalePrice = SalePrice(instance, faction),
+            ResidentsPublic = PublicDayOf(instance),
+        };
     }
 
     #endregion
@@ -494,7 +497,7 @@ public sealed partial class FixtureRegistry
         // A destroyed building has no doors and no lock of its own (docs/game/locks.md "Doors"); its interior's fixtures stay.
         if (record is not null && !IsDestroyed(b))
         {
-            AddDoors(world, db, record, b.Key, site, owner, faction, b.Position, b.Yaw, list);
+            AddDoors(world, db, record, b.Key, site, owner, faction, b.Position, b.Yaw, b.Resolved?.Placement.Rotation, list);
             if (Lockable(db, record) is { } own)
                 list.Add(Make(world, db, own, b.Key, b.Key, record, site, owner, faction, b.Position, b.Yaw));
         }
@@ -632,7 +635,7 @@ public sealed partial class FixtureRegistry
     /// <c>hardness</c>.
     /// </summary>
     void AddDoors(World world, GameDatabase db, GameRecord record, string instance, int site, int owner, FactionData? faction, Vector3 at, float yaw,
-            List<Fixture> list)
+            Quaternion? rotation, List<Fixture> list)
     {
         var doorRefs = record.GetReferences("doors");
         bool gate = TownBuildings.IsGate(db, record, _functions);
@@ -650,6 +653,7 @@ public sealed partial class FixtureRegistry
                 Owner = owner,
                 Position = at,
                 Yaw = yaw,
+                Rotation = rotation is { } turn && turn.LengthSquared() > 1e-12f ? Quaternion.Normalize(turn) : null,
                 DoorIndex = i,
                 WantsLock = door?.GetBool("always locks") ?? false,
                 HostRecordId = record.StringId,
@@ -677,7 +681,7 @@ public sealed partial class FixtureRegistry
         var faction = site.Owner >= 0 && site.Owner < data.Factions.Count ? data.Factions[site.Owner] : null;
         var list = new List<Fixture>();
         float yaw = TownBuildings.YawOf(site.Rotation);
-        AddDoors(world, data.Db, record, site.Id, -1, site.Owner, faction, site.Position, yaw, list);
+        AddDoors(world, data.Db, record, site.Id, -1, site.Owner, faction, site.Position, yaw, site.Rotation, list);
         if (own is { } kind)
         {
             var made = Make(world, data.Db, kind, site.Id, site.Id, record, -1, site.Owner, faction, site.Position, yaw, host: record.StringId);
@@ -1222,12 +1226,26 @@ public sealed partial class FixtureRegistry
         door.SpotAsked = true;
         if (_doors.DoorSpotOf(door.HostRecordId, door.DoorIndex) is { } local)
         {
-            var turn = Quaternion.CreateFromAxisAngle(Vector3.UnitY, door.Yaw);
-            door.Spot = local with { Centre = door.Position + Vector3.Transform(local.Centre, turn), Normal = Vector3.Transform(local.Normal, turn),
-                    Slide = Vector3.Transform(local.Slide, turn) };
+            // The whole placement turn: a gate's leaf high on a tilted building (an Ancient Lab Ramp Gate, 231 up, placed 8-10° off level) landed
+            // 30-40 units off its leaf with the yaw alone (#560). The normal stays horizontal.
+            var turn = door.Rotation ?? Quaternion.CreateFromAxisAngle(Vector3.UnitY, door.Yaw);
+            door.Spot = local with
+            {
+                Centre = door.Position + Vector3.Transform(local.Centre, turn),
+                Normal = Level(Vector3.Transform(local.Normal, turn), local.Normal),
+                Slide = Vector3.Transform(local.Slide, turn),
+            };
         }
 
         return door.Spot;
+
+        static Vector3 Level(Vector3 n, Vector3 upright)
+        {
+            if (n.Y == 0) return n;
+
+            var flat = n with { Y = 0 };
+            return flat.LengthSquared() > 1e-12f ? Vector3.Normalize(flat) : upright;
+        }
     }
 
     /// <summary>
@@ -1614,6 +1632,20 @@ public sealed partial class FixtureRegistry
         }
 
         Hold(table, s, c, cage.Position, cage.Yaw);
+        SetSentence(world, c, cage, prisonTime);
+
+        // FUN_140330600 assigns the cage's owner handle as well as slave state 1. The resident squad stands in for that handle here.
+        if (c.SlaveOwner >= 0 && cage.Owner >= 0) Enslave(world, c, cage.Owner, CageMaster(world, cage));
+
+        NoteCaging(world, prisoner, cage, carrier);
+        return true;
+    }
+
+    /// <summary>
+    /// A caged character's sentence from the captor faction's booked bounty, or no sentence when it has none.
+    /// </summary>
+    static void SetSentence(World world, CharacterCold c, Fixture cage, float prisonTime)
+    {
         if (world.SystemOf<CrimeSystem>() is { } law && c.Bounties?.BookedFor(law.Factions.Relations, cage.Owner) is { Amount: > 0 } entry)
         {
             c.SentenceStart = world.GameHours;
@@ -1624,10 +1656,13 @@ public sealed partial class FixtureRegistry
             c.SentenceStart = 0;
             c.SentenceLength = 0;
         }
+    }
 
-        // An owned slave or escaped slave caged by an owner becomes that owner's slave again (FUN_140330600; the original also tests a type of the
-        // cage's owner, Unknown).
-        if (c.SlaveOwner >= 0 && cage.Owner >= 0) SetSlave(world, c, 1, cage.Owner);
+    /// <summary>
+    /// Records a caging for the rest of this tick and notifies the captive and crime systems.
+    /// </summary>
+    void NoteCaging(World world, CharacterId prisoner, Fixture cage, CharacterId? carrier)
+    {
         if (_cagingsTick != world.Tick)
         {
             _cagings.Clear();
@@ -1637,7 +1672,20 @@ public sealed partial class FixtureRegistry
         var caging = new Imprisonment(world.Tick, carrier ?? CharacterId.None, prisoner, cage);
         _cagings.Add(caging);
         Caged?.Invoke(world, caging);
-        return true;
+    }
+
+    /// <summary>
+    /// The resident squad that owns a cage's building; -1 when its owner has no loaded squad (the existing slave master is kept).
+    /// </summary>
+    static int CageMaster(World world, Fixture cage)
+    {
+        foreach (var squad in world.Squads.All)
+        {
+            if (squad.Faction == cage.Owner && (squad.Ai?.OwnHome ?? squad.HomeBuilding)?.Key == cage.Building)
+                return squad.Id;
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -1987,6 +2035,7 @@ public sealed partial class FixtureRegistry
         {
             (c.SlaveState, c.SlaveOwner, c.SlaveMaster) = (0, -1, -1);
             c.Shaved = false;   // CharacterHuman::shaveHead(false)
+            world.SystemOf<Kidnap.CaptiveSystem>()?.MatchShave(c);
         }
         else if (c.SlaveState == 2 && elapsed > 12) (c.SlaveState, c.SlaveSince) = (3, world.GameHours);
     }

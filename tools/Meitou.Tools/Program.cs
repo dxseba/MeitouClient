@@ -18,12 +18,19 @@ return args switch
     ["particles", "effects"] => WithInstall(i => ParticleSurvey.Run(i, effects: true)),
     ["particles", "weathers"] => WithInstall(i => ParticleSurvey.Run(i, effects: false, weathers: true)),
     ["particles", "warmup", .. var warmupNames] => WithInstall(i => ParticleWarmup.Run(i, warmupNames)),
+    ["record", var recordName] => WithInstall(i => RecordDump.Run(i, recordName)),
+    ["biomes"] => WithInstall(BiomeSurvey.Run),
+    ["items"] => WithInstall(ItemSurvey.Run),
+    ["specs"] => WithInstall(SpecSurvey.Run),
+    ["characters", .. var charArgs] => WithInstall(i => CharacterSurvey.Run(i, charArgs)),
     ["navmesh", .. var navArgs] => WithInstall(i => NavmeshTool.Run(i, navArgs)),
     ["weather", .. var weatherArgs] => WithInstall(i => WeatherTool.Run(i, weatherArgs)),
     ["audio", .. var audioArgs] => WithInstall(i => AudioTool.Run(i, audioArgs)),
     ["image-diff", var a, var b] =>ImageDiff.Run(a, b, null),
     ["image-diff", var a, var b, var d] => ImageDiff.Run(a, b, d),
     ["mod-check", .. var checkArgs] => WithInstall(i => ModCheck.Run(i, checkArgs)),
+    ["probe", .. var probeArgs] => WithInstall(i => SaveProbe.Run(i, probeArgs)),
+    ["objects", .. var objectArgs] => WithInstall(i => PlaceProbe.Run(i, objectArgs)),
     ["icons", .. var iconArgs] => WithInstall(i => IconExport.Run(i, iconArgs)),
     ["world-map", var png] => WithInstall(i => WorldSurvey.RenderMap(i, png)),
     ["world-map", var png, var step] => WithInstall(i => WorldSurvey.RenderMap(i, png, int.Parse(step))),
@@ -60,6 +67,10 @@ static int Usage()
         meitou-tools mod-check <save folder> [--ticks n] [--threads n] [--mod <mod folder>]...
                            load the save headless with the enabled code mods, or the --mod folders (running their code), and compare the state hash
                            per tick over two one-thread runs and a run on n threads (defaults 600, 4): where they differ, and which hashed systems
+        meitou-tools probe <save folder> <mode> [args] [--ticks n] [--nav]
+                           load a save headless (e.g. a feedback report's) and print one mode's view of it: near, watch, slaves, cages, cage, talk,
+                           storage, resave, heights; "meitou-tools probe" alone lists them
+        meitou-tools objects <x> <z> <radius>  towns, foliage meshes and level buildings near a world point under the install's load order
         meitou-tools icons <folder> [--enhanced] [--mods]  write every item's inventory icon to the folder, the drawn ones named as the game saves them
                            (<item>.<material>[.<colour>].png), the others <item>.png, and icons.json listing them; --enhanced draws them supersampled,
                            --mods uses the install's load order instead of the base game

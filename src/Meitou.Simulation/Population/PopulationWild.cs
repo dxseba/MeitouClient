@@ -43,16 +43,16 @@ public sealed record WildSite(int Index, WildKind Kind, ZoneCoordinate Zone, int
 /// homeless branch, <c>max(0, v0 - k x count)</c> with k = (sum of v0) / (P x amount) and the counts of this
 /// sector's own picks; world-state gated templates are skipped. The spot: a random point of the sector, pushed out of the nearest town to twice its
 /// radius and out of other towns of another faction to their radius, at least <see cref="PopulationSettings.HomelessPlayerDistance"/> from every
-/// player character, walkable; 40 tries (the original's 4 rounds of 10), else that squad is not made. A sector whose nearest town is the player's
-/// makes none, and so does one whose own town is a nest with roaming squads.</item>
+/// player character, walkable, terrain no lower than <see cref="SpawnFloor"/>; 40 tries (the original's 4 rounds of 10), else that squad is not
+/// made. A sector whose nearest town is the player's makes none, and so does one whose own town is a nest with roaming squads.</item>
 /// <item><b>Nests</b> (6.3). The original adds one nest per area tick until a group has <c>num nests</c> x the nests multiplier; here the layout is
 /// made at once from the world seed (engine choice; the end state is the same count): each nest's TOWN is a weighted pick from the group's
 /// <c>nests</c> (v0, 0 as 100, the TOWN's <c>world state</c> gate), its place a seeded cell of the group's area with candidate spots away from placed
-/// towns, or for groups with <c>nests at fixed markers only</c> one of the placed NEST_MARKER towns of the area. When its zone activates the nest
-/// fills its roaming pool to its pool's floor(<c>pop2</c>) members (0.7 x <c>nest resident population</c> at first; <c>PopulationPools.cs</c>) from
-/// the TOWN's <c>roaming squads</c> (weight max(0, v0 - count), k = 1; an entry whose expected size passes the free capacity is skipped, unless the
-/// pool is empty and more than 4 are free), the squads wandering round the nest. While loaded it tops up one squad per look and can be wiped out for
-/// good (<c>PopulationPools.cs</c>).</item>
+/// towns and on terrain no lower than <see cref="SpawnFloor"/>, or for groups with <c>nests at fixed markers only</c> one of the placed
+/// NEST_MARKER towns of the area. When its zone activates the nest fills its roaming pool to its pool's floor(<c>pop2</c>) members (0.7 x
+/// <c>nest resident population</c> at first; <c>PopulationPools.cs</c>) from the TOWN's <c>roaming squads</c> (weight max(0, v0 - count), k = 1;
+/// an entry whose expected size passes the free capacity is skipped, unless the pool is empty and more than 4 are free), the squads wandering round
+/// the nest. While loaded it tops up one squad per look and can be wiped out for good (<c>PopulationPools.cs</c>).</item>
 /// <item><b>Saves</b> (docs/formats/save.md "Nests", "Wild and nest platoons"): a loaded save's nests are the layout's first (at their saved places),
 /// the seeded roll (with the seed the save restores) only tops each group up to its count, leaving out the rolls whose nests the save holds, so a
 /// Meitou save (which writes only the nests that have loaded) loads with its other nests where they were. The save's wild platoons stay as
@@ -176,13 +176,24 @@ public sealed partial class PopulationSystem
     #region The layout (pure given the data, the settings and the seed)
 
     /// <summary>
+    /// The lowest terrain height a nest or homeless squad spot may have: the original's spot finder refuses a point whose terrain is under 95
+    /// (<c>FUN_1408f4d70</c>, <c>DAT_141685034</c>; <b>Verified</b>), so neither stands deeper than 5 in the water (surface 100).
+    /// </summary>
+    const float SpawnFloor = 95;
+
+    /// <summary>
+    /// The sector draws the original makes for a new nest's spot before it takes one unchecked (<c>FUN_1408f6350</c>; <b>Verified</b>).
+    /// </summary>
+    const int NestDraws = 10;
+
+    /// <summary>
     /// Lays out the wild sites once, when the data has a biome map (with a loaded save's nests first).
     /// </summary>
     void EnsureWild(World world)
     {
         if (_wildSites is not null || _data.Biomes is not { } biomes) return;
         var saved = world.Saved;
-        _wildSites = BuildWildSites(_data, _settings, biomes, world.Seed, saved?.Nests, States);
+        _wildSites = BuildWildSites(_data, _settings, biomes, world.Seed, saved?.Nests, States, world.Walkability.TerrainHeight);
         _wildStates = new SiteState[_wildSites.Count];
         _wildCentres = new Vector2?[_wildSites.Count];
         for (int i = 0; i < _wildStates.Length; i++) _wildStates[i] = new SiteState();
@@ -258,6 +269,43 @@ public sealed partial class PopulationSystem
     sealed record WildHold(int Squads, int Members, Dictionary<string, int> Templates);
 
     /// <summary>
+    /// What the homeless maker reads of the world: the living platoons per template, and the zones loaded (<c>FUN_1408f8060</c>,
+    /// <c>FUN_1406b9d10</c>).
+    /// </summary>
+    sealed record WorldShare(Dictionary<string, int> Counts, int Zones);
+
+    /// <summary>
+    /// The world's share now: the living squads and the unmade or saved platoons per template, the wild squads kept for unloaded sites, and the
+    /// zones loaded (the active ones, at least the sectors loaded or loading).
+    /// </summary>
+    WorldShare WorldShareOf(World world)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        void Add(string id) => counts[id] = counts.GetValueOrDefault(id) + 1;
+
+        foreach (var squad in world.Squads.All)
+        {
+            if (squad.Members.Any(m => Living(world, m))) Add(squad.TemplateId);
+        }
+
+        foreach (var p in world.Platoons.All)
+        {
+            if (p.SquadId >= 0 || p.Dead) continue;
+            if (p.Saved is { } sp ? sp.Members.Any(m => !m.Dead && !m.Gone) : p.Stored is not null) Add(p.TemplateId);
+        }
+
+        foreach (var list in _keptWild.Values)
+        {
+            foreach (var k in list) Add(k.TemplateId);
+        }
+
+        // The zone manager's loaded zones: the active ones, at least the sectors loaded (or loading) now.
+        int sectors = _wildLoaded.Count(i => _wildSites![i].Kind == WildKind.Sector);
+
+        return new WorldShare(counts, Math.Max(Math.Max(_active.Count, sectors), 1));
+    }
+
+    /// <summary>
     /// What the save's kept wild platoons bound to the site hold; null when none does.
     /// </summary>
     WildHold? HoldOf(World world, int site)
@@ -293,13 +341,14 @@ public sealed partial class PopulationSystem
 
     /// <summary>
     /// The sectors (every in-map zone whose group has homeless spawns), then the nests of every group in record order: the <paramref name="saved"/>
-    /// nests in it (a save's), then rolled ones up to the group's count.
+    /// nests in it (a save's), then rolled ones up to the group's count. <paramref name="terrain"/>: the terrain height a nest spot is tested
+    /// against <see cref="SpawnFloor"/> with (null: none is).
     /// </summary>
     public static List<WildSite> BuildWildSites(PopulationData data, PopulationSettings settings, BiomeMap biomes, ulong seed,
-        IReadOnlyList<Saving.SavedNest>? saved = null, IWorldStates? states = null)
+        IReadOnlyList<Saving.SavedNest>? saved = null, IWorldStates? states = null, Func<float, float, float>? terrain = null)
     {
         states ??= data.States;
-        var builder = new WildSiteBuilder(data, settings, biomes, seed, states);
+        var builder = new WildSiteBuilder(data, settings, biomes, seed, states, terrain);
         builder.AddSectors();
         builder.NoteSaved(saved);
         for (int g = 0; g < biomes.Groups.Count; g++) builder.AddNests(g);
@@ -338,6 +387,11 @@ public sealed partial class PopulationSystem
         readonly IWorldStates _states;
 
         /// <summary>
+        /// The terrain height a nest spot is tested with (null: no test).
+        /// </summary>
+        readonly Func<float, float, float>? _terrain;
+
+        /// <summary>
         /// The biome groups.
         /// </summary>
         readonly IReadOnlyList<BiomeGroupData> _groups;
@@ -370,9 +424,10 @@ public sealed partial class PopulationSystem
         /// <summary>
         /// Takes the world's data; the groups' cell lists start empty.
         /// </summary>
-        public WildSiteBuilder(PopulationData data, PopulationSettings settings, BiomeMap biomes, ulong seed, IWorldStates states)
+        public WildSiteBuilder(PopulationData data, PopulationSettings settings, BiomeMap biomes, ulong seed, IWorldStates states,
+            Func<float, float, float>? terrain)
         {
-            (_data, _settings, _biomes, _seed, _states) = (data, settings, biomes, seed, states);
+            (_data, _settings, _biomes, _seed, _states, _terrain) = (data, settings, biomes, seed, states, terrain);
             _groups = _biomes.Groups;
             _cellsOf = new List<(int X, int Z)>[_groups.Count];
             for (int g = 0; g < _groups.Count; g++) _cellsOf[g] = [];
@@ -444,9 +499,12 @@ public sealed partial class PopulationSystem
             // The roll runs in a fixed order as for a world without a save and leaves out each roll whose nest the save holds (a saved nest stands at
             // one of its spots, or its marker: a Meitou save writes a rolled nest at the spot it loaded at), until the group has its count. A save
             // holds only the nests made so far (docs/formats/save.md "Nests"), so whichever of them it holds, the others come out as before: a
-            // left-out roll takes no room, a held one is never rolled twice, and the saved nest takes over that roll's key.
+            // left-out roll takes no room, a held one is never rolled twice, and the saved nest takes over that roll's key. A roll whose cell has no
+            // dry spot makes nothing, so the rolls go on past the count, up to the original's 10 sector draws a nest (FUN_1408f6350); marker
+            // rolls draw without repeats, one per marker.
             int room = count - mine.Count;
-            for (int i = 0; i < count && room > 0; i++)
+            int rolls = markers is null ? count * NestDraws : count;
+            for (int i = 0; i < rolls && room > 0; i++)
             {
                 if (RollNest(g, group, mine, markers, groupKey, i)) room--;
             }
@@ -477,7 +535,7 @@ public sealed partial class PopulationSystem
                 for (int t = 0; t < 16 && spots.Count < 8; t++)
                 {
                     var p = new Vector2(minX + Rng.Float(Place()) * (maxX - minX), minZ + Rng.Float(Place()) * (maxZ - minZ));
-                    if (!NearTown(_data, p, 2)) spots.Add(p);
+                    if (!NearTown(_data, p, 2) && !Refused(p)) spots.Add(p);
                 }
 
                 if (spots.Count == 0) return false;
@@ -498,6 +556,12 @@ public sealed partial class PopulationSystem
             _sites.Add(new WildSite(_sites.Count, WildKind.Nest, zone, g, town, faction, spots, Key: key));
             return true;
         }
+
+        /// <summary>
+        /// Whether the original's spot finder refuses a spot at layout time: terrain under <see cref="SpawnFloor"/> or a black pixel of the
+        /// areas map (the gate code is tested when the nest loads, <see cref="BuildNest"/>).
+        /// </summary>
+        bool Refused(Vector2 p) => _terrain is not null && _terrain(p.X, p.Y) < SpawnFloor || !_biomes.IsPainted(p.X, p.Y);
 
         /// <summary>
         /// A saved nest added as a site of the group.
@@ -674,6 +738,7 @@ public sealed partial class PopulationSystem
         long loadId = state.LoadId;
         ulong seed = world.Seed;
         var walk = world.Walkability;
+        var regions = RegionsOf(world);
         var players = PlayerSpots(world);
         var hold = HoldOf(world, site.Index);
         if (site.Kind == WildKind.Nest)
@@ -685,8 +750,8 @@ public sealed partial class PopulationSystem
             var counts = new int[site.Nest!.RoamingSquads.Count];
             for (int i = 0; hold is not null && i < counts.Length; i++) counts[i] = hold.Templates.GetValueOrDefault(site.Nest.RoamingSquads[i].Id);
             var budget = new NestBudget(cap, hold?.Members ?? 0, counts, 0, 64, 64);
-            if (_work is null) SpawnWild(world, BuildNest(site, loadId, seed, walk, players, budget));
-            else _work.Add(() => _builtWild.Enqueue(BuildNest(site, loadId, seed, walk, players, budget)));
+            if (_work is null) SpawnWild(world, BuildNest(site, loadId, seed, walk, regions, players, budget));
+            else _work.Add(() => _builtWild.Enqueue(BuildNest(site, loadId, seed, walk, regions, players, budget)));
             return;
         }
 
@@ -695,8 +760,9 @@ public sealed partial class PopulationSystem
         int share = HomelessCount(_data.Biomes!.Groups[site.Group], _settings.PopulationMultiplier);
         state.Planned = Math.Max(0, Math.Min(share, held + room) - held);
 
-        if (_work is null) SpawnWild(world, BuildSector(site, loadId, seed, walk, players, hold, room: room));
-        else _work.Add(() => _builtWild.Enqueue(BuildSector(site, loadId, seed, walk, players, hold, room: room)));
+        var worldShare = WorldShareOf(world);
+        if (_work is null) SpawnWild(world, BuildSector(site, loadId, seed, walk, regions, players, hold, worldShare, room: room));
+        else _work.Add(() => _builtWild.Enqueue(BuildSector(site, loadId, seed, walk, regions, players, hold, worldShare, room: room)));
     }
 
     /// <summary>
@@ -810,6 +876,14 @@ public sealed partial class PopulationSystem
         }
         else squad.HomeRadius = _settings.HomelessHomeRadius;
         state.Squads.Add(squad.Id);
+        if (SpawnTrace is { Count: > 0 } trace && trace[^1].SquadId == squad.Id)
+        {
+            string source = site.Kind == WildKind.Nest
+                ? "nest:" + site.Nest!.Name
+                : "sector:" + _data.Biomes!.Groups[site.Group].Name;
+            trace[^1] = trace[^1] with { Source = source };
+        }
+
         if (_wildLog.Count < 256)
         {
             _wildLog.Add(new WildSpawn(world.Tick, site.Kind, site.Kind == WildKind.Nest ? site.Nest!.Name : _data.Biomes!.Groups[site.Group].Name,
@@ -851,10 +925,12 @@ public sealed partial class PopulationSystem
         (int)MathF.Ceiling(MathF.Max(0, populationMultiplier * group.HomelessSpawnAmount) - 1e-4f);
 
     /// <summary>
-    /// The template weights of 6.2's homeless branch for one sector: <c>max(0, v0 - k x count)</c>, k = (sum of v0) / (P x amount), with
-    /// <paramref name="counts"/> the squads of each entry already made; entries that are no template or are gated get 0.
+    /// The template weights of 6.2's homeless branch for one sector (<c>FUN_1408f7e80</c>, <b>Verified</b>): <c>max(0, v0 - k x count)</c>, k = (sum
+    /// of v0) / (zones x P x amount) with <paramref name="zones"/> the zones loaded and <paramref name="counts"/> the living platoons of each entry's
+    /// template in the whole world; entries that are no template or are gated get 0.
     /// </summary>
-    public static float[] HomelessWeights(BiomeGroupData group, float populationMultiplier, IReadOnlyList<int> counts, Func<string, bool> usable)
+    public static float[] HomelessWeights(
+        BiomeGroupData group, float populationMultiplier, IReadOnlyList<int> counts, Func<string, bool> usable, int zones = 1)
     {
         var entries = group.HomelessSpawns;
         var w = new float[entries.Count];
@@ -862,7 +938,8 @@ public sealed partial class PopulationSystem
         foreach (var e in entries) sum += Math.Max(0, e.V0);
         float target = populationMultiplier * group.HomelessSpawnAmount;
         if (target <= 0 || sum <= 0) return w;
-        float k = sum / target;
+        // Engine choice: a sector makes ceil(P x amount) squads at once, so that is the share each zone is balanced to.
+        float k = sum / (HomelessCount(group, populationMultiplier) * Math.Max(zones, 1));
         for (int i = 0; i < entries.Count; i++)
             w[i] = entries[i].V0 > 0 && usable(entries[i].Id) ? MathF.Max(0, entries[i].V0 - k * counts[i]) : 0;
 
@@ -900,8 +977,8 @@ public sealed partial class PopulationSystem
     /// A sector's squads as it loads, or with <paramref name="topUp"/> ≥ 0 the one squad of the area tick's refill number <paramref name="topUp"/>
     /// (<c>PopulationHomeless.cs</c>).
     /// </summary>
-    BuiltWild BuildSector(WildSite site, long loadId, ulong seed, IWalkability walk, Vector2[] players, WildHold? hold, int topUp = -1,
-        int room = int.MaxValue)
+    BuiltWild BuildSector(WildSite site, long loadId, ulong seed, IWalkability walk, Locks.IGateRegions? regions, Vector2[] players, WildHold? hold,
+        WorldShare worldShare, int topUp = -1, int room = int.MaxValue)
     {
         var squads = new List<BuiltSquad>();
         var group = _data.Biomes!.Groups[site.Group];
@@ -919,8 +996,8 @@ public sealed partial class PopulationSystem
         int n = HomelessCount(group, _settings.PopulationMultiplier);
         var counts = new int[group.HomelessSpawns.Count];
 
-        // The save's homeless squads standing in this sector are of its count (and of their entry's).
-        for (int i = 0; hold is not null && i < counts.Length; i++) counts[i] = hold.Templates.GetValueOrDefault(group.HomelessSpawns[i].Id);
+        // The maker counts the living platoons of each entry's template in the whole world (FUN_1406b9d10, Verified), loaded or not.
+        for (int i = 0; i < counts.Length; i++) counts[i] = worldShare.Counts.GetValueOrDefault(group.HomelessSpawns[i].Id);
         int first = hold?.Squads ?? 0;
 
         // At load no more than the island has room for (IslandRoom).
@@ -931,13 +1008,13 @@ public sealed partial class PopulationSystem
         for (int s = first; s < n; s++)
         {
             ulong key = Rng.Mix(SeedSalts.HomelessSquad ^ (ulong)site.Zone.X << 40 ^ (ulong)site.Zone.Y << 24 ^ (uint)s);
-            var weights = HomelessWeights(group, _settings.PopulationMultiplier, counts, TemplateUsable);
+            var weights = HomelessWeights(group, _settings.PopulationMultiplier, counts, TemplateUsable, worldShare.Zones);
             int e = Pick(weights, Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.HomelessPick));
             if (e < 0) break;
             counts[e]++;
             var template = SquadTemplate.From(_data.Db.Find(group.HomelessSpawns[e].Id)!);
             int faction = _data.SpawnFactionOf(template);
-            if (PlaceInSector(minX, minZ, maxX, maxZ, faction, seed, key, walk, players) is not { } spot) continue;
+            if (PlaceInSector(minX, minZ, maxX, maxZ, faction, seed, key, walk, regions, players) is not { } spot) continue;
             if (BuildOne(template, faction, faction >= 0 ? _data.Factions[faction] : null, key, seed, spot) is { } one) squads.Add(one);
         }
 
@@ -991,9 +1068,10 @@ public sealed partial class PopulationSystem
 
     /// <summary>
     /// The spot of a homeless squad (6.2, <c>FUN_1408f50d0</c>): 40 seeded tries of a point of the sector, pushed out of towns and away from the
-    /// player.
+    /// player, walkable and not <see cref="SpotRefused"/>.
     /// </summary>
-    Vector2? PlaceInSector(float minX, float minZ, float maxX, float maxZ, int faction, ulong seed, ulong key, IWalkability walk, Vector2[] players)
+    Vector2? PlaceInSector(float minX, float minZ, float maxX, float maxZ, int faction, ulong seed, ulong key, IWalkability walk,
+        Locks.IGateRegions? regions, Vector2[] players)
     {
         for (int t = 0; t < 40; t++)
         {
@@ -1009,12 +1087,27 @@ public sealed partial class PopulationSystem
             bool tooClose = false;
             foreach (var at in players)
                 if (Vector2.DistanceSquared(at, p) < _settings.HomelessPlayerDistance * _settings.HomelessPlayerDistance) { tooClose = true; break; }
-            if (tooClose || !walk.IsWalkable(p.X, p.Y)) continue;
+            if (tooClose || SpotRefused(p, walk, regions) || !walk.IsWalkable(p.X, p.Y)) continue;
             return p;
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Whether the original's spot finder refuses a point (<c>FUN_1408f50d0</c>, <b>Verified</b>): terrain under <see cref="SpawnFloor"/>, a black
+    /// pixel of the areas map, or ground inside town walls (gate code above 0, <c>NavMesh::getGateCode</c>; only where the navmesh is loaded).
+    /// </summary>
+    bool SpotRefused(Vector2 p, IWalkability walk, Locks.IGateRegions? regions)
+    {
+        if (walk.TerrainHeight(p.X, p.Y) < SpawnFloor || _data.Biomes?.IsPainted(p.X, p.Y) == false) return true;
+        return regions?.CodeAt(new Vector3(p.X, walk.GroundHeight(p.X, p.Y), p.Y)) > 0;
+    }
+
+    /// <summary>
+    /// The world's gate codes, when the lock system has them.
+    /// </summary>
+    static Locks.IGateRegions? RegionsOf(World world) => world.SystemOf<Locks.LockSystem>()?.Regions;
 
     /// <summary>
     /// Pushes <paramref name="p"/> out of the town's radius times <paramref name="share"/> (a point at the centre goes +X).
@@ -1030,9 +1123,10 @@ public sealed partial class PopulationSystem
     }
 
     /// <summary>
-    /// Builds a nest's roaming squads as it loads: its centre (the budget's, else its first walkable spot) and the squads its pool lacks.
+    /// Builds a nest's roaming squads as it loads: its centre (the budget's, else its first walkable spot not inside town walls) and the squads its
+    /// pool lacks.
     /// </summary>
-    BuiltWild BuildNest(WildSite site, long loadId, ulong seed, IWalkability walk, Vector2[] players, NestBudget budget)
+    BuiltWild BuildNest(WildSite site, long loadId, ulong seed, IWalkability walk, Locks.IGateRegions? regions, Vector2[] players, NestBudget budget)
     {
         var squads = new List<BuiltSquad>();
         var nest = site.Nest!;
@@ -1040,7 +1134,7 @@ public sealed partial class PopulationSystem
         if (centre is null)
         {
             foreach (var s in site.Spots)
-                if (walk.IsWalkable(s.X, s.Y)) { centre = s; break; }
+                if (walk.IsWalkable(s.X, s.Y) && !SpotRefused(s, walk, regions)) { centre = s; break; }
         }
 
         bool topUp = budget.Centre is not null;

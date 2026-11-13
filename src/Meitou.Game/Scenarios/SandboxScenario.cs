@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
+using Meitou.Data.World;
 using Meitou.Game.Editor;
 using Meitou.Game.Host;
 using Meitou.Game.Rendering.Overlays;
@@ -123,6 +124,19 @@ sealed class SandboxScenario(GameHost host)
             .OrderBy(x => x.Race, StringComparer.Ordinal).ToList();
 
     /// <summary>
+    /// <c>--sandbox-animals</c>: the first ANIMAL_CHARACTER record of every race animals use, by name.
+    /// </summary>
+    static List<(string Race, string Record)> SandboxAnimals(Meitou.Data.GameDatabase db) =>
+        db.Records.Values
+            .Where(r => r.Type == FcsRecordType.AnimalCharacter)
+            .Select(r => (Id: r.StringId, Name: r.Name, Race: Meitou.Data.Characters.CharacterAppearance.AnimalRaceId(r)))
+            .Where(x => x.Race is not null)
+            .GroupBy(x => x.Race!)
+            .Select(grp => (Race: db.Find(grp.Key)?.Name ?? grp.Key, Record: grp.First().Id))
+            .OrderBy(x => x.Race, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>
     /// Spawns the hero (and the foe), selects the hero, applies the command-line start state; returns where the camera starts.
     /// </summary>
     internal Vector3 SandboxSpawn()
@@ -143,6 +157,14 @@ sealed class SandboxScenario(GameHost host)
             Console.WriteLine($"sandbox   {races.Count} races: {string.Join(", ", races.Select(x => x.Race))}");
             extra.AddRange(races.Select(x => x.Record));
         }
+
+        if (host.GameOptions.SandboxAnimals)
+        {
+            var animals = SandboxAnimals(host.Scene.Database!);
+            Console.WriteLine($"sandbox   {animals.Count} animal races: {string.Join(", ", animals.Select(x => $"{x.Race} ({x.Record})"))}");
+            extra.AddRange(animals.Select(x => x.Record));
+        }
+
         for (int i = 0, ring = 1, placed = 0; i < extra.Count; i++, placed++)
         {
             int perRing = (int)(2 * MathF.PI * (25 + 15 * ring) / 15);
@@ -305,20 +327,23 @@ sealed class SandboxScenario(GameHost host)
     }
 
     /// <summary>
-    /// The strategy camera on the character the player follows (<see cref="PlayerInterface.Follow"/>), as the sandbox's follow does; a gone character
-    /// is let go.
+    /// The strategy camera on the character the player follows (<see cref="PlayerInterface.Follow"/>), the target at its hips (the game's position
+    /// + <see cref="KenshiCamera.TrackHeight"/>); a gone character is let go. A carried character is tracked by its carrier until put down: the body
+    /// sways on the carrier's shoulder with every step, which shook the view.
     /// </summary>
     internal void FollowCamera()
     {
         if (host.Player.Follow is not { } id || host.Session.Camera.IsFree) return;
-        if (host.Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } followed)
+        var characters = host.Session.CurrentSnapshot.Characters;
+        if (characters.FirstOrDefault(c => c.Id == id) is not { } followed)
         {
             host.Player.Follow = null;
             return;
         }
 
-        host.Session.Camera.MovePivot(new Vector2(followed.Position.X, followed.Position.Z));
-        host.Camera.Target = host.DrawnPosition(followed);
+        var tracked = host.Tracked(followed);
+        host.Session.Camera.MovePivot(new Vector2(tracked.Position.X, tracked.Position.Z));
+        host.Camera.Target = host.DrawnPosition(tracked) + new Vector3(0, KenshiCamera.TrackHeight, 0);
     }
 
     /// <summary>

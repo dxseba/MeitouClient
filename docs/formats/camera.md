@@ -87,7 +87,7 @@ not the game speed, so the camera works while the game is paused. Several inputs
   within 400 units are the pivot's ground, a ruin's on its `destroyed collision` as the game's ray meets it ([collision](collision.md);
   without them close zoom put the eye inside a ruin's raised base, issue #483), and a building in the interior view's parts up to the viewed
   floor (others stay at floor 0, the +0x330 re-cast read as "not the viewed building"); the highest at the point, without the 3000 cap, the sweep, the group-14
-  ray or the eye's lowering ray. A building's collision is read on a worker, so the first frames near it keep to the terrain; a runtime placement
+  ray or the eye's lowering ray. Engine: the eye keeps above those floors too (the game's eye sank into raised building bases). A building's collision is read on a worker, so the first frames near it keep to the terrain; a runtime placement
   added or removed (a building; not a ground item's drop or pick-up, which leaves the lists alone, issue #204, **Observed** by code, not measured) lists the zone's buildings again while the known floors keep answering
   (the pivot does not drop to the terrain meanwhile), and an unchanged building keeps its collision.
 - **Default keys** (`controls.cfg`): `camera_forward` W, Up; `camera_back` S, Down; `camera_left` A, Left; `camera_right` D, Right;
@@ -104,6 +104,7 @@ not the game speed, so the camera works while the game is paused. Several inputs
   with no ground smoothing; the eye clearance still lifts it. Panning, `focus_char` and the free camera clear it; zoom and turn keep it.
   While tracking, the pointer at an edge turns the camera instead of panning (**Observed**: x edge ∓3 yaw input, y edge ∓1 tilt input
   per frame). Edge scrolling is also suppressed after some events until the pointer moves right (a quirk, **Observed**).
+- **Whom the camera tracks** (**Verified**, `FUN_1406b0f90` mode 1 asks the handle's object for its position through vtable `+0x40`, which for a character is `FUN_1405ce680`): a character in a bed or cage (`+0x2f8` set) answers its bed's or cage's position, a **carried** one (`+0x3d4`) answers its **carrier's** position (the carrier handle at `+0x388`, resolved and asked the same way, so a chain of carriers ends at the first one carried by no one), and only otherwise its own (the ragdoll root body's or `+0x48`). So following or centring on a knocked-out character that someone carries keeps the camera on the carrier, at the carrier's position + 10, never on the body on the shoulder (its drawn offset is not used). Meitou: `GameHost.Tracked` / `PlayerInterface.Carrier` for follow, centre (F, portrait), flights and the followed floor; the bed and cage case is not modelled (the body keeps its own place there).
 - The save's `CAMERA` record keeps the pivot position and orientation, the boom and the tracked handle ([saved camera](#saved-camera)).
 
 ## Saved camera
@@ -134,12 +135,19 @@ pivot). The viewer's altitude band starts at 5100 above that and ends at 18700 (
 `StrategyCamera` implements the step above in frames of 1/60 s (a 30 Hz control tick runs two), including edge scrolling (the
 host passes the pointer's place in the window, from Windows, only while the window is in front and nothing else uses the pointer;
 the Controls settings toggle, first taken from the install's `Edge scrolling`, turns it off).
+The turn and tilt averaging counts its 20 frames in drawn frames, as the game's does, while the step stays 1/60 s (so the mouse's turn per
+pixel does not change with the frame rate): a step spanning n drawn frames weighs its samples 1, aⁿ, a²ⁿ, ... over 20 / n samples
+(`StrategyCamera.FramesPerStep`, the host's smoothed frame time). Engine choices: a frame rate under 60 averages as 60 does, and the
+Controls settings' **Camera smoothing** (`UserConfig.CameraSmoothing`, default on; the game has no such option) turns the averaging off.
+Controls settings' **Shift pan boost** (`UserConfig.ShiftPanBoost`, a Faithful / Meitou switch, default on; the game has none) multiplies
+the key pan by **Shift pan speed** (`ShiftPanMultiplier`, 125% to 500%, default 200%) while Shift is held; edge scrolling alone is not boosted.
 Differences, all engine choices: a pitch step is cut into pieces of at most 0.02 rad, each checked against the limits (the game
 overshoots by up to one step); the eye is never left below the clearance by the height lag; tracking is the host's (the pivot
-follows the character; the host draws the character's smoothed position as the target and then lifts it until the eye clears the
+follows the character; the host draws the character's smoothed position + 10 as the target and then lifts it until the eye clears the
 ground by the same clearance, as it does for the squad tour's arcs, [viewer.md](../viewer.md#squad-tour)); rotating pins the pointer as the game does (put back after every move, no
 marker drawn); `mouse_rotate` is the middle button or Ctrl (Ctrl+right click is also Meitou's carry binding); the free camera keeps its own
-engine feel (its Q/E turn the view left/right as named, not as the strategy camera's). The sea height clamps the camera's ground
+engine feel (its Q/E turn the view left/right as named, not as the strategy camera's; each wheel notch scales its speed by 2^(1/4), 1/16 to
+16 times, so scrolling back always reaches 100%; a label shows the speed for 3 s after a change; Shift does not boost it). The sea height clamps the camera's ground
 (**Observed**: the water node's height is the water height, 100). The settings above are constants of `CameraSettings`, not read
 from `settings.cfg`; `.`/`,` are no longer the time-step keys (they tilt, as in the game).
 The free camera more than 3000 above the ground under its eye stops moving the world's focus (`KenshiCamera.FlightHeight`, engine choice; the
