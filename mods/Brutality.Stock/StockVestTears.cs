@@ -15,9 +15,16 @@ namespace Meitou.Brutality;
 internal static class StockVestTears
 {
     const float Marker = -6193;
-    const string VestSignature = "void vest(uint d, uint nm, uint c, bool coloured, vec3 shirt, vec2 uv, inout vec3 albedo, inout vec4 normalMap, inout float gloss, inout float skin)";
+    const string VestSignature = "void vest(uint d, uint nm, uint c, bool coloured, vec3 shirt, float layerSheen, vec2 uv, "
+        + "inout vec3 albedo, inout vec4 normalMap, inout float gloss, inout float skin, inout float sheen)";
     const string VestBlend = "albedo = mix(albedo, v.rgb, vn.a);";
     const string VestCoverage = """
+        // A tear is two floats, each two halves: the stock body material leaves only these channels free.
+        vec4 brutalityTear(float first, float second)
+        {
+            return vec4(unpackHalf2x16(floatBitsToUint(first)), unpackHalf2x16(floatBitsToUint(second)));
+        }
+
         float brutalityVestCoverage(vec2 uv, vec4 tear)
         {
             float length2 = dot(tear.zw, tear.zw);
@@ -35,23 +42,23 @@ internal static class StockVestTears
         """;
     static readonly string[] calls =
     [
-        "vest(m.tex[9], m.tex[10], m.tex[11], flag(f, 2048u), m.shirtColour.rgb, uv, albedo, nm, gloss, skin);",
-        "vest(m.tex[12], m.tex[13], m.tex[14], flag(f, 4096u), m.shirtColour.rgb, uv, albedo, nm, gloss, skin);",
-        "vest(m.tex[15], m.tex[16], m.tex[17], flag(f, 8192u), m.shirtColour.rgb, uv, albedo, nm, gloss, skin);",
+        "vest(m.tex[9], m.tex[10], m.tex[11], flag(f, 2048u), m.shirtColour.rgb, m.diffuseChannel.x, uv, albedo, nm, gloss, skin, sheen);",
+        "vest(m.tex[12], m.tex[13], m.tex[14], flag(f, 4096u), m.shirtColour.rgb, m.diffuseChannel.y, uv, albedo, nm, gloss, skin, sheen);",
+        "vest(m.tex[15], m.tex[16], m.tex[17], flag(f, 8192u), m.shirtColour.rgb, m.diffuseChannel.z, uv, albedo, nm, gloss, skin, sheen);",
     ];
+    /// <summary>The body draws its layers' sheen from diffuseChannel now; alpha channel and the blood colours' spare slots carry the tears.</summary>
     static readonly string[] channels =
     [
-        "m.diffuseChannel",
-        "m.alphaChannel",
-        "vec4(m.colour1.w, m.colour2.zw, m.shirtColour.w)",
+        "brutalityTear(m.alphaChannel.x, m.alphaChannel.y)",
+        "brutalityTear(m.alphaChannel.z, m.alphaChannel.w)",
+        "brutalityTear(m.colour1.w, m.colour2.z)",
     ];
     static readonly ConditionalWeakTable<CharacterAppearance, Payload> looks = new();
     static MaterialFields? fields;
     static volatile bool enabled;
 
     internal sealed record Payload(Vector4 First, Vector4 Second, Vector4 Third);
-    sealed record MaterialFields(FieldInfo Threshold, FieldInfo Diffuse, FieldInfo Alpha, FieldInfo Colour1,
-        FieldInfo Colour2, FieldInfo Gloss);
+    sealed record MaterialFields(FieldInfo Threshold, FieldInfo Alpha, FieldInfo Colour1, FieldInfo Colour2);
     readonly record struct Triangle(Vertex A, Vertex B, Vertex C, int Group)
     {
         public Vector3 Low { get; } = Vector3.Min(A.Position, Vector3.Min(B.Position, C.Position));
@@ -77,9 +84,8 @@ internal static class StockVestTears
             }
 
             var material = bodyMaterial.ReturnType;
-            fields = new MaterialFields(Field("AlphaThreshold", typeof(float)), Field("DiffuseChannel", typeof(Vector4)),
-                Field("AlphaChannel", typeof(Vector4)), Field("Colour1", typeof(Vector4)), Field("Colour2", typeof(Vector4)),
-                Field("GlossMult", typeof(float)));
+            fields = new MaterialFields(Field("AlphaThreshold", typeof(float)), Field("AlphaChannel", typeof(Vector4)),
+                Field("Colour1", typeof(Vector4)), Field("Colour2", typeof(Vector4)));
             context.Harmony.Patch(fragment, postfix: new HarmonyMethod(typeof(StockVestTears), nameof(FragmentPostfix)));
             context.Harmony.Patch(bodyMaterial, postfix: new HarmonyMethod(typeof(StockVestTears), nameof(BodyMaterialPostfix)));
             enabled = true;
@@ -103,14 +109,17 @@ internal static class StockVestTears
         if (fields is not { } material || !looks.TryGetValue(__0, out var payload)) return;
         // Only ShadeBody receives this payload. These channels are unused by body, hair-overlay and blood sampling.
         material.Threshold.SetValue(__result, Marker);
-        material.Diffuse.SetValue(__result, payload.First);
-        material.Alpha.SetValue(__result, payload.Second);
+        material.Alpha.SetValue(__result, new Vector4(Pack(payload.First.X, payload.First.Y), Pack(payload.First.Z, payload.First.W),
+            Pack(payload.Second.X, payload.Second.Y), Pack(payload.Second.Z, payload.Second.W)));
         var colour1 = (Vector4)material.Colour1.GetValue(__result)!;
         var colour2 = (Vector4)material.Colour2.GetValue(__result)!;
-        material.Colour1.SetValue(__result, colour1 with { W = payload.Third.X });
-        material.Colour2.SetValue(__result, colour2 with { Z = payload.Third.Y, W = payload.Third.Z });
-        material.Gloss.SetValue(__result, payload.Third.W);
+        material.Colour1.SetValue(__result, colour1 with { W = Pack(payload.Third.X, payload.Third.Y) });
+        material.Colour2.SetValue(__result, colour2 with { Z = Pack(payload.Third.Z, payload.Third.W) });
     }
+
+    /// <summary>Two values as halves in one float's bits, as GLSL unpackHalf2x16 reads them (the first in the low half).</summary>
+    internal static float Pack(float low, float high) => BitConverter.UInt32BitsToSingle(
+        BitConverter.HalfToUInt16Bits((Half)low) | (uint)BitConverter.HalfToUInt16Bits((Half)high) << 16);
 
     static void FragmentPostfix(ref string __result)
     {

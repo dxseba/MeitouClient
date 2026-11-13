@@ -32,7 +32,7 @@ internal sealed class StockNativeHeadPools
     /// <summary>
     /// The stock head list, head placement fields and host session.
     /// </summary>
-    readonly FieldInfo _heads, _key, _tick, _landed, _start, _session;
+    readonly FieldInfo _heads, _key, _tick, _resting, _time, _start, _session;
 
     /// <summary>
     /// One stock draw owner's observed and still-bleeding heads.
@@ -84,7 +84,9 @@ internal sealed class StockNativeHeadPools
         _heads = StockHostParts.Field(decapitation, "_heads");
         _key = StockHostParts.Field(head, "Key");
         _tick = StockHostParts.Field(head, "Tick");
-        _landed = StockHostParts.Field(head, "Landed");
+        // The stock head steps its own fall now: it has landed once it rests, after Time seconds of fall.
+        _resting = StockHostParts.Field(head, "Resting");
+        _time = StockHostParts.Field(head, "Time");
         _start = StockHostParts.Field(head, "Start");
         _session = StockHostParts.Field(host, "Session");
     }
@@ -135,7 +137,7 @@ internal sealed class StockNativeHeadPools
         {
             if (display.Seen.TryGetValue(head, out var known))
                 known.Frame = frame;
-            else if (_landed.GetValue(head) is float landed && float.IsFinite(landed))
+            else if (_resting.GetValue(head) is true && _time.GetValue(head) is float landed && float.IsFinite(landed))
                 Register(host, shown, list, display, head, landed, now);
         }
 

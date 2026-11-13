@@ -15,7 +15,7 @@
                                ../../src/Meitou.Data/Meitou.Data.csproj;
                                ../../src/Meitou.Simulation/Meitou.Simulation.csproj;
                                ../../src/Meitou.Game/Meitou.Game.csproj"
-                      Private="false" AdditionalProperties="AssemblyVersion=0.17.2.0" />
+                      Private="false" AdditionalProperties="AssemblyVersion=0.18.1.0" />
     <Compile Include="../Brutality/Gameplay/BrutalityStateCodec.cs;../Brutality/Bridge/LegacyGoreSave.cs" />
     <Compile Include="../Brutality/Effects/EffectContracts.cs;../Brutality/Effects/GoreEffectRenderer.cs;../Brutality/Effects/GoreEffectShaders.cs;../Brutality/Effects/LiquidBlood*.cs;../Brutality/Effects/RobotBreakExplosionGeometry.cs;../Brutality/Effects/RobotDischarge*.cs;../Brutality/Effects/RobotVisualRandom.cs" />
     <Compile Include="../Brutality/Gameplay/BrutalityProgress.cs;../Brutality/Gameplay/BrutalityPolicy.cs;../Brutality/Gameplay/CombatWoundMechanism.cs" />

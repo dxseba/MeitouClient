@@ -58,7 +58,8 @@ internal sealed class StockFlatWeaponTint(ModContext context, Type host, Type ch
             context.Harmony.Patch(RequireMethod(shaders, "Port", typeof(string), typeof(IReadOnlyDictionary<string, string>), typeof(string)),
                 prefix: Patch(nameof(Shader)));
             context.Harmony.Patch(RequireMethod(typeof(DebrisRenderer), nameof(DebrisRenderer.Draw), typeof(ReadOnlySpan<DebrisPiece>),
-                typeof(Matrix4x4), typeof(Vector3), typeof(Vector4[]), typeof(WorldLighting).MakeByRefType(), typeof(Func<LimbLook, uint>)),
+                typeof(Matrix4x4), typeof(Vector3), typeof(Vector4[]), typeof(WorldLighting).MakeByRefType(), typeof(Func<LimbLook, uint>),
+                typeof(Matrix4x4?)),
                 postfix: Patch(nameof(Draw)));
             context.Harmony.Patch(RequireMethod(typeof(DebrisRenderer), nameof(DebrisRenderer.Dispose)), postfix: Patch(nameof(Disposed)));
             installed = hooks;
@@ -183,7 +184,7 @@ internal sealed class StockFlatWeaponTint(ModContext context, Type host, Type ch
     }
 
     static void Draw(DebrisRenderer __instance, ReadOnlySpan<DebrisPiece> pieces, Matrix4x4 sliceViewProjection, Vector3 eye,
-        Vector4[] frustum, in WorldLighting light)
+        Vector4[] frustum, in WorldLighting light, Matrix4x4? relative)
     {
         if (installed is not { } hooks || !hooks.displays.TryGetValue(__instance, out var display)
             || display.Renderer is not { } renderer || display.Pieces.Count == 0 || display.NativePieces is not { } native) return;
@@ -192,7 +193,7 @@ internal sealed class StockFlatWeaponTint(ModContext context, Type host, Type ch
         var span = CollectionsMarshal.AsSpan(native);
         if (span.Length != pieces.Length || !span.IsEmpty
             && !Unsafe.AreSame(ref MemoryMarshal.GetReference(span), ref MemoryMarshal.GetReference(pieces))) return;
-        renderer.Draw(CollectionsMarshal.AsSpan(display.Pieces), sliceViewProjection, eye, frustum, light);
+        renderer.Draw(CollectionsMarshal.AsSpan(display.Pieces), sliceViewProjection, eye, frustum, light, relative: relative);
     }
 
     static void Disposed(DebrisRenderer __instance)

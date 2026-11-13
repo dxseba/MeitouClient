@@ -71,7 +71,7 @@ internal sealed class StockCutEquipment(CharacterRigs? rigs, Action<CharacterCol
         lost.Clear();
         var table = world.Characters;
         // Native PopulationSystem consumes these in the next input phase. Leave the native queue intact.
-        foreach (var (slot, limb) in table.LimbsChanged)
+        foreach (var (slot, limb, _) in table.LimbsChanged)
         {
             if (limb is < 0 or > 3 || !table.Next[slot].Alive
                 || table.Cold(slot)?.Medical?.LimbPart(limb)?.Limb != LimbState.Stump) continue;
