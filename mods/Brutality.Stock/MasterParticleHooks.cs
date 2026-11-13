@@ -116,7 +116,9 @@ internal sealed class MasterParticleHooks
         {
             if (binding.Renderer is null && particleContext?.GetValue(__instance) is IGpuContext context)
                 binding.Renderer = new(context, binding.Hooks.folder);
-            binding.Renderer?.Prepare(scene, viewProjectionMatrix, view, eye, true, sunDirection);
+            // The stock pass receives eye-relative matrices (RenderOrigin); the effects renderer takes a world one and removes the eye itself.
+            var world = Matrix4x4.CreateTranslation(-eye) * viewProjectionMatrix;
+            binding.Renderer?.Prepare(scene, world, view, eye, true, sunDirection);
         }
         catch (Exception error)
         {

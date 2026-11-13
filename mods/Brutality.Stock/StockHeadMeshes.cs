@@ -81,6 +81,8 @@ internal static class StockHeadMeshes
             context.Harmony.Patch(AccessTools.Method(typeof(Model), nameof(Model.Build)), postfix: Patch(nameof(ModelBuilt)));
             context.Harmony.Patch(AccessTools.Method(content, "CapMesh"), prefix: Patch(nameof(CapMeshPrefix)));
             context.Harmony.Patch(AccessTools.Method(content, "MarkCurvature"), prefix: Patch(nameof(MarkCurvaturePrefix)));
+            // Stock writes a worn mesh's hide and blood-part bits into its colour's Y, which would overwrite tissue green.
+            if (AccessTools.Method(content, "MarkWorn") is { } markWorn) context.Harmony.Patch(markWorn, prefix: Patch(nameof(MarkCurvaturePrefix)));
             drawsVertexColours = true;
         }
         catch (Exception e)

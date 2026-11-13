@@ -32,7 +32,7 @@ internal static class StockBruiseGeometry
                         + 0.42 * sin(uv.x * 8.0 - uv.y * 15.3 + sin(uv.y * 12.1));
             float edge = shape + 0.095 * stain;
             float feather = 1.0 - smoothstep(0.38, 1.05, edge);
-            float coverage = feather * vColour.a * (0.86 + 0.14 * stain);
+            float coverage = feather * vBrutalityColour.a * (0.86 + 0.14 * stain);
             if (coverage <= 0.001) discard;
             bruiseOpacity = clamp(coverage, 0.0, 1.0);
             albedo *= mix(0.74, 1.13, clamp(edge + stain * 0.14, 0.0, 1.0));
@@ -59,7 +59,8 @@ internal static class StockBruiseGeometry
 
     internal static void Install(ModContext context)
     {
-        if (enabled) return;
+        // The tissue code in vertex alpha reaches the fragment stage only through the restored vertex colour.
+        if (enabled || !StockVertexColour.Install(context)) return;
         try
         {
             var assembly = typeof(Model).Assembly;

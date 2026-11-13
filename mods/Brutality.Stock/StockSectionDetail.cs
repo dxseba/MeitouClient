@@ -38,7 +38,7 @@ internal static class StockSectionDetail
         if (!icon && flag(f, 524288u) && m.skinTone.x == {{Marker.ToString("0.0", CultureInfo.InvariantCulture)}})
         {
             // Alpha encodes muscle, fascia, cortical bone and marrow in order. RGB keeps the race's tissue colours.
-            float tissue = vColour.a;
+            float tissue = vBrutalityColour.a;
             float bone = smoothstep(0.53, 0.68, tissue);
             float marrow = smoothstep(0.80, 0.98, tissue);
             float fascia = smoothstep(0.24, 0.39, tissue) * (1.0 - bone);
@@ -75,7 +75,8 @@ internal static class StockSectionDetail
 
     internal static void Install(ModContext context)
     {
-        if (enabled) return;
+        // The tissue code in vertex alpha reaches the fragment stage only through the restored vertex colour.
+        if (enabled || !StockVertexColour.Install(context)) return;
         try
         {
             var assembly = typeof(Model).Assembly;

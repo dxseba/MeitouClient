@@ -16,7 +16,7 @@ internal static class StockWeaponWetness
     static readonly string WetGloss = "\n" + $$"""
                     if (!icon && flag(f, 524288u) && m.skinTone.x == {{Marker.ToString("0.0", CultureInfo.InvariantCulture)}})
                     {
-                        float wet = clamp(vColour.a, 0.0, 1.0);
+                        float wet = clamp(vBrutalityColour.a, 0.0, 1.0);
                         gloss = mix(gloss, 0.65, wet);
                         metal = mix(metal, 0.02, wet);
                     }
@@ -28,7 +28,8 @@ internal static class StockWeaponWetness
 
     internal static void Install(ModContext context)
     {
-        if (enabled) return;
+        // The tissue code in vertex alpha reaches the fragment stage only through the restored vertex colour.
+        if (enabled || !StockVertexColour.Install(context)) return;
         try
         {
             var assembly = typeof(Model).Assembly;
