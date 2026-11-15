@@ -1560,18 +1560,20 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
             pose.Position[h] = Vector3.Transform(bone.Position, toModel);
         }
 
-        PlaceRootWithoutBody(r.Setup.Rig, pose);
+        PlaceRootWithoutBody(r.Setup.Rig, r.Definition, pose);
         return pose;
     }
 
     /// <summary>
     /// A ragdoll file with no actor on <c>Bip01</c> (the Cannibals') leaves the skeleton root at the node with its animated offsets, so the
     /// drawn body hangs above its bodies on the ground (docs/game/ragdolls.md "Per frame"). Sets the root from the set bone nearest it,
-    /// the trunk before a limb, through their offset in the binding pose; a root with a body keeps it.
+    /// the trunk before a limb, through their offset in the binding pose. A file with a root actor is left alone: in a partial ragdoll
+    /// (a hit limb, a lifted body) that bone is unset because the animation still drives it.
     /// </summary>
-    static void PlaceRootWithoutBody(SkeletonRig rig, BonePose pose)
+    static void PlaceRootWithoutBody(SkeletonRig rig, RagdollDefinition definition, BonePose pose)
     {
-        if (rig.Handle("Bip01") is not int root || pose.Set[root] || NearestSetBone(rig, pose, root) is not int anchor) return;
+        if (rig.Handle("Bip01") is not int root || pose.Set[root] || definition.Bodies.Any(b => b.Bone == root)
+            || NearestSetBone(rig, pose, root) is not int anchor) return;
 
         var rootBind = Quaternion.Inverse(rig.BindRotationInverse[root]);
         var anchorBind = Quaternion.Inverse(rig.BindRotationInverse[anchor]);
