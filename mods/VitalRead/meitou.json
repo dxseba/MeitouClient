@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.vitalread",
+  "apiVersion": 1,
+  "assemblies": ["VitalRead.dll"],
+  "entry": "Meitou.VitalRead.VitalReadMod"
+}

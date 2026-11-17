@@ -12,6 +12,12 @@
     <Project Path="mods/SpeedMenu/Meitou.SpeedMenu.csproj" />
     <Project Path="mods/StackSort/Meitou.StackSort.csproj" />
     <Project Path="mods/TauntExpansion/Meitou.TauntExpansion.csproj" />
+    <Project Path="mods/KenshiCompact/Meitou.KenshiCompact.csproj" />
+    <Project Path="mods/MetabolicTraversal/Meitou.MetabolicTraversal.csproj" />
+    <Project Path="mods/VitalRead/Meitou.VitalRead.csproj" />
+    <Project Path="mods/Cannibalism/Meitou.Cannibalism.csproj" />
+    <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
+    <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />

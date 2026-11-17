@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.metabolictraversal",
+  "apiVersion": 1,
+  "assemblies": ["MetabolicTraversal.dll"],
+  "entry": "Meitou.MetabolicTraversal.MetabolicTraversalMod"
+}

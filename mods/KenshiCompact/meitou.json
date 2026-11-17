@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.kenshicompact",
+  "apiVersion": 1,
+  "assemblies": ["KenshiCompact.dll"],
+  "entry": "Meitou.KenshiCompact.KenshiCompactMod"
+}

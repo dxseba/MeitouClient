@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.areaguard",
+  "apiVersion": 1,
+  "assemblies": ["AreaGuard.dll"],
+  "entry": "Meitou.AreaGuard.AreaGuardMod"
+}

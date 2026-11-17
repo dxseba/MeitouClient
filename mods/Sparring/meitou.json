@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.sparring",
+  "apiVersion": 1,
+  "assemblies": ["Sparring.dll"],
+  "entry": "Meitou.Sparring.SparringMod"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.cannibalism",
+  "apiVersion": 1,
+  "assemblies": ["Cannibalism.dll"],
+  "entry": "Meitou.Cannibalism.CannibalismMod"
+}
