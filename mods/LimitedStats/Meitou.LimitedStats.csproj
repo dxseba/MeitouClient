@@ -11,6 +11,6 @@
     <ProjectReference Include="../../src/Meitou.Data/Meitou.Data.csproj" Private="false" />
   </ItemGroup>
   <ItemGroup>
-    <None Update="meitou.json;README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="meitou.json;README.md;limits.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

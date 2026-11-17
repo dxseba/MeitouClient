@@ -38,6 +38,6 @@ static class HudAdapter
         if (session.World.Systems.OfType<KillCounterSystem>().FirstOrDefault() is not { } counter) return;
 
         if (!counter.Published.TryGetValue(lead.Id, out var tally)) return;
-        __result.Text[Key] = $"Kills {tally.Kills}   Knockouts {tally.Knockouts}";
+        __result.Text[Key] = $"Kills {tally.Kills}   Knockouts {tally.Knockouts}   Limbs {tally.Limbs}";
     }
 }
