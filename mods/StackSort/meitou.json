@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.stacksort",
+  "apiVersion": 1,
+  "assemblies": ["StackSort.dll"],
+  "entry": "Meitou.StackSort.StackSortMod"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.itticklesme",
+  "apiVersion": 1,
+  "assemblies": ["ItTicklesMe.dll"],
+  "entry": "Meitou.ItTicklesMe.ItTicklesMeMod"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.tauntexpansion",
+  "apiVersion": 1,
+  "assemblies": ["TauntExpansion.dll"],
+  "entry": "Meitou.TauntExpansion.TauntExpansionMod"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.speedmenu",
+  "apiVersion": 1,
+  "assemblies": ["SpeedMenu.dll"],
+  "entry": "Meitou.SpeedMenu.SpeedMenuMod"
+}

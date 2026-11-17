@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.disarm",
+  "apiVersion": 1,
+  "assemblies": ["Disarm.dll"],
+  "entry": "Meitou.Disarm.DisarmMod"
+}

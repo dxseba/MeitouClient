@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.levelupnotify",
+  "apiVersion": 1,
+  "assemblies": ["LevelUpNotify.dll"],
+  "entry": "Meitou.LevelUpNotify.LevelUpNotifyMod"
+}

@@ -2,6 +2,17 @@
   <Folder Name="/launcher/">
     <Project Path="launcher/Meitou.Launcher/Meitou.Launcher.csproj" />
   </Folder>
+  <Folder Name="/mods/">
+    <Project Path="mods/CharacterHighlight/Meitou.CharacterHighlight.csproj" />
+    <Project Path="mods/Disarm/Meitou.Disarm.csproj" />
+    <Project Path="mods/ItTicklesMe/Meitou.ItTicklesMe.csproj" />
+    <Project Path="mods/KillCounter/Meitou.KillCounter.csproj" />
+    <Project Path="mods/LevelUpNotify/Meitou.LevelUpNotify.csproj" />
+    <Project Path="mods/LimitedStats/Meitou.LimitedStats.csproj" />
+    <Project Path="mods/SpeedMenu/Meitou.SpeedMenu.csproj" />
+    <Project Path="mods/StackSort/Meitou.StackSort.csproj" />
+    <Project Path="mods/TauntExpansion/Meitou.TauntExpansion.csproj" />
+  </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
   </Folder>

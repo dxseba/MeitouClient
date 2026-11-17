@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.limitedstats",
+  "apiVersion": 1,
+  "assemblies": ["LimitedStats.dll"],
+  "entry": "Meitou.LimitedStats.LimitedStatsMod"
+}
