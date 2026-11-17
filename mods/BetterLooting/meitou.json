@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.betterlooting",
+  "apiVersion": 1,
+  "assemblies": ["BetterLooting.dll"],
+  "entry": "Meitou.BetterLooting.BetterLootingMod"
+}

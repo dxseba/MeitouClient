@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.vitalsense",
+  "apiVersion": 1,
+  "assemblies": ["VitalSense.dll"],
+  "entry": "Meitou.VitalSense.VitalSenseMod"
+}
