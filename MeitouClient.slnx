@@ -16,6 +16,7 @@
     <Project Path="mods/MetabolicTraversal/Meitou.MetabolicTraversal.csproj" />
     <Project Path="mods/VitalRead/Meitou.VitalRead.csproj" />
     <Project Path="mods/BetterLooting/Meitou.BetterLooting.csproj" />
+    <Project Path="mods/MapMarkers/Meitou.MapMarkers.csproj" />
     <Project Path="mods/VitalSense/Meitou.VitalSense.csproj" />
     <Project Path="mods/Cannibalism/Meitou.Cannibalism.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />

@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.mapmarkers",
+  "apiVersion": 1,
+  "assemblies": ["MapMarkers.dll"],
+  "entry": "Meitou.MapMarkers.MapMarkersMod"
+}
