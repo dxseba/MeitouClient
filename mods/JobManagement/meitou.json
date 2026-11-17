@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.jobmanagement",
+  "apiVersion": 1,
+  "assemblies": ["JobManagement.dll"],
+  "entry": "Meitou.JobManagement.JobManagementMod"
+}
