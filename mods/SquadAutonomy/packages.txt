@@ -1,0 +1,2 @@
+# AI packages listed first in the Squad Autonomy window, one record name per line (as the original's SquadAutonomy.cfg <Package> list).
+# Packages whose name ends with <SquadAutonomy> are listed first too; every other AI package follows under "All".

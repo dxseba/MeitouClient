@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.squadautonomy",
+  "apiVersion": 1,
+  "assemblies": ["SquadAutonomy.dll"],
+  "entry": "Meitou.SquadAutonomy.SquadAutonomyMod"
+}
