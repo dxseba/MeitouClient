@@ -22,6 +22,7 @@
     <Project Path="mods/VitalSense/Meitou.VitalSense.csproj" />
     <Project Path="mods/Cannibalism/Meitou.Cannibalism.csproj" />
     <Project Path="mods/Mentors/Meitou.Mentors.csproj" />
+    <Project Path="mods/PersistentPrisoners/Meitou.PersistentPrisoners.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>

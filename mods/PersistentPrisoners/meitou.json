@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.persistentprisoners",
+  "apiVersion": 1,
+  "assemblies": ["PersistentPrisoners.dll"],
+  "entry": "Meitou.PersistentPrisoners.PersistentPrisonersMod"
+}
