@@ -11,10 +11,10 @@ Port of *KENSHI: MENTORS* (workshop 3834394158), rebuilt from its Workshop descr
 - **Price**: our formula (the original's is not published): each level costs `base x (1 + level/10)^2 x (0.75 + teacher/200)`, with
   *Price per level* (40) as the base; attributes cost *Attribute price multiplier* (1.5) times more. Paid from the player's money; the stat is raised
   on the stored value (`CharacterStats.Stored`), so mod modifiers are not baked in.
-- **Fields** (`Professions`): matched on words in the teacher's CHARACTER record name (guard, soldier, ninja, thief, farmer, miner, drone, smith,
+- **Fields** (`Professions`): trader words (trader, merchant, vendor, bartender) first, then words in the teacher's CHARACTER record name (guard, soldier, ninja, thief, farmer, miner, drone, smith,
   doctor, engineer, cook, bartender, shooter, martial, fisher, wanderer...), then a shop (traders: the four attributes, plus a skill by the goods
   word in the name: weapon, armour, crossbow, mechanic, building, book, bar), then NPC class law enforcement (fighter). Others teach nothing.
   *Require profession* off lets any teacher teach every skill.
 - **Missing** (partial): the dialogue line "Can you teach me something?" (a menu row instead), the Ctrl+Shift+T shortcut, the Mentors.ini file
   (settings under Mod settings instead) and the original's exact prices and profession table.
-- **Unknown**: how well record-name matching finds teachers across factions and mods; not checked in game. **Observed** (2026-11-19): builds.
+- **Unknown**: how well record-name matching finds teachers across factions and mods; not checked in game. **Observed** (2026-11-19, headless sandbox fight): loads, 3000 ticks without a fault.

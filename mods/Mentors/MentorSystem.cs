@@ -85,7 +85,9 @@ sealed class MentorSystem(MentorsSettings settings, GameDatabase data) : ITickSy
 
         var field = FieldOf(world, teacher);
         var lessons = field is null ? [] : Lessons(field, studentStats, teacherStats);
-        string status = _status != "" ? _status : field is null ? $"{teacher.Name} has nothing to teach." : lessons.Count == 0 ? "Nothing left to learn here." : "";
+        string status = _status != "" ? _status
+            : field is null ? $"{teacher.Name} has nothing to teach."
+            : lessons.Count == 0 ? "Nothing left to learn here." : "";
         Offer = new(studentId, student.Name, teacherId, teacher.Name, field?.Name ?? "None", world.Player.Money, lessons, status);
     }
 

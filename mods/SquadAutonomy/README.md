@@ -10,8 +10,8 @@ autonomous player squads ([docs/modding.md](../../docs/modding.md), "Player squa
     the work package all day). The system sends `ChangeAi` when the running package is not the wanted one (again after 300 ticks if it does not
     show). The plan is saved with the world (mod sidecar); after a load a plan follows its squad by name if the squad id changed.
 - **Packages**: the picker lists the AI_PACKAGE records named in `packages.txt` or tagged `<SquadAutonomy>` (the original's two rules) under
-  *Listed*, and every package under *All*. The original's own tagged packages come with its `.mod`, which is not shipped here.
+  *Listed*, and every package under *All*. The original's own tagged packages come with its `.mod`, which is not shipped here. **Observed** (2026-11-19, headless, 152 data mods): 9 listed of 279.
 - **Missing** (partial): priorities between several packages (Meitou's `ChangeAi` sets one); the original's labour, combat, medic and rescue
   options, the rest-until-healed and sleep thresholds, paid beds and shopping; gate guarding, closing gates and manning turrets (the engine has no
   outpost gate or turret goals yet); a work building separate from the home; the squad-screen button and button layout settings.
-- **Unknown**: not checked in game; squad ids across a save and load (hence the name fallback). **Observed** (2026-11-19): builds.
+- **Unknown**: not checked in game; squad ids across a save and load (hence the name fallback). **Observed** (2026-11-19, headless sandbox fight): loads, 3000 ticks without a fault.

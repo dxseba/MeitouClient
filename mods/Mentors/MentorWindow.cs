@@ -85,7 +85,11 @@ sealed class MentorWindow(ModContext context) : IUiExtension
         row.Children.Add(Label($"mentors-{key}-teacher", Level(lesson.Teacher), 70, _styles.Dim));
         row.Children.Add(Button($"mentors-{key}-1", $"+1  {Cats(lesson.Cost1)}", 115, _buy, key + ":1", money >= lesson.Cost1));
         if (lesson.Batch > 1)
-            row.Children.Add(Button($"mentors-{key}-n", $"+{lesson.Batch}  {Cats(lesson.CostBatch)}", 125, _buy, $"{key}:{lesson.Batch}", money >= lesson.CostBatch));
+        {
+            string caption = $"+{lesson.Batch}  {Cats(lesson.CostBatch)}";
+            row.Children.Add(Button($"mentors-{key}-n", caption, 125, _buy, $"{key}:{lesson.Batch}", money >= lesson.CostBatch));
+        }
+
         return row;
     }
 
@@ -94,8 +98,8 @@ sealed class MentorWindow(ModContext context) : IUiExtension
         if (MentorsMod.Running?.Offer is not { } offer) return;
 
         var parts = argument.Split(':');
-        if (parts.Length != 2 || !Enum.TryParse<StatsEnumerated>(parts[0], out var stat) || !int.TryParse(parts[1], CultureInfo.InvariantCulture, out int levels))
-            return;
+        if (parts.Length != 2 || !Enum.TryParse<StatsEnumerated>(parts[0], out var stat)) return;
+        if (!int.TryParse(parts[1], CultureInfo.InvariantCulture, out int levels)) return;
 
         context.Enqueue(new BuyLessonOrder(offer.Student, offer.Teacher, stat, levels) { Tick = context.Tick });
     }

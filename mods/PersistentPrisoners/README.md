@@ -13,4 +13,4 @@ Port of *PersistentPrisoners* (workshop 3798215878, GPL-3.0-or-later), rebuilt f
 - **Starvation** (on by default): off feeds the player's caged prisoners up to *Minimum nutrition* (1-300) at 25 per game hour.
 - **Missing** (partial): the original's per-language ini, column and font settings, diagnostic logging, a configurable shortcut key (on/off
   only) and caged corpses (a dead platoon is not kept; **Unknown** whether Meitou removes caged bodies).
-- **Unknown**: not checked in game; whether Meitou ever despawns a caged prisoner with the default switches. **Observed** (2026-11-19): builds.
+- **Unknown**: not checked in game; whether Meitou ever despawns a caged prisoner with the default switches. **Observed** (2026-11-19, headless sandbox fight): loads, 3000 ticks without a fault.

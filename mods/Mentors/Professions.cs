@@ -10,7 +10,8 @@ sealed record Profession(string Name, IReadOnlyList<StatsEnumerated> Skills);
 
 /// <summary>
 /// Who teaches what, from the original's description: matched on words in the teacher's CHARACTER record name (the record says what the NPC
-/// is: "Weapon Trader", "Shinobi Thief"...), then its shop and its NPC class. Ordinary townspeople, slaves and nobles teach nothing.
+/// is: "Holy Weapon Trader", "Temple Guard", "Weapon Smith"...), trader words first, then its shop and its NPC class. Ordinary townspeople,
+/// slaves and nobles teach nothing.
 /// </summary>
 static class Professions
 {
@@ -39,6 +40,9 @@ static class Professions
         (["wanderer", "drifter", "nomad"], new("Wanderer", [Athletics, Swimming, Dodge])),
     ];
 
+    /// <summary>Record-name words of a trader; they come first, so a "Ronin Weapon Trader" is a trader, not a fighter.</summary>
+    static readonly string[] TraderWords = ["trader", "merchant", "vendor", "bartender", "barman"];
+
     /// <summary>A trader's extra skill by the goods its record name says it sells.</summary>
     static readonly (string Word, StatsEnumerated[] Skills)[] TraderGoods =
     [
@@ -51,6 +55,8 @@ static class Professions
     public static Profession? Of(string recordName, bool trader, FundamentalType npcClass)
     {
         string name = recordName.ToLowerInvariant();
+        if (TraderWords.Any(name.Contains)) return Trader(name);
+
         foreach (var (words, field) in ByName)
         {
             if (words.Any(name.Contains)) return field;

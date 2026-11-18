@@ -37,7 +37,9 @@ public sealed class AutonomySettings
 /// <summary>An AI package as the window lists it: its record id and its name without the <c>&lt;SquadAutonomy&gt;</c> tag.</summary>
 sealed record PackageEntry(string Id, string Name);
 
-/// <summary>The AI_PACKAGE records: those the original's rules list (named in packages.txt, or tagged <c>&lt;SquadAutonomy&gt;</c>) and all of them.</summary>
+/// <summary>
+/// The AI_PACKAGE records: those the original's rules list (named in packages.txt, or tagged <c>&lt;SquadAutonomy&gt;</c>) and all of them.
+/// </summary>
 sealed record PackageList(IReadOnlyList<PackageEntry> Featured, IReadOnlyList<PackageEntry> All)
 {
     const string Tag = "<SquadAutonomy>";

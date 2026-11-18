@@ -24,6 +24,7 @@
     <Project Path="mods/Mentors/Meitou.Mentors.csproj" />
     <Project Path="mods/PersistentPrisoners/Meitou.PersistentPrisoners.csproj" />
     <Project Path="mods/SquadAutonomy/Meitou.SquadAutonomy.csproj" />
+    <Project Path="mods/QueenBirthing/Meitou.QueenBirthing.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>

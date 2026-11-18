@@ -69,7 +69,8 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
                 break;
             case SquadHomeOrder home:
                 if (home.Clear) enqueue(new SetSquadHome(home.SquadId, null) { Tick = world.Tick + 1 });
-                else if (HomeKey(world, world.Player.InspectedBuilding) is { } key) enqueue(new SetSquadHome(home.SquadId, key) { Tick = world.Tick + 1 });
+                else if (HomeKey(world, world.Player.InspectedBuilding) is { } key)
+                    enqueue(new SetSquadHome(home.SquadId, key) { Tick = world.Tick + 1 });
                 else world.Post("Select a building first.");
                 break;
         }

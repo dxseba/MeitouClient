@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.queenbirthing",
+  "apiVersion": 1,
+  "assemblies": ["QueenBirthing.dll"],
+  "entry": "Meitou.QueenBirthing.QueenBirthingMod"
+}
