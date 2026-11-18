@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.mentors",
+  "apiVersion": 1,
+  "assemblies": ["Mentors.dll"],
+  "entry": "Meitou.Mentors.MentorsMod"
+}
