@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.kenshiaffixes",
+  "apiVersion": 1,
+  "assemblies": ["KenshiAffixes.dll"],
+  "entry": "Meitou.KenshiAffixes.KenshiAffixesMod"
+}

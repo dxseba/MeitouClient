@@ -26,6 +26,7 @@
     <Project Path="mods/QueenBirthing/Meitou.QueenBirthing.csproj" />
     <Project Path="mods/FixShoppingWages/Meitou.FixShoppingWages.csproj" />
     <Project Path="mods/EquipmentDurability/Meitou.EquipmentDurability.csproj" />
+    <Project Path="mods/KenshiAffixes/Meitou.KenshiAffixes.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>
