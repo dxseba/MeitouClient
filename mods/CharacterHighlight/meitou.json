@@ -1,6 +1,0 @@
-{
-  "id": "dxseba.characterhighlight",
-  "apiVersion": 1,
-  "assemblies": ["CharacterHighlight.dll"],
-  "entry": "Meitou.CharacterHighlight.CharacterHighlightMod"
-}

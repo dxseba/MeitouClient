@@ -1,6 +1,6 @@
 {
   "id": "dxseba.workforcats",
-  "apiVersion": 1,
+  "apiVersion": 3,
   "assemblies": ["WorkForCats.dll"],
   "entry": "Meitou.WorkForCats.WorkForCatsMod"
 }

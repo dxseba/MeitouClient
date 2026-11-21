@@ -3,7 +3,7 @@ using Meitou.Game.Ui;
 
 namespace Meitou.PersistentPrisoners;
 
-/// <summary>The prisoner overview (Ctrl+Shift+P): one row per prisoner, paged; the rows come from the running system.</summary>
+/// <summary>The prisoner overview (the Prisoner overview key action): one row per prisoner, paged; the rows come from the running system.</summary>
 sealed class PrisonerWindow : IUiExtension
 {
     const float Width = 720, Line = 22;

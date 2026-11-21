@@ -1,5 +1,4 @@
-using System.Runtime.CompilerServices;
-using HarmonyLib;
+using System.Collections.Frozen;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Modding;
 using Meitou.Simulation;
@@ -9,12 +8,11 @@ namespace Meitou.LimitedStats;
 
 /// <summary>
 /// Caps trainable stats and scales their XP: a global cap from the settings, overridden per race and per character (by name) from the mod folder's
-/// <c>limits.json</c> (<see cref="Limits"/>), as the original's ini does. The author's own race values are not shipped.
+/// <c>limits.json</c> (<see cref="Limits"/>), as the original's ini does. The author's own race values are not shipped. The XP goes through the
+/// engine's experience filter (docs/modding.md "Experience").
 /// </summary>
 public sealed class LimitedStatsMod : IMod
 {
-    internal static readonly ConditionalWeakTable<CharacterStats, float[]> XpMultipliers = new();
-
     public void Initialize(ModContext context)
     {
         var settings = new LimitedStatsSettings();
@@ -22,18 +20,7 @@ public sealed class LimitedStatsMod : IMod
 
         var limits = Limits.Load(Path.Combine(context.Folder, "limits.json"), context.Log);
         context.AddSystem("cap", _ => new StatCapSystem(settings, limits), SystemAnchor.End);
-
-        var gain = AccessTools.Method(typeof(CharacterStats), nameof(CharacterStats.Gain)) ?? throw new MissingMethodException(nameof(CharacterStats), "Gain");
-        context.Harmony.Patch(gain, prefix: new HarmonyMethod(typeof(LimitedStatsMod), nameof(BeforeGain)));
         context.Log("Limited Stats initialized");
-    }
-
-    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    /// <summary>Scales a gain by the character's multiplier for the stat (1 when none is set).</summary>
-    static void BeforeGain(CharacterStats __instance, StatsEnumerated stat, ref float amount)
-    #pragma warning restore IDE1006
-    {
-        if (XpMultipliers.TryGetValue(__instance, out var multipliers) && (int)stat < multipliers.Length) amount *= multipliers[(int)stat];
     }
 }
 
@@ -47,50 +34,55 @@ public sealed class LimitedStatsSettings
 }
 
 /// <summary>
-/// Clamps the stats in the serial slow phase every 15th tick and refreshes each character's XP multipliers: combat reads other characters' stats
-/// in its parallel phases, so they are not written there (docs/modding.md "Determinism contract").
+/// Clamps the stats in the serial slow phase every 15th tick and publishes each character's XP multipliers there; the experience filter only reads
+/// the published table, so it is a pure read on any thread (combat trains in the parallel phases).
 /// </summary>
-sealed class StatCapSystem(LimitedStatsSettings settings, Limits limits) : ITickSystem
+sealed class StatCapSystem(LimitedStatsSettings settings, Limits limits) : IExperienceFilter
 {
     static readonly StatsEnumerated[] Capped = [.. StatsInfo.RecordStats];
     static readonly int Count = Enum.GetValues<StatsEnumerated>().Max(s => (int)s) + 1;
+
+    volatile FrozenDictionary<CharacterId, float[]> _multipliers = FrozenDictionary<CharacterId, float[]>.Empty;
+
+    public float Gain(World world, in ExperienceGain gain)
+    {
+        if (!_multipliers.TryGetValue(gain.Character, out var multipliers) || (int)gain.Skill >= multipliers.Length) return gain.Amount;
+
+        return gain.Amount * multipliers[(int)gain.Skill];
+    }
 
     public void SlowWorld(World world)
     {
         if (world.Tick % 15 != 0) return;
 
         var table = world.Characters;
+        var multipliers = new Dictionary<CharacterId, float[]>();
         for (int slot = 0; slot < table.HighWater; slot++)
         {
             if (!table.Next[slot].Alive || table.Cold(slot) is not { Stats: { } stats } cold) continue;
-            if (settings.PlayerOnly && !cold.IsPlayer)
-            {
-                LimitedStatsMod.XpMultipliers.Remove(stats);
-                continue;
-            }
+            if (settings.PlayerOnly && !cold.IsPlayer) continue;
 
-            Apply(cold, stats);
+            if (Apply(cold, stats) is { } rates) multipliers[table.IdOf(slot)] = rates;
         }
+
+        _multipliers = multipliers.ToFrozenDictionary();
     }
 
-    void Apply(CharacterCold cold, CharacterStats stats)
+    /// <summary>Clamps the character's stats to its caps; its XP multipliers, or null when no override names its race or itself.</summary>
+    float[]? Apply(CharacterCold cold, CharacterStats stats)
     {
         var race = limits.Race(cold.Race);
         var own = limits.Character(cold.Name);
         foreach (var stat in Capped)
         {
             float cap = own?.CapOf(stat) ?? race?.CapOf(stat) ?? settings.Cap;
-            if (stats[stat] > cap) stats[stat] = cap;
+            if (stats.Stored(stat) > cap) stats[stat] = cap;
         }
 
-        if (race is null && own is null)
-        {
-            LimitedStatsMod.XpMultipliers.Remove(stats);
-            return;
-        }
+        if (race is null && own is null) return null;
 
         var multipliers = new float[Count];
         for (int i = 0; i < Count; i++) multipliers[i] = own?.XpOf((StatsEnumerated)i) ?? race?.XpOf((StatsEnumerated)i) ?? 1;
-        LimitedStatsMod.XpMultipliers.AddOrUpdate(stats, multipliers);
+        return multipliers;
     }
 }

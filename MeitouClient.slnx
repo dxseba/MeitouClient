@@ -3,7 +3,6 @@
     <Project Path="launcher/Meitou.Launcher/Meitou.Launcher.csproj" />
   </Folder>
   <Folder Name="/mods/">
-    <Project Path="mods/CharacterHighlight/Meitou.CharacterHighlight.csproj" />
     <Project Path="mods/Disarm/Meitou.Disarm.csproj" />
     <Project Path="mods/ItTicklesMe/Meitou.ItTicklesMe.csproj" />
     <Project Path="mods/KillCounter/Meitou.KillCounter.csproj" />

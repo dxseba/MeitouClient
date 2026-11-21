@@ -1,8 +1,8 @@
 # Limited Stats (port)
 
 Port of *属性上限 Limited Stats* (workshop 3807762285). A global cap (default 100) for player characters or everyone, overridden per race
-(name or string id) and per character (name) from the mod folder's `limits.json`, which also sets per-stat XP multipliers (a prefix on
-`CharacterStats.Gain`). Clamped every 15th tick in the serial slow phase.
+(name or string id) and per character (name) from the mod folder's `limits.json`, which also sets per-stat XP multipliers (the engine's
+`IExperienceFilter`). Clamped every 15th tick in the serial slow phase.
 
 - The original's own race and character values are not shipped (its ini is the author's; `limits.json` starts empty with an example).
 - Not ported: the cap label in the stats window (its value column is too narrow and the window has no mod slot).

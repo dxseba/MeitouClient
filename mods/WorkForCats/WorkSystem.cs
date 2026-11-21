@@ -30,7 +30,7 @@ internal sealed class Employee
 /// <see cref="Cadence"/> ticks each employee standing at its workplace at the work clip earns its wage, trains the station's skill and adds
 /// relation progress for the employer; a full hour is paid into the player's money. Its state is hashed and saved.
 /// </summary>
-internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IDecisionOwner, ITaskOwner
+internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOwner, ITaskOwner
 {
     /// <summary>
     /// Ticks between work sweeps and view updates.
@@ -59,7 +59,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IDecisionO
         _rules = settings.Rules();
     }
 
-    public void RegisterSources(DecisionSystem decisions) => decisions.RegisterJob(JobType, _job);
+    public void Register(ChooserRegistry chooser) => chooser.Jobs(JobType, _job);
 
     public void RegisterTasks(TaskHandlers tasks) => tasks.Register(JobType, _job);
 

@@ -5,8 +5,8 @@ using Meitou.Simulation;
 namespace Meitou.Cannibalism;
 
 /// <summary>
-/// Port of Cannibalism: an "Eat Alive" row on the right-click menu of an unconscious, caged or racked character. The selected characters eat it
-/// through the game's own eat-captive jobs (<see cref="CaptiveJobs"/>), fed while they bite.
+/// Port of Cannibalism: an "Eat Alive" row on the right-click menu of an unconscious, caged or racked character. The selected characters walk
+/// over and eat it (<see cref="CannibalismSystem"/>), fed while they bite.
 /// </summary>
 public sealed class CannibalismMod : IMod
 {
@@ -16,8 +16,7 @@ public sealed class CannibalismMod : IMod
     {
         context.AddSettings(Settings);
 
-        var jobs = CaptiveJobs.Create();
-        context.AddSystem("cannibalism", _ => new CannibalismSystem(Settings, jobs), SystemAnchor.End);
+        context.AddSystem("cannibalism", _ => new CannibalismSystem(Settings, context.Population), SystemAnchor.End);
         context.AddUi(new EatAliveMenu());
         context.Log("Cannibalism initialized");
     }
