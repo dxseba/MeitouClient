@@ -2,7 +2,7 @@
 
 Port of *Equipment Durability* (workshop 3834344700), rebuilt from its Workshop description.
 
-- **Condition** 0 (broken) to 1 (new) per weapon and armour item, kept in `ItemInstance.ModTag` as `dxseba.durability:<value>` (saved and
+- **Condition** 0 (broken) to 1 (new) per weapon and armour item, kept in `ItemInstance.ModTag` as `durability=<value>` of the shared `dxseba;key=value` tag (`ItemTag`; saved and
   copied with the item; an item another mod tagged is not tracked; untagged counts as new).
 - **Wear** (`ICombatHitObserver`, applied in the serial slow step): the attacker's weapon (first tracked weapon on the hip, else the back) loses
   *Weapon wear per hit* (0.002) per landed melee hit; each worn armour piece whose ARMOUR coverage includes the part hit

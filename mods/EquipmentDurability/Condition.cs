@@ -5,29 +5,27 @@ using Meitou.Simulation.Items;
 namespace Meitou.EquipmentDurability;
 
 /// <summary>
-/// An item's condition, 0 (broken) to 1 (new), kept in its <see cref="ItemInstance.ModTag"/> (saved and copied with the item) as
-/// <c>dxseba.durability:0.8734</c>. An item another mod tagged is left alone; an untagged weapon or armour counts as new.
+/// An item's condition, 0 (broken) to 1 (new), kept in its <see cref="ItemInstance.ModTag"/> (saved and copied with the item) under the key
+/// <c>durability</c> of the shared tag (<see cref="ItemTag"/>). An item another mod tagged is left alone; an untagged weapon or armour counts as new.
 /// </summary>
 static class Condition
 {
-    const string Prefix = "dxseba.durability:";
+    const string Key = "durability";
 
     /// <summary>The armour sections (worn gear the blows wear) and the weapon sections.</summary>
     public static readonly string[] ArmourSections = ["head", "shirt", "armour", "legs", "boots"];
     public static readonly string[] WeaponSections = ["hip", "back"];
 
     /// <summary>Whether this mod tracks the item: a weapon or armour without another mod's tag.</summary>
-    public static bool Tracked(ItemInstance item) =>
-        item.Type is FcsRecordType.Weapon or FcsRecordType.Armour && (item.ModTag.Length == 0 || item.ModTag.StartsWith(Prefix, StringComparison.Ordinal));
+    public static bool Tracked(ItemInstance item) => item.Type is FcsRecordType.Weapon or FcsRecordType.Armour && ItemTag.Ours(item.ModTag);
 
     /// <summary>The condition of a tracked item (1 untagged).</summary>
     public static float Of(ItemInstance item) =>
-        item.ModTag.StartsWith(Prefix, StringComparison.Ordinal)
-        && float.TryParse(item.ModTag.AsSpan(Prefix.Length), NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
+        ItemTag.Get(item.ModTag, Key) is { } text && float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
             ? Math.Clamp(value, 0, 1) : 1;
 
     public static void Set(ItemInstance item, float value) =>
-        item.ModTag = Prefix + Math.Clamp(value, 0, 1).ToString("0.####", CultureInfo.InvariantCulture);
+        item.ModTag = ItemTag.Put(item.ModTag, Key, Math.Clamp(value, 0, 1).ToString("0.####", CultureInfo.InvariantCulture));
 
     /// <summary>
     /// The damage factor of gear in <paramref name="condition"/>: 1 from <paramref name="threshold"/> up, falling linearly to 1 - <paramref name="broken"/>
