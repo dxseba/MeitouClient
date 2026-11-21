@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.equipmentdurability",
+  "apiVersion": 1,
+  "assemblies": ["EquipmentDurability.dll"],
+  "entry": "Meitou.EquipmentDurability.EquipmentDurabilityMod"
+}
