@@ -92,6 +92,27 @@ public sealed record AiSave(string? Contract, double ContractEnd, string? Replac
     public bool AnyRange { get; init; }
 
     /// <summary>
+    /// The PLATOON bool of a contract that is a campaign's phase package (<see cref="Blackboard.PhaseContract"/>: it ends by its class's finished
+    /// test, not its <c>jobhr</c>; engine key, written only when set, which the original ignores). A save without it (the original's own) loads
+    /// the contract as a timed one until its campaign gives it again (<c>AiSystem.InstallPhasePackage</c>).
+    /// </summary>
+    public const string PhaseKey = "meitou phase package";
+
+    /// <summary>
+    /// The contract is a campaign's phase package (<see cref="Blackboard.PhaseContract"/>).
+    /// </summary>
+    public bool Phase { get; init; }
+
+    /// <summary>
+    /// Whether a contract of package signal <paramref name="signal"/> is loaded as a campaign's phase package even without
+    /// <see cref="PhaseKey"/>: the classes only a campaign runs as an override in the base data (the retreats 1 and 25, the war classes 19, 20 and 32,
+    /// the defence 31; no dialogue <c>AI contract</c> names one, by record dump), so a save the original wrote while such a retreat outlived its
+    /// campaign keeps it until its own test passes, as the original does (every override there ends by its class's test). A contract of one of
+    /// these signals that a code mod started is then judged by its class after a load (engine choice).
+    /// </summary>
+    static bool CampaignOnly(int signal) => signal is 1 or 25 or 19 or 20 or 32 or 31;
+
+    /// <summary>
     /// What <paramref name="board"/> holds of it; null when it runs neither.
     /// </summary>
     public static AiSave? Of(Blackboard? board)
@@ -103,10 +124,11 @@ public sealed record AiSave(string? Contract, double ContractEnd, string? Replac
         {
             Target = b.MissionTarget,
             Employer = b.MissionEmployer,
-            MissionTown = contract ? b.ContractTown : CampaignTown.None,
+            MissionTown = contract ? b.ContractMissionTown : CampaignTown.None,
             TargetTown = contract ? b.Destination : CampaignTown.None,
-            TargetIsTown = b.Contract?.Signal == AiSystem.DefendBaseSignal,
+            TargetIsTown = b.Contract?.Signal is AiSystem.DefendBaseSignal or AiSystem.CampaignDefendSignal,
             AnyRange = b.MissionAnyRange,
+            Phase = b.PhaseContract,
         };
     }
 
@@ -117,20 +139,17 @@ public sealed record AiSave(string? Contract, double ContractEnd, string? Replac
     /// </summary>
     public static void Write(FcsRecord platoon, AiSave? ai, Func<CampaignTown, Hand>? townHand = null)
     {
-        WriteMissionTown(platoon, ai, townHand);
+        bool held = platoon.Strings.GetValueOrDefault(ContractKey) is { Length: > 0 };
+        WriteMissionTown(platoon, ai, townHand, held);
         platoon.Strings[ContractKey] = ai?.Contract ?? "";
         platoon.Strings[ReplacementKey] = ai?.Replacement ?? "";
         if (ai?.Contract is not null) platoon.Floats[EndKey] = (float)ai.ContractEnd;
         if (ai is { Contract: not null, AnyRange: true }) platoon.Bools[AnyRangeKey] = true;
         else platoon.Bools.Remove(AnyRangeKey);
+        if (ai is { Contract: not null, Phase: true }) platoon.Bools[PhaseKey] = true;
+        else platoon.Bools.Remove(PhaseKey);
 
-        // A record without a contract keeps a null handle as it was read (its other parts are stale values).
-        var target = ai?.Contract is null
-            ? Hand.Null
-            : ai.TargetIsTown
-                ? TownHand(ai.MissionTown, ai.MissionTownHand, townHand)
-                : ai.TargetHand;
-        WriteHand(platoon, TargetKey, target);
+        WriteMissionTarget(platoon, ai, townHand, held);
         if (ai?.Contract is null) return;
 
         // The employer only once known; the target town while the contract runs (the null handle for a bodyguard's).
@@ -139,16 +158,31 @@ public sealed record AiSave(string? Contract, double ContractEnd, string? Replac
     }
 
     /// <summary>
-    /// The contract's mission town handle: written while a contract runs, cleared once one the record held has ended, else left as the record has it
-    /// (another package's own, which Meitou does not read).
+    /// The contract's mission town handle: written while a contract runs, cleared once one the record held (<paramref name="held"/>) has ended, else
+    /// left as the record has it (another package's own, which Meitou does not read).
     /// </summary>
-    static void WriteMissionTown(FcsRecord platoon, AiSave? ai, Func<CampaignTown, Hand>? townHand)
+    static void WriteMissionTown(FcsRecord platoon, AiSave? ai, Func<CampaignTown, Hand>? townHand, bool held)
     {
-        bool held = platoon.Strings.GetValueOrDefault(ContractKey) is { Length: > 0 };
         if (ai?.Contract is null && !held) return;
 
         var town = ai?.Contract is null ? Hand.Null : TownHand(ai.MissionTown, ai.MissionTownHand, townHand);
         WriteHand(platoon, MissionTownKey, town);
+    }
+
+    /// <summary>
+    /// The contract's mission target handle (a base defence's mission town): written while a contract runs, cleared once one the record held
+    /// (<paramref name="held"/>) has ended, else left as the record has it (another package's own, which Meitou does not read).
+    /// </summary>
+    static void WriteMissionTarget(FcsRecord platoon, AiSave? ai, Func<CampaignTown, Hand>? townHand, bool held)
+    {
+        if (ai?.Contract is null && !held) return;
+
+        var target = ai?.Contract is null
+            ? Hand.Null
+            : ai.TargetIsTown
+                ? TownHand(ai.MissionTown, ai.MissionTownHand, townHand)
+                : ai.TargetHand;
+        WriteHand(platoon, TargetKey, target);
     }
 
     /// <summary>
@@ -176,6 +210,7 @@ public sealed record AiSave(string? Contract, double ContractEnd, string? Replac
 
         Hand HandOf(string key) => contract is null ? Hand.Null : Hand.Read(platoon, key);
         bool anyRange = contract is not null && platoon.Bools.GetValueOrDefault(AnyRangeKey);
+        bool phase = contract is not null && platoon.Bools.GetValueOrDefault(PhaseKey);
         return new AiSave(contract, platoon.Floats.GetValueOrDefault(EndKey), replacement)
         {
             TargetHand = HandOf(TargetKey),
@@ -183,6 +218,7 @@ public sealed record AiSave(string? Contract, double ContractEnd, string? Replac
             MissionTownHand = HandOf(MissionTownKey),
             TargetTownHand = HandOf(TargetTownKey),
             AnyRange = anyRange,
+            Phase = phase,
         };
     }
 
@@ -201,6 +237,6 @@ public sealed record AiSave(string? Contract, double ContractEnd, string? Replac
         var employer = Employer.IsNone ? characterOf?.Invoke(EmployerHand) ?? CharacterId.None : Employer;
         var town = MissionTown.IsNone ? townOf?.Invoke(MissionTownHand) ?? CampaignTown.None : MissionTown;
         var targetTown = TargetTown.IsNone ? townOf?.Invoke(TargetTownHand) ?? CampaignTown.None : TargetTown;
-        board.ResumeContract(contract, ContractEnd, rules, target, AnyRange, employer, town, targetTown);
+        board.ResumeContract(contract, ContractEnd, rules, target, AnyRange, employer, town, targetTown, Phase || CampaignOnly(contract.Signal));
     }
 }

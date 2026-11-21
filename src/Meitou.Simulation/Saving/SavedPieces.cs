@@ -30,6 +30,12 @@ public sealed class SavedPieces
     readonly Dictionary<string, SavedPiece?> _matched = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The entries already matched to a layout object: one entry serves one object, so two identical objects standing within <see cref="Reach"/>
+    /// of each other cannot both read and write it.
+    /// </summary>
+    readonly HashSet<SavedPiece> _taken = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
     /// Indexes every entry of the save's building lists that names a record.
     /// </summary>
     public SavedPieces(SaveGame save)
@@ -41,51 +47,56 @@ public sealed class SavedPieces
             var states = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
             foreach (var r in zone.BuildingStates) states[r.StringId] = r;
 
+            bool fresh = list.Bools.ContainsKey("imported");
             foreach (var i in list.Instances)
-                if (i.Target.Length > 0) Add(zone, i, states);
+                if (i.Target.Length > 0) Add(zone, i, states, fresh);
         }
     }
 
     /// <summary>
-    /// The entry of the layout object <paramref name="piece"/>: the first of its record within <see cref="Reach"/>; null for none.
+    /// The entry of the layout object <paramref name="piece"/> (<see cref="Of(string, string, Vector3)"/>); null for none.
     /// </summary>
-    public SavedPiece? Of(TownLayoutBuilding piece)
+    public SavedPiece? Of(TownLayoutBuilding piece) => Of(piece.Id, piece.RecordId, piece.Position);
+
+    /// <summary>
+    /// The entry of the layout object <paramref name="id"/> (record <paramref name="recordId"/>, standing at <paramref name="position"/>): the nearest
+    /// of its record within <see cref="Reach"/> no other object took (the first of equals in the save's order); null for none.
+    /// </summary>
+    public SavedPiece? Of(string id, string recordId, Vector3 position)
     {
-        if (_matched.TryGetValue(piece.Id, out var known)) return known;
+        if (_matched.TryGetValue(id, out var known)) return known;
 
         SavedPiece? found = null;
-        foreach (var entry in _byRecord.GetValueOrDefault(piece.RecordId) ?? [])
+        float best = Reach * Reach;
+        foreach (var entry in _byRecord.GetValueOrDefault(recordId) ?? [])
         {
-            if (Vector3.DistanceSquared(entry.Instance.Position, piece.Position) > Reach * Reach) continue;
+            float d = Vector3.DistanceSquared(entry.Instance.Position, position);
+            if (d > best || d == best && found is not null || _taken.Contains(entry)) continue;
 
-            found = entry;
-            break;
+            (found, best) = (entry, d);
         }
 
-        _matched[piece.Id] = found;
+        _matched[id] = found;
+        if (found is not null) _taken.Add(found);
         return found;
     }
 
     /// <summary>
-    /// Indexes one entry with its building state (an inventory state can come first, docs/formats/save.md "Zone files").
+    /// Indexes one entry with its building state (an inventory state can come first, docs/formats/save.md "Zone files") and whether its zone loads
+    /// fresh (<see cref="SavedPiece.Fresh"/>).
     /// </summary>
-    void Add(SaveZone zone, FcsInstance instance, Dictionary<string, FcsRecord> states)
+    void Add(SaveZone zone, FcsInstance instance, Dictionary<string, FcsRecord> states, bool fresh)
     {
         var state = instance.States.Select(id => states.GetValueOrDefault(id)).FirstOrDefault(r => r is not null);
         if (!_byRecord.TryGetValue(instance.Target, out var list)) _byRecord[instance.Target] = list = [];
-        list.Add(new SavedPiece(zone, instance, state));
+        list.Add(new SavedPiece(zone, instance, state, fresh));
     }
 }
 
 /// <summary>
-/// A building-list entry a layout object was matched to (<see cref="SavedPieces"/>): its zone file, instance and GAMESTATE_BUILDING (null: none).
-/// Its keys are read only from a zone that is not loaded fresh (<see cref="Fresh"/>), as the original's loader guard has it
-/// (docs/game/buildings-production.md "NPC generator state").
+/// A building-list entry a layout object was matched to (<see cref="SavedPieces"/>): its zone file, instance and GAMESTATE_BUILDING (null: none),
+/// and whether the zone loads fresh in spite of its file: its building list holds <c>imported</c> (<paramref name="Fresh"/>, <c>FUN_1409ffad0</c>,
+/// key presence; read once when the entries are indexed: finding the list scans the zone file's records). Its keys are read only from a zone that is
+/// not loaded fresh, as the original's loader guard has it (docs/game/buildings-production.md "NPC generator state").
 /// </summary>
-public sealed record SavedPiece(SaveZone Zone, FcsInstance Instance, FcsRecord? State)
-{
-    /// <summary>
-    /// The zone loads fresh in spite of its file: its building list holds <c>imported</c> (<c>FUN_1409ffad0</c>, key presence).
-    /// </summary>
-    public bool Fresh => Zone.BuildingList?.Bools.ContainsKey("imported") == true;
-}
+public sealed record SavedPiece(SaveZone Zone, FcsInstance Instance, FcsRecord? State, bool Fresh);

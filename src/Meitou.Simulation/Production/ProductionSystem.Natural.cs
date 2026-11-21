@@ -73,6 +73,15 @@ public sealed partial class ProductionSystem
     public static bool IsNatural(string id) => id.StartsWith(NaturalPrefix, StringComparison.Ordinal);
 
     /// <summary>
+    /// The BUILDING of the rock a natural id names (<see cref="NaturalId"/>); null for any other id.
+    /// </summary>
+    public static string? NaturalRecord(string id)
+    {
+        int at = id.LastIndexOf('@');
+        return IsNatural(id) && at > NaturalPrefix.Length ? id[NaturalPrefix.Length..at] : null;
+    }
+
+    /// <summary>
     /// A player site of the registry, else the rock a natural id names, else a town seat or training dummy; null for none.
     /// </summary>
     BuildSite? Site(World world, string id) => world.Buildings.Find(id) ?? Seat(world, id) ?? Natural(id) ?? TownDummy(world, id) ?? TownWorkSite(id);
@@ -193,12 +202,13 @@ public sealed partial class ProductionSystem
 
     /// <summary>
     /// The richness line of the building <paramref name="instance"/> names (<c>ProductionBuilding::getGUIFertility</c>, function 1 or 27 with a
-    /// resource): a machine's yield, or a rock's before it has been mined (no machine yet); null for anything else.
+    /// resource): a machine's yield (a site's, or a town building's <see cref="TownWorkId"/> machine: the slot tests no owner), or a rock's before
+    /// it has been mined (no machine yet); null for anything else.
     /// </summary>
     public RichnessView? RichnessOf(World world, string? instance)
     {
         if (instance is null) return null;
-        if (world.Machines.Find(instance) is { } m)
+        if ((world.Machines.Find(instance) ?? world.Machines.Find(TownWorkPrefix + instance)) is { } m)
         {
             return m.Data is { Function: MachineData.MineFunction or MachineData.NaturalMineFunction, Resource: not 0 and var r }
                 ? new(instance, r, m.Yield) { Owner = Natural(instance)?.Owner ?? -1, TownName = TownNameOf(world, Natural(instance)) }

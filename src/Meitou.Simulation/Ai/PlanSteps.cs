@@ -12,8 +12,8 @@ namespace Meitou.Simulation.Ai;
 static class PlanSteps
 {
     /// <summary>
-    /// Runs the plan step for the running step of <paramref name="goal"/>'s plan: true while the plan still has a step running, false when the plan is
-    /// over (cleared) and the goal is to be chosen afresh.
+    /// Runs the plan step for the running step of <paramref name="goal"/>'s plan: true while the plan still has a step running (a next step that
+    /// starts rolls the task's timer, <see cref="AiSystem.StartTask"/>), false when the plan is over (cleared) and the goal is to be chosen afresh.
     /// </summary>
     public static bool Run(World world, int slot, AiMind mind, IPlanWorld states, AiGoal goal, int hour)
     {
@@ -23,7 +23,10 @@ static class PlanSteps
         if (TaskDataTable.Of(step.Type) is not { } row || !Ends(world, slot, mind, states, step, row, goal, hour)) return true;
 
         mind.Plan.RemoveAt(0);
-        return StartNext(mind, states);
+        if (!StartNext(mind, states)) return false;
+
+        AiSystem.StartTask(world, slot, mind);
+        return true;
     }
 
     /// <summary>
@@ -111,6 +114,6 @@ static class PlanSteps
     /// <summary>
     /// The rows whose TaskData <c>+0x16</c> is set (12, 102, 159, 161, <c>FUN_140319a60</c>): the plan step tests neither their hours nor their list B.
     /// </summary>
-    static bool KeepsHours(TaskType type) => type is TaskType.PlayerTalkTo or TaskType.SeekAndTalkAndSendSignal or TaskType.SendDialogueSignal
+    internal static bool KeepsHours(TaskType type) => type is TaskType.PlayerTalkTo or TaskType.SeekAndTalkAndSendSignal or TaskType.SendDialogueSignal
         or TaskType.SendDialogueSignalWithoutMoving;
 }

@@ -77,6 +77,11 @@ public sealed class Squad
     /// </summary>
     public float HomeRadius { get; set; }
     /// <summary>
+    /// The point the squad's patrol walks to now (<c>Task_Patrol</c>'s move, drawn by the population's patrol step, docs/game/factions-squads-towns.md
+    /// "Patrol task"), apart from its home; null while it does not patrol. Hashed, not saved: a load draws afresh, as the original's task start does.
+    /// </summary>
+    public Vector2? PatrolPoint { get; set; }
+    /// <summary>
     /// The building the town gave it as its home (docs/game/factions-squads-towns.md "Town residents"), or the one a save names; the AI takes it as
     /// the squad's own home. Null: none (the AI picks one).
     /// </summary>
@@ -137,7 +142,8 @@ public sealed class Squad
     /// </summary>
     public long Money { get; set; }
     /// <summary>
-    /// The squad's shop, when it is a trader (<see cref="Trading.TradeSystem"/>); null otherwise.
+    /// The squad's shop, when it is a trader (<see cref="Trading.TradeSystem"/>), or a squad of the player's faction a code mod gave one
+    /// (<see cref="Trading.SetSquadShop"/>); null otherwise.
     /// </summary>
     public Trading.Shop? Shop { get; set; }
     /// <summary>
@@ -145,6 +151,11 @@ public sealed class Squad
     /// saved: the containers are.
     /// </summary>
     public long NextHomeFillTick { get; set; }
+    /// <summary>
+    /// The squad moved out of a house the player bought and was given no other (<see cref="Ai.AiSystem.Evict"/>): a save writes its platoon not
+    /// persistent, as the original's purchase leaves one (docs/formats/save.md "NPC platoons"). Not saved or hashed: only the save writer reads it.
+    /// </summary>
+    public bool MovedOut { get; set; }
     /// <summary>
     /// Whether one of the player's characters has stood in or on the squad's home building since the squad was made (its town loaded): the
     /// original builds that building's interior parts (BuildingInterior <c>+0x10</c>) then and keeps them until the building unloads, and no restock
@@ -157,9 +168,33 @@ public sealed class Squad
     /// </summary>
     public Ai.Blackboard? Ai { get; set; }
     /// <summary>
+    /// The requests filed on the squad's platoon blackboard for its members to weigh (<see cref="Ai.BoardRequests"/>); null until the first one.
+    /// </summary>
+    internal Ai.BoardRequests? Requests { get; set; }
+    /// <summary>
     /// The dialogue-given AI a save or its stored state held, until the AI attaches a blackboard and applies it (then null).
     /// </summary>
     public Saving.AiSave? SavedAi { get; set; }
+    /// <summary>
+    /// The running package's own keys a save held (<see cref="Saving.PackageSave"/>), until the AI attaches a blackboard and applies them (then null).
+    /// </summary>
+    public Saving.PackageSave? SavedPackage { get; set; }
+    /// <summary>
+    /// The town a squad without a board is in (a player's: the original's player platoon runs its blackboard's town step too, <c>FUN_1402688d0</c>)
+    /// and the game hour it came in, as <see cref="Ai.Blackboard.InTown"/> and <see cref="Ai.Blackboard.InTownSince"/> hold them for a squad with
+    /// one; handed to its board when the AI attaches one and back when it drops it. Saved as <c>currenttown</c> / <c>towntime</c>, hashed while
+    /// set.
+    /// </summary>
+    public CampaignTown StayTown { get; set; } = CampaignTown.None;
+    /// <summary>
+    /// The game hour the squad came into <see cref="StayTown"/>; kept on leaving it, as the original's +0x140 is.
+    /// </summary>
+    public double StaySince { get; set; }
+    /// <summary>
+    /// The town and arrival hour a player platoon's save record held (<see cref="Saving.CurrentTownSave"/>), until the AI first looks at the squad
+    /// and applies them (then null); hashed while held.
+    /// </summary>
+    public Saving.CurrentTownSave? SavedTown { get; set; }
     /// <summary>
     /// A player's squad the AI may run (<see cref="Ai.SetSquadAutonomy"/>, docs/simulation.md "Autonomous player squads"): it takes AI packages
     /// as an NPC squad does, and its members act them out while no order or job holds them. Meitou only; saved, hashed while set.
@@ -182,6 +217,56 @@ public sealed class Squad
     /// without that mod running gives the squad back to the player (<see cref="Ai.SquadAutonomy.DropUnowned"/>). Saved, hashed while set.
     /// </summary>
     public string? AutonomyOwner { get; set; }
+    /// <summary>
+    /// A player squad a code mod keeps out of the faction size count (<see cref="SetSquadUncounted"/>, <see cref="SquadManagement.CappedHeads"/>):
+    /// its members never fill <c>max faction size</c>, for townspeople, staff or followers a mod adds beside the player's own characters. They
+    /// still count as the faction's for everything else, the dismiss rule included. Meitou only; saved, hashed while set.
+    /// </summary>
+    public bool Uncounted { get; set; }
+    /// <summary>
+    /// The code mod that set <see cref="Uncounted"/> (its manifest id); null: none named. A load without that mod running counts the squad again
+    /// (<see cref="SquadManagement.DropUnownedUncounted"/>). Saved, hashed while set.
+    /// </summary>
+    public string? UncountedOwner { get; set; }
+    /// <summary>
+    /// The code mods' tags on the squad, by mod manifest id: a mod sets its own entry to find the squad again after a load, when squad ids are
+    /// given anew; one mod's tag never replaces another's. Saved for the player's squads (<see cref="Saving.ModTagSave"/>), hashed while any.
+    /// </summary>
+    public SortedDictionary<string, string> ModTags { get; } = new(StringComparer.Ordinal);
+    /// <summary>
+    /// A player squad a code mod gave its own purse (<see cref="SetSquadPurse"/>): its members pay an NPC-style purchase from <see cref="Money"/>
+    /// instead of the player's money, and what a shop it owns earns stays in it (a shopkeeper keeping its takings). Meitou only; saved with its
+    /// money, hashed while set.
+    /// </summary>
+    public bool OwnPurse { get; set; }
+    /// <summary>
+    /// The code mod that set <see cref="OwnPurse"/> (its manifest id); null: none named. A load without that mod running pours the purse into the
+    /// player's money and ends it (<see cref="SquadManagement.DropUnownedPurses"/>). Saved, hashed while set.
+    /// </summary>
+    public string? PurseOwner { get; set; }
+    /// <summary>
+    /// A player squad a code mod put to sleep (<see cref="SetSquadDormant"/>): its members ask for no zones round them, so their place unloads when
+    /// no led character or the camera is near, and while the far-tick cadence runs they are stepped only near the camera or a led player
+    /// character, standing still otherwise (a town that sleeps while the player is away). Meitou only; saved, hashed while set.
+    /// </summary>
+    public bool Dormant { get; set; }
+    /// <summary>
+    /// The code mod that set <see cref="Dormant"/> (its manifest id); null: none named. A load without that mod running wakes the squad
+    /// (<see cref="SquadManagement.DropUnownedDormant"/>). Saved, hashed while set.
+    /// </summary>
+    public string? DormantOwner { get; set; }
+    /// <summary>
+    /// The code mod that gave this player squad its shop (<see cref="Trading.SetSquadShop"/>, its manifest id); null: none named, or no shop. A load
+    /// without that mod running ends the shop (<see cref="Trading.TradeSystem.DropUnownedShops"/>), and so does removing the squad. Meitou only;
+    /// saved, hashed while set.
+    /// </summary>
+    public string? ShopOwner { get; set; }
+    /// <summary>
+    /// The SQUAD_TEMPLATE a code mod named for this player squad's shop (<see cref="Trading.SetSquadShop"/>): its trade terms, and its fills and
+    /// restocks when it is a trader's with vendor lists; null: none (terms of no template, stock the mod's own). Meitou only; saved, hashed while
+    /// set.
+    /// </summary>
+    public string? ShopTemplate { get; set; }
     /// <summary>
     /// The package it ran when it left the world (a kept or saved squad's), until the AI attaches a blackboard: an occupation goes on
     /// (<see cref="Ai.AiSystem"/>).
@@ -272,6 +357,11 @@ public sealed class SquadRegistry
     public bool IsIndependent(int id) => Find(id) is { Independent: true };
 
     /// <summary>
+    /// Whether squad <paramref name="id"/> is one a code mod put to sleep (<see cref="Squad.Dormant"/>).
+    /// </summary>
+    public bool IsDormant(int id) => Find(id) is { Dormant: true };
+
+    /// <summary>
     /// Takes the next id.
     /// </summary>
     public int NextId() => _nextId++;
@@ -352,6 +442,12 @@ public sealed class SquadRegistry
             hasher.Add(s.Money);
             hasher.Add(s.HomeCentre);
             hasher.Add(s.HomeRadius);
+            if (s.PatrolPoint is { } patrol)
+            {
+                hasher.Add(0x50747250);   // "PtrP": nothing for a squad not patrolling, so the pinned hashes stay
+                hasher.Add(patrol);
+            }
+
             hasher.Add(s.Position);
             hasher.Add(s.Leader);
             if (!s.Backup.IsNone) hasher.Add(s.Backup);   // nothing for a squad that never needed one, so the pinned hashes stay
@@ -359,6 +455,9 @@ public sealed class SquadRegistry
             if (s.Resume) hasher.Add(0x52657375);
             if (s.Dead) hasher.Add(0x44656164);
             if (s.Autonomous) hasher.Add(0x4175746F);
+            if (s.SavedPackage is { } saved) HashSavedPackage(ref hasher, saved);
+            HashStay(ref hasher, s);
+            if (s.LeftPackage is { } left) hasher.Add(0x4C667450 ^ Rng.StableHash(left));   // "LftP": only until the AI attaches a blackboard
             if (s.Independent) hasher.Add(0x496E6470);
             if (s.HomeInteriorShown) hasher.Add(0x496E7472);
             if (s.AssignedHome is { } assigned) hasher.Add(Rng.StableHash(assigned));
@@ -367,6 +466,19 @@ public sealed class SquadRegistry
                 hasher.Add(0x4F776E72);
                 hasher.Add(Rng.StableHash(owner));
             }
+            if (s.Uncounted) hasher.Add(0x556E636E);
+            if (s.UncountedOwner is { } uncountedOwner) hasher.Add(Rng.StableHash(uncountedOwner));
+            foreach (var (mod, tag) in s.ModTags)
+            {
+                hasher.Add(Rng.StableHash(mod));
+                hasher.Add(Rng.StableHash(tag));
+            }
+            if (s.OwnPurse) hasher.Add(0x50757273);
+            if (s.PurseOwner is { } purseOwner) hasher.Add(Rng.StableHash(purseOwner));
+            if (s.Dormant) hasher.Add(0x446F726D);
+            if (s.DormantOwner is { } dormantOwner) hasher.Add(Rng.StableHash(dormantOwner));
+            if (s.ShopOwner is { } shopOwner) hasher.Add(0x53686F70 ^ Rng.StableHash(shopOwner));
+            if (s.ShopTemplate is { } shopTemplate) hasher.Add(Rng.StableHash(shopTemplate));
             hasher.Add(s.Members.Count);
             foreach (var m in s.Members)
             {
@@ -374,6 +486,7 @@ public sealed class SquadRegistry
             }
             s.Shop?.Hash(ref hasher);   // nothing for squads that do not trade, so the pinned hashes of worlds without shops stay
             s.Ai?.Hash(ref hasher);     // nor for squads without AI packages
+            s.Requests?.Hash(ref hasher);   // nor for squads with no request filed
             if (s.War.IsSet)
             {
                 hasher.Add(s.War.Faction);
@@ -382,5 +495,41 @@ public sealed class SquadRegistry
                 hasher.Add(s.War.Town.PlayerTown);
             }   // nor for squads not assaulting
         }
+    }
+
+    /// <summary>
+    /// Hashes a board-less squad's town and arrival hour while set, and the ones a save held while the AI has not applied them, so worlds without
+    /// them hash as before.
+    /// </summary>
+    static void HashStay(ref StateHasher hasher, Squad s)
+    {
+        if (!s.StayTown.IsNone || s.StaySince != 0)
+        {
+            hasher.Add(0x53746179);   // "Stay"
+            hasher.Add(s.StayTown.Site);
+            hasher.Add(s.StayTown.PlayerTown);
+            hasher.Add(s.StayTown.Nest);
+            hasher.Add(s.StaySince);
+        }
+
+        if (s.SavedTown is not { } saved) return;
+
+        hasher.Add(0x54776E53);   // "TwnS"
+        hasher.Add(saved.Town.Type);
+        hasher.Add(saved.Town.C);
+        hasher.Add(saved.Town.Cs);
+        hasher.Add(saved.Since);
+    }
+
+    /// <summary>
+    /// Hashes the running package's keys a save held, while the AI has not applied them yet.
+    /// </summary>
+    static void HashSavedPackage(ref StateHasher hasher, Saving.PackageSave saved)
+    {
+        hasher.Add(0x506B5376);   // "PkSv"
+        hasher.Add(saved.Persist);
+        hasher.Add(saved.Done);
+        hasher.Add(saved.Started);
+        if (saved.Enemy is { } enemy) hasher.Add(Rng.StableHash(enemy));
     }
 }

@@ -98,7 +98,7 @@ public readonly record struct CageClips(string? Idle, string? Ko, string? Dazed,
 /// <summary>
 /// What a bed's BUILDING says (docs/game/locks.md "Beds"): its functionality's <c>function</c> (6 BF_BED, 25 BF_SKELETON_BED), the clip it is lain in
 /// (the functionality's <c>animation</c>: <c>sleepinbed</c>, <c>sleeponfloor</c>), the sum of its construction materials (the bed search weighs a bed
-/// that needs more than 1 three times) and its use nodes (null with none; with fewer than 2 it is lain in at its position marker, facing its lone node's way or its own).
+/// that needs more than 1 three times) and its use nodes (null with none: it is then lain in at its position marker, facing its own way).
 /// </summary>
 public readonly record struct BedData(int Function, string? Clip, float Materials, UseNode[]? Nodes = null);
 
@@ -306,7 +306,7 @@ public sealed class Fixture
     public float Yaw { get; init; }
     /// <summary>
     /// The building's position marker (<see cref="Meitou.Data.World.WorldObjectLayout.PositionMarker"/>) where it differs from
-    /// <see cref="Position"/>: what <c>getPositionMarker</c> gives when the building has fewer than two use nodes.
+    /// <see cref="Position"/>: what <c>getPositionMarker</c> gives when the building has no use node.
     /// </summary>
     public Vector3? Marker { get; init; }
     /// <summary>
@@ -314,10 +314,15 @@ public sealed class Fixture
     /// </summary>
     public LockState? Lock { get; init; }
     /// <summary>
-    /// A container's own inventory (<c>has inventory</c>; docs/game/locks.md "Containers"): null for the rest. Starts empty (what the original puts
-    /// in is <b>Unknown</b>).
+    /// A container's own inventory (<c>has inventory</c>; docs/game/locks.md "Containers"): null for the rest. Starts empty, or with what a loaded
+    /// save holds for it.
     /// </summary>
     public Items.Inventory? Contents { get; init; }
+    /// <summary>
+    /// The items a town container held as saved once the original's entry of it was read (<c>Saving/FurnitureInventorySave</c>; null: none
+    /// read); a save that finds them unchanged leaves that entry's inventory as it was. Not hashed: it only mirrors the save.
+    /// </summary>
+    public IReadOnlyList<Meitou.Data.Save.SaveItem>? LoadedContents { get; set; }
 
     /// <summary>
     /// Doors: the index in the building's <c>doors</c> list (the save's suffix), the motion state, the open amount 0..1, the door's own broken flag,
@@ -513,6 +518,11 @@ public sealed record BuildingDetail(string Instance, IReadOnlyList<DoorDetail> D
     /// The selected bed's own panel data (null: no bed selected).
     /// </summary>
     public BedDetail? Bed { get; init; }
+
+    /// <summary>
+    /// Whether the selected container's inventory holds no items (the panel's <c>[EMPTY]</c>).
+    /// </summary>
+    public bool Empty { get; init; }
 }
 
 /// <summary>

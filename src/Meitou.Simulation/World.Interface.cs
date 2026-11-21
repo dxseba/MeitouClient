@@ -14,6 +14,11 @@ public sealed partial class World
     readonly System.Collections.Concurrent.ConcurrentDictionary<Type, object?> _systemsByType = new();
 
     /// <summary>
+    /// The character under the pointer when the last snapshot was published (<see cref="PlayerState.Pointed"/>).
+    /// </summary>
+    CharacterId _publishedPointed;
+
+    /// <summary>
     /// Applies the interface's commands between ticks while paused, without advancing time or running simulation phases:
     /// selection, order toggles, job lists, crafting and research queues, squads, inventory, open-shop transactions, building settings,
     /// the Stop order and every order (<see cref="OrderCommand"/>: each goes into its characters' queues through the one order path,
@@ -38,16 +43,29 @@ public sealed partial class World
             or Construction.PlaceBuildings or Construction.CancelSite or Construction.ConfirmDismantle or Construction.PauseSite
             or Editing.EditCharacter or Editing.FinishCreation or Editing.InPlayEditorOpened
             or Locks.ToggleDoorsOrder or Locks.ToggleDoorLocksOrder or DebugGiveItem or DebugPlaceItem or DebugAnimalAge);
-        if (due.Count == 0) return;
+        due = Simulation.Player.OrderGiver.SkipGettingUp(this, due);
+        if (due.Count == 0)
+        {
+            // The pointer moved onto another character: publish again, as what its menu offers with a chance (stealth KO, kidnap) is published only
+            // for the character pointed at, selected or inspected (#878).
+            if (Player.Pointed != _publishedPointed) PublishPaused();
+            return;
+        }
 
         Characters.BeginTick();
         Characters.Phase = TablePhase.Inputs;
         try
         {
             // The systems that take these commands: every order's owner, and the others' handlers.
-            foreach (var system in _systems)
+            for (int k = 0; k < _systems.Count; k++)
             {
-                if (system is IOrderOwner or PlayerSystem or Trading.TradeSystem or Dialogue.DialogueSystem or Combat.CombatSystem)
+                var system = _systems[k];
+                bool takesCommands = system is IOrderOwner or PlayerSystem or Trading.TradeSystem or Dialogue.DialogueSystem or Combat.CombatSystem;
+                if (!takesCommands) continue;
+
+                if (ModFaults.IsMod(k))
+                    ModFaults.Run(k, "inputs", system, this, due, static (s, w, d) => s.Inputs(w, d));
+                else
                     system.Inputs(this, due);
             }
 
@@ -63,12 +81,19 @@ public sealed partial class World
         ActionLog?.Observe(this);
         foreach (var trade in _systems.OfType<Trading.TradeSystem>()) trade.RefreshView(this);
         foreach (var talk in _systems.OfType<Dialogue.DialogueSystem>()) talk.RefreshView(this);
-        if (Settings.PublishSnapshots)
-        {
-            var (previous, buffer) = (PreviousSnapshot, _previousBuffer);
-            Publish();
-            KeepPrevious(previous, buffer);
-        }
+        PublishPaused();
+    }
+
+    /// <summary>
+    /// Publishes the snapshot between ticks while paused, keeping the previous one the renderer interpolates from.
+    /// </summary>
+    void PublishPaused()
+    {
+        if (!Settings.PublishSnapshots) return;
+
+        var (previous, buffer) = (PreviousSnapshot, _previousBuffer);
+        Publish();
+        KeepPrevious(previous, buffer);
     }
 
     /// <summary>

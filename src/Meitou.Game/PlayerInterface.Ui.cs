@@ -48,6 +48,10 @@ sealed partial class PlayerInterface
     /// </summary>
     IDisposable? _uiRegistration;
     /// <summary>
+    /// The Squad XP label's registration (<see cref="SquadXpLabel"/>), removed in <see cref="DisposeUi"/>.
+    /// </summary>
+    IDisposable? _xpLabelRegistration;
+    /// <summary>
     /// Paints the arranged controls; null before <see cref="CreateUiPainter"/> or after <see cref="DisposeUi"/>.
     /// </summary>
     internal UiPainter? UiPainter;
@@ -204,6 +208,7 @@ sealed partial class PlayerInterface
         FaithfulScreens.Activated += ScreenRouter.FaithfulAction;
         _uiHost.Diagnostic += d => Console.Error.WriteLine($"ui        {d.Extension} {d.Operation}: {d.Error.Message}");
         _uiRegistration = _uiHost.Register(new PlayerUiExtension(ExecuteUiAction));
+        _xpLabelRegistration = _uiHost.Register(new SquadXpLabel(() => XpLabel));
     }
 
     /// <summary>
@@ -240,6 +245,8 @@ sealed partial class PlayerInterface
         UiPainter = null;
         _uiRegistration?.Dispose();
         _uiRegistration = null;
+        _xpLabelRegistration?.Dispose();
+        _xpLabelRegistration = null;
     }
 
     /// <summary>
@@ -254,9 +261,38 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>
+    /// Whether any UI extension adds buttons to the building panel.
+    /// </summary>
+    internal bool HasModBuildingActions => _uiHost.HasBuildingActions;
+
+    /// <summary>
+    /// The buttons the interface extensions add to the panel of <paramref name="building"/> (<see cref="UiHost.BuildingActions"/>), given the snapshot
+    /// the panel is laid out from.
+    /// </summary>
+    internal IReadOnlyList<UiBuildingAction> ModBuildingActions(UiSelectedBuilding building, WorldSnapshot snapshot) =>
+        _uiHost.BuildingActions(new UiBuildingContext(building, snapshot, () => Session.World.Tick, Say));
+
+    /// <summary>
+    /// Whether any UI extension adds lines to the town panel.
+    /// </summary>
+    internal bool HasModTownLines => _uiHost.HasTownLines;
+
+    /// <summary>
+    /// The lines the interface extensions add to the town panel for <paramref name="town"/> (<see cref="UiHost.TownLines"/>), given whether the
+    /// player's faction owns it and the snapshot the panel is laid out from.
+    /// </summary>
+    internal IReadOnlyList<UiTownLine> ModTownLines(Simulation.Production.OutpostSnapshot town, bool owned, WorldSnapshot snapshot) =>
+        _uiHost.TownLines(new UiTownContext(town, owned, snapshot, () => Session.World.Tick, Say));
+
+    /// <summary>
     /// Future code-mod loader entry point; disposal removes the extension's owned registrations.
     /// </summary>
     public IDisposable RegisterUiExtension(IUiExtension extension) => _uiHost.Register(extension);
+
+    /// <summary>
+    /// Registers a code mod's extension with its mod's folder, under which its map marker images lie (docs/modding.md "Map markers").
+    /// </summary>
+    public IDisposable RegisterUiExtension(IUiExtension extension, string? folder) => _uiHost.Register(extension, folder);
 
     /// <summary>
     /// Whether any UI extension adds markers to the world map.
@@ -264,10 +300,12 @@ sealed partial class PlayerInterface
     internal bool HasModMapMarkers => _uiHost.HasMapMarkers;
 
     /// <summary>
-    /// The markers the UI extensions add to the world map (<see cref="UiHost.MapMarkers"/>), each group checked by <paramref name="knownGroup"/>.
+    /// The markers the UI extensions add to the world map (<see cref="UiHost.MapMarkers(UiMapContext, Func{string, bool}, Func{string, string})"/>),
+    /// each group checked by <paramref name="knownGroup"/> and each image file judged by <paramref name="imageProblem"/>.
     /// </summary>
-    internal IReadOnlyList<(string Owner, UiMapMarker Marker)> ModMapMarkers(UiMapContext context, Func<string, bool> knownGroup) =>
-        _uiHost.MapMarkers(context, knownGroup);
+    internal IReadOnlyList<(string Owner, UiMapMarker Marker)> ModMapMarkers(UiMapContext context, Func<string, bool> knownGroup,
+        Func<string, string?> imageProblem) =>
+        _uiHost.MapMarkers(context, knownGroup, imageProblem);
 
     /// <summary>
     /// The rows the interface extensions add to <paramref name="target"/>'s right-click menu (<see cref="UiHost.CharacterMenuVerbs"/>); none
@@ -837,6 +875,7 @@ sealed partial class PlayerInterface
         else if (action == "medic") Say(new Simulation.FirstAid.MedicJobCommand(SelectedIds(), SlowModifier) { Tick = Session.World.Tick });
         else if (action == "rescue") Say(new Simulation.Carrying.RescueJobCommand(SelectedIds(), SlowModifier) { Tick = Session.World.Tick });
         else if (action == "prospect") Prospecting.ProspectAction();
+        else if (action == BuildingModButtons.Action) BuildingSelection.ModButtons.Press(argument);
         else if (action.StartsWith("building-", StringComparison.Ordinal) || action.StartsWith("machine-", StringComparison.Ordinal))
             BuildingSelection.BuildingAction(action);
         else if (action == "tutorial") TutorialWindow.TutorialAction(argument);
@@ -946,15 +985,15 @@ sealed partial class PlayerInterface
     /// <summary>
     /// With the interface hidden (F7, <c>hud hide</c>) only the speech bubbles are drawn, so a filmed clean picture keeps the <c>say</c> commentary.
     /// </summary>
-    public void DrawSpeechOnly(DebugOverlay overlay, int width, int height)
+    public void DrawSpeechOnly(DebugOverlay overlay, int width, int height, DebugOverlay.OverlayPass? pass = null)
     {
         Width = width;
         Height = height;
         var controls = new List<UiControl>();
         SpeechBubbles.AddSpeech(controls);
         if (controls.Count == 0) return;
-        UiPainter?.Draw(controls, width, height, Mouse, SpeedButtonAction, minimumTextPixels: StandardPixels);
-        overlay.Flush(width, height);
+        UiPainter?.Draw(controls, width, height, Mouse, SpeedButtonAction, minimumTextPixels: StandardPixels, pass: pass);
+        overlay.Flush(width, height, null, pass);
     }
 
     /// <summary>
@@ -1307,6 +1346,7 @@ sealed partial class PlayerInterface
         if (FactionWindow.FactionWheel(p, steps)) return true;
         if (Production.ResearchWheel(p, steps)) return true;
         if (Production.CraftWheel(p, steps)) return true;
+        if (!FaithfulScreens.Contains(p) && HudPanels.MedicalWheel(p, steps)) return true;
         return CharacterEditor.EditorWheel(p, steps) || FaithfulScreens.Wheel(p, steps);
     }
 

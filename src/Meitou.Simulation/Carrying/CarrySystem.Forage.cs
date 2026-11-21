@@ -108,7 +108,7 @@ public sealed partial class CarrySystem
     /// <c>FUN_14059acd0</c>, <b>Verified</b> decompile): a complete storage building of the forager's faction within the AI's range
     /// (<see cref="Construction.ConstructionSystem.SourceRangeSquared"/>, 3D) that takes it
     /// (<see cref="Meitou.Data.Gameplay.Construction.MachineData.Accepts"/>, engine stand-in for its <c>canHaveSomeOfThese</c>: free room is not
-    /// tested); null: none.
+    /// tested) and the storage filters let the forager put it in (<see cref="IStorageFilter"/>); null: none.
     /// </summary>
     static ItemInstance? Storable(World world, CharacterCold forager, Vector3 at, CharacterCold animal)
     {
@@ -117,15 +117,53 @@ public sealed partial class CarrySystem
             foreach (var m in world.Machines.All)
                 if (m.Data.IsStorage && m.Storage is not null && m.Data.Accepts(item.Record, item.Type)
                     && Vector3.DistanceSquared(m.Position, at) <= Construction.ConstructionSystem.SourceRangeSquared
-                    && world.Buildings.Find(m.Site) is { Complete: true } site && site.Owner == forager.Faction)
+                    && world.Buildings.Find(m.Site) is { Complete: true } site && site.Owner == forager.Faction
+                    && world.StorageAllows(forager, m.Site, StorageUse.Put, item.Record))
                     return item;
         return null;
     }
 
     /// <summary>
+    /// A loaded 238 Foraging animals entry's score in the second list (<c>FUN_14060fd80</c>, <b>Verified</b>): the row's desire (AI slot 62
+    /// <c>FUN_140597ae0</c>: 1 while the posture is 0, else 0) times its finder's value (<c>FUN_1408ce3a0</c>: 1.0 with a body found, else 0;
+    /// <see cref="FindForage"/>).
+    /// </summary>
+    internal float ForageEntryScore(World world, int slot)
+    {
+        var cold = world.Characters.Cold(slot)!;
+        if (!CharacterFacts.PostureZero(cold)) return 0;
+
+        return cold.Inventory is not null && FindForage(world, slot, Looting(world.Characters)) >= 0 ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Whether a loaded 238 Foraging animals entry can start: a forager that can carry, not fleeing, whose finder finds a body (<see cref="FindForage"/>),
+    /// as row 238's plan loots the finder's pick (its effect 148), not the saved body.
+    /// </summary>
+    OrderCheck ForageEntryCheck(World world, int slot, CharacterCold cold)
+    {
+        if (cold.Fleeing || cold.Inventory is null || !CanCarry(world, cold, TaskType.LootAnimalsJob)) return OrderCheck.Blocked();
+
+        return FindForage(world, slot, Looting(world.Characters)) >= 0 ? OrderCheck.Run : OrderCheck.Blocked();
+    }
+
+    /// <summary>
+    /// Starts a loaded 238 Foraging animals entry: the forage loot of the body its finder picks now (serial).
+    /// </summary>
+    void StartForageEntry(World world, int slot, CharacterCold cold)
+    {
+        var table = world.Characters;
+        int body = cold.Inventory is null ? -1 : FindForage(world, slot, Looting(table));
+        if (body < 0) return;
+
+        var forage = Start(world, slot, CharacterTask.Loot, TaskType.LootAnimalsJob, Ai.TaskSource.Order, table.IdOf(body), CharacterTask.Idle);
+        if (forage) cold.Foraging = true;
+    }
+
+    /// <summary>
     /// The bodies being looted now (by slot).
     /// </summary>
-    static HashSet<int> Looting(CharacterTable table)
+    internal static HashSet<int> Looting(CharacterTable table)
     {
         var taken = new HashSet<int>();
         for (int i = 0; i < table.HighWater; i++)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
@@ -9,12 +10,13 @@ using Meitou.Game.Ui;
 namespace Meitou.Game.Host;
 
 /// <summary>
-/// One feedback report as the host hands it over: the form, the game's details, the screenshot and the navmesh screenshot being encoded, the camera's
-/// location and the save being written (a temporary folder), each null when not sent, and the paths of the logs sent (none, log.txt, the action
-/// and dialogue logs).
+/// One feedback report as the host hands it over: the form, the game's details (with each load order entry's workshop item, null when none), the
+/// screenshot and the navmesh screenshot being encoded, the camera's location and the save being written (a temporary folder), each null when not
+/// sent, and the paths of the logs sent (none, log.txt, the action and dialogue logs).
 /// </summary>
 sealed record FeedbackPackage(FeedbackForm Form, string Version, string Commit, string Platform, IReadOnlyList<string> Mods,
-    Task<byte[]>? Screenshot, Task<byte[]>? Navmesh, string? Location, string? SaveFolder, Task? SaveWritten, IReadOnlyList<string> Logs);
+    IReadOnlyList<ulong?> Workshop, Task<byte[]>? Screenshot, Task<byte[]>? Navmesh, string? Location, string? SaveFolder, Task? SaveWritten,
+    IReadOnlyList<string> Logs);
 
 /// <summary>
 /// A sent report's GitHub issue, or why it was not sent.
@@ -120,6 +122,7 @@ static class FeedbackSender
             ["platform"] = p.Platform,
             ["discord"] = p.Form.Discord,
             ["mods"] = new JsonArray([.. p.Mods.Select(m => (JsonNode)m)]),
+            ["workshop"] = new JsonArray([.. p.Workshop.Select(id => (JsonNode?)id?.ToString(CultureInfo.InvariantCulture))]),
             ["screenshot"] = png is not null,
             ["navmesh"] = navPng is not null,
             ["location"] = p.Location,
@@ -226,14 +229,9 @@ static class FeedbackSender
     }
 
     /// <summary>
-    /// The player's home folder as paths in the logs show it, and how a report writes it: its last part, the user name, as
-    /// <c>&lt;username&gt;</c> (<c>C:\Users\&lt;username&gt;</c>); null when there is none.
-    /// </summary>
-    static readonly (string Home, string Hidden)? HomeFolder = HomeOf(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-
-    /// <summary>
     /// The logs as one gzipped text, the service's single log attachment (GameLog keeps each under 10 MiB), read while the game goes on writing
-    /// them, with the user name hidden (<see cref="HideUserName"/>). With more than one, each starts with a line naming its file.
+    /// them, with the user name hidden (<see cref="UserName"/>: lines written by an older game still hold it). With more than one, each starts
+    /// with a line naming its file.
     /// </summary>
     static byte[] GzipLogs(IReadOnlyList<string> paths)
     {
@@ -245,33 +243,10 @@ static class FeedbackSender
                 if (paths.Count > 1) gz.Write(Encoding.UTF8.GetBytes($"======== {Path.GetFileName(path)} ========\n"));
                 using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 using var reader = new StreamReader(file, Encoding.UTF8);
-                gz.Write(Encoding.UTF8.GetBytes(HideUserName(reader.ReadToEnd())));
+                gz.Write(Encoding.UTF8.GetBytes(UserName.Hide(reader.ReadToEnd())));
             }
         }
         return packed.ToArray();
-    }
-
-    /// <summary>
-    /// <paramref name="text"/> with the home folder (<see cref="HomeFolder"/>) written with <c>&lt;username&gt;</c>, in either slash direction and
-    /// any case; the files on disk keep the name.
-    /// </summary>
-    static string HideUserName(string text)
-    {
-        if (HomeFolder is not var (home, hidden)) return text;
-
-        text = text.Replace(home, hidden, StringComparison.OrdinalIgnoreCase);
-        return text.Replace(home.Replace('\\', '/'), hidden.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// <paramref name="home"/> and the same path with its last part as <c>&lt;username&gt;</c>; null for an empty path or a root.
-    /// </summary>
-    static (string Home, string Hidden)? HomeOf(string home)
-    {
-        string trimmed = home.TrimEnd('\\', '/');
-        if (trimmed.Length == 0 || Path.GetDirectoryName(trimmed) is not { Length: > 0 } parent) return null;
-
-        return (trimmed, Path.Combine(parent, "<username>"));
     }
 
     /// <summary>

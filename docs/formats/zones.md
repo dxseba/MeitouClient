@@ -87,19 +87,20 @@ Building state writer/reader (**Verified** by code, no player-built building in 
 
 | Key | Type | Value |
 |---|---|---|
-| `name` | string | display name; housing replaces it ([town residents](../game/factions-squads-towns.md#town-residents)) |
+| `name` | string | display name; housing replaces it, and vacating resets it to the building's ([town residents](../game/factions-squads-towns.md#town-residents)) |
 | `residents` handle, `residents template` | handle, string | the platoon whose home it is and that platoon's SQUAD_TEMPLATE ([which](../game/factions-squads-towns.md#whose-template-a-home-carries)); null / empty with no residents. The reader `FUN_140552b70` drops a non-empty `residents template` (level data's is never used) |
 | `floornum` | int | floor |
 | `destroyed` | bool | +0x1a1 |
 | `town` | handle | its town (outpost), only when the building is not inside another one (**Observed** condition) |
 | `flags` | int | bit0 is outside (+0x240), bit1 foliage, bit2 +0x241 ; old saves use bools `is outside` / `foliage` |
+| (a layout object's state) | | An `interiors.level` instance can list several states (a later file adds its own; a container lists its INVENTORY_STATE first). The object is made from the last GAMESTATE_BUILDING (an item slot: the last ITEM_PLACEMENT_GROUP): its `floornum`, and `flags` bit 0 alone, a state with only the old `is outside` giving an inside object (**Verified**, `meitou-tools probe METARU interiors`: the saved `floornum` and `flags` of all 14660 generated furniture entries and 5627 groups; reading the first state missed 904 and 232). Meitou `BuildingLayouts.StateOf`. |
 | `serialised interior` | int 1 | when not in interior edit mode, followed by the interior layout records; on load 1 keeps the saved furniture, anything else makes the building generate its interior (**Verified** by code, [zone files](save.md#zone-files)) |
 | `construction progress` | float | progress in material units |
 | `is complete` | bool | absent means complete |
 | `is public day` | bool | |
 | `pause` | bool | construction paused |
 | `<i>construction mats` | float | delivered amount of material entry i, i from 0 in entry order |
-| `owner faction ID` | string | owner FACTION id |
+| `owner faction ID` | string | owner FACTION id: in level data whatever the designer left, in a save the live owner ([building owner](../game/factions-squads-towns.md#town-residents)) |
 | `handle` | handle | own handle |
 | `interior layout name`, `exterior layout name` | string | only with an interior |
 | `player furniture Y offset` | float | height above the parent building's origin for furniture, else 0 |
@@ -173,8 +174,12 @@ zone file ([player outposts](save.md#player-outposts)); the buildings' `town` ha
 GAMESTATE_TOWN state `-S5e`. **Verified**304 targets resolve;224 town states listing zones contain
 their town,80 list none. Keys `zones_count`, `zone_x_<i>`, `zone_y_<i>`, handle `hand*`, string
 `instance`=list entry ID. ROAD keys: `hidden`, `width`46..200, `length`, `weight`, `start`, `end`
-(junction numbers, [roads](../game/factions-squads-towns.md#off-screen-world)); ordered instances target `-`, absolute positions, rotation w1/y0/z0,
-x0..1 (**Observed**, purpose Unknown). `5-roadfoliage` target- points use quaternion w as
+(junction numbers, [roads](../game/factions-squads-towns.md#off-screen-world)); instances target `-`, absolute positions, rotation w1/y0/z0,
+x0..1. A road's points are its instances by number: the id is the point's number in lowercase hex without padding (`0`..`f`, `10`..), and the
+loader (`FUN_14045e760`, id made by `FUN_1400ac750`) asks for 0, 1, 2.. until an id is missing or the point read has rotation x >= 1, the mark of
+the last point (**Verified**: `meitou-tools world`, of 2109 roads each has the mark on its highest id and on no other point, and none ends before
+its instances). The files list the ids as text (`1`, `10`..`1f`, `2`), so file order is not the road's order for the 368 roads of over 16 points
+(`WorldLevelData.RoadPoints`; **Observed**, #1065: `1154-Newwworld`, 46 points, read in file order ran (22104,13517) → (29077,5154) → (21889,13829)). `5-roadfoliage` ids are hex slot numbers too (**Observed**, `FUN_14045eb80`, `strtol` base 16); its target- points use quaternion w as
 size0.1..3590 (**Observed**, likely clearing radius). Furnished interiors use GAMESTATE_BUILDING,
 ITEM_PLACEMENT_GROUP, inventory states and collections, often `<n>-[basedata]-INGAME` IDs;
 `WorldLevelData.Load(includeInteriors:true)` merges them. Item groups: [loose items](../game/factions-squads-towns.md#loose-items-in-buildings); inventory semantics Unknown.
@@ -234,6 +239,18 @@ block:  int32 count, count ×
           float32 qw, qx, qy, qz                 rotation, w first
 ```
 
+**Verified** (decompiled, `FUN_14039a4d0` and `FUN_14039a820`): the game reads the magic, the count and the table once (another magic or a count
+other than 4096: no map features at all), then each zone's block when the zone loads, by seeking to its offset (0: none). The size is never
+read, so blocks may lie anywhere in the file, in any order, and bytes after a block are ignored. Each placement read is compared with the last entry of
+the zone's feature list before its record is looked up: one at exactly the same position (`Vector3 ==`) is skipped. A record the data lacks is logged
+("not found") and a placement whose position lies in another zone is logged ("Map feature in wrong zone") after its object is made; neither enters the
+zone's list. **Observed** (a count over the install's base `features.dat` with Meitou's reader, the base data's records; the 11 below include the
+2 of the 5 that also lie outside their zone, so 1819 less 14 is 1805): 2 placements repeat the one
+before them exactly (a First Civ_WreckBit06 in zone 52.31 and a Barge WreckPiece02 in 46.33, each the same record, scale and rotation); of the
+other 1819, 5 lie outside their zone (FloodedForest_Processor04, BlockyCubeCliff01, First Civ_Full-Wreck and 2 naming records the data lacks) and
+11 name records the data lacks, so the game's zone lists hold 1805. Meitou (`MapFeatureFile.Read`) skips a placement at the position of the last
+one it read in the zone that lies in its zone, keeps the 1819, and draws a placement lying outside its zone (engine choice).
+
 ## Town membership
 
 **Observed** (building import `FUN_14057cc70`, position lookup `FUN_140928890`, `Town::vfunc_78` / `vfunc_84`; Meitou `TownBuildings.MemberOf`):
@@ -269,7 +286,7 @@ TownBase, Town, Nest and TownNull), which seeds `rand()` from the town's positio
     2026-11-17): the Stationhouse ruin's campfire and its squatters stand on its floor-0 base at 1627, under the upper storey's collision at 1705,
     which the ray does not meet. Repairing a ruin removes none of them: its first build step restores it through `FUN_140557280` with 0, which
     empties the interior only when ruining, and the completion (`FUN_140562340`) destroys nothing. Buying the home destroys them with its interior
-    (`FUN_14054f4d0` with 1 keeps only buildings whose slot 135 handle is set, `LightBuilding`'s) and drops the town's nest spots naming the home
+    (`FUN_14054f4d0` with 1 keeps only buildings whose slot 135 handle is set, `LightBuilding`'s; the original's save of a house bought there holds no lamps of its old interior, [save](save.md#zone-files)) and drops the town's nest spots naming the home
     (a handle compare) and its debris meshes round it ([purchase](../game/ui-screens.md#selected-building)); the home's pieces on the ground
     beside it stay. **Observed** (1.0.65 through KenshiHarness, the same save, 2026-11-17, bought paused with Re_Dev's money): the Stationhouse's
     campfire, stools and camp bed and the debris round it vanish at the purchase, its squatters stay. The building's bounding box there is the
@@ -288,10 +305,12 @@ Meitou (`PopulationSystem.StandCamp`, **Engine choices**: its own random stream,
 items kept apart from the ground item limit; a nest loaded again, and one a save names, lay nothing more. A town stands its residents' nests round each home whose template
 names one, as its own camp's (`PopulationSystem.ResidentNests`): the buildings and meshes every time it is made, the items once and only round a home whose zone the save has
 no file of. A building of the player's gets none (housing passes it over, [town residents](../game/factions-squads-towns.md#town-residents), so nothing hands its nest to the town). The pieces that are chairs, dummies or workstations are that home's furniture for staying home (`NestBuildings.FurnitureOf`). A resident template no building of
-the town houses (5 base sites: 4 one-building Lost Library placements, Police Barracks) lays its nest's items round the centre. A home's piece stands on the home when the
-placement ray meets the home first (`PopulationSystem.HomeHit`): the home's highest group-9 surface over the spot (as a ruin or standing, `GroundShapes`) is not below the
-terrain, and no other town building, finished player building (or one built past its visual threshold) or camp piece laid before has a group-9 surface above it there. It then
-stands at that height, tilted to that surface's slope up to its `max slope` (`NestPiece.OnHome`). Buying a home whose nest stands takes the pieces on it, its furniture and
+the town houses (5 base sites: 4 one-building Lost Library placements, Police Barracks) lays its nest's items round the centre. A home's piece stands where the
+placement ray meets first (`PopulationSystem.FirstHit`): the highest group-9 surface over the spot (`GroundShapes`) of the home (as a ruin or standing), another town building,
+a finished player building (or one built past its visual threshold) or a camp piece laid before, else the terrain when that is higher; at that height, tilted to that
+surface's slope up to its `max slope`, on the home when the surface is the home's (`NestPiece.OnHome`; the home's wins a tie). The navmesh only keeps or drops the piece: its
+stand height can be a surface beside the spot (**Verified** headless on issue #1005, probe `layout 20.32:28-Newwworld-INGAME`, a Hub Old Storm House ruin: its campfire and
+sitting spot stood 16 and 20 over the terrain on the ruin's plinth beside them; by the ray they stand on the terrain, the other Hub squatter camps as before). Buying a home whose nest stands takes the pieces on it, its furniture and
 its camp's debris meshes within its bounding box's radius (`BuildingShape.BoundsRadius`: its drawn parts' render-mesh bounds, as it was when bought) of its position away
 (`FixtureRegistry.ClearCamp`, `NestBuildings.ClearHome`); the pieces and meshes its nest laid beside it go when the town unloads (`PopulationSystem.FoldBoughtCamp`,
 `NestBuildings.DropHomes`): the original's pieces are not saved, its purchase drops the home's nest spots and its housing passes a player's

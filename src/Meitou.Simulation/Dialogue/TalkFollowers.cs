@@ -1,16 +1,17 @@
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Simulation.Ai;
-using Meitou.Simulation.Movement;
 
 namespace Meitou.Simulation.Dialogue;
 
 /// <summary>
-/// DA_FOLLOW_WHILE_TALKING: the speakers following their targets while their conversations last (hashed).
+/// The followers on order 164 (DA_FOLLOW_WHILE_TALKING, <c>Task_FollowAndTalk</c>, <see cref="DialogueOrders"/>) and their targets (hashed): each
+/// follows with the movement's follow task until it and its target are both free of conversation (slot 4 <c>FUN_14033bc90</c>, <b>Verified</b>;
+/// a threat on it ends the order by its list B, <c>!158</c>).
 /// </summary>
 sealed class TalkFollowers(DialogueSystem system)
 {
     /// <summary>
-    /// Who follows whom while its conversation lasts.
+    /// Who follows whom on its order.
     /// </summary>
     readonly SortedDictionary<CharacterId, CharacterId> _followers = new(Comparer<CharacterId>.Create(DialogueSystem.CompareIds));
 
@@ -20,34 +21,55 @@ sealed class TalkFollowers(DialogueSystem system)
     public int Count => _followers.Count;
 
     /// <summary>
-    /// <paramref name="who"/> follows <paramref name="whom"/> while its conversation lasts (<see cref="StartFollowing"/>).
+    /// <paramref name="who"/>'s order 164 on <paramref name="whom"/> has started.
     /// </summary>
-    public void Add(World world, CharacterId who, CharacterId whom)
-    {
-        _followers[who] = whom;
-        StartFollowing(world, who, whom);
-    }
+    public void Add(CharacterId who, CharacterId whom) => _followers[who] = whom;
 
     /// <summary>
-    /// The follow lasts while the conversation does: when it is over (or the speaker or target is gone) the speaker stops following and stands.
+    /// Each follow's step (serial): dropped once its follower no longer runs the order; done once the follower and its target are both free of
+    /// conversation (or the target is gone) and the follower standing. Either way the follow target goes (#883: a kept one sent its next follow of
+    /// its leader after the talk's target instead).
     /// </summary>
-    public void StepFollowers(World world)
+    public void Step(World world)
     {
         if (_followers.Count == 0) return;
+
         var table = world.Characters;
         foreach (var (who, whom) in _followers.ToArray())
         {
-            bool talking = system.LeadsTalk(who);
-            if (talking && table.TryResolveNext(who, out _) && DialogueSystem.Position(world, whom) is not null) continue;
-            _followers.Remove(who);
-            if (table.TryResolveNext(who, out int s) && table.Cold(s) is { } cold && cold.FollowOrder == whom
-                && table.Next[s].Task == (byte)CharacterTask.Follow)
+            bool there = table.TryResolveNext(who, out int s);
+            if (!there || !DialogueOrders.Runs(table, s, TaskType.FollowWhileTalking, whom))
             {
-                cold.FollowOrder = CharacterId.None;
-                TaskStart.Stand(table, s);
+                _followers.Remove(who);
+                if (there) ForgetTarget(table.Cold(s)!, whom);
+                continue;
             }
+
+            bool talks = !system.Free(who) || !system.Free(whom);
+            if (talks && table.TryResolveNext(whom, out _)) continue;
+
+            _followers.Remove(who);
+            ForgetTarget(table.Cold(s)!, whom);
+            TaskStart.End(world, s, TaskEnd.Done);
         }
     }
+
+    /// <summary>
+    /// The follow target goes while it is still the talk's: not when a follow of the same character another order or a job gave runs since.
+    /// </summary>
+    static void ForgetTarget(CharacterCold cold, CharacterId whom)
+    {
+        if (cold.FollowOrder != whom) return;
+        bool laterFollow = cold.Running is { Task: Movement.CharacterTask.Follow, Row: not TaskType.FollowWhileTalking } run && run.Target == whom;
+        if (laterFollow) return;
+
+        cold.FollowOrder = CharacterId.None;
+    }
+
+    /// <summary>
+    /// Each follower and the target it follows (read only).
+    /// </summary>
+    public IEnumerable<KeyValuePair<CharacterId, CharacterId>> Pairs => _followers;
 
     /// <summary>
     /// Adds the followers and their targets, in id order.
@@ -59,17 +81,5 @@ sealed class TalkFollowers(DialogueSystem system)
             hasher.Add(who);
             hasher.Add(whom);
         }
-    }
-
-    /// <summary>
-    /// DA_FOLLOW_WHILE_TALKING (16, Task_FollowAndTalk 164): the speaker follows the target with the shared follow task (FUN_140333400 /
-    /// FUN_140333500, the same as a follow order: stand-off 20 to 40 on the follower's side, the follow speed profile; <b>Verified</b>), a character
-    /// in a fight excepted (engine choice: no walk to end a fight).
-    /// </summary>
-    static void StartFollowing(World world, CharacterId who, CharacterId whom)
-    {
-        var table = world.Characters;
-        if (!table.TryResolveNext(who, out int s) || table.Cold(s) is not { InCombat: false }) return;
-        TaskStart.Start(world, s, new TaskRequest(CharacterTask.Follow, TaskType.FollowWhileTalking, TaskSource.Npc) { Target = whom });
     }
 }

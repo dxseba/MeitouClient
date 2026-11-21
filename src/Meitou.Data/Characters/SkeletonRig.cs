@@ -204,7 +204,19 @@ public sealed class SkeletonRig
     public readonly Quaternion[] BindRotationInverse = [];
 
     /// <summary>
-    /// The skeletons the instance links (docs/animation.md, "Animation files"), read when a clip is first looked for past the own ones.
+    /// The neck and head bones' handles (-1: the skeleton has none, as an animal's), and the unit axis through the character's sides in model space
+    /// (from the right thigh to the left one in the binding pose): what a head pitch turns about (<see cref="PoseScratch.PoseDerived"/>).
+    /// </summary>
+    public readonly int NeckBone = -1, HeadBone = -1;
+
+    /// <summary>
+    /// The unit axis through the character's sides in model space (see <see cref="NeckBone"/>).
+    /// </summary>
+    public readonly Vector3 SideAxis = Vector3.UnitX;
+
+    /// <summary>
+    /// The skeletons the instance links (docs/animation.md, "Animation files"), in link order: a clip is looked for in them before the
+    /// skeleton's own. Each is read when a lookup first reaches it.
     /// </summary>
     readonly IReadOnlyList<Lazy<OgreSkeleton?>> _linked;
 
@@ -222,8 +234,8 @@ public sealed class SkeletonRig
     /// <summary>
     /// A rig of <paramref name="skeleton"/>: its bones by handle, the parents-first order and the binding pose.
     /// </summary>
-    /// <param name="linked">The linked animation sources in link order: a clip the skeleton lacks is taken from the first that has it, its tracks
-    /// applied by bone handle.</param>
+    /// <param name="linked">The linked animation sources in link order: a clip is taken from the first that has it, its tracks applied by bone
+    /// handle, and from the skeleton itself only when none does.</param>
     public SkeletonRig(OgreSkeleton skeleton, IReadOnlyList<Lazy<OgreSkeleton?>>? linked = null)
     {
         Skeleton = skeleton;
@@ -259,6 +271,11 @@ public sealed class SkeletonRig
         BindScale = [.. scratch.DerivedScale.AsSpan(0, BoneCount)];
         BindRotationInverse = new Quaternion[BoneCount];
         for (int h = 0; h < BoneCount; h++) BindRotationInverse[h] = Quaternion.Inverse(scratch.DerivedRotation[h]);
+
+        (NeckBone, HeadBone) = (Handle("Bip01 Neck") ?? -1, Handle("Bip01 Head") ?? -1);
+        if (Handle("Bip01 L Thigh") is { } left && Handle("Bip01 R Thigh") is { } right
+            && (BindPosition[left] - BindPosition[right]) is var across && across.LengthSquared() > 1e-8f)
+            SideAxis = Vector3.Normalize(across);
     }
 
     /// <summary>
@@ -289,15 +306,26 @@ public sealed class SkeletonRig
     public int? Handle(string name) => _handles.TryGetValue(name, out var h) ? h : null;
 
     /// <summary>
-    /// The animation called <paramref name="name"/> as arrays, the skeleton's own else the first linked source's (null: none has it).
+    /// The animation called <paramref name="name"/> as arrays: the first linked source's that has it, else the skeleton's own (null: none has
+    /// it). A mod's animation file so replaces a base clip of the same name (docs/animation.md, "Animation files").
     /// </summary>
     public AnimationClip? Clip(string name)
     {
         if (_clips.TryGetValue(name, out var cached)) return cached;
-        var animation = Find(Skeleton, name);
-        for (int i = 0; animation is null && i < _linked.Count; i++)
-            if (_linked[i].Value is { } source) animation = Find(source, name);
+
+        var animation = FindLinked(name) ?? Find(Skeleton, name);
         return _clips[name] = animation is null ? null : Compile(animation);
+    }
+
+    /// <summary>
+    /// The animation called <paramref name="name"/> of the first linked source that has it, or null.
+    /// </summary>
+    OgreAnimation? FindLinked(string name)
+    {
+        foreach (var linked in _linked)
+            if (linked.Value is { } source && Find(source, name) is { } animation) return animation;
+
+        return null;
     }
 
     /// <summary>
@@ -433,11 +461,13 @@ public sealed class PoseScratch
     /// <summary>
     /// Poses the skeleton with <paramref name="layers"/> (empty: the binding pose) and the body shape <paramref name="shape"/> (null: neutral);
     /// writes each bone's skin matrix into <paramref name="skin"/> (<see cref="SkeletonRig.BoneCount"/> entries, System.Numerics row-vector form,
-    /// the memory a GLSL <c>mat4</c> reads as its column-vector form).
+    /// the memory a GLSL <c>mat4</c> reads as its column-vector form). <paramref name="unitMovement"/>: the tracks' translations at scale 1, not the
+    /// shape's movement scale (<see cref="PoseDerived"/>).
     /// </summary>
-    public void Pose(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, Span<Matrix4x4> skin, BonePose? overrides = null)
+    public void Pose(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, Span<Matrix4x4> skin, BonePose? overrides = null,
+        (float Neck, float Head) pitch = default, bool unitMovement = false)
     {
-        PoseDerived(shape, layers, overrides);
+        PoseDerived(shape, layers, overrides, pitch, unitMovement);
         for (int h = 0; h < _rig.BoneCount; h++) skin[h] = Offset(h);
     }
 
@@ -460,15 +490,17 @@ public sealed class PoseScratch
 
     /// <summary>
     /// Poses the derived transforms; <paramref name="overrides"/> (null: none) replaces the model-space rotations of some bones afterwards, and their
-    /// children follow.
+    /// children follow. <paramref name="unitMovement"/>: the translations at scale 1 whatever the shape's movement scale (the original sets the
+    /// skeleton's to 1 while the character lies in a bed, <c>FUN_14052bb10</c>, docs/animation.md "In a bed or a cage").
     /// </summary>
-    public void PoseDerived(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, BonePose? overrides = null)
+    public void PoseDerived(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, BonePose? overrides = null, (float Neck, float Head) pitch = default,
+        bool unitMovement = false)
     {
         int count = _rig.BoneCount;
         BindLocal(count);
-        float movement = shape?.MovementScale ?? 1;
+        float movement = unitMovement ? 1 : shape?.MovementScale ?? 1;
         BlendLayers(layers, count, movement);
-        Derive(shape, overrides);
+        Derive(shape, overrides, pitch);
     }
 
     /// <summary>
@@ -543,7 +575,7 @@ public sealed class PoseScratch
     /// <summary>
     /// The derived (model-space) transforms from the local ones, parents first, with the body shape's sizes; then the overrides.
     /// </summary>
-    void Derive(BodyShapeData? shape, BonePose? overrides)
+    void Derive(BodyShapeData? shape, BonePose? overrides, (float Neck, float Head) pitch)
     {
         var boneSize = shape?.BoneSize;
         var positionalSize = shape?.PositionalSize;
@@ -569,6 +601,10 @@ public sealed class PoseScratch
             }
 
             if (overrides is not null && h < overrides.Set.Length && overrides.Set[h]) ApplyOverride(overrides, h, parent);
+
+            // A pitch (radians, positive looks up) turns the bone about the sides' axis in model space; the head, below the neck, follows the neck's.
+            float angle = h == _rig.NeckBone ? pitch.Neck : h == _rig.HeadBone ? pitch.Head : 0;
+            if (angle != 0) DerivedRotation[h] = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(_rig.SideAxis, angle) * DerivedRotation[h]);
         }
     }
 

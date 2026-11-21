@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
@@ -146,6 +148,8 @@ public sealed partial class MainWindow : Window
         _updater = new LauncherUpdater(_releases, config.IncludePrereleases);
         InitializeComponent();
         _modDrag = new ModListDrag(ModListBox, _mods);
+        _ = new SmoothWheelScroll(ModListBox);
+        RestoreWindowSize(config);
         _grips = new WindowResizeGrips(this);
         LauncherText.Use(StartLanguage(found), found);
         PopulateLanguageOptions(found);
@@ -155,6 +159,10 @@ public sealed partial class MainWindow : Window
         PlayVersionButton.Flyout = _versionMenu;
         TrackPointer();
         WireModList();
+        ModDetailsToggle.IsChecked = config.ModDetailsShown;
+        ShowModDetails();
+        AnimateModDetails();
+        ShowModsSummary();
         ConfigureOptions(config);
         ShowBuiltTexts();
         InstallPathBox.Text = LauncherConfig.InstallDirectory;
@@ -222,6 +230,7 @@ public sealed partial class MainWindow : Window
     {
         Closing += (_, _) =>
         {
+            SaveWindowSize();
             _workshopSync.Stop();
             if (_graphicsSave?.IsEnabled == true) SaveGame();
         };
@@ -325,6 +334,7 @@ public sealed partial class MainWindow : Window
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
+        if (change.Property == ClientSizeProperty && WindowState == WindowState.Normal) _normalSize = ClientSize;
         if (change.Property != WindowStateProperty || Plate is null) return;
         bool max = WindowState == WindowState.Maximized;
         Plate.Margin = new Thickness(max ? 0 : 8);
@@ -333,6 +343,40 @@ public sealed partial class MainWindow : Window
         SetupHost.CornerRadius = new CornerRadius(0, 0, max ? 0 : 10, max ? 0 : 10);
         Grips.IsVisible = !max;
         MaximizeIcon.Data = Avalonia.Media.Geometry.Parse(max ? "M2,0 H10 V8 M0,2 H8 V10 H0 Z" : "M0,0 H10 V10 H0 Z");
+    }
+
+    /// <summary>
+    /// The window's size the last time it was neither maximised nor full screen, saved on close; null until known.
+    /// </summary>
+    Size? _normalSize;
+
+    /// <summary>
+    /// The size and state <c>launcher.json</c> kept from the last close: the size within the primary screen's working area, then
+    /// maximised or full screen again.
+    /// </summary>
+    void RestoreWindowSize(LauncherConfig config)
+    {
+        if (config.WindowWidth is { } width && config.WindowHeight is { } height)
+        {
+            var screen = Screens.Primary;
+            var area = screen is null ? new Size(width, height) : screen.WorkingArea.Size.ToSize(screen.Scaling);
+            Width = Math.Clamp(width, MinWidth, Math.Max(MinWidth, area.Width));
+            Height = Math.Clamp(height, MinHeight, Math.Max(MinHeight, area.Height));
+        }
+
+        if (config.WindowState is WindowState.Maximized or WindowState.FullScreen) WindowState = config.WindowState;
+    }
+
+    /// <summary>
+    /// Keeps the window's normal size and whether it is maximised or full screen in <c>launcher.json</c>.
+    /// </summary>
+    void SaveWindowSize()
+    {
+        var size = _normalSize ?? ClientSize;
+        _config.WindowWidth = size.Width;
+        _config.WindowHeight = size.Height;
+        _config.WindowState = WindowState is WindowState.Maximized or WindowState.FullScreen ? WindowState : WindowState.Normal;
+        _config.Save();
     }
 
     #endregion
@@ -377,8 +421,12 @@ public sealed partial class MainWindow : Window
         ShowBuiltTexts();
         foreach (var row in _mods) row.LanguageChanged();
         if (_modsReady) ShowDependencyProblems();
+        ShowModDetails();
+        ShowModsSummary();
         ShowReleases();
-        PopulateLanguageOptions(_install);
+
+        // Refilling the box inside its own SelectionChanged throws (Avalonia's selection is still committing), so it waits for the next turn.
+        Dispatcher.UIThread.Post(() => PopulateLanguageOptions(_install));
     }
 
     /// <summary>
@@ -771,7 +819,8 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Browse for the install folder: the installed versions move there (not during a download).
+    /// Browse for the install folder (not during a download): asks whether the installed versions move there or stay where they
+    /// are; the versions list then shows what the new folder holds.
     /// </summary>
     async void BrowseInstall_Click(object? sender, RoutedEventArgs e)
     {
@@ -780,25 +829,51 @@ public sealed partial class MainWindow : Window
             InstallStatus.Text = Tr("Wait for the download to finish first.");
             return;
         }
+
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Install folder" });
         if (folders is not [var folder] || folder.TryGetLocalPath() is not { } path || path == LauncherConfig.InstallDirectory)
             return;
+
+        if (await MoveInstalledAsked(path)) UseInstallFolder(path);
+    }
+
+    /// <summary>
+    /// When the current install folder holds versions, asks whether they move to <paramref name="path"/> and moves them if so;
+    /// false when the move failed.
+    /// </summary>
+    async Task<bool> MoveInstalledAsked(string path)
+    {
         var previous = LauncherConfig.InstallDirectory;
+        if (!Releases.HasInstalled(previous)) return true;
+
+        var text = Tr("Move the installed versions from {1} to {2}? Kept, they stay where they are and the new folder lists only its own.",
+            previous, path);
+        if (!await AskAsync("Install folder", text, "Move them", "Keep them")) return true;
+
         InstallStatus.Text = Tr("Moving installed versions…");
         try
         {
             await Task.Run(() => Releases.MoveInstalled(previous, path));
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             InstallStatus.Text = Tr("Could not move the versions to {1}: {2}", path, ex.Message);
             RefreshInstalled();
-            return;
+            return false;
         }
+    }
+
+    /// <summary>
+    /// Saves <paramref name="path"/> as the install folder and shows the versions installed there.
+    /// </summary>
+    void UseInstallFolder(string path)
+    {
         _config.InstallFolder = Path.GetFullPath(path) == Path.GetFullPath(LauncherConfig.DataDirectory) ? null : path;
         _config.Save();
+
         InstallPathBox.Text = LauncherConfig.InstallDirectory;
-        InstallStatus.Text = Tr("Where versions are installed; changing it moves them.");
+        InstallStatus.Text = Tr("Where versions are installed; changing it asks whether they move.");
         RefreshInstalled();
         ShowReleases();
     }
@@ -867,6 +942,11 @@ public sealed partial class MainWindow : Window
     readonly WorkshopSyncRunner _workshopSync = new();
 
     /// <summary>
+    /// True while Steam is asked to subscribe to endorsed ports (<see cref="SubscribeToPorts"/>): one request at a time.
+    /// </summary>
+    bool _subscribing;
+
+    /// <summary>
     /// Off the UI thread, so a large workshop folder does not hold up the window: listing the folders and reading every header (for the
     /// dependency order and the authors) is file work per mod. Until it is done the list is not saved (Play, presets), so a click
     /// meanwhile cannot write an empty mods.cfg. A later load (another Kenshi folder, Refresh) supersedes an unfinished one.
@@ -887,11 +967,11 @@ public sealed partial class MainWindow : Window
             {
                 var order = ModList.LauncherOrder(gameInstall, ModList.Discover(gameInstall));
 
-                // The rows show each mod's author, plugin note and code-mod dependencies: read them here too, not on the UI thread.
+                // The rows show each mod's author, RE_Kenshi notes and code-mod dependencies: read them here too, not on the UI thread.
                 foreach (var entry in order)
                 {
                     _ = entry.Mod.Header;
-                    _ = entry.Mod.HasNativePlugin;
+                    _ = entry.Mod.ReKenshi;
                 }
                 return order.Select(e => (e, CodeModDependencies.ReadEntry(e.Mod, e.Enabled))).ToList();
             });
@@ -912,56 +992,207 @@ public sealed partial class MainWindow : Window
         _modsReady = true;
         ShowDependencyProblems();
         QueueBlankingCheck();
-        MarkSuggestions();
-        ModsEmpty.IsVisible = _mods.Count == 0;
-        ModsEmpty.Text = Tr(gameInstall is null ? "Set the Kenshi folder in Settings to list its mods."
-            : "No mods found in Kenshi's mods folder or among its Steam workshop items.");
-        OfferSuggestions();
+        MarkPorts();
+        ApplyModSearch();
+        OfferPorts();
     }
 
     /// <summary>
-    /// Tells each row of an RE_Kenshi mod with a suggested code mod whether the list holds it (<see cref="CoveredMods.Suggested"/>).
+    /// The search text changed: the rows that do not match it are hidden.
     /// </summary>
-    void MarkSuggestions()
+    void ModSearch_TextChanged(object? sender, TextChangedEventArgs e) => ApplyModSearch();
+
+    /// <summary>
+    /// Shows only the rows matching the search box (<see cref="ModRow.Matches"/>), and says why the list is empty when it is.
+    /// </summary>
+    void ApplyModSearch()
+    {
+        string search = ModSearch.Text?.Trim() ?? "";
+        foreach (var row in _mods) row.IsShown = row.Matches(search);
+        ShowModsSummary();
+
+        // Until a load ends the empty line is the load's own (its error, or nothing).
+        if (!_modsReady) return;
+
+        bool none = _mods.Count == 0;
+        ModsEmpty.IsVisible = !_mods.Any(m => m.IsShown);
+        ModsEmpty.Text = Tr(!none ? "No mods match the search."
+            : _install is null ? "Set the Kenshi folder in Settings to list its mods."
+            : "No mods found in Kenshi's mods folder or among its Steam workshop items.");
+    }
+
+    /// <summary>
+    /// Tells each row of an RE_Kenshi mod with an endorsed port whether the list holds it (<see cref="CoveredMods.Endorsed"/>).
+    /// </summary>
+    void MarkPorts()
     {
         var mods = _mods
             .Select(r => r.Mod)
             .ToList();
         foreach (var row in _mods)
-            if (row.Suggestion is { } suggested) row.SuggestionInstalled = CoveredMods.HasSuggestion(suggested, mods);
+            if (row.Port is { } port) row.PortInstalled = CoveredMods.HasPort(port, mods);
     }
 
     /// <summary>
-    /// Once per mod, in one question for all of them: the enabled RE_Kenshi mods with a suggested code mod that is not installed, with an
-    /// offer (not a requirement: other ports may exist) to open the suggested mods' Steam workshop pages, where the player subscribes (the
-    /// launcher has no Steam subscribe call). Asked or not, each is remembered (<see cref="LauncherConfig.OfferedSuggestions"/>), and the row
-    /// keeps its button. Not over another question or the first-start dialog: the next listing asks.
+    /// Once per mod, in one question for all of them: the enabled RE_Kenshi mods with an endorsed port that is not installed are offered
+    /// (<see cref="OfferPortsAsync"/>). Asked or not, each is remembered (<see cref="LauncherConfig.OfferedPorts"/>), and the row keeps its
+    /// button. Not over another question or the first-start dialog: the next listing asks.
     /// </summary>
-    async void OfferSuggestions()
+    async void OfferPorts()
     {
         if (SetupHost.IsVisible) return;
 
         var rows = _mods
-            .Where(r => r.Enabled && r.SuggestionPage is not null && !_config.OfferedSuggestions.Contains(r.Name))
+            .Where(r => r.Enabled && r.PortPage is not null && !_config.OfferedPorts.Contains(r.Name))
             .ToList();
         if (rows.Count == 0) return;
 
-        _config.OfferedSuggestions.AddRange(rows.Select(r => r.Name));
+        _config.OfferedPorts.AddRange(rows.Select(r => r.Name));
         _config.Save();
+        await OfferPortsAsync(rows);
+    }
 
-        var lines = rows.Select(r => Tr("{1}: {2}", r.Name, r.Suggestion!.By));
-        string text = Tr("The plugins of these RE_Kenshi mods do not run in Meitou.") + " "
-            + Tr("One Meitou mod on the Steam workshop that does the same (others may too):") + "\n"
-            + string.Join("\n", lines) + "\n" + Tr("Want to look at them on Steam?");
-        var pages = rows
-            .Select(r => r.SuggestionPage)
-            .OfType<Uri>()
-            .Distinct()
+    /// <summary>
+    /// Asks whether to subscribe to the endorsed ports of <paramref name="rows"/> on the Steam workshop, as a table of each RE_Kenshi mod
+    /// beside its port and maintainer, and does what is chosen: subscribe through Steam, open the ports' workshop pages, or nothing.
+    /// Subscribing is offered only where Steam can be asked (<see cref="SteamLibrary.Locate"/>).
+    /// </summary>
+    async Task OfferPortsAsync(IReadOnlyList<ModRow> rows)
+    {
+        var ports = rows
+            .Select(r => r.Port!)
+            .DistinctBy(p => p.PortWorkshopId)
             .ToList();
-        string open = pages.Count == 1 ? Tr("Open its page") : Tr("Open {1} pages", pages.Count);
-        if (!await AskAsync(Tr("Meitou mods you might like"), text, open, Tr("No thanks"))) return;
+        string? library = _subscribing ? null : SteamLibrary.Locate(_install);
+        string intro = Tr("The plugins of these RE_Kenshi mods do not run in Meitou.") + " "
+            + Tr("Each has a port for Meitou on the Steam workshop, kept up by its maintainer and endorsed by Meitou:");
+        string question = library is null ? Tr("Want to look at them on Steam?") : Tr("Do you want to subscribe now?");
+        Control[] body = [Wrapped(intro), PortTable(rows), Wrapped(question)];
 
-        foreach (var page in pages) await this.Launcher.LaunchUriAsync(page);
+        var choice = await ChooseAsync(Tr("Meitou ports of your mods"), body, PortChoices(ports.Count, library is not null), PortChoice.None);
+        if (choice == PortChoice.Pages) await OpenPortPages(ports);
+        if (choice == PortChoice.Subscribe) await SubscribeToPorts(library!, ports);
+    }
+
+    /// <summary>
+    /// The buttons of the port offer for <paramref name="count"/> ports: no, their workshop pages and, when Steam can be asked, subscribing
+    /// (the main button).
+    /// </summary>
+    static List<(string Label, PortChoice Value)> PortChoices(int count, bool canSubscribe)
+    {
+        string open = count == 1 ? Tr("Open its page") : Tr("Open {1} pages", count);
+        List<(string, PortChoice)> choices = [(Tr("No thanks"), PortChoice.None), (open, PortChoice.Pages)];
+        if (canSubscribe) choices.Add((Tr("Subscribe"), PortChoice.Subscribe));
+
+        return choices;
+    }
+
+    /// <summary>
+    /// Opens the Steam workshop page of each of <paramref name="ports"/>, where the player subscribes.
+    /// </summary>
+    async Task OpenPortPages(IEnumerable<EndorsedPort> ports)
+    {
+        foreach (var port in ports) await this.Launcher.LaunchUriAsync(CoveredMods.WorkshopPage(port.PortWorkshopId));
+    }
+
+    /// <summary>
+    /// Has Steam subscribe the account to <paramref name="ports"/> (<see cref="WorkshopSubscribeRunner"/>), says how it went and lists the
+    /// mods again; for the ports Steam did not subscribe to, with the reasons, it offers their workshop pages instead.
+    /// </summary>
+    async Task SubscribeToPorts(string library, IReadOnlyList<EndorsedPort> ports)
+    {
+        _subscribing = true;
+        Status(Tr("Asking Steam to subscribe..."));
+        var result = await WorkshopSubscribeRunner.RunAsync(library, [.. ports.Select(p => p.PortWorkshopId)]);
+        _subscribing = false;
+
+        var failed = ports
+            .Where(p => result.Items.FirstOrDefault(i => i.Id == p.PortWorkshopId) is not { Problem: null })
+            .ToList();
+        Status(SubscribeSummary(result, ports, failed));
+        if (failed.Count > 0) await OfferPagesOfFailed(result, failed);
+
+        if (failed.Count < ports.Count) LoadMods();
+    }
+
+    /// <summary>
+    /// The status line after subscribing: the ports subscribed to and whether Steam is still downloading them, or that none was.
+    /// </summary>
+    static string SubscribeSummary(WorkshopSubscribeResult result, IReadOnlyList<EndorsedPort> ports, IReadOnlyList<EndorsedPort> failed)
+    {
+        var subscribed = ports
+            .Except(failed)
+            .ToList();
+        if (subscribed.Count == 0) return Tr("Steam did not subscribe to anything.");
+
+        string done = Tr("Subscribed on Steam: {1}.", string.Join(", ", subscribed.Select(p => p.Port)));
+        bool installed = subscribed.All(p => result.Items.Any(i => i.Id == p.PortWorkshopId && i.Installed));
+        return installed ? done : done + " " + Tr("Steam is still downloading; press Refresh when it is done.");
+    }
+
+    /// <summary>
+    /// Says why Steam did not subscribe to <paramref name="failed"/> (one reason for all when Steam could not be asked, else one per port)
+    /// and offers to open their workshop pages instead.
+    /// </summary>
+    async Task OfferPagesOfFailed(WorkshopSubscribeResult result, IReadOnlyList<EndorsedPort> failed)
+    {
+        var reasons = result.Problem is { } problem
+            ? [Tr(problem)]
+            : failed.Select(p => p.Port + ": " + Tr(result.Items.FirstOrDefault(i => i.Id == p.PortWorkshopId)?.Problem ?? "Steam gave no answer."));
+        string text = string.Join("\n", reasons) + "\n\n" + Tr("You can subscribe on the Steam workshop page instead.");
+        string open = failed.Count == 1 ? Tr("Open its page") : Tr("Open {1} pages", failed.Count);
+        if (await AskAsync(Tr("Steam could not subscribe"), text, open, Tr("No thanks"))) await OpenPortPages(failed);
+    }
+
+    /// <summary>
+    /// The ports of <see cref="OfferPortsAsync"/> as a table: a header row, then each RE_Kenshi mod beside its port and the port's maintainer.
+    /// </summary>
+    Grid PortTable(IReadOnlyList<ModRow> rows)
+    {
+        var table = new Grid
+        {
+            ColumnDefinitions = new("*,*,Auto"), ColumnSpacing = 16, Margin = new(0, 8),
+            RowDefinitions = new(string.Join(",", Enumerable.Repeat("Auto", rows.Count + 1))),
+        };
+        var line = (Avalonia.Media.IBrush)this.FindResource("PlateRim")!;
+        AddRowLine(table, 0, line);
+        AddCell(table, 0, 0, Tr("RE_Kenshi mod"), header: true);
+        AddCell(table, 0, 1, Tr("Meitou port"), header: true);
+        AddCell(table, 0, 2, Tr("Maintained by"), header: true);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (i < rows.Count - 1) AddRowLine(table, i + 1, line);
+            AddCell(table, i + 1, 0, rows[i].Name, header: false);
+            AddCell(table, i + 1, 1, rows[i].Port!.Port, header: false);
+            AddCell(table, i + 1, 2, rows[i].Port!.Maintainer, header: false);
+        }
+
+        return table;
+    }
+
+    /// <summary>
+    /// A line under row <paramref name="row"/> of <paramref name="table"/>, across its columns.
+    /// </summary>
+    static void AddRowLine(Grid table, int row, Avalonia.Media.IBrush brush)
+    {
+        var line = new Border { BorderBrush = brush, BorderThickness = new(0, 0, 0, 1) };
+        Grid.SetRow(line, row);
+        Grid.SetColumnSpan(line, table.ColumnDefinitions.Count);
+        table.Children.Add(line);
+    }
+
+    /// <summary>
+    /// A wrapped cell of <paramref name="table"/> at <paramref name="row"/>, <paramref name="column"/>: a header muted, a value in medium weight.
+    /// </summary>
+    static void AddCell(Grid table, int row, int column, string text, bool header)
+    {
+        var cell = new TextBlock { Text = text, TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new(0, 5) };
+        if (header) cell.Classes.Add("desc");
+        else cell.FontWeight = Avalonia.Media.FontWeight.Medium;
+
+        Grid.SetRow(cell, row);
+        Grid.SetColumn(cell, column);
+        table.Children.Add(cell);
     }
 
     /// <summary>
@@ -1104,6 +1335,8 @@ public sealed partial class MainWindow : Window
     {
         ShowDependencyProblems();
         QueueBlankingCheck();
+        ShowModDetails();
+        ShowModsSummary();
         if (_checksSuspended || !_modsReady || _toggleSavePending) return;
 
         _toggleSavePending = true;
@@ -1163,14 +1396,48 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Ticks every mod.
+    /// The Select all button's icon: a ticked box.
     /// </summary>
-    void SelectAll_Click(object? sender, RoutedEventArgs e) { foreach (var m in _mods) m.Enabled = true; }
+    static readonly Avalonia.Media.Geometry SelectAllIcon = Avalonia.Media.Geometry.Parse("F0 M0,0 H14 V14 H0 Z M3.5,6 L2.5,7 L6,10.5 L11.5,5 L10.5,4 L6,8.5 Z");
 
     /// <summary>
-    /// Unticks every mod.
+    /// The Select none button's icon: an empty box.
     /// </summary>
-    void SelectNone_Click(object? sender, RoutedEventArgs e) { foreach (var m in _mods) m.Enabled = false; }
+    static readonly Avalonia.Media.Geometry SelectNoneIcon = Avalonia.Media.Geometry.Parse("F0 M0,0 H14 V14 H0 Z M2,2 V12 H12 V2 Z");
+
+    /// <summary>
+    /// Ticks every mod the search shows, or unticks them all when every one is ticked.
+    /// </summary>
+    void SelectToggle_Click(object? sender, RoutedEventArgs e)
+    {
+        bool tick = !AllShownEnabled();
+        foreach (var m in _mods.Where(m => m.IsShown)) m.Enabled = tick;
+    }
+
+    /// <summary>
+    /// Whether the search shows mods and every one of them is ticked.
+    /// </summary>
+    bool AllShownEnabled() => _mods.Any(m => m.IsShown) && _mods.Where(m => m.IsShown).All(m => m.Enabled);
+
+    /// <summary>
+    /// The header's count (the mods, those the search shows, those enabled) and the Select all / Select none button for the shown mods.
+    /// </summary>
+    void ShowModsSummary()
+    {
+        int shown = _mods.Count(m => m.IsShown);
+        int enabled = _mods.Count(m => m.Enabled);
+        string count = shown == _mods.Count
+            ? Tr("{1} mods, {2} enabled", _mods.Count, enabled)
+            : Tr("{1} of {2} mods shown, {3} enabled", shown, _mods.Count, enabled);
+
+        // An inline, as SetText's: the language pass when the window opens would put a plain Text back to its first value.
+        ModCount.Inlines = [new Run(count)];
+
+        bool untick = AllShownEnabled();
+        SetText(SelectToggleText, untick ? "Select none" : "Select all");
+        SelectToggleIcon.Data = untick ? SelectNoneIcon : SelectAllIcon;
+        ToolTip.SetTip(SelectToggle, Tr(untick ? "Untick every mod the search shows" : "Tick every mod the search shows"));
+    }
 
     /// <summary>
     /// Alt+Up / Alt+Down move the selected mods one place, as dragging does.
@@ -1197,12 +1464,13 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// A click on the View button of an RE_Kenshi mod with a suggested code mod opens that mod's Steam workshop page.
+    /// A click on the Get the port button of an RE_Kenshi mod with an endorsed port that is not installed offers that port.
     /// </summary>
-    async void SuggestionPage_Click(object? sender, RoutedEventArgs e)
+    async void GetPort_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is Control { DataContext: ModRow { SuggestionPage: { } page } })
-            await this.Launcher.LaunchUriAsync(page);
+        if (SetupHost.IsVisible || sender is not Control { DataContext: ModRow { PortPage: not null } row }) return;
+
+        await OfferPortsAsync([row]);
     }
 
     /// <summary>
@@ -1215,38 +1483,70 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// A mod selected: its details (description, the dependencies with those not enabled above it, folder).
+    /// A mod selected: its details in the side pane.
     /// </summary>
-    void ModListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    void ModListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e) => ShowModDetails();
+
+    /// <summary>
+    /// The Details button shows or hides the side pane; the choice is kept in <c>launcher.json</c>.
+    /// </summary>
+    void ModDetailsToggle_Click(object? sender, RoutedEventArgs e)
     {
-        if (ModListBox.SelectedItem is not ModRow row)
-        {
-            ModDetails.Text = "";
-            return;
-        }
-        var header = row.Mod.Header;
-        var parts = new List<string>();
-        if (header is { Description.Length: > 0 }) parts.Add(header.Description.ReplaceLineEndings(" "));
-        if (header is { Dependencies.Count: > 0 })
-        {
-            var missing = header.Dependencies.Where(d => !IsAvailableBefore(d, row)).ToList();
-            string notEnabled = missing.Count > 0 ? Tr(" (not enabled above it: {1})", string.Join(", ", missing)) : "";
-            parts.Add(Tr("Needs {1}", string.Join(", ", header.Dependencies)) + notEnabled);
-        }
-        parts.Add(row.Mod.Folder);
-        ModDetails.Text = string.Join(" · ", parts);
+        _config.ModDetailsShown = ModDetailsToggle.IsChecked == true;
+        _config.Save();
+        ShowModDetails();
     }
 
     /// <summary>
-    /// A dependency is met by a core file or by an enabled mod earlier in the list.
+    /// The side pane's width when open: its rule with the margins around it, then the details.
+    /// </summary>
+    const double ModDetailsWidth = 381;
+
+    /// <summary>
+    /// How long the side pane takes to slide open or shut.
+    /// </summary>
+    static readonly TimeSpan ModDetailsSlideTime = TimeSpan.FromMilliseconds(220);
+
+    /// <summary>
+    /// Makes the side pane slide (its width) and fade from now on; set after the first <see cref="ShowModDetails"/>, so the window opens with
+    /// the pane already where it was left.
+    /// </summary>
+    void AnimateModDetails()
+    {
+        var easing = new CubicEaseOut();
+        ModDetailsSlide.Transitions =
+        [
+            new DoubleTransition { Property = WidthProperty, Duration = ModDetailsSlideTime, Easing = easing },
+            new DoubleTransition { Property = OpacityProperty, Duration = ModDetailsSlideTime, Easing = easing },
+        ];
+    }
+
+    /// <summary>
+    /// The side pane: open with the selected mod's details (<see cref="ModDetailsView"/>) while Details is on and a mod is selected, else shut.
+    /// </summary>
+    void ShowModDetails()
+    {
+        var row = _config.ModDetailsShown ? ModListBox.SelectedItem as ModRow : null;
+        ModDetailsSlide.Width = row is null ? 0 : ModDetailsWidth;
+        ModDetailsSlide.Opacity = row is null ? 0 : 1;
+
+        // Shutting, the pane keeps the last mod's details while it slides away.
+        if (row is not null) ModDetails.Content = ModDetailsView.Render(row, dependency => IsAvailableBefore(dependency, row), OpenLink);
+    }
+
+    /// <summary>
+    /// A dependency is met by a core file or by an enabled mod earlier in the list, matched by name as the load order does
+    /// (<see cref="ModList.DependencyName"/>).
     /// </summary>
     bool IsAvailableBefore(string dependency, ModRow row)
     {
-        if (dependency is "gamedata.base" or "Newwworld.mod" or "Dialogue.mod" or "rebirth.mod") return true;
+        string name = ModList.DependencyName(dependency);
+        if (dependency == "gamedata.base" || ModList.CoreModNames.Contains(name)) return true;
+
         foreach (var m in _mods)
         {
             if (m == row) return false;
-            if (m.Enabled && m.Name + ".mod" == dependency) return true;
+            if (m.Enabled && m.Name == name) return true;
         }
         return false;
     }

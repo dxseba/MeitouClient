@@ -47,6 +47,24 @@ public sealed partial class AiSystem
     }
 
     /// <summary>
+    /// Whether the squad's effective leader's current town (its status town, the original's status <c>+0x88</c>,
+    /// <see cref="CharacterCold.StatusTown"/>, as its next update writes it: <see cref="StatusTownAt"/>) is a town of the squad's faction; false
+    /// with no leader or no town. The leader is the one the original's platoon getter <c>FUN_14079aea0</c> gives a loaded platoon,
+    /// <c>getSquadLeader</c> <c>FUN_140792b90</c> (<see cref="PopulationSystem.EffectiveLeader"/>: the leader while it stands, else a member that
+    /// does; the stored leader without a population). The test of <c>CannibalRetreatFromRaid</c>'s start and finish, and the town the retreat's own
+    /// Go Home Town goal reads, so the two agree at a town's edge.
+    /// </summary>
+    bool LeaderInOwnTown(World world, Squad squad)
+    {
+        var table = world.Characters;
+        var lead = world.SystemOf<PopulationSystem>()?.EffectiveLeader(world, squad) ?? squad.Leader;
+        if (squad.Faction < 0 || !table.TryResolveNext(lead, out int s) || table.Cold(s) is not { } leader) return false;
+
+        var town = StatusTownAt(data, world, table.Next[s].Position, leader.StatusTown);
+        return !town.IsNone && town.Owner(world, data) == squad.Faction;
+    }
+
+    /// <summary>
     /// Whether a member of the squad carries someone.
     /// </summary>
     static bool AnyCarrying(World world, Squad squad)
@@ -102,9 +120,9 @@ public sealed partial class AiSystem
     /// </summary>
     internal bool CaptiveCanStart(World world, Squad squad, Blackboard board, AiPackage package, PackageClass kind) => kind switch
     {
-        // CannibalRetreatFromRaid slot 12 (FUN_140288630): not while the leader is in a town of its faction; then when a member carries someone.
-        PackageClass.CannibalRetreat => world.Characters.IsAlive(squad.Leader)
-            && LeaderTown(world, squad).Faction != squad.Faction && AnyCarrying(world, squad),
+        // CannibalRetreatFromRaid slot 12 (FUN_140288630, Verified): not while the effective leader is in a town of its faction (status +0x88);
+        // then when a member carries someone. No test of the leader's life.
+        PackageClass.CannibalRetreat => !LeaderInOwnTown(world, squad) && AnyCarrying(world, squad),
 
         // Package_CannibalsAtHome slot 12 (FUN_140291ef0): in its home town, or in a town of a faction not hostile to it that has a bar (town vfunc
         // 0x2d0 with BD_BAR).
@@ -125,8 +143,10 @@ public sealed partial class AiSystem
     /// </summary>
     internal bool CaptiveFinished(World world, Squad squad, Blackboard board, AiPackage package, PackageClass kind) => kind switch
     {
-        // Slot 13 (FUN_140288740): the leader is in a town of its faction.
-        PackageClass.CannibalRetreat => LeaderTown(world, squad).Faction == squad.Faction || !world.Characters.IsAlive(squad.Leader),
+        // Slot 13 (FUN_140288740, Verified by disassembly): the effective leader's current town is of the platoon's faction; no distance, home,
+        // time or life test, and false without a leader or a town (its scan of the members for a carrier cannot change that). So a wiped raid
+        // keeps its retreat, as the original does.
+        PackageClass.CannibalRetreat => LeaderInOwnTown(world, squad),
         PackageClass.CannibalsAtHome => !CaptiveCanStart(world, squad, board, package, kind),
 
         // Slot 13 (FUN_140288a00): more slaves than 3 x the squad's members, or nothing left to gather.
@@ -140,9 +160,7 @@ public sealed partial class AiSystem
 
     /// <summary>
     /// The activation: a cannibal retreat (1) goes to the squad's home town, else the nearest town of its faction (<c>FUN_140288580</c>); the
-    /// nearest-nest kind (25) always to the nearest (<c>FUN_140289b50</c>). Slave shipping goes to the nearest slave camp of a faction not hostile to
-    /// the squad (<c>FUN_1402873a0</c>); the anywhere kind (28) takes a nearer town (a TOWN within 0.7 x that squared distance, <c>FUN_140289f90</c>)
-    /// only when its flag bit 10 is set, whose meaning is <b>Unknown</b>: Meitou takes the camp.
+    /// nearest-nest kind (25) always to the nearest (<c>FUN_140289b50</c>). Slave shipping goes to <see cref="SlaveShipping.Town"/>.
     /// </summary>
     internal void CaptiveStarted(World world, Squad squad, Blackboard board, AiPackage package, PackageClass kind)
     {
@@ -155,25 +173,8 @@ public sealed partial class AiSystem
                 board.MissionTown = package.Signal == 1 && board.Town >= 0 ? board.Town : NearestTownOf(at, squad.Faction);
                 break;
             case PackageClass.SlaverShipping:
-                {
-                    int best = -1;
-                    float bestD = float.MaxValue;
-                    foreach (var site in data.Sites)
-                    {
-                        if (site.Town.Type != TownType.SlaveCamp || site.Index >= data.SiteFactions.Count) continue;
-
-                        int f = data.SiteFactions[site.Index];
-                        if (f >= 0 && squad.Faction >= 0 && data.Relations.Contains(f) && data.Relations.Contains(squad.Faction)
-                            && data.Relations.IsHostile(f, squad.Faction))
-                            continue;
-
-                        float d = Vector2.DistanceSquared(Flat(at), Flat(site.Position));
-                        if (d < bestD) (best, bestD) = (site.Index, d);
-                    }
-
-                    board.MissionTown = best;
-                    break;
-                }
+                board.MissionTown = SlaveShipping.Town(data, at, squad.Faction, package.Signal);
+                break;
         }
 
         // The travel goals (TRAVEL_TO_TARGET_TOWN_FAST) walk to the running package's destination.

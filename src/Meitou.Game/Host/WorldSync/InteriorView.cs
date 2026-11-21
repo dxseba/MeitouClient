@@ -46,6 +46,10 @@ sealed class InteriorView(GameHost host)
     /// </summary>
     internal readonly HashSet<CharacterId> HiddenIndoors = [];
     /// <summary>
+    /// The buildings last handed to the simulation as shown (<see cref="WorldSession.ShownInteriors"/>), a new set each time the view changes.
+    /// </summary>
+    HashSet<string> _published = new(StringComparer.Ordinal);
+    /// <summary>
     /// The followed character the viewed floor follows (game: PI+0x270): the viewed floor follows that character's floor changes only.
     /// </summary>
     CharacterId? _floorFollow;
@@ -111,10 +115,14 @@ sealed class InteriorView(GameHost host)
                 _viewed.Add(building);
         host.ApplyForcedInteriorView(objects);
         HoldLeftOpen(objects);
+        PublishShown();
         objects.InteriorView = InteriorFloors;
         objects.CutIntoViewed = host.Config.FixPartsInBuildings;
+        objects.CutRainOverViewed = host.Config.FixRainInBuildings;
+        objects.KeepHeldGround = host.Config.FixRuinGround;
         objects.HiddenItems = host.GroundItemSync.HiddenGroundKeys;
         host.Session.Camera.Floors ??= CameraFloor;
+        host.Session.Camera.Features ??= CameraFeature;
         foreach (var c in characters)
         {
             var at = host.TrackedPosition(c);
@@ -194,6 +202,19 @@ sealed class InteriorView(GameHost host)
     }
 
     /// <summary>
+    /// Hands the buildings in the view this frame to the simulation (<see cref="WorldSession.ShownInteriors"/>) when they changed: a new set, as the
+    /// ticks may run beside the frame.
+    /// </summary>
+    void PublishShown()
+    {
+        if (_published.Count == InteriorFloors.Count && InteriorFloors.Keys.All(_published.Contains) && host.Session.ShownInteriors == _published)
+            return;
+
+        _published = new HashSet<string>(InteriorFloors.Keys, StringComparer.Ordinal);
+        host.Session.ShownInteriors = _published;
+    }
+
+    /// <summary>
     /// While the camera follows a character: a new follow sets the viewed floor to the character's floor, and so does a change of that floor later; a
     /// PageUp / PageDown in between stays until then (game: FUN_1407f5400 and the per-frame FUN_140801630). Outside a building a character is on
     /// floor 0.
@@ -218,6 +239,11 @@ sealed class InteriorView(GameHost host)
     /// panning lets go of it.
     /// </summary>
     float? CameraFloor(float x, float z) => host.ActiveObjects?.FloorHeightAt(x, z, _cameraFloorOf ??= key => InteriorFloors.GetValueOrDefault(key));
+
+    /// <summary>
+    /// The highest map feature surface at (x, z) at or under a height, or null: the camera's group-14 ray (docs/formats/camera.md "Height").
+    /// </summary>
+    float? CameraFeature(float x, float z, float top) => host.ActiveObjects?.FeatureHeightBelow(x, z, top);
 
     /// <summary>
     /// Where a click ray first comes down onto a walkable navmesh surface clear of the terrain (a wall top, a ramp, a deck) within <paramref

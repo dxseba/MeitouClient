@@ -63,7 +63,14 @@ public struct GeometryRecord
     /// For a character: its part's diffuse map and head map in the bindless table (0: none), and its tint (RGBA8; alpha 0: a hair, whose map is a
     /// brightness).
     /// </summary>
-    public uint CharacterDiffuse, CharacterHead, CharacterTint, Pad;
+    public uint CharacterDiffuse, CharacterHead, CharacterTint;
+
+    /// <summary>
+    /// Bit 0: an object lit as an interior (<c>WorldObjectRenderer.RayInterior</c>): a ray's hit on it takes the probes' light in full, none of the
+    /// sky's. Bit 1: the floor view hides it (<c>WorldObjectRenderer.RayHidden</c>): what lies under it is a room seen through the cut
+    /// (<see cref="RoomMaskPass"/>).
+    /// </summary>
+    public uint Interior;
 
     /// <summary>
     /// The record's size in bytes.
@@ -89,9 +96,11 @@ internal sealed unsafe class GiScene : IDisposable
     #region Settings
 
     /// <summary>
-    /// Most instances in the top-level structure, and most geometry records.
+    /// Most instances in the top-level structure, and most geometry records. At 16384 a stand of bushes (save trees-shadows: 12000 to 15000 small
+    /// foliage casters in reach and over 3 pixels, 1600 to 1900 trees) overflowed the foliage's share, and the bushes left out, the smallest on screen,
+    /// changed as the eye moved: their shadows came and went (the user's "unstable blobs" on and round foliage).
     /// </summary>
-    public const int MaxInstances = 16384, MaxRecords = 65536;
+    public const int MaxInstances = 32768, MaxRecords = 131072;
 
     /// <summary>
     /// The objects' range the probes need (<see cref="Range"/>'s default; the traced sun takes it to the shadows' range).
@@ -353,6 +362,16 @@ internal sealed unsafe class GiScene : IDisposable
     /// The mask pass's <c>grass</c> constants: the reach (0: no grass this frame), the tallest blade, the blind range and its fade.
     /// </summary>
     public Vector4 GrassRayParams => Casters && _grass is not null ? _grass.RayParams : default;
+
+    /// <summary>
+    /// Whether a traced blade may stand within <paramref name="radius"/> of <paramref name="centre"/> (<see cref="TracedGrass.Within"/>).
+    /// </summary>
+    public bool GrassWithin(Vector3 centre, float radius) => Casters && _grass is not null && _grass.Within(centre, radius);
+
+    /// <summary>
+    /// The traced blades' map (<see cref="TracedGrass.Map"/>); null without traced grass.
+    /// </summary>
+    public TracedGrass.MapView? GrassMap => Casters && _grass is not null ? _grass.Map : null;
 
     /// <summary>
     /// What the probes leave out is in the scene: the small foliage, the grass and the objects' cut-out maps.
@@ -745,6 +764,7 @@ internal sealed unsafe class GiScene : IDisposable
             var record = entry.Records[k];
             record.Texture = objects.RayTexture(inst.Materials!, entry.Parts[k]);
             record.Emitter = lamps?.Emitter(inst.Placed.PlacementId) ?? 0;
+            record.Interior = (objects.RayInterior(inst) ? 1u : 0u) | (objects.RayHidden(inst) ? 2u : 0u);
             if (Casters) (record.SunMap, record.SunCut) = objects.RayCut(inst.Materials!, entry.Parts[k]);
             cut |= record.SunCut > 0;
             _records.Add(record);

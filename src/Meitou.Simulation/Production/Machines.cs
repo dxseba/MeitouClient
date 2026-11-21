@@ -30,6 +30,17 @@ public sealed class InputSlot(RecipeInput recipe)
     /// The level taken from items, one item = 1 (the save's <c>consumption amount-&lt;k&gt;</c>).
     /// </summary>
     public float Level { get; set; }
+
+    /// <summary>
+    /// A crafting bench's section the bound craft takes nothing from (<b>Verified</b>, <c>CraftingBuilding::vfunc_182</c> <c>FUN_1402bb470</c>):
+    /// the original clears its item and disables it while it is empty, so it takes no item.
+    /// </summary>
+    public bool Idle { get; set; }
+
+    /// <summary>
+    /// Whether the section takes units of <paramref name="record"/>: its item, unless it is <see cref="Idle"/>.
+    /// </summary>
+    public bool Takes(string record) => !Idle && Item == record;
 }
 
 /// <summary>
@@ -214,6 +225,11 @@ public sealed class Machine : IPowerDraw
     /// </summary>
     public System.Numerics.Vector3 Position { get; init; }
     /// <summary>
+    /// The items the machine held as saved once its saved inventory was read (null: none read); a save that finds them unchanged leaves that
+    /// record as it was (<c>Saving/MachineSave</c>).
+    /// </summary>
+    public IReadOnlyList<Meitou.Data.Save.SaveItem>? LoadedItems { get; set; }
+    /// <summary>
     /// The recipe inputs, by section.
     /// </summary>
     public InputSlot[] Inputs { get; init; } = [];
@@ -250,6 +266,20 @@ public sealed class Machine : IPowerDraw
     /// full (blocked: the planner's states 63 / 64 read it), 0 nothing to work with. Not saved (the original saves no such key). Hashed.
     /// </summary>
     public byte Status { get; set; }
+
+    /// <summary>
+    /// The inputs row 94's finder walks, in list order (<c>FUN_14059d9b0</c>, <b>Verified</b>): those that rate and hold none of their item (slot
+    /// <c>0x560</c>, <c>FUN_140299d00</c>), else, with none such, those with room (slot <c>0x568</c>, <c>FUN_140299b60</c>). An idle bench section
+    /// has no item (<see cref="InputSlot.Idle"/>) and is left out.
+    /// </summary>
+    public IEnumerable<InputSlot> FillOrder
+    {
+        get
+        {
+            var empty = Inputs.Where(i => !i.Idle && i.Rate > 0 && i.Count == 0).ToList();
+            return empty.Count > 0 ? empty : Inputs.Where(i => !i.Idle && i.Count < i.Recipe.Capacity);
+        }
+    }
 
     /// <summary>
     /// <c>machineHasEmptyInputs</c> (slot 149 <c>FUN_140298b70</c>, <b>Verified</b>): some rated input holds no item and its level is spent (0.001
@@ -419,6 +449,10 @@ public sealed class Machine : IPowerDraw
     /// An item furnace's grid metal (<see cref="ProductionSystem.FurnaceMetal"/>), for its panel; derived each tick, not saved, not hashed.
     /// </summary>
     public float Metal { get; set; }
+    /// <summary>
+    /// The view last published and the values it was made from (<see cref="MachineRegistry.Published"/>); not saved, not hashed.
+    /// </summary>
+    internal MachineViewCache View { get; } = new();
 
     /// <summary>
     /// Adds the machine's state to the world's state hash.
@@ -492,9 +526,9 @@ public sealed class MachineRegistry
     /// </summary>
     readonly Dictionary<string, Machine> _bySite = new(StringComparer.Ordinal);
     /// <summary>
-    /// The cache of <see cref="Published"/> (null: made again on the next call).
+    /// The machines' views last published, kept while none of them changed.
     /// </summary>
-    IReadOnlyList<MachineSnapshot>? _published;
+    IReadOnlyList<MachineSnapshot> _published = [];
 
     /// <summary>
     /// The number of machines.
@@ -509,18 +543,25 @@ public sealed class MachineRegistry
     /// </summary>
     public Machine? Find(string site) => _bySite.GetValueOrDefault(site);
     /// <summary>
-    /// Bumped on every change the host shows (items, progress, status).
+    /// Bumped on every change the host shows (items, progress, status): by <see cref="Touch"/> and by a <see cref="Published"/> whose views changed.
     /// </summary>
     public long Version { get; private set; }
+    /// <summary>
+    /// Bumped every tick the machines work (<see cref="ProductionSystem.SlowWorld"/>): the views that also read the characters at the machines (the
+    /// smiths, the research) refresh on it as well as on <see cref="Version"/>.
+    /// </summary>
+    public long Worked { get; private set; }
 
     /// <summary>
-    /// Notes a change the host shows: bumps <see cref="Version"/> and drops the published views.
+    /// Notes a change the host shows: bumps <see cref="Version"/>. The machines' views need no touch (each publish compares them value by value);
+    /// the views made from other state too read the version.
     /// </summary>
-    public void Touch()
-    {
-        Version++;
-        _published = null;
-    }
+    public void Touch() => Version++;
+
+    /// <summary>
+    /// Notes a tick of the machines' work: bumps <see cref="Worked"/>.
+    /// </summary>
+    internal void Work() => Worked++;
 
     /// <summary>
     /// Adds a machine.
@@ -577,7 +618,38 @@ public sealed class MachineRegistry
     }
 
     /// <summary>
-    /// The machines as the host shows them (cached until the next change).
+    /// The machines as the host shows them: each machine's view is made again only when a value it shows changed
+    /// (<see cref="MachineViewCache"/>), and the list and <see cref="Version"/> only when a view or the set of machines changed.
     /// </summary>
-    internal IReadOnlyList<MachineSnapshot> Published(ItemFactory items) => _published ??= [.. _all.Select(m => MachineSnapshot.Of(m, items))];
+    internal IReadOnlyList<MachineSnapshot> Published(ItemFactory items)
+    {
+        MachineSnapshot[]? fresh = null;
+
+        for (int i = 0; i < _all.Count; i++)
+        {
+            var view = _all[i].View.ViewOf(_all[i], items);
+            if (fresh is null && i < _published.Count && ReferenceEquals(view, _published[i])) continue;
+            fresh ??= Started(i);
+            fresh[i] = view;
+        }
+
+        if (fresh is null)
+        {
+            if (_published.Count == _all.Count) return _published;
+            fresh = Started(_all.Count);
+        }
+
+        Version++;
+        return _published = fresh;
+    }
+
+    /// <summary>
+    /// A new view list for every machine, its first <paramref name="kept"/> views the published ones.
+    /// </summary>
+    MachineSnapshot[] Started(int kept)
+    {
+        var list = new MachineSnapshot[_all.Count];
+        for (int i = 0; i < kept; i++) list[i] = _published[i];
+        return list;
+    }
 }

@@ -406,9 +406,15 @@ public sealed class CharacterAppearance
     public Dictionary<string, AttachmentPoint> AttachmentPoints { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Pose weights from the body file, keyed by pose name (only non-zero values).
+    /// Pose weights from the body file, keyed by pose name (only non-zero values), with the code mods' (<see cref="ModLooks.Extras"/>) set over
+    /// them.
     /// </summary>
     public Dictionary<string, float> PoseWeights { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The colour tints code mods lay over the skin (<see cref="ModLooks.Extras"/>, docs/modding.md "Look extras"); none without them.
+    /// </summary>
+    public IReadOnlyList<LookTint> Tints { get; private set; } = [];
 
     /// <summary>
     /// What the build could not resolve or chose to leave out, as readable lines.
@@ -488,6 +494,7 @@ public sealed class CharacterAppearance
         var result = CreateResult(db, race, female, body, bodyFile, loadout, character, faction, random, notes);
         result.Notes.AddRange(notes);
         AddPoseWeights(result, body);
+        if (ModLooks.HasExtras && body is not null) AddExtras(result, body, race, female);
 
         var (items, materials, colours) = CollectItems(db, options, character, loadout, random);
         AddEquipped(db, result, options, race, items);
@@ -638,6 +645,24 @@ public sealed class CharacterAppearance
             SkinToneParameter = body?.SkinTone is { } tone ? Vector3.One - tone : Vector3.Zero,
             HairColour = HairColourOf(db, race, body, random),
         };
+    }
+
+    /// <summary>
+    /// The code mods' extras for a person's look (docs/modding.md "Look extras"): their pose weights set over the body's (0 takes one off), and
+    /// their tints.
+    /// </summary>
+    static void AddExtras(CharacterAppearance result, AppearanceFile body, GameRecord race, bool female)
+    {
+        var context = new LookExtrasContext(body.Record, race, female, result.Head);
+        if (ModLooks.Extras(context) is not { } extras) return;
+
+        foreach (var (name, weight) in extras.PoseWeights)
+        {
+            if (weight != 0) result.PoseWeights[name] = weight;
+            else result.PoseWeights.Remove(name);
+        }
+
+        result.Tints = extras.Tints;
     }
 
     /// <summary>
@@ -840,13 +865,14 @@ public sealed class CharacterAppearance
 
     /// <summary>
     /// Places the weapons and crossbows. A fight draws the first WEAPON of the hip or of the back, by the arms (CharacterAssembly.MakeFighter,
-    /// Fighter.Weapon): each gets its sheathed and drawn meshes, the renderer shows one set.
+    /// Fighter.Weapon): each gets its sheathed and drawn meshes, the renderer shows one set. The back one may hang at <c>back2</c> (row 1 of the
+    /// section) with no weapon above it (#967: drawn invisible).
     /// </summary>
     static void AddWeapons(
         CharacterAppearance result, bool female, List<(GameRecord Weapon, string Point, GameRecord? Model)> weapons, CharacterOptions options)
     {
         int hipInHand = weapons.FindIndex(w => w.Weapon.Type == FcsRecordType.Weapon && w.Point == "hip");
-        int backInHand = weapons.FindIndex(w => w.Weapon.Type == FcsRecordType.Weapon && w.Point == "back");
+        int backInHand = weapons.FindIndex(w => w.Weapon.Type == FcsRecordType.Weapon && w.Point is "back" or "back2");
         int bowInHand = weapons.FindIndex(w => w.Weapon.Type == FcsRecordType.Crossbow);
         for (int i = 0; i < weapons.Count; i++)
             if (weapons[i].Weapon.Type == FcsRecordType.Crossbow)
@@ -1169,6 +1195,7 @@ public sealed class CharacterAppearance
             Shape = Shape,
             Beard = Beard,
             SkinToneParameter = SkinToneParameter,
+            Tints = Tints,
             HairColour = HairColour,
             HeadOnly = true,
         };
@@ -1208,6 +1235,7 @@ public sealed class CharacterAppearance
             Shape = Shape,
             Beard = Beard,
             SkinToneParameter = SkinToneParameter,
+            Tints = Tints,
             HairColour = HairColour,
             HiddenLimbs = HiddenLimbs,
             HiddenParts = HiddenParts,

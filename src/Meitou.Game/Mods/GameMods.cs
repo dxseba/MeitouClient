@@ -47,9 +47,15 @@ sealed class GameMods(GameHost host)
     /// </summary>
     internal void StartWarmup()
     {
-        if (ModHost.EnabledCodeMods(host.Install).Count > 0) _warmupAfterMods = true;
+        if (CodeMods().Enabled.Count > 0) _warmupAfterMods = true;
         else JitWarmup.Start();
     }
+
+    /// <summary>
+    /// The code mods on disk (<see cref="ModHost.CodeMods(Content.GameInstall)"/>): the data phase's reading when the session has one, so the
+    /// folders are scanned once.
+    /// </summary>
+    (List<Content.ModInfo> Enabled, List<Content.ModInfo> Disabled) CodeMods() => host.DataPhase?.CodeMods() ?? ModHost.CodeMods(host.Install);
 
     /// <summary>
     /// Starts the JIT warm-up held back for the code mods, once they are initialized.
@@ -58,25 +64,82 @@ sealed class GameMods(GameHost host)
     {
         if (!_warmupAfterMods) return;
         _warmupAfterMods = false;
-        JitWarmup.Start();
+        JitWarmup.Start(late: true);
     }
 
     /// <summary>
-    /// Loads the enabled code mods and runs their initialization; on the boot worker.
+    /// Loads the enabled code mods and runs their initialization; on the boot worker. Mods whose code the data phase loaded already
+    /// (<see cref="ModDataPhase"/>) are initialized from there.
     /// </summary>
     internal void StartMods(Data.GameDatabase db, PopulationData data)
     {
         // The world's body options were made from the config before this, so settings taken in from a mod reach them here.
         _builtInNotices = BuiltInMods.Adopt(host.Config, host.Install);
         (data.BodyOptions.SquadXp, data.BodyOptions.OthersXp) = (host.Config.SquadXp, host.Config.OthersXp);
+        data.BodyOptions.SquadSkillXp = Meitou.Game.Settings.SkillXp.Rates(host.Config.SquadSkillXp);
 
-        var (enabled, disabled) = ModHost.CodeMods(host.Install);
+        if (host.DataPhase?.Mods is { } prepared) StartPrepared(prepared, host.DataPhase.Enabled, db, data);
+        else LoadMods(db, data);
+
+        // Every skill is added now: a weapon naming one that is not uses its category's, which the log says once (docs/modding.md "Weapon types").
+        Simulation.Bodies.ModSkills.WarnUnknown(db);
+    }
+
+    /// <summary>
+    /// Loads and initializes the enabled code mods when no data phase loaded their code (<see cref="StartPrepared"/> starts those).
+    /// </summary>
+    void LoadMods(Data.GameDatabase db, PopulationData data)
+    {
+        var (enabled, disabled) = CodeMods();
         BuiltInMods.SkipCovered(enabled, disabled);
         if (enabled.Count == 0) return;
-        Console.WriteLine($"mods      {enabled.Count} code mod(s) enabled; Harmony {ModHost.HarmonyVersion}, code-mod API {ModApi.Version}");
-        Mods = ModHost.Load(new ModHostOptions(enabled, db, data, () => host.Session?.World,
-            id => host.Config.ModSettings.TryGetValue(id, out var saved) ? saved : null, RunningVersion(), disabled));
+        LogEnabled(enabled.Count);
+        Mods = ModHost.Load(Options(enabled, db, data, disabled));
+
+        // No mod was found with a data phase, so an entry that is one anyway has it where the scan cannot see it.
+        foreach (var mod in Mods.Mods.Where(m => m.Instance is IModDataPhase)) ModHost.NoteUnscannedDataPhase(mod);
+
+        KeepModSettings(Mods);
     }
+
+    /// <summary>
+    /// Initializes the mods the data phase loaded (<see cref="ModHost.Start"/>).
+    /// </summary>
+    void StartPrepared(ModHost prepared, IReadOnlyList<Content.ModInfo> enabled, Data.GameDatabase db, PopulationData data)
+    {
+        if (enabled.Count == 0) return;
+        LogEnabled(enabled.Count);
+        prepared.Start(Options(enabled, db, data));
+        Mods = prepared;
+        KeepModSettings(prepared);
+    }
+
+    /// <summary>
+    /// Keeps a value a mod sets itself (ModSetting.Set, Reset) as the page's are, on either start path; the page's own change is kept twice, the
+    /// same value.
+    /// </summary>
+    void KeepModSettings(ModHost mods)
+    {
+        foreach (var group in mods.Settings) group.Changed += host.Config.KeepModSetting;
+    }
+
+    /// <summary>
+    /// The log line naming how many code mods start.
+    /// </summary>
+    static void LogEnabled(int count) =>
+        Console.WriteLine($"mods      {count} code mod(s) enabled; Harmony {ModHost.HarmonyVersion}, code-mod API {ModApi.Version}");
+
+    /// <summary>
+    /// What the mods are loaded or initialized with: the data, the population, the running world and the player's saved settings.
+    /// </summary>
+    ModHostOptions Options(IReadOnlyList<Content.ModInfo> enabled, Data.GameDatabase db, PopulationData data,
+        IReadOnlyList<Content.ModInfo>? disabled = null) =>
+        new(enabled, db, data, () => host.Session?.World, SavedSettings, RunningVersion(), disabled);
+
+    /// <summary>
+    /// The player's saved settings of a mod by its id, or null.
+    /// </summary>
+    IReadOnlyDictionary<string, string>? SavedSettings(string id) => host.Config.ModSettings.TryGetValue(id, out var saved) ? saved : null;
 
     /// <summary>
     /// The mods' interface extensions and their load notices, for a new interface.
@@ -85,7 +148,7 @@ sealed class GameMods(GameHost host)
     {
         foreach (var notice in _builtInNotices) ui.Notice(notice);
         if (Mods is null) return;
-        Mods.RegisterUi(ui.RegisterUiExtension);
+        Mods.RegisterUi((extension, folder) => ui.RegisterUiExtension(extension, folder));
         if (Mods.ArrangesFactionList) ui.FactionWindow.ArrangeList = Mods.ArrangeFactionList;
         foreach (var notice in Mods.Notices) ui.Notice(notice, true);
     }
@@ -111,10 +174,24 @@ sealed class GameMods(GameHost host)
     }
 
     /// <summary>
+    /// Once a frame: a notice for each mod system the world stopped after a fault (docs/modding.md "Tick systems") and one for each mod that
+    /// failed anywhere as built for another version of the game (<see cref="Content.CodeModFaults.Tell"/>).
+    /// </summary>
+    internal void UpdateModFaults()
+    {
+        if (Mods is null) return;
+
+        while (Content.CodeModFaults.TryTakeNotice(out var outdated)) Notice(outdated);
+        if (host.Session?.World is not { } world) return;
+
+        while (world.TryTakeModFaultNotice(out var notice)) Notice(notice);
+    }
+
+    /// <summary>
     /// This build's nearest game tag (<c>v*</c>, Meitou.Game.csproj) as a version for <c>gameVersion</c> ranges; null for a build without one (no git
     /// history), which passes every range.
     /// </summary>
-    static Content.CodeModVersion? RunningVersion() =>
+    internal static Content.CodeModVersion? RunningVersion() =>
         Content.CodeModVersion.TryParse(BuildVersion.Tag.TrimStart('v'), out var version) ? version : null;
 
     /// <summary>
@@ -173,8 +250,10 @@ sealed class GameMods(GameHost host)
     internal void RestoreModData(World world, Data.Save.SaveGame save) => Mods?.RestoreSaveData(world, save.ModData);
 
     /// <summary>
-    /// The squads of the world just loaded that a code mod made autonomous, when that mod is not running now (not installed, refused or failed to
-    /// start), go back to the player (<see cref="Simulation.Ai.SquadAutonomy.DropUnowned"/>), with a notice; between ticks, before the first.
+    /// The squads of the world just loaded that a code mod made autonomous or kept out of the faction size count, when that mod is not running now
+    /// (not installed, refused or failed to start), go back to the player (<see cref="Simulation.Ai.SquadAutonomy.DropUnowned"/>) and count again
+    /// (<see cref="Simulation.Factions.SquadManagement.DropUnownedUncounted"/>), and lose the shops, purses and sleep it gave them, each with a
+    /// notice; between ticks, before the first.
     /// </summary>
     internal void DropUnownedAutonomy(World world)
     {
@@ -182,11 +261,63 @@ sealed class GameMods(GameHost host)
             .Select(m => m.Manifest.Id)
             .ToHashSet(StringComparer.Ordinal);
         int dropped = Simulation.Ai.SquadAutonomy.DropUnowned(world, running.Contains);
-        if (dropped == 0) return;
+        if (dropped > 0) Notice($"{dropped} squad(s) run by a mod that is not loaded are yours again.");
 
-        string line = $"{dropped} squad(s) run by a mod that is not loaded are yours again.";
+        int counted = Simulation.Factions.SquadManagement.DropUnownedUncounted(world, running.Contains);
+        if (counted > 0) Notice($"{counted} squad(s) a mod that is not loaded kept out of your faction size count are counted again.");
+
+        int shops = Simulation.Trading.TradeSystem.DropUnownedShops(world, running.Contains, out int grounded);
+        if (shops > 0) Notice(ShopsClosed(shops, grounded));
+
+        int purses = Simulation.Factions.SquadManagement.DropUnownedPurses(world, running.Contains);
+        if (purses > 0) Notice($"{purses} squad purse(s) of a mod that is not loaded went into your money.");
+
+        int woken = Simulation.Factions.SquadManagement.DropUnownedDormant(world, running.Contains);
+        if (woken > 0) Notice($"{woken} squad(s) a mod that is not loaded put to sleep are awake again.");
+    }
+
+    /// <summary>
+    /// The notice for the shops closed at a load: their goods went to the squads' members, and what did not fit onto the ground.
+    /// </summary>
+    static string ShopsClosed(int shops, int dropped) => dropped == 0
+        ? $"{shops} shop(s) a mod that is not loaded gave your squads are closed; their goods went to the squads' members."
+        : $"{shops} shop(s) a mod that is not loaded gave your squads are closed; their goods went to the squads' members where they fit, "
+            + $"and {dropped} stack(s) lie on the ground by the squads.";
+
+    /// <summary>
+    /// Shows a line about the mods to the player and in the console.
+    /// </summary>
+    void Notice(string line)
+    {
         Console.WriteLine($"mods      {line}");
         host.Player.Notice(line, true);
+    }
+
+    /// <summary>
+    /// The mods' key actions, in load order (none without code mods), for the bindings (<see cref="GameHost.UseSavedBindings"/>).
+    /// </summary>
+    internal IReadOnlyList<Game.Host.Input.ModKeyAction> KeyActions => Mods?.KeyActions ?? [];
+
+    /// <summary>
+    /// Once a control tick on the host's thread: each mod key action's held state, and its press for each one pressed this tick (docs/modding.md
+    /// "Key actions"), with the snapshot on screen, the selection and the command queue; none over the title or a loading cover.
+    /// </summary>
+    internal void PressKeyActions(Game.Host.Input.ActionState actions)
+    {
+        var keyActions = KeyActions;
+        if (keyActions.Count == 0) return;
+
+        bool playing = host.Player is { TitleOpen: false } && !host.Covered;
+        Game.Host.Input.ModKeyContext? context = null;
+        foreach (var action in keyActions)
+        {
+            action.Held = playing && actions.Held(action.Action);
+            if (!playing || !actions.Pressed(action.Action)) continue;
+
+            context ??= new Game.Host.Input.ModKeyContext(host.Session.CurrentSnapshot, host.Player.SelectedIds(), host.Session.World.Tick,
+                host.Session.World.Commands.Enqueue);
+            action.Press(context);
+        }
     }
 
     /// <summary>
@@ -231,6 +362,7 @@ sealed class GameMods(GameHost host)
         catch (Exception e)
         {
             Console.Error.WriteLine($"mod       {command.Owner}: debug command '{command.Label}' failed: {e}");
+            Content.CodeModFaults.Tell(command.Owner, e);
             return $"{command.Owner}: {e.GetBaseException().Message}";
         }
     }

@@ -31,11 +31,6 @@ public static class ContainerAccess
     public const float ContainerReach = 20;
 
     /// <summary>
-    /// The <see cref="TaskRequest.Detail"/> of a walk to a container that only walks there (the hint to hold Alt was shown).
-    /// </summary>
-    internal static readonly object ContainerWalk = new();
-
-    /// <summary>
     /// How far above or below a container a character may stand to open or use it (engine choice: a storey is about 66).
     /// </summary>
     public const float ContainerFloorSlack = 20;
@@ -60,12 +55,12 @@ public static class ContainerAccess
         bool locked = fixture.Lock is { EffectivelyLocked: true };
 
         // A locked container not the player's, an unowned one too, is picked (76) with Alt (the original's FUN_1407fc6e0 tests only the player's
-        // ownership, FUN_140546dd0); the rest is row 3, a walk to it.
-        var row = locked && !own && order.Alt ? Meitou.Data.Gameplay.Ai.TaskType.PickLock : Meitou.Data.Gameplay.Ai.TaskType.Pickup;
+        // ownership, FUN_140546dd0); the rest is 26 Loot (the original's container order), or a 29 walk to it.
+        var row = locked && !own && order.Alt ? Meitou.Data.Gameplay.Ai.TaskType.PickLock : Meitou.Data.Gameplay.Ai.TaskType.LootTarget;
         foreach (var id in order.Characters.Count > 0 ? order.Characters : world.Player.Selection.ToArray())
         {
             if (!table.TryResolveNext(id, out int s)
-                    || table.Cold(s) is not { IsPlayer: true, Medical.Incapacitated: false, Inventory: not null, IsImprisoned: false } c
+                    || table.Cold(s) is not { Medical.Incapacitated: false, Inventory: not null, IsImprisoned: false } c
                             || !c.CarriedBy.IsNone
                 || !TaskStart.Eligible(world, c, row)) continue;
             float d = Vector2.Distance(Flat(table.Next[s].Position), Flat(fixture.Position));
@@ -83,7 +78,7 @@ public static class ContainerAccess
 
             // Without Alt: the hint and a walk to it.
             if (!order.Alt) world.Post("Hold down the ALT key to pick the lock.");
-            PlayerOrders.Give(world, best, ContainerOrder(owner, row, fixture, walkOnly: !order.Alt), order.Queued);
+            PlayerOrders.Give(world, best, ContainerOrder(world, owner, row, fixture, walkOnly: !order.Alt), order.Queued);
             return;
         }
         if (fixture.Function == Meitou.Data.World.TownBuildings.ShopFunction && !order.Alt && theirs)
@@ -91,17 +86,20 @@ public static class ContainerAccess
             // Another faction's BF_SHOP container (9) without Alt: the original's hint and a move (FUN_1407fc6e0); with Alt (the menu's Loot) the
             // walker steals from it. Its other containers, a shop's stock ones too, open without Alt (#784).
             world.Post("Hold down the ALT key to steal items");
-            PlayerOrders.Give(world, best, ContainerOrder(owner, row, fixture, walkOnly: true), order.Queued);
+            PlayerOrders.Give(world, best, ContainerOrder(world, owner, row, fixture, walkOnly: true), order.Queued);
             return;
         }
-        PlayerOrders.Give(world, best, ContainerOrder(owner, row, fixture, walkOnly: false), order.Queued);
+        PlayerOrders.Give(world, best, ContainerOrder(world, owner, row, fixture, walkOnly: false), order.Queued);
     }
 
     /// <summary>
-    /// The order to open (row 3), pick (76) or only walk to (<paramref name="walkOnly"/>) a container, given by <paramref name="owner"/>.
+    /// The order to open (26) or pick (76) a container, given by <paramref name="owner"/>; or only to walk to it (<paramref name="walkOnly"/>): a
+    /// 29 move there (the original's walk without Alt, made at the zero point, <c>FUN_1407fc6e0</c>).
     /// </summary>
-    static OrderEntry ContainerOrder(IOrderOwner owner, Meitou.Data.Gameplay.Ai.TaskType row, Locks.Fixture fixture, bool walkOnly) =>
-        new(row, owner) { Site = fixture.Id, Point = fixture.Position, Detail = walkOnly ? ContainerWalk : null };
+    static OrderEntry ContainerOrder(World world, IOrderOwner owner, Meitou.Data.Gameplay.Ai.TaskType row, Locks.Fixture fixture, bool walkOnly) =>
+        walkOnly && world.SystemOf<MovementSystem>() is { } movement
+            ? new(Meitou.Data.Gameplay.Ai.TaskType.MoveCusOrdered, movement) { Point = fixture.Position }
+            : new(row, owner) { Site = fixture.Id, Point = fixture.Position };
 
     /// <summary>
     /// The start of a container order: the walk to it, or, in reach on its floor, the opening where the character stands.
@@ -111,7 +109,7 @@ public static class ContainerAccess
         var request = new TaskRequest(CharacterTask.GoTo, order.Row, TaskSource.Order) { Site = order.Site, Point = order.Point,
                 Detail = order.Detail };
         var at = world.Characters.Next[slot].Position;
-        bool walk = order.Row != Meitou.Data.Gameplay.Ai.TaskType.Pickup || order.Detail == ContainerWalk
+        bool walk = order.Row != Meitou.Data.Gameplay.Ai.TaskType.LootTarget
             || Vector2.Distance(Flat(at), Flat(order.Point)) > ContainerReach || !SameFloor(at, order.Point);
         TaskStart.Start(world, slot, walk ? request : request with { Task = CharacterTask.Idle });
 
@@ -173,14 +171,16 @@ public static class ContainerAccess
 
     /// <summary>
     /// The container Take/Put address by <paramref name="site"/> (a fixture id) and the character, when it is open and the character is in reach;
-    /// posts "Out of trading range." otherwise (<see cref="TradingRange"/>). Null when <paramref name="site"/> is not a container.
+    /// posts "Out of trading range." otherwise (<see cref="TradingRange"/>). Null when <paramref name="site"/> is not a container. Any character with
+    /// an inventory: <c>Task_Loot_Order</c>'s start queues the window for whoever runs it, with no faction test (<c>FUN_140354dc0</c> →
+    /// <c>FUN_140791830</c> kind 3, <b>Verified</b>), so an NPC opener's window moves items too.
     /// </summary>
     internal static Locks.Fixture? ContainerFor(World world, string site, CharacterId who, out CharacterCold? cold)
     {
         cold = null;
         if (world.Fixtures.Find(site) is not { Contents: not null } f) return null;
         var table = world.Characters;
-        if (!table.TryResolveNext(who, out int slot) || table.Cold(slot) is not { IsPlayer: true, Inventory: not null } c)
+        if (!table.TryResolveNext(who, out int slot) || table.Cold(slot) is not { Inventory: not null } c)
             return f;
         if (Vector2.Distance(Flat(table.Next[slot].Position), Flat(f.Position)) > TradingRange)
         {

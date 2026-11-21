@@ -95,7 +95,7 @@ and the next frame tries again (`PostProcess.Unallocated`). Before this, a 3840 
 
 ## Kept points
 
-Advanced "Keep textures at characters" (Meitou, default on, `UserConfig.KeepTexturesAtCharacters`): the host sets `WorldFrame` `Kept` to
+Advanced "Keep textures at characters" (default on, `UserConfig.KeepTexturesAtCharacters`): the host sets `WorldFrame` `Kept` to
 the drawn position of every squad bar member each frame; its sub-option "Keep textures at all squads" (default off, shown only while the
 main one is on, `KeepTexturesAtAllSquads`) takes every player squad's members instead. `ObjectStreamer.Near` / zone layout count the nearest of eye, `Ahead` and `Kept`,
 so object meshes and texture mips stay loaded round each character (a resolving instance's first texture need is measured the same way, else
@@ -237,7 +237,7 @@ built by `BuildingMaterial.FromFarmSpec` (normal-alpha cut-out, two-sided, no ve
 levels, `DrawReal` picks level 0) and with no part distance (only the real-object range). The original draws one merged mesh per farm with
 a `plantData` shader array; Meitou instances each plant (batched by mesh). Its back faces flip their normal (the DX11 game's do not). Each plant's colour (`FarmLayout.Tint`, the death tint and brightness of
 [farm plants](game/buildings-production.md#farm-plants)) multiplies its albedo, packed into a negative spare `M44`
-(`FarmPlants.PackTint`: 8 bits per channel over [0, 1.275]).
+(`FarmPlants.PackTint`: 8 bits per channel over [0, 1.275]). A plant's material is cut out by its normal map's alpha (threshold `alpha threshold`, 128 when absent) and two-sided whatever its `material type` (`PlacedMesh.FarmPlant`, `BuildingMaterial.FromSpec`): **Verified** against the installed `foliage.material` `FarmPlants` (cull none, `Object_DoubleSided_Coloured_FP` = `TRANSPARENCY,COLOURING,DOUBLESIDED2`, `objects.hlsl` `clip(normalTex.a - threshold)`); with the spec's own type the Wheat's cards drew as solid quads (**Observed**, save grass-through interior). The loose instances are in the traced scene (`WorldObjectRenderer.RayInstances`), so the crops cast traced sun and lamp shadows.
 
 ## Doors
 

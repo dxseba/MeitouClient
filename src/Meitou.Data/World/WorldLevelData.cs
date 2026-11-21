@@ -148,7 +148,7 @@ public sealed class WorldLevelData
     {
         string directory = Path.Combine(install.DataDirectory, RelativeDirectory);
         var world = Load(directory, order.Entries, includeInteriors);
-        return OnGround(world, install);
+        return OnGround(world, TerrainHeightmap.PathOf(install));
     }
 
     /// <summary>
@@ -158,16 +158,15 @@ public sealed class WorldLevelData
     {
         string directory = Path.Combine(install.DataDirectory, RelativeDirectory);
         var world = Load(directory, LoadOrder.BaseGame(install).Entries, includeInteriors);
-        return OnGround(world, install);
+        return OnGround(world, GameFiles.Resolve(Path.Combine(install.DataDirectory, TerrainHeightmap.RelativePath)));
     }
 
     /// <summary>
-    /// <paramref name="world"/> with its buildings stood on the install's heightmap (<see cref="PlaceOnGround"/>); unchanged when the heightmap
-    /// is missing.
+    /// <paramref name="world"/> with its buildings stood on the heightmap at <paramref name="path"/> (<see cref="PlaceOnGround"/>): the one the
+    /// game reads, or for the base game the install's own; unchanged when the heightmap is missing.
     /// </summary>
-    static WorldLevelData OnGround(WorldLevelData world, GameInstall install)
+    static WorldLevelData OnGround(WorldLevelData world, string path)
     {
-        string path = GameFiles.Resolve(Path.Combine(install.DataDirectory, TerrainHeightmap.RelativePath));
         if (!File.Exists(path)) return world;
 
         using var map = TerrainHeightmap.Open(path);
@@ -226,48 +225,87 @@ public sealed class WorldLevelData
 
         if (includeInteriors) world.Interiors = new GameDatabase();
 
-        foreach (var layer in world.Layers)
-            world.ApplyLayer(layer);
-
+        world.ApplyLayers();
         return world;
     }
 
     /// <summary>
-    /// Merges one layer's zone files, level file and interiors file into the world.
+    /// How many level files <see cref="ApplyLayers"/> decodes ahead of the one it merges.
     /// </summary>
-    void ApplyLayer(WorldLevelLayer layer)
+    static int ReadAhead => Math.Max(2 * Environment.ProcessorCount, 4);
+
+    /// <summary>
+    /// Merges every layer's zone files, level file and interiors file into the world, layer by layer in order. The files are read and decoded on
+    /// workers, up to <see cref="ReadAhead"/> ahead of the one being merged, and merged one at a time in that order, so the result is the
+    /// sequential merge's (a 655-mod list has 179 mod layers; decoding was most of their load).
+    /// </summary>
+    void ApplyLayers()
     {
-        foreach (var path in layer.ZoneFiles())
+        var files = new List<(GameDatabase Db, string Path, WorldLevelLayer Layer, ZoneCoordinate? Zone)>();
+        foreach (var layer in Layers)
         {
-            if (!ZoneCoordinate.TryParseFileName(path, out var zone)) continue;
-            if (!Zones.TryGetValue(zone, out var db))
-                Zones[zone] = db = new GameDatabase();
-            Apply(db, path, layer, zone);
+            foreach (var path in layer.ZoneFiles())
+            {
+                if (!ZoneCoordinate.TryParseFileName(path, out var zone)) continue;
+                if (!Zones.TryGetValue(zone, out var db))
+                    Zones[zone] = db = new GameDatabase();
+                files.Add((db, path, layer, zone));
+            }
+
+            var level = GameFiles.Resolve(Path.Combine(layer.Directory, LevelFileName));
+            if (File.Exists(level)) files.Add((Level, level, layer, null));
+            var interiors = GameFiles.Resolve(Path.Combine(layer.Directory, InteriorsFileName));
+            if (Interiors is not null && File.Exists(interiors)) files.Add((Interiors, interiors, layer, null));
         }
 
-        var level = GameFiles.Resolve(Path.Combine(layer.Directory, LevelFileName));
-        if (File.Exists(level)) Apply(Level, level, layer);
-        var interiors = GameFiles.Resolve(Path.Combine(layer.Directory, InteriorsFileName));
-        if (Interiors is not null && File.Exists(interiors)) Apply(Interiors, interiors, layer);
+        var reads = new Task<(LevelFile? File, Exception? Refused)>?[files.Count];
+        int started = 0;
+        void ReadUpTo(int end)
+        {
+            for (; started < Math.Min(end, files.Count); started++)
+            {
+                string path = files[started].Path;
+                reads[started] = Task.Run(() => Read(path));
+            }
+        }
+
+        ReadUpTo(ReadAhead);
+        for (int i = 0; i < files.Count; i++)
+        {
+            var read = reads[i]!.GetAwaiter().GetResult();
+            reads[i] = null;
+            ReadUpTo(i + 1 + ReadAhead);
+            var (db, path, layer, zone) = files[i];
+            Apply(db, path, layer, read, zone);
+        }
+
+        // A level file, or the reason the reader refuses it (any other failure is thrown).
+        static (LevelFile? File, Exception? Refused) Read(string path)
+        {
+            try
+            {
+                return (LevelFile.ReadFile(path), null);
+            }
+            catch (Exception e) when (e is FcsFormatException or EndOfStreamException or InvalidDataException or IOException)
+            {
+                return (null, e);
+            }
+        }
     }
 
     /// <summary>
-    /// Merges one level file of <paramref name="layer"/> into <paramref name="db"/>; a file the reader refuses is left out.
+    /// Merges one level file of <paramref name="layer"/> (read as <paramref name="read"/>) into <paramref name="db"/>; a file the reader refuses is
+    /// left out.
     /// </summary>
-    void Apply(GameDatabase db, string path, WorldLevelLayer layer, ZoneCoordinate? zone = null)
+    void Apply(GameDatabase db, string path, WorldLevelLayer layer, (LevelFile? File, Exception? Refused) read, ZoneCoordinate? zone = null)
     {
         var name = layer.Name.Length == 0 ? Path.GetFileName(path) : $"{layer.Name}/{Path.GetFileName(path)}";
         int before = db.Issues.Count;
-        LevelFile file;
-        try
-        {
-            file = LevelFile.ReadFile(path);
-        }
-        catch (Exception e) when (e is FcsFormatException or EndOfStreamException or InvalidDataException or IOException)
+        if (read.File is not { } file)
         {
             // A mod's file the reader refuses is left out (Observed: Great Frontiers' interiors.level has every zero byte turned to a space;
             // the game plays on).
-            Issues.Add(new GameDataIssue(GameDataIssueKind.LevelFileNotLoaded, name, null, e.Message));
+            Issues.Add(new GameDataIssue(GameDataIssueKind.LevelFileNotLoaded, name, null, read.Refused!.Message));
             return;
         }
 
@@ -379,13 +417,33 @@ public sealed class WorldLevelData
     /// Road segments: <see cref="FcsRecordType.Road"/> records whose instances are the path's points.
     /// </summary>
     public IEnumerable<RoadPath> Roads() =>
-        Level.OfType(FcsRecordType.Road).Select(r => new RoadPath(
-            r.StringId,
-            r.GetFloat("width"),
-            r.GetInt("start"),
-            r.GetInt("end"),
-            r.GetFloat("length"),
-            r.Instances.Values.Where(i => !i.IsCleared).Select(i => i.Position).ToList()));
+        Level.OfType(FcsRecordType.Road).Select(RoadOf);
+
+    /// <summary>
+    /// The road of a <see cref="FcsRecordType.Road"/> record.
+    /// </summary>
+    static RoadPath RoadOf(GameRecord road) =>
+        new(road.StringId, road.GetFloat("width"), road.GetInt("start"), road.GetInt("end"), road.GetFloat("length"), RoadPoints(road));
+
+    /// <summary>
+    /// A road's points in the original's order (docs/formats/zones.md, <b>Verified</b>, the road loader <c>FUN_14045e760</c>): the instance ids
+    /// are the points' numbers in lowercase hex without padding, looked up from 0 on until one is missing or the point read has a rotation x of
+    /// 1 or more, the road's last point. The level files list the ids as text (<c>1</c>, <c>10</c> ... <c>1f</c>, <c>2</c>), so file order
+    /// scrambles a road of over 16 points. A point a later layer cleared is left out and the road goes on (engine choice; no base road has one).
+    /// </summary>
+    static List<Vector3> RoadPoints(GameRecord road)
+    {
+        var points = new List<Vector3>();
+        for (int i = 0; road.Instances.TryGetValue(i.ToString("x"), out var point); i++)
+        {
+            if (point.IsCleared) continue;
+
+            points.Add(point.Position);
+            if (point.Rotation.X >= 1) break;
+        }
+
+        return points;
+    }
 
     #endregion
 }

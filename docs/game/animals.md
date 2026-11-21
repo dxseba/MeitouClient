@@ -48,6 +48,17 @@ Pose/LOD distances can scale by animal size in engine, not original scheduler pr
   type` (13), `_robot spider type` (12), `_skimmer` (13). None can block. Lengths 18 (duck, small spider) to 120
   (elephant). Swamp Turtle and "Pack Beast Dead" name no weapon (**Verified**, dump).
 - `weapon level` is a WEAPON_MANUFACTURER: "Ancient" on all but the Skimmer ("Unknown") (**Verified**).
+- **Natural weapon** (**Verified**, decompile: `CharacterAnimal` slot 133 `FUN_14062aa60`, called by setup slot 111 and by the weapon equip
+  slot 123 when handed none, through the item factory `FUN_140580750`): the factory is handed the `weapon level` manufacturer and the
+  `weapon`. No manufacturer: no weapon (no attack). No `weapon`: one drawn from the manufacturer's `weapon types` (v0, 0 counting as 100), so
+  a Swamp Turtle fights with a random Ancient weapon (a sword, cleaver, club or polearm). The model and level
+  are drawn as for a shop weapon ([economy.md](economy.md) "Weapon level"). Ancient's three models are 15, 20 and 25 at chance 100 each, so
+  every animal's weapon level is one of those. It is not an inventory item and is made again on load. Meitou
+  `CharacterAssembly.NaturalWeapon`, kept when the kit changes. The fighting category is the weapon's `skill category` (`FUN_140897f30` sets
+  CharStats +0x1f0 from it, **Verified**), so the turtle picks its weapon's human techniques, whose clips its skeleton lacks: the blows land
+  with no motion ([animation.md](../animation.md#clips-a-body-lacks)). Meitou fix (Fixes page `Swamp turtle attacks`, on by default;
+  `CombatSystem.AnimalMovesFix`): an animal with a drawn weapon picks its attacks and defences from the elephant techniques (category 9:
+  "elephant type bash" `attack1`, "elephant type bite" `attack2`) and keeps the drawn weapon's damage.
 - `attack type` (an int in the creature category range) does **not** always match the weapon's category: Wild
   Bull 11 with a category-20 weapon, Cage Beast 14 and Landbat 19 with the dog weapon (10). The string "attack
   type" does not occur in `kenshi_x64.exe` (**Observed**: absent from the binary's string table), so the game does
@@ -62,7 +73,7 @@ Pose/LOD distances can scale by animal size in engine, not original scheduler pr
 | 0x238 (`vfunc_71`) | 1 | `HP mult` (`+0x6dc`; read by `14062f000`, 1 when 0 or below) | part body scale (+0x5c), blood capacity |
 | 0x250 (`vfunc_74`) | the humanoid stats object | null | blood capacity uses s = 1; the hit path cannot sever limbs |
 | 0x390 (`vfunc_114`) | 1 | lerp(`+0x700`, `scale min`, `scale max`) | part HP multiplier (+0x58, rewritten each tick), blood capacity, hunger rate |
-| 0x398 (`vfunc_115`) | 1 | `+0x700`, the age ([Ageing](#ageing)) | the stats multiplier `+0x34`, the save's `age` |
+| 0x398 (`vfunc_115`) | 1 | `+0x700`, the age ([Ageing](#ageing)) | the stats multiplier `+0x34`, the save's `age`, the run value's (0.5 + 0.5 x age) (`FUN_140883db0`, **Verified** by decompile: a pup at 0.2 runs at 0.6 of an adult's value; Meitou `Speed.RunValue`) |
 
 ### 7. Animations
 
@@ -112,10 +123,11 @@ from the start.
 - Taking one out (`FUN_14075e7e0`, from the inventory's remove functions) clears the flag; when the owner is alive and down
   (`isDown`, [carry-loot.md](carry-loot.md): unconscious, playing dead, carried or ragdolled, so an awake carried body too) the owner dies (the death function) with "{1} has been butchered"
   (**Verified**, `FUN_14075e7e0`: not dead, then `isDown` or posture 3+, which `isDown` already covers; the flag clears either way).
-- No inventory-window filter on the flag was found (**Observed**, absence in the decompile). The player's own animal's inventory window
-  shows no main grid at all, so they are out of sight there: it ends under the data panel, without the grid or "-INVENTORY-" (**Observed**,
-  original: a bought Garru whose save holds its skins and meat, and a dog with none; Meitou `InventoryLayout.TrimAnimalWindow`; its loot
-  window keeps the grid).
+- No inventory-window filter on the flag was found (**Observed**, absence in the decompile). A live animal's main grid is shut while it is the
+  player's or not down (`FUN_1405cc630`, Meitou `InventoryCommands.MainClosed`), and the window then shows no main grid at all, so they are out
+  of sight there: it ends under the data panel, without the grid or "-INVENTORY-" (**Observed**, original: a bought Garru whose save holds its
+  skins and meat, a dog with none, and Trade on the player's own caged Bonedog, #1007; Meitou `InventoryLayout.TrimAnimalWindow`, inventory
+  and loot windows alike; a dead or down other-faction animal's loot window keeps the grid).
 - Death items weigh nothing for a living owner (**Observed**, original: a Garru pup with a 6 kg backpack and 14 flagged 1 kg meat/skin items
   shows Total Weight 6). Meitou excludes them from Total Weight and encumbrance, including worn bag contents. Unknown: `FUN_1405a59a0` (reads record 3979's `death items`).
 
@@ -148,6 +160,9 @@ Meitou: `BodySystem.Age` grows `CharacterStats.Scale` (`CharacterCold.Age`, what
 is `+0x6fc` (the drawn size only; it is not refreshed above 0.95, unlike the original), the save writes and reads `age`.
 Growth and the Meitou-only [`animalage` console command](ui-input.md#dev-console) share `BodySystem.SetAnimalAge`; explicit edits also refresh
 `ShownAge` immediately, including shrinking an animal and setting an adult or elder. Natural growth retains the step gate described above.
+The animation's playback factor is 1 / the live size (`ScaleK`, slot 0x390), re-read every tick as `FUN_14052bad0` does at each movement pick, and
+the movement clips' speed weights scale their speeds by that size ([animation](../animation.md#choosing-candidates--14051d660); **Verified**,
+decompile), so a grown animal's run slows and starts at a higher speed with its age.
 
 ## Pack animals
 
@@ -189,7 +204,8 @@ is set; the player faction's lists "Protect allies"), then:
 - the player's faction: AQUIRE_FOOD_AT_HOMEBASE (243) at 0.5 unless present; an animal also gets its RACE's `AI Goals`, EAT_FOOD_ON_GROUND (259)
   at 0.5, and loses EAT_A_RANDOM_DEAD_BODY (230).
 
-Animal races list their feeding goals (**Verified**, probe): goats, bulls, garru, turtles "eating food on the ground"; bonedogs and boneyard wolves
+Animal races list their feeding goals (**Verified**, probe): goats, bulls, garru, turtles "eating food on the ground" (AI_TASK enum 14, IDLE, not 259: no RACE
+lists 259, only setupAI gives it; **Verified**, `gamedata_base.txt`); bonedogs and boneyard wolves
 also "eating corpses" and the three limb games; beak things and spiders "eating any bodies"; raptors "eating crops". The ANIMAL_CHARACTER's own
 `AI Goals` (Follow leader on Pet Dog, Settler's Pup, Cornelius) is not read: the exe's only references to the string are this function and the two
 package loaders (**Observed**). 243's desire and what Meitou runs of these for the player's animals: [eating](character-stats.md#eating),
@@ -247,5 +263,5 @@ were not traced. So the original has no egg laying, and Meitou builds none.
 
 ## Not found
 
-The default level of the natural weapon (`14062aa60` makes it without a level argument), the consumers of `animal strength`, the smells and
+The consumers of `animal strength`, the smells and
 slot 0x3a8; the movement rule of a Follow order.

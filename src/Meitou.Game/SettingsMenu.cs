@@ -48,6 +48,10 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     /// </summary>
     internal const int GraphicsPageIndex = 1;
     /// <summary>
+    /// The Advanced page (its Squad XP folds the skills' own multipliers).
+    /// </summary>
+    internal const int AdvancedPageIndex = 4;
+    /// <summary>
     /// The MODS page (<see cref="Settings.ModsPage"/>): the loaded mods, each with the settings its code registered.
     /// </summary>
     internal const int ModsPageIndex = 8;
@@ -217,12 +221,13 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     internal sealed record Choice(Func<IReadOnlyList<string>> Options, Func<int> Current, Action<int> Choose);
 
     /// <summary>
-    /// A row of a page: its label and hint, and the slider, switch, drop-down, binding or action it edits, with how it is drawn.
+    /// A row of a page: its label and hint, and the slider, switch, drop-down, binding or action it edits (an action's button reads
+    /// <paramref name="RunLabel"/>, the row's label without one), with how it is drawn.
     /// </summary>
     internal sealed record Entry(string Label, string Hint = "", Slider? Slider = null, Toggle? Toggle = null, Choice? Choice = null,
         InputAction? Binding = null, Action? Run = null, string? Picture = null, bool Segmented = false, bool Changed = false,
         string? Impact = null, bool Warn = false, string? Raw = null, int Depth = 0, bool? Open = null, string? GroupId = null, Action? Reset = null,
-        bool Locked = false, string? Tag = null, bool TagHot = false);
+        bool Locked = false, string? Tag = null, bool TagHot = false, string? RunLabel = null);
 
     /// <summary>
     /// A clickable widget as the last frame drew it: its bounds, what a click does, and a slider's track.
@@ -425,14 +430,34 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     public Action<bool>? PunchReachChanged { get; init; }
 
     /// <summary>
+    /// Applies the animal moves fix (<see cref="UserConfig.FixAnimalMoves"/>) to the running combat system.
+    /// </summary>
+    public Action<bool>? AnimalMovesChanged { get; init; }
+
+    /// <summary>
     /// Applies the bench facing fix (<see cref="UserConfig.FixBenchFacing"/>).
     /// </summary>
     public Action<bool>? BenchFacingChanged { get; init; }
 
     /// <summary>
+    /// Applies the prisoner pose fix (<see cref="UserConfig.FixPrisonPose"/>).
+    /// </summary>
+    public Action<bool>? PrisonPoseChanged { get; init; }
+
+    /// <summary>
+    /// Applies the caged animal fix (<see cref="UserConfig.FixCagedAnimals"/>).
+    /// </summary>
+    public Action<bool>? CagedAnimalsChanged { get; init; }
+
+    /// <summary>
     /// Applies the bag search fix (<see cref="UserConfig.FixBagSearch"/>).
     /// </summary>
     public Action<bool>? BagSearchChanged { get; init; }
+
+    /// <summary>
+    /// Applies the shop counter talk reach (<see cref="UserConfig.CounterTalk"/>).
+    /// </summary>
+    public Action<bool>? CounterTalkChanged { get; init; }
 
     /// <summary>
     /// Called when an off-screen switch changes (the config holds the new values).
@@ -546,7 +571,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     /// the game started with.
     /// </summary>
     static readonly HashSet<string> RestartKeys =
-        ["frameGeneration", "hdr", WorldFrame.TextureQualitySlider, WorldFrame.WaterGridSlider, WorldFrame.WaterOceanSlider];
+        ["hdr", WorldFrame.TextureQualitySlider, WorldFrame.WaterGridSlider, WorldFrame.WaterOceanSlider];
     /// <summary>
     /// The value each restart setting had when its row was first built (the menu is made with the game).
     /// </summary>
@@ -618,18 +643,20 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
                 or WorldFrame.TracedGrassSwitch => "Lighting",
             "Indirect light" or "Indoor GI" or "Hybrid GI" or "Ambient occlusion" or "Ground-truth occlusion" or "Light shafts" or "Planetshine"
                 or WorldFrame.GiRelocateSwitch or WorldFrame.GiCloudShadowsSwitch or WorldFrame.GiCacheSwitch
-                or WorldFrame.GiRaysSwitch => "Lighting",
+                or WorldFrame.GiRaysSwitch or WorldFrame.GiCharactersSwitch => "Lighting",
             "Water" or "Water contact foam, wakes and ripples" or "Reflections" => "Water & reflections",
             "Ground parallax" or "Ground displacement (tessellation)" or "Ground trails" or WorldFrame.RockSmoothingSwitch
                 or WorldFrame.OutlineRefineSwitch => "Terrain",
-            "Foliage ranges" or "Foliage levels" or "Far impostors" or WorldFrame.GrassCoverSwitch => "Vegetation",
-            "Haze" or "Night air" or "Night sky" or "Clouds" or "Cloud shadows" or "Cloud shadows in fog" or "Fog"
+            "Foliage ranges" or "Foliage levels" or "Far impostors" or WorldFrame.GrassCoverSwitch or WorldFrame.NearTreeFadeSwitch => "Vegetation",
+            "Haze" or "Night air" or "Night sky" or "Clouds" or "Cloud shadows" or "Cloud shadows in fog" or "Fog" or "Lit dust"
                 or WorldFrame.WetWorldSwitch => "Sky & weather",
-            "Tone map and grade" or "Night grading" or "Dithering" => "Colour",
-            "Heat haze" or WorldFrame.BloomSwitch or WorldFrame.DepthOfFieldSwitch or WorldFrame.CameraEffectsSwitch => "Post FX",
+            "Tone map and grade" or "Adaptive exposure" or "Night grading" or "Dithering" => "Colour",
+            "Heat haze" or WorldFrame.BloomSwitch or WorldFrame.DepthOfFieldSwitch or WorldFrame.CameraEffectsSwitch or WorldFrame.VignetteSwitch
+                or WorldFrame.FilmGrainSwitch => "Post FX",
             "Skin" or "Character levels" or "Advanced materials" or "Blood on weapons and gear" or "Blood cells" or "Blood on surfaces"
                 or "Bolt tracers" or WorldFrame.MaterialHairSwitch or WorldFrame.MaterialClothSwitch or WorldFrame.MaterialSkinSwitch
-                or WorldFrame.MaterialEyesSwitch or WorldFrame.MaterialMetalSwitch or WorldFrame.MaterialBeadsSwitch => "Characters",
+                or WorldFrame.MaterialEyesSwitch or WorldFrame.MaterialMetalSwitch or WorldFrame.MaterialPolishSwitch
+                or WorldFrame.MaterialBeadsSwitch => "Characters",
             "Item icons" or "Portrait and editor sun" or "Character editor bar" => "Interface",
             _ => "Objects",   // Draw distances, Mesh welding, Metal on buildings, Glass bottles
         };
@@ -652,8 +679,8 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
             return "Vegetation";
         if (S("Haze") || label == WorldFrame.HazeDistanceSlider || label == WorldFrame.CloudHeightSlider || WorldFrame.ParticleSliders.Contains(label))
             return "Sky & weather";
-        if (S("Tone map") || S("Hybrid") || S("Grading") || S("Night grading")) return "Colour";
-        if (S("Bloom") || S("Depth of field") || S("Heat haze")) return "Post FX";
+        if (S("Tone map") || S("Hybrid") || S("Grading") || S("Night grading") || S("Adaptive exposure")) return "Colour";
+        if (S("Bloom") || S("Depth of field") || S("Heat haze") || S("Vignette") || S("Film grain")) return "Post FX";
         if (label == WorldFrame.CharacterDistanceSlider) return "Characters";
 
         return "Objects";   // object, landmark and town distances, object LOD
@@ -808,6 +835,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
             "Contact shadows" => sun is not (3 or 4),
             WorldFrame.TracedGrassSwitch => sun is -1 or 3 or 4,
             "Indoor GI" or WorldFrame.GiRaysSwitch => gi != 0,
+            WorldFrame.GiCharactersSwitch => gi != 0 && occlusion is -1 or 2,
             WorldFrame.GiRelocateSwitch or WorldFrame.GiCloudShadowsSwitch or WorldFrame.GiCacheSwitch => gi is -1 or 2,
             WorldFrame.GtaoQualitySlider => occlusion != 0 && SwitchOn("Ambient occlusion"),
             WorldFrame.ShaftStrengthSlider or WorldFrame.ShaftAirSlider or WorldFrame.ShaftAirDawnSlider
@@ -822,9 +850,13 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
                 or WorldFrame.ImpostorBudgetSlider => SwitchOn("Far impostors"),
             WorldFrame.MaterialHairSwitch or WorldFrame.MaterialClothSwitch or WorldFrame.MaterialSkinSwitch or WorldFrame.MaterialEyesSwitch
                 or WorldFrame.MaterialMetalSwitch or WorldFrame.MaterialBeadsSwitch => SwitchOn("Advanced materials"),
+            WorldFrame.MaterialPolishSwitch => SwitchOn("Advanced materials") && SwitchOn(WorldFrame.MaterialMetalSwitch),
             WorldFrame.NightGradeStrengthSlider => SwitchOn("Night grading"),
+            WorldFrame.AdaptiveExposureSlider => SwitchOn("Adaptive exposure"),
             WorldFrame.BloomStrengthSlider => SwitchOn(WorldFrame.BloomSwitch),
             WorldFrame.DofApertureSlider or WorldFrame.CameraEffectsSwitch => SwitchOn(WorldFrame.DepthOfFieldSwitch),
+            WorldFrame.VignetteStrengthSlider => SwitchOn(WorldFrame.VignetteSwitch),
+            WorldFrame.GrainStrengthSlider => SwitchOn(WorldFrame.FilmGrainSwitch),
             _ => true,
         };
     }
@@ -896,7 +928,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     }
 
     /// <summary>
-    /// The rows shown: the search's results while it has a query, else the page's, the Display and Graphics ones folded into features
+    /// The rows shown: the search's results while it has a query, else the page's, the Display, Graphics and Advanced ones folded into features
     /// (on Display, the upscaler's and the HDR output's settings under their rows).
     /// </summary>
     internal List<Entry> Entries()
@@ -905,7 +937,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
 
         var rows = PageRows(Page, GraphicsPage);
 
-        return Page is 0 or GraphicsPageIndex ? Grouping.Grouped(rows) : rows;
+        return Page is 0 or GraphicsPageIndex or AdvancedPageIndex ? Grouping.Grouped(rows) : rows;
     }
 
     /// <summary>
@@ -1071,7 +1103,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     /// </summary>
     string HdrPaperText(float v) =>
         v < UserConfig.HdrPaperAuto
-            ? Loc.Tr("Automatic ({0})", Config.HdrPaperNitsNow.ToString("0", CultureInfo.InvariantCulture))
+            ? Loc.Tr("Automatic ({1})", Config.HdrPaperNitsNow.ToString("0", CultureInfo.InvariantCulture))
             : v.ToString("0", CultureInfo.InvariantCulture);
 
     /// <summary>
@@ -1085,6 +1117,11 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     /// An action's name for its row: its words spaced.
     /// </summary>
     internal static string ActionLabel(InputAction action) => Regex.Replace(action.ToString(), "(?<=[a-z0-9])(?=[A-Z])|(?<=[a-z])(?=[0-9])", " ");
+
+    /// <summary>
+    /// An action's name in the notices: a code mod's action's caption (docs/modding.md "Key actions"), else <see cref="ActionLabel"/>.
+    /// </summary>
+    internal string Label(InputAction action) => Bindings.ModAction(action)?.Caption ?? ActionLabel(action);
 
     /// <summary>
     /// A page's all-Faithful / all-Meitou switch over its Faithful / Meitou <paramref name="toggles"/> and the <paramref name="sliders"/> with both
@@ -1117,11 +1154,11 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         }));
 
     /// <summary>
-    /// The Advanced or Fixes page's all switch, over that page's Faithful / Meitou switches (not the plain on/off ones such as luckyren Mode) and
-    /// sliders with both marks.
+    /// The Advanced or Fixes page's all switch, over that page's Faithful / Meitou switches (not the plain on/off ones such as luckyren Mode, nor
+    /// greyed ones) and sliders with both marks.
     /// </summary>
     internal Entry PageSidesEntry(List<Entry> entries, string label, string hint, string what) => SidesEntry(label, hint, what,
-        entries.Select(e => e.Toggle).OfType<Toggle>().Where(t => t.Remaster).ToList(),
+        entries.Where(e => !e.Locked).Select(e => e.Toggle).OfType<Toggle>().Where(t => t.Remaster).ToList(),
         entries.Select(e => e.Slider).OfType<Slider>().Where(s => s.Faithful is not null && s.Meitou is not null).ToList());
 
     #endregion
@@ -1433,22 +1470,22 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     }
 
     /// <summary>
-    /// Binds <paramref name="action"/> to <paramref name="binding"/>, taking it from the actions that have it; a reserved key is refused with a
-    /// notice.
+    /// Binds <paramref name="action"/> to <paramref name="binding"/>, taking it from the actions of its key map that have it; a reserved key is
+    /// refused with a notice.
     /// </summary>
     void SetBinding(InputAction action, Binding binding)
     {
-        if (!binding.IsMouse
-            && binding.Key is Key.Escape or Key.F6 or Key.LeftAlt or Key.RightAlt or Key.LeftControl or Key.RightControl or Key.LeftShift
-                or Key.RightShift)
+        if (RefusedBinding(action, binding, Bindings.ModAction(action) is not null) is { } refusal)
         {
-            Notice = "That key is reserved. Choose another key, or Esc to cancel.";
+            Notice = refusal;
             return;
         }
 
         // Rotate item acts only over an inventory item, so it shares its control with whatever acts elsewhere (the camera's orbit by default).
+        // The build map is a key map of its own (docs/game/ui-input.md section 4): its keys are taken only from its actions, and the reverse.
         bool shared = action == InputAction.RotateItem;
-        var conflicts = Enum.GetValues<InputAction>()
+        var conflicts = Bindings.Actions
+            .Where(a => InputBindings.IsBuildMap(a) == InputBindings.IsBuildMap(action))
             .Where(a => a != action && a != InputAction.RotateItem && !shared && Bindings.Get(a).Contains(binding))
             .ToArray();
 
@@ -1460,7 +1497,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
             Bindings.Set(other, [.. Bindings.Get(other).Where(b => b != binding), previous]);
             Bindings.Set(action, binding);
             Rebinding = null;
-            Notice = $"{ActionLabel(action)} bound to {binding}; {ActionLabel(other)} moved to {previous}.";
+            Notice = $"{Label(action)} bound to {binding}; {Label(other)} moved to {previous}.";
             return;
         }
 
@@ -1470,8 +1507,22 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         Bindings.Set(action, binding);
         Rebinding = null;
         Notice = conflicts.Length == 0
-            ? $"{ActionLabel(action)} bound to {binding}."
-            : $"{ActionLabel(action)} bound to {binding}, taken from {string.Join(", ", conflicts.Select(ActionLabel))}.";
+            ? $"{Label(action)} bound to {binding}."
+            : $"{Label(action)} bound to {binding}, taken from {string.Join(", ", conflicts.Select(Label))}.";
+    }
+
+    /// <summary>
+    /// Why <paramref name="binding"/> cannot go to <paramref name="action"/>, or null: the reserved keys, for a code mod's action
+    /// (<paramref name="modAction"/>) also the keys the game keeps (Insert reaches this page on the Metal host, which has no console key), and a
+    /// mouse button for a build map action (build mode takes only keys there; its buttons place and clear).
+    /// </summary>
+    static string? RefusedBinding(InputAction action, Binding binding, bool modAction)
+    {
+        if (binding.IsMouse && InputBindings.IsBuildMap(action)) return "Build keys take a key, not a mouse button. Choose a key, or Esc to cancel.";
+        if (binding.IsMouse) return null;
+
+        bool reserved = InputBindings.Reserved(binding) || (modAction && InputBindings.HostKey(binding));
+        return reserved ? "That key is reserved. Choose another key, or Esc to cancel." : null;
     }
 
     /// <summary>
@@ -1500,14 +1551,17 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         Config.LateDefences = false;
         LateDefencesChanged?.Invoke(false);
         Config.KeepRoamers = Config.OffscreenFights = Config.OffscreenHealing = Config.CampaignAncestorsOnce = Config.KeepWild
-            = Config.ResidentSchedule = Config.UnloadedProduction = true;
+            = Config.ResidentSchedule = Config.OffscreenOverrides = Config.UnloadedProduction = true;
         Config.Decapitation = true;
         Config.AdvancedRagdolls = true;
         Config.PauseOnLoad = true;
         Config.LoadingPause = false;
         Player.InventoryWindows.AutoOpenBags = Config.AutoOpenBags = true;
+        Player.InventoryWindows.SplitStacks = Config.SplitStacks = true;
         Config.AnimalsPickUp = false;
         AnimalsPickUpChanged?.Invoke(false);
+        Config.CounterTalk = true;
+        CounterTalkChanged?.Invoke(true);
         Config.CagesSpareOwn = false;
         Config.FixDoorBreak = Config.FixAmbienceSuffix = Config.FixWindStop = true;
         Player.Frontend.FixLoadButton = Config.FixLoadButton = true;
@@ -1515,10 +1569,20 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         GunnerFacingChanged?.Invoke(true);
         Config.FixPunchReach = true;
         PunchReachChanged?.Invoke(true);
+        Config.FixAnimalMoves = true;
+        AnimalMovesChanged?.Invoke(true);
         Config.FixBenchFacing = true;
         BenchFacingChanged?.Invoke(true);
+        Config.FixPrisonPose = true;
+        PrisonPoseChanged?.Invoke(true);
+        Config.FixCagedAnimals = true;
+        CagedAnimalsChanged?.Invoke(true);
         Config.FixBagSearch = true;
         BagSearchChanged?.Invoke(true);
+        Config.FixHeadTurnBack = false;
+        Config.FixRaidClocks = true;
+        Config.FixArrestLifts = true;
+        Config.FixGround = true;
         OffscreenChanged?.Invoke();
         Config.Audio = new();
         AudioChanged?.Invoke();
@@ -1768,7 +1832,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         {
             string prompt = Notice.Length > 0
                 ? Notice
-                : $"{ActionLabel(binding)}: press a key or mouse button.\nDelete clears the binding. Esc cancels.";
+                : $"{Label(binding)}: press a key or mouse button.\nDelete clears the binding. Esc cancels.";
             Canvas.DrawMessage("Assign a control", prompt, () => Rebinding = null);
         }
 

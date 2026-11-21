@@ -67,7 +67,8 @@ public sealed class FactionRelations
     public int PlayerFaction { get; set; } = -1;
 
     /// <summary>
-    /// How many <see cref="Event"/>s changed a value so far (the state hash covers the table once this is above 0).
+    /// How many <see cref="Event"/>s changed a value since the table was built, <see cref="Reset"/> or a save was loaded into it
+    /// (<see cref="RestartChanges"/>); the state hash covers the table once this is above 0.
     /// </summary>
     public long Changes { get; private set; }
 
@@ -120,8 +121,8 @@ public sealed class FactionRelations
     }
 
     /// <summary>
-    /// Back to the FACTION records' start values: every relation, no war flag, every rank 0 (an imported game that does not take the save's
-    /// relations, docs/formats/save.md "Importing a game").
+    /// Back to the FACTION records' start values: every relation, no war flag, every rank and global trust 0 (a new game, and an imported game that
+    /// does not take the save's relations, docs/formats/save.md "Importing a game").
     /// </summary>
     public void Reset()
     {
@@ -129,17 +130,26 @@ public sealed class FactionRelations
         Defaults(Factions, _index, _relation, _coexist);
         Array.Clear(_war);
         Array.Clear(_rank);
+        Array.Clear(_trust);
         Changes = 0;
     }
+
+    /// <summary>
+    /// Starts <see cref="Changes"/> again from 0 and keeps the values (a save loaded into the table: the count is the loaded game's, not the
+    /// previous game's of the session, which shares this table through the data).
+    /// </summary>
+    public void RestartChanges() => Changes = 0;
 
     #region Relations
 
     /// <summary>
-    /// The relation of faction <paramref name="a"/> towards <paramref name="b"/>, -100 to 100 (the player's row is asked of the other side).
+    /// The relation of faction <paramref name="a"/> towards <paramref name="b"/>, -100 to 100 (the player's row is asked of the other side); 0
+    /// (neutral) when either is not a faction of the table, such as a character with no faction (-1).
     /// </summary>
     public float Get(int a, int b)
     {
-        if (a == PlayerFaction && a >= 0) return a == b ? 100 : _relation[b * Count + a];
+        if (!Contains(a) || !Contains(b)) return 0;
+        if (a == PlayerFaction) return a == b ? 100 : _relation[b * Count + a];
         return _relation[a * Count + b];
     }
 
@@ -201,7 +211,10 @@ public sealed class FactionRelations
     /// Sets the relation of faction <paramref name="a"/> towards <paramref name="b"/> (a loaded save does this; trust and the other state live
     /// outside this table).
     /// </summary>
-    public void Set(int a, int b, float value) => _relation[a * Count + b] = value;
+    public void Set(int a, int b, float value)
+    {
+        if (Contains(a) && Contains(b)) _relation[a * Count + b] = value;
+    }
 
     /// <summary>
     /// A to B: B is another faction and the relation is at or below <see cref="HostileThreshold"/>.
@@ -214,12 +227,15 @@ public sealed class FactionRelations
     public bool IsAlly(int a, int b) => a == b || Get(a, b) >= AllyThreshold;
 
     /// <summary>
-    /// A to B: B is A itself, or A lists B in <c>coexistence</c> (for the player's row: B lists the player).
+    /// A to B: B is A itself, or A lists B in <c>coexistence</c> (for the player's row: B lists the player); false when either is not a faction of
+    /// the table.
     /// </summary>
     public bool Coexists(int a, int b)
     {
         if (a == b) return true;
-        return a == PlayerFaction && a >= 0 ? _coexist[b * Count + a] : _coexist[a * Count + b];
+        if (!Contains(a) || !Contains(b)) return false;
+
+        return a == PlayerFaction ? _coexist[b * Count + a] : _coexist[a * Count + b];
     }
 
     #endregion

@@ -405,6 +405,7 @@ sealed class BuildingSync(GameHost host)
             Footprint = footprints.Of,
             CollisionMesh = footprints.Mesh,
             CollisionMeshDoors = footprints.MeshDoors,
+            LevelDestroyed = LevelDestroyed,
             CollisionFile = footprints.File,
             Plot = footprints.Plot,
             PartBounds = footprints.PartBounds,
@@ -434,6 +435,22 @@ sealed class BuildingSync(GameHost host)
             Roof = hit.Room.RoofCuts,
         };
         return (hit.Position, floor);
+    }
+
+    /// <summary>
+    /// Whether a level building is drawn as a ruin: a town's override, else the placement's own flag or its level state's (as the object renderer
+    /// reads them).
+    /// </summary>
+    bool LevelDestroyed(BuildingPlacement placement)
+    {
+        if (host.TownChanges.ShownRuins.TryGetValue(placement.Key, out var ruin)) return ruin.Destroyed;
+        if (placement.DestroyedOverride is { } destroyed) return destroyed;
+
+        var levels = host.Scene.Objects?.Levels;
+        var zone = placement.StateZone ?? placement.Zone;
+        var state = levels is not null && placement.StateId is { } stateId && levels.Zones.TryGetValue(zone, out var zoneDb)
+            ? zoneDb.Find(stateId) : null;
+        return state?.GetBool("destroyed") ?? false;
     }
 
     /// <summary>
@@ -491,8 +508,8 @@ sealed class BuildingSync(GameHost host)
 
     /// <summary>
     /// Each town building of <paramref name="d"/> by zone and instance: its town, its owner faction (<see cref="PopulationData.LevelOwnerOf"/>: the
-    /// player's when the level data names it, else the town's, as the original re-owns a town's buildings) and its site and index in the site's
-    /// buildings.
+    /// player's when the level data names it, else its residents', else the town's, as the original re-owns a town's buildings) and its site and
+    /// index in the site's buildings.
     /// </summary>
     static Dictionary<(ZoneCoordinate, string), (string Town, int Owner, int Site, int Index)> TownBuildings(PopulationData d)
     {

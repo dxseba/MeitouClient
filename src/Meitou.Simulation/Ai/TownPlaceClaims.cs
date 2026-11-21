@@ -33,6 +33,13 @@ sealed class TownPlaceClaims(PopulationData data)
     /// </summary>
     static Vector2 Flat(Vector3 p) => new(p.X, p.Z);
 
+    /// <summary>
+    /// The list a member plans with, as its think's: its master squad's Slave AI Goals when it obeys one (<see cref="AiSystem.ObeyedRoles"/>), else
+    /// its role's. So an enslaved member claims no place its plan never uses.
+    /// </summary>
+    static IReadOnlyList<AiGoal> RolesOf(World world, Blackboard board, Squad squad, CharacterId id, CharacterCold cold) =>
+        AiSystem.ObeyedRoles(world, squad, cold) ?? board.Roles[(int)AiSystem.RoleOf(squad, id, cold)];
+
     #endregion
 
     #region Turrets
@@ -61,7 +68,7 @@ sealed class TownPlaceClaims(PopulationData data)
             {
                 var id = squad.Members[k];
                 if (!world.Characters.TryResolveNext(id, out int s) || world.Characters.Cold(s) is not { } cold || cold.Ai is not { } mind) continue;
-                if (board.TurretClaims.ContainsKey(s) || !TurretGoal(board, squad, id, cold, hour, out bool homeOnly)) continue;
+                if (board.TurretClaims.ContainsKey(s) || !TurretGoal(RolesOf(world, board, squad, id, cold), hour, out bool homeOnly)) continue;
                 if (pass == 0 ? !homeOnly : homeOnly) continue;
                 int best = -1;
                 float bestD = float.MaxValue;
@@ -85,13 +92,12 @@ sealed class TownPlaceClaims(PopulationData data)
     }
 
     /// <summary>
-    /// Whether the member's role list has a turret goal open at <paramref name="hour"/>, and whether it is only the home building's (222): that one
-    /// may only man a turret mounted on its home. Its role list only (not its race's goals): a race goal without the town's turret data names no
-    /// turret.
+    /// Whether the member's list (<see cref="RolesOf"/>) has a turret goal open at <paramref name="hour"/>, and whether it is only the home
+    /// building's (222): that one may only man a turret mounted on its home. That list only (not its race's goals): a race goal without the town's
+    /// turret data names no turret.
     /// </summary>
-    static bool TurretGoal(Blackboard board, Squad squad, CharacterId id, CharacterCold cold, int hour, out bool homeOnly)
+    static bool TurretGoal(IReadOnlyList<AiGoal> roles, int hour, out bool homeOnly)
     {
-        var roles = board.Roles[(int)AiSystem.RoleOf(squad, id, cold)];
         bool home = false, town = false;
         for (int k = 0; k < roles.Count; k++)
         {
@@ -118,6 +124,12 @@ sealed class TownPlaceClaims(PopulationData data)
     /// The guard posts of each building held in the current cadence pass, by spot index (derived, not hashed).
     /// </summary>
     readonly Dictionary<TownBuilding, HashSet<int>> _postTaken = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// The positions of the town training dummies a character trains on by an order or job (<see cref="CharacterTask.Operate"/>) in the current
+    /// cadence pass: no member claims them (#996); derived, not hashed.
+    /// </summary>
+    readonly HashSet<Vector3> _usedDummies = [];
 
     /// <summary>
     /// The seats the members held before this pass (<see cref="ClaimSeats"/>), by slot; scratch.
@@ -173,7 +185,7 @@ sealed class TownPlaceClaims(PopulationData data)
         {
             var id = squad.Members[k];
             if (!world.Characters.TryResolveNext(id, out int s) || world.Characters.Cold(s) is not { } cold || cold.Ai is null) continue;
-            var roles = board.Roles[(int)AiSystem.RoleOf(squad, id, cold)];
+            var roles = RolesOf(world, board, squad, id, cold);
             bool relaxes = false, sits = false;
             for (int g = 0; g < roles.Count; g++)
             {
@@ -182,9 +194,17 @@ sealed class TownPlaceClaims(PopulationData data)
                 sits |= roles[g].Task.Type == TaskType.StayInHome;
             }
 
+            relaxes &= TaskStart.Eligible(world, cold, TaskType.RelaxInTownPackage);
+            sits &= Seated(world, cold);
             ClaimSeat(world, board, s, id, relaxes, sits && !relaxes, cold.Ai);
         }
     }
+
+    /// <summary>
+    /// Whether the member's repertoire can use a seat of staying home or sitting around: both lead to 221 (effect 136), which only the human
+    /// repertoire registers, so an animal or a crawling character plans nothing there and takes no seat (docs/game/ai-tasks.md "Town goals").
+    /// </summary>
+    static bool Seated(World world, CharacterCold cold) => TaskStart.Eligible(world, cold, TaskType.PretendToOperateMachinery);
 
     /// <summary>
     /// One member's seat of <see cref="ClaimSeats"/>: the one it kept, else a free one of the building its goal names; one that relaxes and stays
@@ -205,7 +225,7 @@ sealed class TownPlaceClaims(PopulationData data)
         var seats = SeatsOf(world, building);
         var taken = TakenOf(building);
         int had = kept ? seats.IndexOf(old) : -1;
-        if (had >= 0 && Operated(world, seats.At(had).Position)) had = -1;
+        if (had >= 0 && (Operated(world, seats.At(had).Position) || DummyUsed(seats.At(had)))) had = -1;
         bool staying = StaysAt(old.Kind) && mind.Goal?.Task.Type == TaskType.StayInHome;
         if (had >= 0 && (relaxes || staying))
         {
@@ -318,7 +338,7 @@ sealed class TownPlaceClaims(PopulationData data)
     /// <summary>
     /// Whether a character working a machine (<see cref="CharacterTask.Operate"/>) is on the spot, as of the last tick.
     /// </summary>
-    static bool Operated(World world, Vector3 at)
+    internal static bool Operated(World world, Vector3 at)
     {
         var scan = new OperatorScan { Table = world.Characters, At = at };
         world.Grid.Query(at.X, at.Z, 1, ref scan, static (int other, ref OperatorScan st) =>
@@ -332,19 +352,52 @@ sealed class TownPlaceClaims(PopulationData data)
     }
 
     /// <summary>
+    /// Gathers <see cref="_usedDummies"/>: the training dummies characters operate as of the last tick, walking there included.
+    /// </summary>
+    void CollectUsedDummies(World world)
+    {
+        _usedDummies.Clear();
+        var table = world.Characters;
+        for (int i = 0; i < table.HighWater; i++)
+        {
+            if (!table.Next[i].Alive || table.Next[i].Task != (byte)CharacterTask.Operate || table.Cold(i)?.OperateSite is not { } site) continue;
+            if (world.Fixtures.Find(site) is { Kind: Locks.FixtureKind.Training } dummy) _usedDummies.Add(dummy.Position);
+        }
+    }
+
+    /// <summary>
+    /// Marks taken the training dummies of <paramref name="home"/> (its nest's included) a character operates, so no member stays home at them.
+    /// </summary>
+    void TakeUsedDummies(World world, TownBuilding home, HashSet<int> taken)
+    {
+        if (_usedDummies.Count == 0) return;
+
+        var seats = SeatsOf(world, home);
+        for (int i = 0; i < seats.Count; i++)
+            if (DummyUsed(seats.At(i))) taken.Add(i);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="spot"/> is a training dummy a character operates (<see cref="_usedDummies"/>).
+    /// </summary>
+    bool DummyUsed(HomeSpot spot) => spot.Kind == HomeSpotKind.Training && _usedDummies.Contains(spot.Position);
+
+    /// <summary>
     /// The seats of <paramref name="building"/> taken in this cadence pass (indices of <see cref="TownBuilding.SeatAt"/>).
     /// </summary>
     HashSet<int> TakenOf(TownBuilding building) => _seatTaken.TryGetValue(building, out var taken) ? taken : _seatTaken[building] = [];
 
     /// <summary>
     /// The sitting-around (275) counterpart of <see cref="ClaimSeats"/> (the finder <c>FUN_1408caf00</c>, docs/game/ai-tasks.md "Town goals"): a
-    /// member whose role list has 275 open at this hour takes a piece of furniture of the mask 0x1020080 that no one claimed in this cadence pass, in
-    /// the town it stands in (<see cref="TownPlaces.Seats"/>; the home need not be a part of it): a chair or throne, and a training dummy unless the
-    /// character is on the player's side (the mask 0x1020000 of <c>FUN_140856bc0</c>; an AI-run squad is never the player's, so this only spares a
-    /// recruit). The town must be the squad's home town or owned by the squad's faction, a player-side character's a town of the player's faction
+    /// member whose role list has 275 open at this hour (or 255 Reigning, only the squad's leader: 255's desire, AI slot 67, is 0 for the others)
+    /// takes a piece of furniture of the mask 0x1020080 that no one claimed in this cadence pass, in the town it stands in (<see cref="TownPlaces.Seats"/>; the home need not be a part of it): a chair or throne, and a training dummy unless the
+    /// character is on the player's side (the mask 0x1020000 of <c>FUN_140856bc0</c>: a recruit, or a member of an autonomous player squad). The
+    /// town must be the squad's home town or owned by the squad's faction, a player-side character's a town of the player's faction
     /// (<see cref="MaySitIn"/>), and the piece's building owned by the character's faction or the squad's (<see cref="TownPlaces.SeatOwners"/>);
-    /// outside every town it finds nothing. The nearest free piece is an engine choice (the original takes the first of its zone map). A member keeps
-    /// its piece while it still sits around and may sit there, as in <see cref="ClaimSeats"/>.
+    /// outside every town it finds nothing; in the outpost the squad has as its town (<see cref="SitTown"/>) the pieces are the player's
+    /// (<see cref="OutpostSeats"/>), and one a character sits on by an order or job is not taken. The nearest free piece is an engine choice (the
+    /// original takes the first of its zone map). A member keeps its piece while it still sits around and may sit there, as in
+    /// <see cref="ClaimSeats"/>.
     /// </summary>
     public void ClaimSitting(World world, Blackboard board, Squad squad, TownPlaceIndex places)
     {
@@ -356,17 +409,18 @@ sealed class TownPlaceClaims(PopulationData data)
         {
             var id = squad.Members[k];
             if (!world.Characters.TryResolveNext(id, out int s) || world.Characters.Cold(s) is not { } cold || cold.Ai is null) continue;
-            var roles = board.Roles[(int)AiSystem.RoleOf(squad, id, cold)];
+            var roles = RolesOf(world, board, squad, id, cold);
             bool sits = false, around = false;
+            bool reigns = id == squad.Leader;   // 255's desire is 0 for any other member, so its finder is not asked (FUN_140597c20)
             for (int g = 0; g < roles.Count; g++)
             {
                 if (!roles[g].InWindow(hour)) continue;
-                sits |= roles[g].Task.Type is TaskType.SitAround or TaskType.SitOnThrone;
+                sits |= roles[g].Task.Type == TaskType.SitAround || roles[g].Task.Type == TaskType.SitOnThrone && reigns;
                 around |= roles[g].Task.Type == TaskType.SitAround;
             }
 
             bool had = _keptSits.TryGetValue(s, out var old);
-            if (!sits || cold.Ai.SeatUnreachable)   // one that gave its seat up leaves it to the next member
+            if (!sits || cold.Ai.SeatUnreachable || !Seated(world, cold))   // one that gave its seat up leaves it to the next member
             {
                 if (had) TakenOf(old.Building).Remove(old.Index);
                 continue;
@@ -374,15 +428,15 @@ sealed class TownPlaceClaims(PopulationData data)
 
             bool playerSide = PlayerSide(world, cold);
             var at = world.Characters.Next[s].Position;
-            int site = data.TownAt(at);
-            var seats = site >= 0 && MaySitIn(world, board, squad, site, playerSide) ? places.Of(site) : TownPlaceIndex.None;
+            var town = SitTown(world, board, at);
+            var seats = !town.IsNone && MaySitIn(world, board, squad, town, playerSide) ? places.Of(town) : TownPlaceIndex.None;
             bool Mine(TownBuilding b) =>
                 seats.SeatOwners.TryGetValue(b, out int owner) && owner >= 0 && (owner == cold.Faction || owner == squad.Faction);
 
             // Only reigning open: the throne furniture alone (BF_THRONE, mask 0x1000000 of FUN_1408cbd50); sitting around also takes chairs and
             // dummies.
             bool Takes(HomeSpotKind kind) => around ? Sittable(kind, !playerSide) : kind == HomeSpotKind.ThroneSeat;
-            if (had && Mine(old.Building) && Takes(old.Spot.Kind))
+            if (had && Mine(old.Building) && Takes(old.Spot.Kind) && !DummyUsed(old.Spot) && !TakenByOrder(world, old))
             {
                 TakenOf(old.Building).Add(old.Index);
                 board.SitClaims[s] = old;
@@ -395,8 +449,8 @@ sealed class TownPlaceClaims(PopulationData data)
             for (int i = 0; i < seats.Seats.Count; i++)
             {
                 var seat = seats.Seats[i];
-                if (!Takes(seat.Spot.Kind) || !Mine(seat.Building)
-                    || _seatTaken.TryGetValue(seat.Building, out var taken) && taken.Contains(seat.Index))
+                if (!Takes(seat.Spot.Kind) || !Mine(seat.Building) || DummyUsed(seat.Spot)
+                    || _seatTaken.TryGetValue(seat.Building, out var taken) && taken.Contains(seat.Index) || TakenByOrder(world, seat))
                     continue;
 
                 float d = Vector3.DistanceSquared(seat.Spot.Position, at);
@@ -418,7 +472,7 @@ sealed class TownPlaceClaims(PopulationData data)
     /// </summary>
     public void ClaimTownPosts(World world, Blackboard board, Squad squad, TownPlaceIndex places)
     {
-        var posts = places.Of(board.Town).Posts;
+        var posts = places.Of(board.HomeTown).Posts;
         for (int k = 0; k < squad.Members.Count; k++)
         {
             var id = squad.Members[k];
@@ -487,15 +541,37 @@ sealed class TownPlaceClaims(PopulationData data)
     }
 
     /// <summary>
-    /// Whether a member standing in town <paramref name="site"/> may sit around there (the town gate of <c>FUN_1408caf00</c>): a non-player character
+    /// The town a member standing at <paramref name="at"/> sits around in: the placed town it stands in (<see cref="PopulationData.TownAt"/>),
+    /// else the outpost the squad has as its town when it stands within that outpost's radius (Meitou only: the original plans no goals for the
+    /// player's squads, and only those have an outpost as their town); none outside both.
+    /// </summary>
+    CampaignTown SitTown(World world, Blackboard board, Vector3 at)
+    {
+        if (data.TownAt(at) is >= 0 and var site) return CampaignTown.OfSite(site);
+
+        var home = board.HomeTown;
+        if (home.PlayerTown <= 0 || world.Buildings.FindTown(home.PlayerTown) is not { } outpost)
+            return CampaignTown.None;
+        return Vector2.DistanceSquared(Flat(at), Flat(outpost.Position)) <= outpost.Radius * outpost.Radius ? home : CampaignTown.None;
+    }
+
+    /// <summary>
+    /// Whether a member standing in <paramref name="town"/> may sit around there (the town gate of <c>FUN_1408caf00</c>): a non-player character
     /// needs the squad's home town or a town owned by the squad's faction, a player-side one a town owned by the player's faction (no home test).
     /// </summary>
-    bool MaySitIn(World world, Blackboard board, Squad squad, int site, bool playerSide)
+    bool MaySitIn(World world, Blackboard board, Squad squad, CampaignTown town, bool playerSide)
     {
-        int owner = site < data.SiteFactions.Count ? data.SiteFactions[site] : -1;
+        int owner = town.Owner(world, data);
         if (playerSide) return owner >= 0 && owner == (world.Player.Faction >= 0 ? world.Player.Faction : data.PlayerFaction);
-        return site == board.Town || owner >= 0 && owner == squad.Faction;
+        return town == board.HomeTown || owner >= 0 && owner == squad.Faction;
     }
+
+    /// <summary>
+    /// Whether a character sits on a player-built seat piece (an outpost's, <see cref="OutpostSeats"/>) by the player's order or job: such a
+    /// sitter operates it (<see cref="Operated"/>), so no member claims it. A placed town's pieces are reserved as before
+    /// (<see cref="ReserveSeats"/>).
+    /// </summary>
+    internal static bool TakenByOrder(World world, SeatClaim seat) => seat.Building.RuntimeKey is not null && Operated(world, seat.Spot.Position);
 
     /// <summary>
     /// Whether sitting around takes a piece of furniture of this kind (bits CHAIR and THRONE of the mask; TRAINING too unless
@@ -514,10 +590,16 @@ sealed class TownPlaceClaims(PopulationData data)
     /// </summary>
     void ReserveSeats(World world)
     {
+        CollectUsedDummies(world);
         foreach (var squad in world.Squads.All)
         {
             if (squad.Ai is not { } board) continue;
-            foreach (var building in Buildings(board)) TakeOperatedSeats(world, building, TakenOf(building));
+            foreach (var building in Buildings(board))
+            {
+                TakeOperatedSeats(world, building, TakenOf(building));
+                TakeUsedDummies(world, building, TakenOf(building));
+            }
+
             foreach (var spot in board.SeatClaims.Values) Reserve(world, board, spot);
 
             foreach (var claim in board.SitClaims.Values) TakenOf(claim.Building).Add(claim.Index);

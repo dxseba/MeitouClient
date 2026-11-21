@@ -84,6 +84,16 @@ public sealed class SavedPlatoon
     /// </summary>
     public const string BaseTownKey = "meitou basetown";
     /// <summary>
+    /// Set on a platoon a code mod moved to its town as a guest (<see cref="Platoon.Guest"/>); its <c>basetown</c> and <c>hometown</c> name the host
+    /// town, so the game reads it as one of that town's.
+    /// </summary>
+    public const string GuestKey = "meitou guest";
+    /// <summary>
+    /// On an unloaded guest (<see cref="GuestKey"/>): the platoon place, x and z, its members' saved places belong to (their old town); read back as
+    /// <see cref="Anchor"/>, so they come to the host with the platoon.
+    /// </summary>
+    public const string GuestAnchorKey = "meitou guest anchor";
+    /// <summary>
     /// A platoon of an older Meitou save: its <c>basetown</c> is the placement's own id even in a replaced town, so it is taken to fit (the
     /// original's test is not applied).
     /// </summary>
@@ -144,9 +154,18 @@ public sealed class SavedPlatoon
     /// </summary>
     public Trading.Shop? Shop { get; set; }
     /// <summary>
-    /// Its contract and <c>change AI</c>: the save's until its squad first leaves the world, then the squad's.
+    /// Its contract and <c>change AI</c>: the save's until its squad first leaves the world (<see cref="SavedAi"/>), then the squad's. Read in
+    /// parallel by the off-screen step.
     /// </summary>
-    public AiSave? Ai { get => _aiSet ? _ai : AiSave.Read(Source.Record); set { _ai = value; _aiSet = true; } }
+    public AiSave? Ai
+    {
+        get => Volatile.Read(ref _aiSet) ? _ai : SavedAi();
+        set
+        {
+            _ai = value;
+            Volatile.Write(ref _aiSet, true);
+        }
+    }
     /// <summary>
     /// The AI written over the save's (see <see cref="Ai"/>).
     /// </summary>
@@ -156,6 +175,14 @@ public sealed class SavedPlatoon
     /// </summary>
     bool _aiSet;
     /// <summary>
+    /// The save's AI once read from the record (<see cref="SavedAi"/>); kept apart from <see cref="_ai"/> so a read racing a write never covers it.
+    /// </summary>
+    AiSave? _savedAi;
+    /// <summary>
+    /// Whether <see cref="_savedAi"/> was read.
+    /// </summary>
+    bool _savedAiRead;
+    /// <summary>
     /// What its squad remembered when it last left the world (<see cref="MemorySet"/>; else the record's keys are the memory, read when its squad is
     /// made).
     /// </summary>
@@ -164,6 +191,20 @@ public sealed class SavedPlatoon
     /// Whether <see cref="Memory"/> holds the squad's memory (else the record's keys do).
     /// </summary>
     public bool MemorySet { get; set; }
+
+    /// <summary>
+    /// The save's AI (<see cref="AiSave.Read"/>), read once: the running game writes its AI keys only on the copy a save is captured into, so the
+    /// record's never change. Two first readers at once read equal values.
+    /// </summary>
+    AiSave? SavedAi()
+    {
+        if (Volatile.Read(ref _savedAiRead)) return _savedAi;
+
+        var read = AiSave.Read(Source.Record);
+        _savedAi = read;
+        Volatile.Write(ref _savedAiRead, true);
+        return read;
+    }
 }
 
 /// <summary>
@@ -386,7 +427,8 @@ internal static class SavedCharacters
 
         if (race is not null && sc.Medical is not null)
         {
-            medical = MedicalState.ReadSave(race, sc.Medical.Floats, sc.Medical.Bools, sc.Medical.Strings, id => PartOf(id, data.Db, parts));
+            medical = MedicalState.ReadSave(race, sc.Medical.Floats, sc.Medical.Bools, sc.Medical.Strings, id => PartOf(id, data.Db, parts),
+                sc.Medical.Ints);
             SavedLimbs.Apply(medical, sc.Platoon.File, sc.Medical, data.Items);
         }
 
@@ -453,6 +495,11 @@ internal static class SavedCharacters
         var race = p.Race;
         var stats = p.Stats;
         var medical = p.Medical;
+
+        // The original seats a character on the mesh when its movement is made (docs/game/pathfinding.md "Made on the mesh").
+        float? seat = world.Walkability.SeatHeight(position.X, position.Z, position.Y);
+        if (seat is { } floor) position.Y = floor;
+
         float athletics = stats?.Athletics ?? 20;
         float speed = race is null
             ? 45
@@ -471,6 +518,9 @@ internal static class SavedCharacters
         int faction = ownerId.Length > 0 && data.FactionIndex(ownerId) is var fi and >= 0 ? fi : fallbackFaction;
         bool player = faction == playerFaction && (playerPlatoon || playerFaction >= 0);
         var cold = NewCold(p, platoonName, squad, faction, player);
+        if (seat is not null) cold.Save!.Ragdoll = null;   // the ragdoll saved where it lay is not on that floor
+
+        cold.LastingId = world.LastingIds.ForSaved(sc);
 
         ReadState(world, sc, cold, ref hot, data, context, bounties);
 
@@ -480,7 +530,8 @@ internal static class SavedCharacters
         {
             assembly.AttachSaved(cold, race, stats, medical, p.Record,
                 p.Inventory ?? (sc.Inventory is not null ? SavedKit.ToInventory(p.Items, data.Items, notes, p.Record, race.StringId) : null),
-                sc.GameState is { } aged && aged.Floats.TryGetValue("age", out float age) ? age : 1);
+                sc.GameState is { } aged && aged.Floats.TryGetValue("age", out float age) ? age : 1,
+                CharacterAssembly.NaturalWeaponRoll(world.Seed, (ulong)(uint)sc.Handle.S << 32 | (uint)sc.Handle.I));
         }
         else if (race is not null)
             notes?.Add($"{platoonName}: {cold.Name} has no stats or medical state that could be read; it has no body in the world.");
@@ -557,7 +608,8 @@ internal static class SavedCharacters
         if (cold.InSomething == Locks.HeldState.Bed)
             hot.Task = (byte)CharacterTask.Sleep;   // it lies there until an order (Locks.BedSystem)
 
-        if (cold.IsPlayer && sc.Ai is { } ai)
+        // Every character's job list, an NPC's too (the loader FUN_140508e10 has no faction test: an NPC robot's 57, an NPC slave's 187).
+        if (sc.Ai is { } ai)
         {
             PermaJobSave.Read(ai, sc.GameState, cold, world.Buildings, context.Handles, context.InstanceOf, context.InstanceIds,
                 world.SystemOf<Player.PlayerSystem>()?.Extensions?.JobTypes);
@@ -636,6 +688,13 @@ internal static class SavedCharacters
     #endregion
 
     #region NPC platoons
+
+    /// <summary>
+    /// The <see cref="Squad.NextHomeFillTick"/> of a squad a save gives back: its home was filled when the squad was made, before that save (the squad
+    /// factory, <c>FUN_140583a10</c>), so its next fill is a refill with no specials, due at once (<c>TradeSystem.FillHome</c> takes 0 for the first).
+    /// Carried through the squad's time out of the world like any other value of it.
+    /// </summary>
+    const long HomeFilled = 1;
 
     /// <summary>
     /// The building of <paramref name="site"/> a saved platoon lives in: its <c>homebuilding</c> handle resolved to the zone's building state
@@ -784,6 +843,7 @@ internal static class SavedCharacters
             Pinned = sp.Pinned,
             Wild = sp.Wild is not null,
             Restored = true,
+            NextHomeFillTick = HomeFilled,
             LeftPackage = platoon.Package,
             Position = new Vector3(platoon.Position.X, walk.GroundHeight(platoon.Position.X, platoon.Position.Y), platoon.Position.Y),
             HomeCentre = homeCentre,
@@ -816,6 +876,10 @@ internal static class SavedCharacters
         // Its shop as it was when it left the world, else the save's (a fresh fill when the save has none).
         squad.Shop = sp.Shop ?? ShopSave.Read(world, squad, sp.Source.Record, data);
         squad.SavedAi = sp.Ai;
+        squad.SavedPackage = PackageSave.Read(sp.Source.Record);
+
+        // Its house flag as the save had it, the first time it is made (its town and arrival hour wait on its platoon, Platoon.SavedTown).
+        if (!sp.Touched) HomeLockSave.Read(sp.Source.Record, world, squad);
         world.Squads.Add(squad);
 
         // What the squad remembered: the save's, else what it kept when it last left the world.

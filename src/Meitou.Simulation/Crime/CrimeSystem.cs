@@ -141,8 +141,12 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
             if (viaWrapper) c.Freed = false;
             return true;
         }
+        var replaced = c.Pending;
         c.Pending = new PendingCrime { Code = code, VictimFaction = victimFaction, Victim = victim, VictimHolder = victimHolder, Timer = timer };
         if (viaWrapper) c.Freed = false;
+
+        // the crime of another code it replaced ended, told once the new one is set
+        if (replaced is not null) Lapsed(world, culprit, replaced);
         Note(world, CrimeEventKind.Pending, culprit, code, victimFaction, 0, CharacterId.None);
         return true;
     }
@@ -325,21 +329,25 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
             if (c.Pending is { } p)
             {
                 // Check, then subtract (FUN_1405cbb80 tail): cleared on the first call after the timer reached 0.
-                if (p.Timer <= 0) c.Pending = null;
+                if (p.Timer <= 0)
+                {
+                    c.Pending = null;
+                    Lapsed(world, s, p);
+                }
                 else p.Timer -= seconds;
             }
             // A carried or imprisoned suspect is not looked at (the game's witness function): a prisoner's crime runs out and its bounty shows.
             if (!c.CarriedBy.IsNone || c.IsImprisoned) continue;
             if (!c.IsPlayer)
             {
-                if (c.Pending is not null) Witnesses(world, s, c, false, false, seconds);
+                if (c.Pending is not null) Witnesses(world, s, c, false, false, seconds, every);
                 continue;
             }
             bool kidnapping = !c.Carrying.IsNone && table.TryResolveNext(c.Carrying, out int body) && Bodies.CharacterFacts.Kidnapped(table.Cold(body)!);
             // The sight pass sets trespassing itself (SightCrimes); without it the witnesses do.
             bool premises = !SightSystem.Running(world) && PremisesOf(world, s) is not null;
             if (c.Pending is null && !kidnapping && !premises) continue;
-            Witnesses(world, s, c, kidnapping, premises, seconds);
+            Witnesses(world, s, c, kidnapping, premises, seconds, every);
         }
     }
 
@@ -385,14 +393,15 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
     /// victim's is lawless, when it books bounties and the victim's is a bandit faction, or when it regards the culprit as friendly and the victim is
     /// of another faction. Theft and Looting need it to care about the victim (same faction or allied); Looting also that it does not regard the
     /// culprit as friendly; Kidnapping a victim and that care; an Assault a victim that it does not regard as an enemy; a Murder nothing more. One
-    /// that regards the culprit as friendly costs it <see cref="BetrayalDelta"/>. A witness then sets the timer to 20 and, police-like of a faction
-    /// that books bounties, books the crime. With <paramref name="kidnapping"/>, a witness that cares about the carried body first sets a pending
-    /// Kidnapping (timer 20) on the carrier (the carrying check that runs before the crime check); with <paramref name="premises"/> (the culprit
+    /// that regards the culprit as friendly costs it <see cref="BetrayalDelta"/>. A witness then sets the timer to 20 (not for a culprit that is
+    /// down) and, police-like of a faction that books bounties, books the crime. With <paramref name="kidnapping"/>, a witness that cares about
+    /// the carried body first sets a pending Kidnapping (timer 20) on the carrier (the carrying check that runs before the crime check); with <paramref name="premises"/> (the culprit
     /// inside premises while the sight pass does not run: <b>engine</b> fallback), a witness that does not regard it as an enemy and
     /// <see cref="Trespasses"/> sets a pending Trespassing against its own faction. A culprit is seen by the sight test with the sight ray
-    /// (<see cref="SightRay.Sees"/>), a sneaking one only through a full spot meter (<see cref="Spotted"/>).
+    /// (<see cref="SightRay.Sees"/>), a sneaking one only through a full spot meter (<see cref="Spotted"/>). A witness that is the crime's victim keeps
+    /// the culprit on its threats list for the sweep's period <paramref name="every"/>, until the next sweep renews it.
     /// </summary>
-    void Witnesses(World world, int culprit, CharacterCold c, bool kidnapping, bool premises, float seconds)
+    void Witnesses(World world, int culprit, CharacterCold c, bool kidnapping, bool premises, float seconds, int every)
     {
         var table = world.Characters;
         var next = table.Next;
@@ -403,11 +412,8 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
         CharacterCold? body = kidnapping && table.TryResolveNext(c.Carrying, out int b) ? table.Cold(b) : null;
         for (int w = 0; w < table.HighWater; w++)
         {
-            if (w == culprit || !next[w].Alive) continue;
-            if (table.Cold(w) is not { IsPlayer: false, IsImprisoned: false, Medical.Incapacitated: false } wc) continue;
-            if (!wc.CarriedBy.IsNone || wc.Pending is not null) continue;
+            if (w == culprit || !next[w].Alive || MayWitness(table, w, c) is not { } wc) continue;
             int wf = wc.Faction;
-            if (wf == c.Faction || !Relations.Contains(wf)) continue;
             float range = AggroSystem.RangeOf(wc, Settings.Sight);
             if (sneaking)
             {
@@ -419,50 +425,86 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
                 SetPending(world, culprit, CrimeCode.Kidnapping, body.Faction, c.Carrying, KidnapTimer, viaWrapper: true);
             if (premises && !AggroSystem.IsEnemy(Relations, wf, c.Faction) && Trespasses(world, w, culprit))
                 SetPending(world, culprit, CrimeCode.Trespassing, wf, table.IdOf(w), MinTimer);
-            if (c.Pending is not { } p) continue;
-            if (!Reacts(world, wc, c, p)) continue;
-            if (Friendly(wf, c.Faction) && Betrays(p.Code))
-                PlayerRelations.Add(world, Relations, wf, c.Faction, BetrayalDelta, new(RelationCauseType.Crime, culpritId),
-                    $"a friend's crime witnessed ({p.Code})");
+            if (c.Pending is { } p) React(world, w, wc, culprit, c, p, world.Tick + every);
+        }
+    }
+
+    /// <summary>
+    /// The character in slot <paramref name="w"/> as a witness of <paramref name="c"/>'s crime (<see cref="Witnesses"/>' tests on the witness): an
+    /// awake NPC, not carried or imprisoned, with no pending crime of its own, of another faction known to the relations; null when it is not one.
+    /// </summary>
+    CharacterCold? MayWitness(CharacterTable table, int w, CharacterCold c)
+    {
+        if (table.Cold(w) is not { IsPlayer: false, IsImprisoned: false, Medical.Incapacitated: false } wc) return null;
+        if (!wc.CarriedBy.IsNone || wc.Pending is not null) return null;
+
+        return wc.Faction == c.Faction || !Relations.Contains(wc.Faction) ? null : wc;
+    }
+
+    /// <summary>
+    /// The forced sense made <paramref name="looker"/> a new entry of <paramref name="culprit"/> (<c>FUN_140858f40</c>, <b>Verified</b>: with no entry
+    /// it runs the perception update <c>FUN_1408580d0</c> as seen, which runs the witness function <c>FUN_140854d10</c>): a looker that may witness
+    /// the culprit's pending crime reacts at once (<see cref="React"/>), as at a sweep. So a failed stealth knock-out's victim, whose Assault is set
+    /// before the miss notices the attacker, witnesses it then and keeps it pending (timer 20). Serial.
+    /// </summary>
+    internal void Sensed(World world, int looker, int culprit)
+    {
+        var table = world.Characters;
+        if (looker == culprit || table.Cold(culprit) is not { Pending: { } p, IsImprisoned: false } c || !c.CarriedBy.IsNone) return;
+        if (MayWitness(table, looker, c) is not { } wc) return;
+
+        React(world, looker, wc, culprit, c, p, world.Tick + world.Every(Settings.SweepEveryTicks));
+    }
+
+    /// <summary>
+    /// One witness's reaction to the culprit's pending crime <paramref name="p"/> (the game's witness function <c>FUN_140854d10</c>, <b>Observed</b>;
+    /// see <see cref="Witnesses"/>): the victim among the witnesses keeps the culprit on its threats list until <paramref name="until"/>.
+    /// </summary>
+    void React(World world, int w, CharacterCold wc, int culprit, CharacterCold c, PendingCrime p, long until)
+    {
+        var table = world.Characters;
+        var culpritId = table.IdOf(culprit);
+        int wf = wc.Faction;
+        bool friendly = RegardsFriendly(world, w, culprit);
+        if (!Reacts(world, wc, c, p, friendly)) return;
+
+        if (friendly && Betrays(p.Code)) Betrayed(world, wc, culpritId, c.Faction, p.Code);
+        // The refresh (FUN_140851f40) skips a culprit that is down: a knocked-out culprit's crime runs out under its witnesses' eyes.
+        if (!Bodies.CharacterFacts.Down(c))
+        {
             p.Timer = WitnessTimer;
             c.RecentlyWanted = RecentlyWantedSeconds;
-            var witness = table.IdOf(w);
-            // Its squad tags the culprit short-term CRIMINAL (7).
-            if (wc.SquadId >= 0) world.SystemOf<Dialogue.DialogueSystem>()?.Memory.Flag(world, wc.SquadId, culpritId, Dialogue.MemoryTag.Criminal);
-            // A witness that is the crime's own victim (a trespass's is the witness that called it) goes for the culprit (Character::attackTarget:
-            // its squad tags the culprit TEMP_ENEMY).
-            if (p.Victim == witness && wc.Fighter?.CanAttack == true
-                && !(world.SystemOf<Combat.CombatSystem>()?.StateOf(witness) is { } fight && fight.TargetSlot == culprit
-                    && fight.TargetGeneration == culpritId.Generation))
-            {
-                world.SystemOf<Dialogue.DialogueSystem>()?.TagEnemy(world, w, culprit);
-                world.Defer(new Combat.AttackOrder([witness], culpritId)
-                {
-                    Tick = world.Tick + 1, Source = TaskSource.Npc, Cause = $"the victim saw the crime ({p.Code})",
-                });
-            }
-            bool first = !p.Witnessed;
-            if (first)
-            {
-                p.Witnessed = true;
-                Note(world, CrimeEventKind.Witnessed, culprit, p.Code, wf, 0, witness);
-                // The loot already says "was seen looting".
-                if (c.IsPlayer && p.Code != CrimeCode.Looting)
-                {
-                    world.Post(Loc.Tr("{1} has been caught committing {2}!", c.Name, CrimeTable.Name(p.Code)));
-                }
-            }
-            // The original fires the event on every reacting run (docs/game/dialogue.md "Witnesses"). Meitou fires it once at the player's
-            // characters; at an NPC culprit again on every sweep from a police-like witness not yet fighting, as the guards' lines want a culprit
-            // within talking range that does not run (engine choice: lines' repetition limits are not kept). Not a Trespassing: its event-17 line
-            // ("intruder law", DA 6 chase forever) needs no range, and repeating it only restarts the chase (#519).
-            if (first || !c.IsPlayer && p.Code != CrimeCode.Trespassing && !wc.InCombat && IsPoliceLike(world, wc))
-                world.Defer(new Dialogue.DialogueEvent(witness, table.IdOf(culprit), WitnessEvent(world, wc, p)) { Tick = world.Tick + 1 });
-
-            // No stop once booked: the original runs the witness function per looker, so every witness reacts. A booking police far off
-            // (in sight range, too far for its lines) would otherwise keep the guards beside the crime from ever reacting.
-            if (!p.Booked && IsPoliceLike(world, wc) && Factions.Books(wf)) Book(world, culprit, wf, witness);
         }
+
+        var witness = table.IdOf(w);
+        // Its squad tags the culprit short-term CRIMINAL (7).
+        if (wc.SquadId >= 0) world.SystemOf<Dialogue.DialogueSystem>()?.Memory.Flag(world, wc.SquadId, culpritId, Dialogue.MemoryTag.Criminal);
+
+        // A witness that is the crime's own victim (a trespass's is the witness that called it) takes the culprit as its threat
+        // (Character::attackTarget, FUN_140854d10) from inside its own sense pass, so the culprit stays on the list its chooser reads while it
+        // witnesses, until the next sweep: its own chooser answers it.
+        if (p.Victim == witness) AttackTarget(world, w, culprit, until);
+        bool first = !p.Witnessed;
+        if (first)
+        {
+            p.Witnessed = true;
+            Note(world, CrimeEventKind.Witnessed, culprit, p.Code, wf, 0, witness);
+            // The loot already says "was seen looting".
+            if (c.IsPlayer && p.Code != CrimeCode.Looting)
+            {
+                world.Post(Loc.Tr("{1} has been caught committing {2}!", c.Name, CrimeTable.Name(p.Code)));
+            }
+        }
+        // The original fires the event on every reacting run (docs/game/dialogue.md "Witnesses"). Meitou fires it once at the player's
+        // characters; at an NPC culprit again on every sweep from a police-like witness not yet fighting, as the guards' lines want a culprit
+        // within talking range that does not run (engine choice: lines' repetition limits are not kept). Not a Trespassing: its event-17 line
+        // ("intruder law", DA 6 chase forever) needs no range, and repeating it only restarts the chase (#519).
+        if (first || !c.IsPlayer && p.Code != CrimeCode.Trespassing && !wc.InCombat && IsPoliceLike(world, wc))
+            world.Defer(new Dialogue.DialogueEvent(witness, table.IdOf(culprit), WitnessEvent(world, wc, p)) { Tick = world.Tick + 1 });
+
+        // No stop once booked: the original runs the witness function per looker, so every witness reacts. A booking police far off
+        // (in sight range, too far for its lines) would otherwise keep the guards beside the crime from ever reacting.
+        if (!p.Booked && IsPoliceLike(world, wc) && Factions.Books(wf)) Book(world, culprit, wf, witness);
     }
 
     /// <summary>
@@ -588,7 +630,7 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
     /// <summary>
     /// Slot 126 (<c>isAlly</c>): the dialogue's reading with the squad memory, else the same or allied factions.
     /// </summary>
-    bool RegardsFriendly(World world, int a, int b)
+    internal bool RegardsFriendly(World world, int a, int b)
     {
         if (world.SystemOf<Dialogue.DialogueSystem>() is { } talk) return talk.RegardsFriendly(world, a, b);
 
@@ -599,10 +641,27 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
     /// <summary>
     /// What a witness's faction loses towards a culprit it regards as friendly that it sees commit a crime against its own faction (the witness
     /// function's ally branch, <c>FUN_140854d10</c>: slot 4 of its table, -20 x 1, <b>Observed</b>; skipped there when the witness's platoon object
-    /// <c>+0x210</c> has <c>+0xa8</c> set, <b>Unknown</b>, not modelled). The game runs it on every perception update while the crime is fresh, here
-    /// on every sweep, so it repeats until the culprit is no longer an ally.
+    /// <c>+0x210</c> has <c>+0xa8</c> set, not modelled). Once per witness squad while its TEMP_ENEMY tag on the culprit lasts (<see cref="Betrayed"/>).
     /// </summary>
     public const float BetrayalDelta = -20;
+
+    /// <summary>
+    /// The witness function's ally branch (<c>FUN_140854d10</c>, <b>Verified</b>): the witness's squad drops TEMP_ALLY on the culprit and tags it
+    /// TEMP_ENEMY, so the squad no longer regards it as friendly (slot 126) and the branch does not run again on the next sweep, then its faction
+    /// loses <see cref="BetrayalDelta"/> towards the culprit's. Without the tag every witness took 20 off on every sweep, and a town's allies went
+    /// hostile to it within seconds of one of them hitting a townsman (#948).
+    /// </summary>
+    void Betrayed(World world, CharacterCold witness, CharacterId culprit, int culpritFaction, CrimeCode code)
+    {
+        if (witness.SquadId >= 0 && world.SystemOf<Dialogue.DialogueSystem>() is { } talk)
+        {
+            talk.Memory.ClearTempAlly(world, witness.SquadId, culprit);
+            talk.Memory.Flag(world, witness.SquadId, culprit, Dialogue.MemoryTag.TempEnemy);
+        }
+
+        var cause = new RelationCause(RelationCauseType.Crime, culprit);
+        PlayerRelations.Add(world, Relations, witness.Faction, culpritFaction, BetrayalDelta, cause, $"a friend's crime witnessed ({code})");
+    }
 
     /// <summary>
     /// The crimes whose witness path reaches the ally branch: every code but Burglary, Looting, Trespassing, Crop Theft and Uniform Theft (their
@@ -741,10 +800,9 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
     /// <summary>
     /// The investigators' serial step (<c>Task_InvestigateAlarms</c> update, <b>Observed</b>), for each NPC whose AI acts out goal 209 or 210
     /// (<see cref="Ai.AiBehaviour.Investigate"/>): within <see cref="AlarmLookRange"/> of its alarm it counts <see cref="Ai.AiMind.LookAbout"/> down
-    /// and clears the alarm when it runs out; on the way there it keeps the count at <see cref="LookAboutSeconds"/>, and every character it sees that
-    /// is not down, not of its faction or an ally, and has a pending crime against its faction or an ally, its squad tags TEMP_ENEMY (all of them)
-    /// and it goes for the last (<c>Character::attackTarget</c>, which only stores the target: the last in slot order is attacked, <b>Verified</b>;
-    /// the task tests no capability to fight). Engine: "sees" is the witnesses' sight test, the original's sense list (seen or heard) is not.
+    /// and clears the alarm when it runs out; on the way there it keeps the count at <see cref="LookAboutSeconds"/> and looks for suspects
+    /// (<see cref="LookForSuspects"/>). Engine: "sees" is the witnesses' sight test (<see cref="SuspectView"/>), standing for the original's sense
+    /// list (seen or heard).
     /// </summary>
     void Investigate(World world, float seconds)
     {
@@ -768,33 +826,68 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
                 continue;
             }
             mind.LookAbout = LookAboutSeconds;
-            // Every qualifying witness in sight is tagged and the last one scanned is the attack target (the original overwrites the AI's attack
-            // hand: FUN_140354260, Verified, no can-attack test on this path); the order is sent only for that last one.
-            float range = AggroSystem.RangeOf(cold, Settings.Sight);
-            int last = -1;
-            for (int c = 0; c < table.HighWater; c++)
-            {
-                if (c == i || !next[c].Alive || table.Cold(c) is not { Pending: { } p, Medical.Incapacitated: false } cc
-                    || Friendly(cold.Faction, cc.Faction) || !Friendly(cold.Faction, p.VictimFaction))
-                {
-                    continue;
-                }
-                if (Vector3.DistanceSquared(next[c].Position, next[i].Position) > range * range
-                    || world.Sight.Sees(i, c, next[i].Position, next[c].Position, range) <= 0)
-                {
-                    continue;
-                }
-                world.SystemOf<Dialogue.DialogueSystem>()?.TagEnemy(world, i, c);
-                last = c;
-            }
-            if (last >= 0)
-            {
-                world.Defer(new Combat.AttackOrder([table.IdOf(i)], table.IdOf(last))
-                {
-                    Tick = world.Tick + 1, Source = TaskSource.Npc, Cause = "investigating an alarm",
-                });
-            }
+            LookForSuspects(world, i, cold);
         }
+    }
+
+    /// <summary>
+    /// The investigator's look on the way to its alarm (<c>FUN_140354260</c>, <b>Verified</b>): every character it sees that is not down, not of its
+    /// faction or an ally, with a pending crime against its faction or an ally, its squad tags TEMP_ENEMY and it takes as a threat
+    /// (<see cref="AttackTarget"/>, all of them); its own chooser picks whom it fights. No can-attack test on this path.
+    /// </summary>
+    void LookForSuspects(World world, int i, CharacterCold cold)
+    {
+        var table = world.Characters;
+        var next = table.Next;
+        float range = AggroSystem.RangeOf(cold, Settings.Sight);
+        for (int c = 0; c < table.HighWater; c++)
+        {
+            if (c == i || !next[c].Alive || table.Cold(c) is not { Pending: { } p, Medical.Incapacitated: false } cc
+                || Friendly(cold.Faction, cc.Faction) || !Friendly(cold.Faction, p.VictimFaction))
+            {
+                continue;
+            }
+
+            if (Vector3.DistanceSquared(next[c].Position, next[i].Position) > range * range || SuspectView(world, i, c, cc, range) <= 0) continue;
+
+            AttackTarget(world, i, c);
+        }
+    }
+
+    /// <summary>
+    /// <c>Character::attackTarget</c> (<c>FUN_1405cb0a0</c>, <b>Verified</b>): <paramref name="target"/> goes on <paramref name="slot"/>'s threats
+    /// list (AI <c>+0x78</c>, SensoryData <c>+0x50</c>; <see cref="AggroSystem.Threaten"/>: forced sense, the entry), its squad tags the target
+    /// TEMP_ENEMY, and its AI is updated at once (Meitou: it thinks at the next tick). No order and no fight start: the list's readers are 32 Self
+    /// preservation's desire and row 13's finder, the tag the attack-on-sight finders' (docs/game/economy.md "Witnesses"). With
+    /// <paramref name="witnessedUntil"/> (a crime's victim witnessing it, the push from its own sense pass) the target stays on the list its chooser
+    /// reads until that tick (<see cref="AggroSystem.Witness"/>); else the push raises only the immediate-threat flag. Serial.
+    /// </summary>
+    static void AttackTarget(World world, int slot, int target, long witnessedUntil = -1)
+    {
+        var aggro = world.SystemOf<AggroSystem>();
+        if (witnessedUntil >= 0) aggro?.Witness(world, slot, target, witnessedUntil);
+        else
+            aggro?.Threaten(world, slot, target);
+        world.SystemOf<Dialogue.DialogueSystem>()?.TagEnemy(world, slot, target);
+        if (world.Characters.Cold(slot) is not { } cold) return;
+
+        Ai.DecisionSystem.Request(cold);
+        if (cold.Ai is { } mind) mind.Replan = true;
+    }
+
+    /// <summary>
+    /// How well the looker in <paramref name="looker"/> sees the suspect in <paramref name="suspect"/> as a witness does
+    /// (<see cref="SightRay.Sees"/>'s view factor: the sight test, with the ray where it applies, and for a sneaker a full spot meter); 0 when it
+    /// does not. Read by the alarm's investigators (#897: one went after a sneaking criminal through a floor) and the arrest system's bounty
+    /// spotting.
+    /// </summary>
+    internal float SuspectView(World world, int looker, int suspect, CharacterCold c, float range)
+    {
+        var next = world.Characters.Next;
+        bool sneaking = (c.Orders & CharacterOrders.Sneak) != 0;
+        if (sneaking && !Spotted(world, looker, world.Characters.IdOf(suspect))) return 0;
+
+        return SightRay.Sees(world, looker, suspect, next[looker].Position, next[suspect].Position, range, sneaking ? Orders.Stealth(c) : -1);
     }
 
     /// <summary>
@@ -856,12 +949,11 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
     /// <summary>
     /// The witness function's tests for one witness and one pending crime (see <see cref="Witnesses"/>).
     /// </summary>
-    bool Reacts(World world, CharacterCold w, CharacterCold culprit, PendingCrime p)
+    bool Reacts(World world, CharacterCold w, CharacterCold culprit, PendingCrime p, bool friendlySuspect)
     {
         int wf = w.Faction, vf = p.VictimFaction;
         if (!Relations.Contains(vf) || Relations.IsHostile(wf, vf) || Factions.Lawless(vf)) return false;
         if (Factions.Books(wf) && Factions.Bandit(vf)) return false;
-        bool friendlySuspect = Friendly(wf, culprit.Faction);
         if (friendlySuspect && vf != wf) return false;
         bool cares = Friendly(wf, vf);
         var victim = world.Characters.TryResolveNext(p.Victim, out int v) ? world.Characters.Cold(v) : null;
@@ -882,12 +974,66 @@ public sealed partial class CrimeSystem(FactionRelations relations, CrimeSetting
         BountyBook.Lines(c, tick, tickSeconds, local);
 
     /// <summary>
-    /// Adds an event to <see cref="Log"/> (with <see cref="CrimeSettings.RecordLog"/>).
+    /// Records a pending, witnessed, booked or expired crime: <see cref="Report"/> (with the culprit's pending crime, none for an expiry), then the
+    /// world event log's line.
     /// </summary>
     internal void Note(World world, CrimeEventKind kind, int culprit, CrimeCode code, int faction, int amount, CharacterId witness)
     {
-        if (Settings.RecordLog) _log.Add(new CrimeEvent(world.Tick, kind, world.Characters.IdOf(culprit), code, faction, amount, witness));
+        var pending = kind == CrimeEventKind.Expired ? null : world.Characters.Cold(culprit)?.Pending;
+        Report(world, kind, culprit, code, faction, amount, witness, pending);
         world.Events.Line(world, "crime", CrimeLine(world, kind, culprit, code, faction, amount, witness));
+    }
+
+    /// <summary>
+    /// Adds an event to <see cref="Log"/> (with <see cref="CrimeSettings.RecordLog"/>) and passes it to the crime observers
+    /// (<see cref="ICrimeObserver"/>), once the change it reports is made, with <paramref name="pending"/>'s victim; neither builds the event
+    /// without a log or an observer.
+    /// </summary>
+    void Report(World world, CrimeEventKind kind, int culprit, CrimeCode code, int faction, int amount, CharacterId witness, PendingCrime? pending)
+    {
+        if (!Settings.RecordLog && !world.CrimeObservers.Active) return;
+
+        var crime = new CrimeEvent(world.Tick, kind, world.Characters.IdOf(culprit), code, faction, amount, witness)
+        {
+            Victim = pending?.Victim ?? CharacterId.None,
+            VictimFaction = pending?.VictimFaction ?? -1,
+            VictimHolder = pending?.VictimHolder,
+        };
+        if (Settings.RecordLog) _log.Add(crime);
+        world.CrimeObservers.Observe(world, crime);
+    }
+
+    /// <summary>
+    /// Reports <paramref name="ended"/>, the pending crime the culprit no longer has (<see cref="CrimeEventKind.Lapsed"/>); no event log line, as
+    /// lapses are routine.
+    /// </summary>
+    void Lapsed(World world, int culprit, PendingCrime ended) =>
+        Report(world, CrimeEventKind.Lapsed, culprit, ended.Code, ended.VictimFaction, 0, CharacterId.None, ended);
+
+    /// <summary>
+    /// Drops the pending crime of the character in <paramref name="slot"/> (a change of side: recruited, bought free, dismissed, stored off screen)
+    /// and reports it (<see cref="CrimeEventKind.Lapsed"/>); nothing without one. Serial phases.
+    /// </summary>
+    internal static void DropPending(World world, int slot, CharacterCold c)
+    {
+        if (c.Pending is not { } ended) return;
+
+        c.Pending = null;
+        world.SystemOf<CrimeSystem>()?.Lapsed(world, slot, ended);
+    }
+
+    /// <summary>
+    /// Removes <paramref name="entry"/> from the ledger of the character in <paramref name="slot"/> other than by expiry (a fine, a bail, a release,
+    /// dialogue, the debug menu), the ledger going once empty, and reports it (<see cref="CrimeEventKind.Cleared"/>, with the entry's faction and
+    /// amount). Serial phases.
+    /// </summary>
+    internal static void ClearBounty(World world, int slot, CharacterCold c, BountyLedger ledger, BountyEntry entry)
+    {
+        ledger.Remove(entry);
+        if (ledger.Count == 0 && ReferenceEquals(c.Bounties, ledger)) c.Bounties = null;
+
+        world.SystemOf<CrimeSystem>()?.Report(world, CrimeEventKind.Cleared, slot, CrimeCode.None, entry.Faction, entry.Amount, CharacterId.None,
+            null);
     }
 
     /// <summary>

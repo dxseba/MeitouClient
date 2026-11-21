@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Simulation;
+using Meitou.Simulation.Factions;
 using Meitou.Simulation.Movement;
 using SimWorld = Meitou.Simulation.World;
 
@@ -18,7 +19,14 @@ public class MovementTests
             byte mode = SpeedMode.Free)
     {
         var hot = new CharacterHot { Position = at, Health = 100, Task = (byte)task, MaxSpeed = max, WalkSpeed = walk, Mode = mode };
-        return w.Characters.Spawn(hot, new CharacterCold(), 0);
+        var squad = new Squad { Id = w.Squads.NextId(), TemplateId = "t" };
+        w.Squads.Add(squad);
+
+        // A character with no squad runs no chooser, so it would start no order (OrderStep.Runs).
+        var id = w.Characters.Spawn(hot, new CharacterCold { SquadId = squad.Id }, 0);
+        squad.Members.Add(id);
+        squad.Leader = id;
+        return id;
     }
 
     static Vector3 Where(SimWorld w, CharacterId id) => w.Characters.Previous[id.Slot].Position;
@@ -144,6 +152,23 @@ public class MovementTests
 
         Assert.Throws<InvalidOperationException>(() => w2.RunTick());
         Assert.True(w2.Characters.IsAlive(id));
+    }
+
+    /// <summary>
+    /// A fighter's footwork step into ground it cannot stand on is turned along the edge rather than dropped (#923: guards backing off into a cliff
+    /// stood piled up for good); one straight into a dead end gets no turn either.
+    /// </summary>
+    [Fact]
+    public void A_refused_footwork_step_is_turned_along_the_edge()
+    {
+        var walk = new OpenGroundWalkability((x, _) => x < 0 ? -1000 : 300);
+        var from = new Vector3(0.2f, 300, 0);
+        var slid = MovementSystem.SlideStep(walk, from, new Vector2(-1, 0.6f));
+
+        Assert.NotNull(slid);
+        Assert.True(walk.IsWalkable(from.X + slid.Value.X, from.Z + slid.Value.Y), "it ends on ground it can stand on");
+        Assert.True(slid.Value.Y > 0, "it keeps the step's way along the edge");
+        Assert.Null(MovementSystem.SlideStep(walk, from, new Vector2(-1, 0)));
     }
 
     sealed class Misbehaving : ITickSystem

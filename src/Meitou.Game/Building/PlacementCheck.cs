@@ -89,13 +89,18 @@ public sealed class PlacementServices
     /// </summary>
     public Func<Vector3, Vector3, float, IEnumerable<PlacedBuilding>> StaticAlong { get; init; } = (_, _, _) => [];
     /// <summary>
-    /// The collision triangles of a building record in its own space (a click on a building is tested against them); empty without level data.
+    /// The collision triangles of a building record in its own space, intact or (true) destroyed (a click on a building is tested against them);
+    /// empty without level data.
     /// </summary>
-    public Func<string, IReadOnlyList<(Vector3[] Vertices, int[] Indices)>> CollisionMesh { get; init; } = _ => [];
+    public Func<string, bool, IReadOnlyList<(Vector3[] Vertices, int[] Indices)>> CollisionMesh { get; init; } = (_, _) => [];
     /// <summary>
     /// For each shape of <see cref="CollisionMesh"/>, in order: the index of the door it is a part of, -1 for none.
     /// </summary>
-    public Func<string, IReadOnlyList<int>> CollisionMeshDoors { get; init; } = _ => [];
+    public Func<string, bool, IReadOnlyList<int>> CollisionMeshDoors { get; init; } = (_, _) => [];
+    /// <summary>
+    /// Whether a level building is drawn as a ruin now (a town's override, else its save or level state).
+    /// </summary>
+    public Func<BuildingPlacement, bool> LevelDestroyed { get; init; } = _ => false;
     /// <summary>
     /// The triangles of a collision file by its record path (an item's <c>physics file</c>), in its own space; empty when it is not in the install.
     /// </summary>
@@ -207,6 +212,11 @@ public static class PlacementCheck
     /// A person's radius for the characters-in-the-way test (engine choice; the original's node box test is <b>Observed</b> only).
     /// </summary>
     public const float CharacterRadius = 2.5f;
+    /// <summary>
+    /// A person's height for the characters-in-the-way test (engine choice): one whose feet to this far over them miss the ghost's height, on
+    /// the floor below or above it, is not in the way.
+    /// </summary>
+    const float CharacterHeight = 19;
     /// <summary>
     /// How far above the floor and below its top the ghost's footprint is tested against the building's structure (engine choice): the floor it stands
     /// on and a ceiling it hangs from touch it there.
@@ -323,11 +333,26 @@ public static class PlacementCheck
                 && Overlap(hull, queued.Hull))
                 return PlacementFailure.TooCloseToBuilding;
         }
+        return CharacterBlock(q, hull);
+    }
+
+    /// <summary>
+    /// <see cref="PlacementFailure.CharactersInTheWay"/> when a living, uncarried character stands in the footprint <paramref name="hull"/> at
+    /// the ghost's height (from its floor to its top: the footprint's, else the record's <c>building height</c>); None otherwise.
+    /// </summary>
+    static PlacementFailure CharacterBlock(PlacementQuery q, Vector2[] hull)
+    {
+        var footprint = q.Services.Footprint(q.Building.Id);
+        float bottom = q.Position.Y + MathF.Max(footprint?.YMin ?? 0, 0);
+        float top = q.Position.Y + (footprint?.YMax ?? q.Building.BuildingHeight);
+
         foreach (var c in q.Characters)
         {
             if (c.Body is { Dead: true } || !c.CarriedBy.IsNone) continue;
+            if (c.Position.Y > top || c.Position.Y + CharacterHeight < bottom) continue;
             if (Distance(hull, new Vector2(c.Position.X, c.Position.Z)) < CharacterRadius) return PlacementFailure.CharactersInTheWay;
         }
+
         return PlacementFailure.None;
     }
 

@@ -1,7 +1,7 @@
 # Interior cut
 
 What lies inside a building's interior mask is not drawn, so a room dug into a hillside shows its floor and no grass
-grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, foliage, map features.
+grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, foliage, map features, particles.
 
 ## Original
 
@@ -12,7 +12,10 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
   not sample it.
 - **Verified** readers (installed `data/materials`): `terrain.material`/`terrainfp4.hlsl` (patches, always);
   `foliage.material` `Grass` (`grass_fs`, always; the `Foliage` material there is commented out); `objects.hlsl` and
-  `triplanar.hlsl` under `CLIP_INTERIOR` (0x200); `mapfeature.material` `Feature_Terrain_DX11` (`interiorClip` unit).
+  `triplanar.hlsl` under `CLIP_INTERIOR` (0x200); `mapfeature.material` `Feature_Terrain_DX11` (`interiorClip` unit);
+  `forward/basic.hlsl` under `CLIP_INTERIOR` (`Basic_Texture_Clipped_FP_HLSL` in `basic.program`, the same rule), the fragment program of 41
+  of the installed particle materials (the rain streaks `Kenshi_rain_basic`, `kenshi_rain1`, `Kenshi_black_rain` and the red ones, and dust,
+  ash, drifting-foliage and wisp sprites; listed by `ParticleMaterial.ClipInterior` over the vanilla install). Not the rain splash.
 - **Verified (decompiled)**: map features always get CLIP_INTERIOR ([runtime-materials](formats/runtime-materials.md)),
   and so do foliage leaves (FUN_1406d1380 copies the `leaves *` fields and calls FUN_140843920 with mode 4, FOLIAGE).
   Building parts and items do not. **Observed**: the foliage meshes' own materials also come from FUN_140843920
@@ -21,6 +24,15 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
   (render queue 0x10, visibility 0x800, no shadows; skipped with `skip stencil tricks`) and destroyed on close, so a closed
   building cuts nothing ([closed interiors](render-objects.md#closed-interiors)). Meitou cuts with every loaded mask (engine
   difference).
+- **Verified (decompiled)**: the open path (`FUN_140561d10`) makes the mask for any complete building whose `interior mask` part has a
+  `phs or mesh`; it does not read `interior terrain` (Building +0xc1, "building interior includes terrain"). That flag has two readers: the
+  pick walk, where a ground hit inside a building ends the walk only in a building with it
+  ([building picking](game/ui-input.md#building-picking-and-selection)), and the character visibility pass `FUN_1405c9f60`, which keeps a
+  character on floor 0 of such a building drawn while its interior is closed.
+- **Verified** (mask mesh files, every placement): of the three `interior terrain` buildings, the Metal Warehouse's mask part has no mesh; the
+  Ancient Factory's mesh spans local Y 337..693, 238+ over the terrain at its 3 placements; the Ash Dome Ruin reuses the Ash Dome's
+  (Y -74..496) and its 12 placements lie 60..621 under the terrain, so its mask holds the terrain the ruin is walked on
+  ([pathfinding](game/pathfinding.md), #222, #1023).
 - **Observed**: the queue-16 geometry is the `interior mask` parts' `phs or mesh` (`Storm_House_01_Interior_MASK.mesh` etc.;
   [settings](formats/settings.md) `skip stencil tricks`), placed with the building node. **Verified** (probe, merged
   records): 31 mask parts have such a mesh (gate triggers have none), none has an offset; the meshes are not the
@@ -34,6 +46,7 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
   trigger hull its masks write R = 0 (the game's value there: every face seen is a back face). `Boxes` are the drawn mask
   meshes' X/Z bounds.
 - Readers: `InteriorMaskRenderer.WithCut` puts the test first in a fragment program. A `discard` costs the early depth
+- **Under the floor** (Meitou, `InteriorMaskRenderer.CutUnderFloor`, on; no setting yet): the mask pass also writes G = -(depth + 1) of the farthest face that lies flat below the eye (min blend), and where that face is the farthest of all (the mask's floor) the cut reaches 8 units further along the view. **Observed** (save grass-through interior, the Bughouse): a hump of terrain between the floor's boards and the mask's bottom (more than 1 unit behind the mask's back face, so the game's rule keeps it) came through the floor with its grass; cut with the reach, 19,300 -> 150 dark pixels. **Unknown**: whether the original shows the same hump there (its shader rule says it would; not run).
   test, so programs without one stay without it and only work over a box takes the cut:
   - terrain: patches overlapping a box use cut variants of the colour and prepass programs;
   - map features: instances whose sphere overlaps a box form their own batches, drawn with the full (dithered) program
@@ -41,6 +54,17 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
   - foliage meshes: the full colour and prepass programs (already discarding) cut while the view has it on; the GPU cull
     gives a fully visible instance over a box the fade 1.5 (drawn whole), which lays it out with the dithered ones;
   - grass: always cut in the main near view (its cut-out already discards);
+  - particles: materials whose fragment program defines `CLIP_INTERIOR` (`ParticleMaterial.ClipInterior`), the game's rule alone (no
+    under-floor reach), in the colour, low-resolution and reactive-mask draws (`ParticleRenderer.SetInteriorCut`);
+    **Rain in open buildings** (Fixes settings, on; off: the game's rule alone): the mask pass also writes B = -(depth + 1) of the farthest face
+    of a building in the interior view (min blend), and full-size camera-box `CLIP_INTERIOR` particles (`EffectType.Camera`, `CameraRain`,
+    `CameraAcidRain`: rain and ash flakes) are cut anywhere nearer than it (`uInterior.w`), so rain in front of a room with its roof hidden no
+    longer streaks over it. The game's camera rain lies 30..190 ahead of the eye (`Kenshi_Heavy_Rain`'s 120 cube), so from a camera pulled back
+    further than that its rule cuts none of it (issue #945). World-space duststorms and placed smoke/beams keep the game's rule alone (cutting
+    them in front of an open building punches a hole through dust between the camera and the building with low-resolution block edges). When
+    `uSoftDepth` is bound, the front cut also requires the scene depth behind the pixel to lie within the open building's mask span
+    (`r - (2 + 0.002 r)` to `-b + 24`), keeping streaks over foreground occluders and over sky or distant terrain seen through a hidden roof.
+    Rain off the building's screen footprint is unchanged;
   - TERRAIN-mode features and rocks (the terrain's mesh path): placements over a box are drawn with the meshes' full
     colour program with `TerrainConstants.interiorCut` on (features and CPU-culled rocks in their own list; GPU-culled
     rocks get the fade 1.5 too and are drawn by the fading draw).
@@ -51,6 +75,12 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
     nothing inside the hull (convex footprint and height range of up to 4 viewed buildings, 32 edges in all, in `ViewConstants.cutPlanes`; the
     objects' depth program discards). Limits: the mask is shared, so such a part between two masks along a ray, or in a non-convex mask's concavity, is
     cut too; a far cascade cached before the view opened keeps the shadow until it is redrawn.
+- **Interior terrain** (Fixes settings, `Ground in buried ruins`, on; off: the game's rule; `InteriorVolume.MaskHoldsGround`,
+  `WorldObjectRenderer.KeepHeldGround`): the mask of an `interior terrain` building with a mask mesh reaching under the terrain at the building's
+  origin is not used, so nothing is cut in it and a move pick stops on its terrain ([movement marker](game/ui-input.md#movement-marker)).
+  **Verified** (scratch check, every placed building with a mask): the 12 Ash Dome Ruins are such; the 3 Ancient Factories, the 6 Ash Domes and the
+  other 39 building types are not. The original's rule (above) cuts the terrain in a ruin while a player character is in it, showing buried
+  floors no navmesh reaches under a character walking unseen ground (#1023; the game was not run).
 - Only the main view; not shadows or the water reflection.
 - Engine limits: "inside" is decided by the hull, not per ray; foliage impostors and the grass motion pass (TAA velocity)
   are not cut.

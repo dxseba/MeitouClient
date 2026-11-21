@@ -77,6 +77,18 @@ public sealed partial class ProductionSystem
     static int Held(CraftState state, CraftOption option) => state.Done.Where(d => d.Record == option.Item).Sum(d => d.Quantity);
 
     /// <summary>
+    /// Whether the bench's output takes no more of this option: the option's store is held, or the output holds an item and no stack of the option's
+    /// item with room. <b>Observed</b> with the harness (cooking stove, Dried Gristle Flaps, stackable 1): one finished item makes it "Output full" and
+    /// the cook stops until it is taken (<c>FUN_1402bcac0</c> adds the item only while the <c>out</c> section holds less than its minimum stack, 1).
+    /// </summary>
+    internal static bool OutputFull(CraftState state, CraftOption option)
+    {
+        if (Held(state, option) >= option.Store) return true;
+
+        return state.Done.Count > 0 && !state.Done.Any(d => d.Record == option.Item && d.Quantity < d.StackLimit);
+    }
+
+    /// <summary>
     /// Sets the input sections for the first craft (<b>Observed</b>, <c>CraftingBuilding::vfunc_182</c> "setProductionItem"): section k takes
     /// ingredient k at its per-item amount; sections it does not use draw nothing. Done when the first craft changes (queued, cancelled, finished).
     /// Items of another kind in a section fall on the ground (engine choice; the original hands them back to the bench). Each section's level moves
@@ -138,6 +150,7 @@ public sealed partial class ProductionSystem
         {
             m.Inputs[k].Item = ItemOf(m, job, k);
             m.Inputs[k].Rate = k < job.Recipe.Inputs.Count ? job.Recipe.Inputs[k].PerItem : 0;
+            m.Inputs[k].Idle = k >= job.Recipe.Inputs.Count;
         }
     }
 
@@ -155,7 +168,7 @@ public sealed partial class ProductionSystem
         }
 
         var job = state.Queue[0];
-        if (Held(state, job.Option) >= job.Option.Store)
+        if (OutputFull(state, job.Option))
         {
             m.Status = 1;
             return false;
@@ -195,10 +208,11 @@ public sealed partial class ProductionSystem
     }
 
     /// <summary>
-    /// A finished craft (<b>Observed</b>, <c>FUN_1402bcac0</c>): armour of the crafter's tier (one better on a critical), capped at the bench's tech
-    /// level, and a robotic limb or crossbow of that grade as its level; a weapon of the queued model, or when the crafter's skill is below its level
-    /// and there was no critical, of the best model of the bench at or below the skill (engine reading of the model pick); other items as they are.
-    /// The craft leaves the queue, and with repeat on goes back to its end.
+    /// A finished craft (<b>Observed</b>, <c>FUN_1402bcac0</c>): armour of the crafter's tier (one better on a critical), whatever the bench's
+    /// tech level (<b>Verified</b>, disassembly: no bench field reaches the factory), and a robotic limb or crossbow of that grade as its level;
+    /// a weapon of the queued model, or when the crafter's skill is below its level and there was no critical, of the best model of the bench at
+    /// or below the skill (engine reading of the model pick); other items as they are. The craft leaves the queue, and with repeat on goes back to
+    /// its end.
     /// </summary>
     void Finish(World world, Machine m, CraftState state, CraftJob job, float skill)
     {
@@ -210,11 +224,11 @@ public sealed partial class ProductionSystem
         {
             case CraftKind.Armour:
                 // the factory gives an armour piece its level from that quality
-                made = _items.Create(option.Item, 1, Math.Min(CraftBench.ArmourQuality(skill, critical), bench.TechLevel));
+                made = _items.Create(option.Item, 1, CraftBench.ArmourQuality(skill, critical));
                 break;
             case CraftKind.Robotics or CraftKind.Crossbow:
                 made = _items.Create(option.Item, 1);
-                if (made is not null) made.Level = Math.Min(CraftBench.ArmourQuality(skill, critical), bench.TechLevel);
+                if (made is not null) made.Level = CraftBench.ArmourQuality(skill, critical);
                 break;
             case CraftKind.Weapon:
                 var model = WeaponModel(bench, option, skill, critical);
@@ -263,9 +277,9 @@ public sealed partial class ProductionSystem
     /// </summary>
     IReadOnlyDictionary<string, CraftSmithView>? _publishedSmiths;
     /// <summary>
-    /// The machine registry version <see cref="_publishedSmiths"/> was made at (-1: never).
+    /// The machine registry's version and work count <see cref="_publishedSmiths"/> was made at (-1: never).
     /// </summary>
-    long _smithsVersion = -1;
+    (long Version, long Worked) _smithsVersion = (-1, -1);
 
     /// <summary>
     /// The Craft tab's Current Smith per bench (<c>FUN_1402bcf60</c>): the bench's last operator (<see cref="Machine.Smith"/>) while it is alive with
@@ -274,8 +288,9 @@ public sealed partial class ProductionSystem
     /// </summary>
     public IReadOnlyDictionary<string, CraftSmithView> SmithsView(World world)
     {
-        if (_publishedSmiths is not null && _smithsVersion == world.Machines.Version) return _publishedSmiths;
-        _smithsVersion = world.Machines.Version;
+        var machines = (world.Machines.Version, world.Machines.Worked);
+        if (_publishedSmiths is not null && _smithsVersion == machines) return _publishedSmiths;
+        _smithsVersion = machines;
         var map = new Dictionary<string, CraftSmithView>(StringComparer.Ordinal);
         foreach (var m in world.Machines.All)
         {

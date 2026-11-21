@@ -28,8 +28,8 @@
     "areas": "Slaves, Squads, Saves"
   },
   "dmlen": {
-    "commits": 9,
-    "areas": "Benchmarks, Proton saves, Tracers"
+    "commits": 10,
+    "areas": "Benchmarks, Crossbow bolt tracers"
   },
   "lucasskrewer": {
     "commits": 23,
@@ -48,19 +48,31 @@
     "areas": "Mod settings"
   },
   "teppum": {
-    "commits": 82,
-    "areas": "Mods, Launcher, Squads, Inventory, Animals"
+    "commits": 252,
+    "areas": "Code mod hooks, NPC goals"
   },
   "robgreen490": {
     "commits": 4,
     "areas": "UI scaling, Inventory rendering"
   },
   "deseven": {
-    "commits": 26,
-    "areas": "Debug menu, Metal rendering"
+    "commits": 34,
+    "areas": "Metal rendering, debug menu"
   },
   "mattresspad": {
     "commits": 3,
     "areas": "Benchmarks, Homepage"
+  },
+  "pza-mods-bot": {
+    "commits": 5,
+    "areas": "Group speed, mod settings"
+  },
+  "dk853": {
+    "commits": 2,
+    "areas": ""
+  },
+  "protocol-nyx": {
+    "commits": 1,
+    "areas": "Monitor start option"
   }
 }

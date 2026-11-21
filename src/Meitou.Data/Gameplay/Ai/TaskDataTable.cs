@@ -343,6 +343,50 @@ public static class TaskDataTable
     static readonly System.Collections.Concurrent.ConcurrentDictionary<(int, TaskCondition), TaskDataRow[]> ProviderCache = new();
 
     /// <summary>
+    /// TaskData <c>followMeWeight</c> (<c>+0x30</c>) where the registration sets it (<c>FUN_140319a60</c>, <b>Verified</b>: 24 writes, their values
+    /// read in the disassembly, each after its row's registration call): 1 for these rows; 35 Running away 0.5; 19, 37, 43, 153, 239, 255 and 275
+    /// write 0.1. Every other row keeps the constructor's 0.01 (<c>FUN_14061d350</c>).
+    /// </summary>
+    static readonly TaskType[] LeadingRows =
+    [
+        TaskType.Patrol, TaskType.Wanderer, TaskType.PatrolTown, TaskType.WanderingTrader, TaskType.TravelToTargetTown, TaskType.DefeatSquad,
+        TaskType.MakeAnnouncement, TaskType.RunAwayHometown, TaskType.RetreatHometown, TaskType.MakeAnnouncementFast, TaskType.TravelToTargetTownFast,
+        TaskType.TownStalker, TaskType.HuntingBloodsmell, TaskType.GoToSomewhereForDeliveringSlaves, TaskType.TravelToTargetPackage,
+        TaskType.DefeatSquadLimitChaseRange,
+    ];
+
+    /// <summary>
+    /// A row's <c>followMeWeight</c> (<c>+0x30</c>, <see cref="LeadingRows"/>): how much a character running it as its goal draws followers.
+    /// </summary>
+    public static float FollowMeWeight(TaskType type) => type switch
+    {
+        TaskType.RunAway => 0.5f,
+        TaskType.GoHomebuilding or TaskType.WanderTown or TaskType.StayInHome or TaskType.GoHomeAndGoToBed or TaskType.GoHomeAndGoToBedSecure
+            or TaskType.SitOnThrone or TaskType.SitAround => 0.1f,
+        _ => Array.IndexOf(LeadingRows, type) >= 0 ? 1 : 0.01f,
+    };
+
+    /// <summary>
+    /// A row's alertness (<c>+0x3c</c>, <b>Verified</b>: 0.4 from the TaskData constructor <c>FUN_14061d350</c>, the other values written by the
+    /// registrations of <c>FUN_140319a60</c>): how fast a character running the task fills its spot meter on a sneaker
+    /// (docs/game/perception.md "Spotting a sneaker"); 0 sees none.
+    /// </summary>
+    public static float Alertness(TaskType type) => type switch
+    {
+        TaskType.UseBed or TaskType.UseBedOrder or TaskType.SleepOnFloor or TaskType.SleepOnFloorFakeAmbush => 0,
+        TaskType.UseTrainingDummy => 0.1f,
+        TaskType.HealMyLegs or TaskType.FirstAidOrder or TaskType.SplintOrder or TaskType.FirstAidRobot => 0.2f,
+        TaskType.StripTargetsWeapons or TaskType.ProcessAndStripNewSlave => 0.25f,
+        TaskType.NewSlaveProcessing => 0.5f,
+        TaskType.Patrol => 0.75f,
+        TaskType.PatrolTown => 0.8f,
+        TaskType.UseTurret or TaskType.Protection or TaskType.Bodyguard or TaskType.StandAtNode or TaskType.StandAtGeneralNode
+            or TaskType.StandAtGuardNodeHomebuilding or TaskType.StandAtGuardNodeHomebuildingIndoorsOnly
+            or TaskType.StandAtGuardNodeHometownOutside or TaskType.HuntingBloodsmell => 1,
+        _ => 0.4f,
+    };
+
+    /// <summary>
     /// The row of a type; null for the 37 named types without one.
     /// </summary>
     public static TaskDataRow? Of(TaskType type) => (uint)type < (uint)ByType.Length ? ByType[(int)type] : null;

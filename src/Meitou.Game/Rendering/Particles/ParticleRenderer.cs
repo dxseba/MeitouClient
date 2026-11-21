@@ -6,6 +6,7 @@ using Meitou.Data.Particles;
 using Meitou.Data.Textures;
 using Meitou.Game.Rendering.Frame;
 using Meitou.Game.Rendering.Gpu;
+using Meitou.Game.Rendering.Objects;
 using Meitou.Game.Rendering.Post;
 using Meitou.Game.Rendering.Sky;
 using Meitou.Game.Rendering.Water;
@@ -53,6 +54,9 @@ public sealed unsafe class ParticleRenderer : IDisposable
         out vec3 vHazeMul, vHazeAdd;                // the haze and the fog volumes in front of the corner: colour * mul + add
         out float vSun;                             // the sun's visibility through the sprite's volume (the same at every corner)
         out float vGlow;                            // the light scattered forward when the sprite is seen towards the sun
+        // x 1: lit as a medium (the dustlight switch, a unit that scatters), y pi x the noon sun's luminance, z the noon environment factor
+        uniform vec4 uDustLight;
+        out vec3 vLight;                            // the light on a scattering sprite against the noon's (1: as drawn)
 
         // The sun's visibility averaged through a sprite's volume: eight bilinear compares at the corners of a cube half its size about its centre, each
         // in the first cascade that holds it (1 beyond them). Read at each fragment of the flat quad, the shadow printed the outline of every tree and
@@ -79,6 +83,27 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 lit += shadowCascadeLayer(tile.xy, c, tile.z);
             }
             return lit * 0.125;
+        }
+
+        // The light on a scattering sprite (dust, spray) at its centre against the noon's in the open, where the game's additive sprite was made to look
+        // right: the sun through its shadows (sun, the volume's visibility), half of it as on a sphere's mean, brighter seen towards it (glow); the sky
+        // from above; the lamps from both sides of the plane facing the eye. Both terms take the ambient map as the ground does, the noon's too, so
+        // by day the sprite keeps its colour. At most twice the noon's (a sprite at a lamp's heart).
+        vec3 dustLight(vec3 centre, vec3 toEye, float sun, float glow)
+        {
+            const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+            vec4 am = atmoAmbientMapAt(centre);
+            vec3 sky = atmoIrradiance(vec3(0.0, 1.0, 0.0));
+            vec3 light = uAtmoSunLight * (am.a * atmoCloudShadow(centre) * sun * glow * ATMO_PI) + sky * am.rgb * uAtmoLight.w;
+            if (uLightGrid.w > 0.5)
+            {
+                vec3 front = vec3(0.0), back = vec3(0.0), specular = vec3(0.0);
+                lampLight(centre, toEye, toEye, 1.0, 1.0, front, specular);
+                lampLight(centre, -toEye, toEye, 1.0, 1.0, back, specular);
+                light += 0.5 * (front + back);
+            }
+            float noon = uDustLight.y * am.a + dot(sky, luma) * dot(am.rgb, luma) * uDustLight.z;
+            return min(light / max(noon, 1e-4), vec3(2.0));
         }
 
         void main()
@@ -126,9 +151,16 @@ public sealed unsafe class ParticleRenderer : IDisposable
             vHazeAdd = vec3(0.0);
             vSun = 1.0;
             vGlow = 1.0;
+            vLight = vec3(1.0);
+            vec3 centre = uParticleEye + position + right * middle.x + up * middle.y;
+            if (uDustLight.x > 0.5)
+            {
+                float glow = 1.0 + uLitVertex.z * pow(max(dot(normalize(world), uAtmoSun.xyz), 0.0), 8.0);
+                vLight = dustLight(centre, normalize(-world), particleSun(centre, max(width, height)), glow);
+            }
             if (uLitVertex.x > 0.5)
             {
-                vSun = particleSun(uParticleEye + position + right * middle.x + up * middle.y, max(width, height));
+                vSun = particleSun(centre, max(width, height));
                 atmoApplyCoefficients(uParticleEye, uParticleEye + world, vHazeMul, vHazeAdd);
                 // And the placed fog volumes and the effects' fog spheres in front of it, blended over that as the game blends them over the hazed scene
                 // (the sprites came after them, so a dust cloud behind a fog bank showed through it).
@@ -153,6 +185,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
         in vec3 vHazeMul, vHazeAdd;
         in float vSun;
         in float vGlow;
+        in vec3 vLight;                             // a scattering sprite's light against the noon's (1: as drawn)
         uniform vec4 uLitFragment;                  // x 1: lit (Meitou fog switch), y how much of the light the sun's shadow takes, z 0 alpha blend, 1 additive, 2 neither
         in vec4 vColour;
         in float vDepth;
@@ -163,13 +196,34 @@ public sealed unsafe class ParticleRenderer : IDisposable
         uniform vec4 uSoft;                         // x: 0 hard (the game's), 1 fade the alpha, 2 the colour and alpha (additive), 3 towards white (modulate); y, z: the scene depth's near, far; w unused
         uniform float uCoverageMax, uCoverageGain;
         uniform int uCoverage;                      // 0: colour; 1: the particle's alpha, 2: its brightest channel (the upscalers' reactive mask); 3 / 4: the low-resolution target's premultiplied alpha / additive
+        uniform sampler2D uInteriorMask;            // the interior cut's depth range (InteriorMaskRenderer): r the nearest mask face's depth + 1, a the farthest's, b minus the farthest open building's
+        uniform vec4 uInterior;                     // x 1: the material clips inside buildings (CLIP_INTERIOR); y, z: the mask's pixels per pixel of this target; w 1: also cut in front of open buildings (full-size camera rain/ash)
         """ + DepthConvention.Glsl + """
         void main()
         {
+            // basic.hlsl under CLIP_INTERIOR: a fragment between the nearest and the farthest interior-mask face is left out (rain in a building).
+            if (uInterior.x > 0.5)
+            {
+                ivec2 maskCoord = clamp(ivec2(gl_FragCoord.xy * uInterior.yz), ivec2(0), textureSize(uInteriorMask, 0) - 1);
+                vec4 interiorRange = texelFetch(uInteriorMask, maskCoord, 0);
+                float interiorDepth = 1.0 / gl_FragCoord.w;
+                if (interiorDepth < interiorRange.a && interiorDepth > interiorRange.r) discard;
+                // Meitou: camera rain and ash in front of a building whose roof is hidden too, so no streaks fall over the open room (b is 0 where
+                // there is none). When the scene depth is available, keep streaks over surfaces clearly in front of the building (its outer wall or
+                // a foreground structure) or behind it (sky or distant terrain seen through a hidden upper floor's mask).
+                if (uInterior.w > 0.5 && interiorRange.b < 0.0 && interiorDepth < -interiorRange.b)
+                {
+                    if (uSoft.x <= 0.0) discard;
+                    float sceneZ = depthViewZ(texelFetch(uSoftDepth, ivec2(gl_FragCoord.xy), 0).r, uSoft.yz);
+                    float frontMargin = 2.0 + 0.002 * interiorRange.r;
+                    if (sceneZ >= interiorRange.r - frontMargin && sceneZ <= -interiorRange.b + 24.0) discard;
+                }
+            }
             // basic.hlsl: texture * colour * vertex colour. A recoloured burst (negative vertex rgb, Burst's recolour) takes that colour instead of the texture's hue, keeping its brightness.
             vec4 t = texture(uTexture, vUv);
             if (min(vColour.r, min(vColour.g, vColour.b)) < 0.0) t.rgb = vec3(max(t.r, max(t.g, t.b)));
             vec4 c = t * abs(vColour);
+            c.rgb *= vLight;
             // Meitou fog: dust and smoke lit as the scene is (the game's sprites are flat, and not fogged): darker where the sun is shadowed, brighter seen
             // towards the sun, then seen through the haze in front of them like the land behind; an additive sprite (fire) only dimmed by the haze.
             if (uLitFragment.x > 0.5 && uLitFragment.z < 1.5)
@@ -245,17 +299,32 @@ public sealed unsafe class ParticleRenderer : IDisposable
     /// The program's camera, billboard and coverage uniforms.
     /// </summary>
     readonly UniformHandle _viewProjection, _cameraRight, _cameraUp, _mode, _anchor, _commonDirection, _commonUp, _colourScale, _coverageMode,
-        _coverageLimit, _coverageGain, _soft;
+        _coverageLimit, _coverageGain, _soft, _interior;
     /// <summary>
     /// The program's uniforms for the Meitou lighting.
     /// </summary>
-    readonly UniformHandle _litVertex, _litFragment, _particleEye;
+    readonly UniformHandle _litVertex, _litFragment, _particleEye, _dustLight;
+    /// <summary>
+    /// Meitou (the <c>dustlight</c> switch, docs/render-post.md "Lit dust"): the sprites of a unit that scatters (<see cref="EffectUnit.Scatters"/>:
+    /// the dust and spray a foot throws up) take the light where they are, the sun through its shadows, the sky and the lamps, against the noon's
+    /// (<see cref="DustNoon"/>). The game draws them additive and unlit, as bright by night as by day.
+    /// </summary>
+    public bool LitDust { get; set; }
+    /// <summary>
+    /// The light <see cref="LitDust"/> measures against: x pi times the luminance of the sun's light at the zenith, y the environment light's
+    /// factor at noon (<see cref="Sky.SkyRenderer.NoonLight"/>).
+    /// </summary>
+    public Vector2 DustNoon { get; set; }
     /// <summary>
     /// Meitou (the <c>fog</c> switch): alpha sprites lit as the scene is, darker where the sun is shadowed (by <see cref="SunShade"/>), brighter seen
     /// towards the sun, and seen through the haze in front of them; additive ones dimmed by the haze. The game's are flat and not fogged, so a dust
     /// cloud had one brightness everywhere, in sun and in shade, near and far (docs/render-post.md "Fog").
     /// </summary>
     public bool Lit { get; set; }
+    /// <summary>
+    /// The interior masks of this frame, which the materials with <c>CLIP_INTERIOR</c> are cut by (docs/render-interior-cut.md); null: no cut.
+    /// </summary>
+    internal InteriorMaskRenderer? InteriorCut { get; set; }
     /// <summary>
     /// How much of the light on a sprite the sun's shadow takes (the light shafts' darkening: the sun's share of the light).
     /// </summary>
@@ -271,7 +340,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
     /// <summary>
     /// The program's texture and soft-depth samplers.
     /// </summary>
-    readonly SamplerSlot _textureSlot, _softDepthSlot;
+    readonly SamplerSlot _textureSlot, _softDepthSlot, _interiorSlot;
     /// <summary>
     /// The 1 × 1 white stand-in for a missing texture.
     /// </summary>
@@ -298,9 +367,9 @@ public sealed unsafe class ParticleRenderer : IDisposable
     /// </summary>
     readonly List<EffectUnit> _simulationWork = [];
     /// <summary>
-    /// Scratch: the units drawn this frame, with whether each is rain and whether it is placed.
+    /// Scratch: the units drawn this frame, with whether each is rain, a camera-box weather effect, and whether it is placed.
     /// </summary>
-    readonly List<(EffectUnit Unit, bool Rain, bool Placed)> _drawUnits = [];
+    readonly List<(EffectUnit Unit, bool Rain, bool Camera, bool Placed)> _drawUnits = [];
     /// <summary>
     /// This frame's draws (<see cref="Prepare"/>).
     /// </summary>
@@ -398,11 +467,11 @@ public sealed unsafe class ParticleRenderer : IDisposable
     /// <summary>
     /// The particles alive in the weather's groups and the placers (waits for the simulation).
     /// </summary>
-    public int ParticleCount { get { Sync(); return _groups.Weather.Groups.Concat(_groups.Placers).Sum(g => g.ParticleCount); } }
+    public int ParticleCount { get { Sync(); return _groups.WeatherGroups.Concat(_groups.Placers).Sum(g => g.ParticleCount); } }
     /// <summary>
-    /// The weather's groups (not the map placers').
+    /// The weather's groups (camera and nearby regions, not the map placers').
     /// </summary>
-    public IReadOnlyList<EffectGroup> Groups => _groups.Weather.Groups;
+    public IReadOnlyList<EffectGroup> Groups => _groups.WeatherGroups;
     /// <summary>
     /// The map placers' groups.
     /// </summary>
@@ -463,10 +532,17 @@ public sealed unsafe class ParticleRenderer : IDisposable
         /// </summary>
         public float Fill;
         /// <summary>
-        /// Rain (a <c>CAMERA_RAIN</c> or <c>CAMERA_ACID_RAIN</c> effect's draw) and fire (a placed effect's additive draw: flames, sparks): full size
-        /// at every setting, each with its own coverage (RecordDraws).
+        /// Rain (a <c>CAMERA_RAIN</c> or <c>CAMERA_ACID_RAIN</c> effect's draw), camera-box weather (<c>CAMERA</c>, <c>CAMERA_RAIN</c>,
+        /// <c>CAMERA_ACID_RAIN</c>, whose particles sit in a box ahead of the eye) and fire (a placed effect's additive draw: flames, sparks): rain
+        /// and fire stay full size at every setting, each with its own coverage; full-size camera draws take the open-building front cut
+        /// (RecordDraws).
         /// </summary>
-        public bool Rain, Fire;
+        public bool Rain, Camera, Fire;
+        /// <summary>
+        /// The draw of a unit whose particles scatter the light they are in (<see cref="EffectUnit.Scatters"/>): lit as the scene is with
+        /// <see cref="LitDust"/>.
+        /// </summary>
+        public bool Scatter;
         /// <summary>
         /// The <see cref="Tracers"/>' draw: full size, counted in the reactive mask as rain.
         /// </summary>
@@ -497,7 +573,10 @@ public sealed unsafe class ParticleRenderer : IDisposable
         _coverageGain = _program.Uniform("uCoverageGain");
         _textureSlot = _program.Sampler("uTexture");
         _softDepthSlot = _program.Sampler("uSoftDepth");
+        _interiorSlot = _program.Sampler("uInteriorMask");
+        _interior = _program.Uniform("uInterior");
         _soft = _program.Uniform("uSoft");
+        _dustLight = _program.Uniform("uDustLight");
         (_litVertex, _litFragment, _particleEye) = (_program.Uniform("uLitVertex"), _program.Uniform("uLitFragment"),
             _program.Uniform("uParticleEye"));
         float[] corners = [-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f];   // triangle strip
@@ -577,6 +656,11 @@ public sealed unsafe class ParticleRenderer : IDisposable
     public void SetWeather(WeatherEffectInput weather) => _groups.Weather.Want(weather, Now());
 
     /// <summary>
+    /// Sets the nearby regions' spatial weather inputs so neighbouring zones' dust clouds and storms spawn and remain visible across boundaries.
+    /// </summary>
+    public void SetRegionWeathers(IReadOnlyList<RegionWeatherInput> regions) => _groups.SetRegionWeathers(regions, Now());
+
+    /// <summary>
     /// The time in seconds on the high-resolution clock.
     /// </summary>
     static double Now() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
@@ -619,15 +703,18 @@ public sealed unsafe class ParticleRenderer : IDisposable
     /// <paramref name="orientation"/>, emitting for
     /// <paramref name="seconds"/> of the frame clock, the particles <paramref name="size"/> times as big and <paramref name="lifeScale"/> times as
     /// long-lived (luckyren Mode's blood). With <paramref name="recolour"/> the particles take that colour (rgb, 0 to about 2) in place of their
-    /// texture's hue (a race's <c>blood colour</c>). Drawn with the map's placers; an unknown system does nothing. Returns the burst's unit (null:
-    /// none), for <see cref="MoveBurst"/>.
+    /// texture's hue (a race's <c>blood colour</c>). <paramref name="scatters"/>: the particles are dust or spray lit by the scene
+    /// (<see cref="EffectUnit.Scatters"/>). Drawn with the map's placers; an unknown system does nothing. Returns the burst's unit (null: none), for
+    /// <see cref="MoveBurst"/>.
     /// </summary>
     public EffectUnit? Burst(string system, Vector3 position, Quaternion orientation, float seconds, float size = 1, float lifeScale = 1,
-        Vector3? recolour = null)
+        Vector3? recolour = null, bool scatters = false)
     {
         if (!Enabled) return null;
         Sync();
-        return _groups.BurstGroup(system)?.Spawn(position, orientation, seconds, size, lifeScale, recolour);
+        var unit = _groups.BurstGroup(system)?.Spawn(position, orientation, seconds, size, lifeScale, recolour);
+        if (unit is not null) unit.Scatters = scatters;
+        return unit;
     }
 
     /// <summary>
@@ -664,7 +751,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
             {
                 var u = g.Units[ui];
                 if (u.Effect.FogVolumes.Count == 0) continue;
-                float fade = u.FogFade;
+                float fade = u.FogFade * u.Alpha;
                 if (fade <= 0) continue;
                 foreach (var f in u.Effect.FogVolumes)
                 {
@@ -717,14 +804,10 @@ public sealed unsafe class ParticleRenderer : IDisposable
 
         // A weather change: the groups made on the side are swapped in once warmed (with the frame's simulation finished, so nothing runs on the old
         // ones).
-        bool changed = _groups.Weather.Advance(view, Now());
-        if (changed || (_groups.Weather.Building && !ReferenceEquals(_groups.Weather.BuildingGroups, _preloaded)))
-        {
-            _preloaded = _groups.Weather.Building ? _groups.Weather.BuildingGroups : _groups.Weather.Groups;
-            PreloadTextures(_preloaded);   // decoded on a worker while the groups are warmed
-        }
+        _groups.Advance(view, Now(), _preloadTargets);
+        if (_preloadTargets.Count > 0) PreloadTextures(_preloadTargets);   // decoded on a worker while the groups are warmed
         DropStalePreloads();
-        if (_groups.Weather.Groups.Count == 0 && _groups.Placers.Count == 0)
+        if (_groups.WeatherGroups.Count == 0 && _groups.Placers.Count == 0)
         {
             _lastSeconds = seconds;
             return;
@@ -736,9 +819,9 @@ public sealed unsafe class ParticleRenderer : IDisposable
     }
 
     /// <summary>
-    /// The groups whose textures were last preloaded.
+    /// Reused list of groups whose textures should be preloaded on the current frame.
     /// </summary>
-    IReadOnlyList<EffectGroup>? _preloaded;
+    readonly List<EffectGroup> _preloadTargets = [];
 
     /// <summary>
     /// Starts the simulation of the active units on the thread pool.
@@ -788,7 +871,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
     {
         Sync();
         int n = 0;
-        foreach (var g in _groups.Weather.Groups.Concat(_groups.Placers))
+        foreach (var g in _groups.WeatherGroups.Concat(_groups.Placers))
             foreach (var u in g.Units)
             {
                 if (g is CameraEffectGroup) continue;
@@ -938,16 +1021,16 @@ public sealed unsafe class ParticleRenderer : IDisposable
         _drawnParticles = 0;
         _drawnUnits = 0;
         _coveragePending = false;
-        if (!Enabled || (_groups.Weather.Groups.Count == 0 && _groups.Placers.Count == 0 && Tracers.Count == 0)) return;
+        if (!Enabled || (_groups.WeatherGroups.Count == 0 && _groups.Placers.Count == 0 && Tracers.Count == 0)) return;
         _draws.Clear();
         var frame = _gpu.Frame;
         var forward = -new Vector3(view.M13, view.M23, view.M33);   // the view's -Z axis in the world
         CollectUnits(WorldCamera.FrustumPlanes(viewProjectionMatrix), eye);   // eye-relative: tested with positions less the eye
-        foreach (var (u, rain, placed) in _drawUnits)
+        foreach (var (u, rain, camera, placed) in _drawUnits)
         {
             var offset = u.Anchor - eye;
             if (u.Simulation is not { } sim || u.CatchingUp) continue;
-            float shown = RangeFade ? u.RangeFade : 1;
+            float shown = (RangeFade ? u.RangeFade : 1) * u.Alpha;
             if (shown <= 0) continue;
             _drawnUnits++;
             for (int t = 0; t < sim.Techniques.Count; t++)
@@ -966,7 +1049,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 // A unit stepped at a lower rate (StartSimulation) is drawn ahead by the time it has queued since its last step, so it moves every
                 // frame.
                 int written = sim.Collect(t, _scratch.AsSpan(0, n), material.Blend == ParticleBlend.Add ? u.Tint * shown : u.Tint,
-                    u.Alpha * EffectOpacity(u.Effect.Name) * shown, offset, Math.Min(u.Pending, MaxDrawAhead));
+                    EffectOpacity(u.Effect.Name) * shown, offset, Math.Min(u.Pending, MaxDrawAhead));
                 if (written == 0) continue;
                 int close = PartitionByDepth(_scratch.AsSpan(0, written), forward, nearPlane);
 
@@ -979,7 +1062,9 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 _collectTotal += collected;
                 int divisor = 1;
                 float fill = 0;
-                bool fire = placed && material.Blend == ParticleBlend.Add;
+                // A burst that scatters (dust, spray: EffectUnit.Scatters) is no fire, whatever its blend.
+                bool scatter = u.Scatters;
+                bool fire = placed && material.Blend == ParticleBlend.Add && !scatter;
                 if (pixelsPerUnit > 0 && !rain && !fire && (material.Blend == ParticleBlend.Alpha || material.Blend == ParticleBlend.Add))
                 {
                     float needed = material.Texture is { } name && _pixelsNeeded.TryGetValue(name, out float texels) ? texels : 1;
@@ -988,7 +1073,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
                     _nextDivisors[(u, t)] = divisor;
                 }
                 _draws.Add(new DrawItem { Instances = instances, Count = written, Close = close, Technique = def, Material = material,
-                    Texture = texture, Divisor = divisor, Fill = fill, Rain = rain, Fire = fire });
+                    Texture = texture, Divisor = divisor, Fill = fill, Rain = rain, Camera = camera, Fire = fire, Scatter = scatter });
                 _drawnParticles += written;
             }
         }
@@ -1025,7 +1110,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
                     if (!InFrustum(planes, u.Position - eye, u.Radius)) continue;
                 }
 
-                units.Add((u, g.Effect.Type is EffectType.CameraRain or EffectType.CameraAcidRain, g.Entry is null));
+                units.Add((u, g.Effect.Type is EffectType.CameraRain or EffectType.CameraAcidRain, g.Effect.IsCameraGroup, g.Entry is null));
             }
         }
 
@@ -1258,7 +1343,8 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 float lit = m.Ambient ? ambient : 1;
                 _program.Set(_colourScale, m.ColourScale.X * lit, m.ColourScale.Y * lit, m.ColourScale.Z * lit, m.ColourScale.W);
                 _program.Bind(_textureSlot, d.Texture.Sampled());
-                SetSoftAndLight(m, coverage, softDepth);
+                SetSoftAndLight(m, coverage, softDepth, d.Scatter);
+                SetInteriorCut(d, m, targets, divisor);
                 RecordPass(cmd, state, targets, d, first, count);
             }
         }
@@ -1297,7 +1383,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
     /// <summary>
     /// The soft fade against the scene's depth and the Meitou sun lighting of a material's sprites.
     /// </summary>
-    void SetSoftAndLight(ParticleMaterial m, int coverage, SoftDepth? softDepth)
+    void SetSoftAndLight(ParticleMaterial m, int coverage, SoftDepth? softDepth, bool scatter)
     {
         // The soft fade by blend: an alpha sprite fades its alpha, an additive or colour-blended one its colour, a modulating one towards
         // white.
@@ -1315,7 +1401,31 @@ public sealed unsafe class ParticleRenderer : IDisposable
         _program.Set(_litFragment, litOn ? 1 : 0, Math.Clamp(SunShade, 0, 1),
             m.Blend == ParticleBlend.Alpha ? 0 : m.Blend == ParticleBlend.Add ? 1 : 2, 0);
         _program.Set(_particleEye, _frameEye);
+        // Every pass of a lit scatterer, the reactive mask's too: what it adds is what it shows.
+        _program.Set(_dustLight, LitDust && scatter ? 1 : 0, DustNoon.X, DustNoon.Y, 0);
         _program.Bind(_softDepthSlot, softDepth is { } bound ? bound.Texture : _white.Sampled());
+    }
+
+    /// <summary>
+    /// The interior cut of a material's sprites: on when it clips inside buildings (<see cref="ParticleMaterial.ClipInterior"/>) and the mask drew
+    /// this frame, read at the mask's size whatever the target's (the low-resolution ones, after the upscale). The open-building front cut
+    /// (<c>uInterior.w</c>, Fixes settings <c>Rain in open buildings</c>) applies only to full-size camera-box effects (rain and ash flakes, which
+    /// stay ahead of the eye so the game's rule misses them when zoomed out): world-space duststorms are already cut inside buildings by the game's
+    /// rule, and cutting them in front of an open building punches a blocky hole through the dust between the camera and the building.
+    /// </summary>
+    void SetInteriorCut(in DrawItem d, ParticleMaterial m, in PassTargets targets, int divisor)
+    {
+        var viewport = targets.Viewport;
+        if (!m.ClipInterior || InteriorCut?.DepthRange is not { } range || viewport.Width <= 0 || viewport.Height <= 0)
+        {
+            _program.Set(_interior, 0f, 0f, 0f, 0f);
+            _program.Bind(_interiorSlot, _white.Sampled());
+            return;
+        }
+
+        float frontCut = d.Camera && divisor == 1 ? 1f : 0f;
+        _program.Set(_interior, 1f, (float)range.Width / viewport.Width, (float)range.Height / viewport.Height, frontCut);
+        _program.Bind(_interiorSlot, range.Texture);
     }
 
     /// <summary>
@@ -1501,7 +1611,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
     public void Dispose()
     {
         Sync();
-        _groups.Weather.Dispose();
+        _groups.Dispose();
         _simulator.Dispose();
         foreach (var t in _textures.Values) t?.Dispose();
         _white.Dispose();

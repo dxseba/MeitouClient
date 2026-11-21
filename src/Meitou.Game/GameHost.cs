@@ -87,6 +87,11 @@ sealed partial class GameHost(
     /// </summary>
     public IDisposable? Splash { get; init; }
 
+    /// <summary>
+    /// How the session's game data was read, with the code mods' data phase (docs/modding.md "Data phase"); null: read without one.
+    /// </summary>
+    internal Meitou.Modding.ModDataPhase? DataPhase { get; init; }
+
     #endregion
 
     #region Features
@@ -178,6 +183,10 @@ sealed partial class GameHost(
     /// The corpse flies.
     /// </summary>
     internal CorpseFlies CorpseFlies = null!;
+    /// <summary>
+    /// The animations' dust kicks on dry ground.
+    /// </summary>
+    internal DryGroundEffects DryGround = null!;
 
     /// <summary>
     /// The character editor's host side.
@@ -261,6 +270,7 @@ sealed partial class GameHost(
         Debris = new(this);
         Decapitation = new(this);
         CorpseFlies = new(this);
+        DryGround = new(this);
 
         CharacterEditor = new(this);
         LevelEditorHost = new(this);
@@ -638,7 +648,10 @@ sealed partial class GameHost(
             clock: clock, simulation: settings, systems: systems, walkability: walkability);
 
         Session.World.BenchFacingFix = Config.FixBenchFacing;
+        Session.World.PrisonPoseFix = Config.FixPrisonPose;
+        Session.World.CagedAnimalFix = Config.FixCagedAnimals;
         Session.World.BagSearchFix = Config.FixBagSearch;
+        Session.World.CounterTalk = Config.CounterTalk;
         Session.World.TakeIntoBackpack = Config.TakeIntoBackpack;
         Session.World.ActionLog = ActionLogs.Log;
         Session.Simulation.SetFastSpeeds(Config.FastSpeed, Config.FastestSpeed);
@@ -712,6 +725,7 @@ sealed partial class GameHost(
                 Decapitation = Config.Decapitation,
                 AdvancedRagdolls = Config.AdvancedRagdolls,
                 SquadXp = Config.SquadXp,
+                SquadSkillXp = SkillXp.Rates(Config.SquadSkillXp),
                 OthersXp = Config.OthersXp,
             },
             ZoneReady = ready =>
@@ -775,7 +789,7 @@ sealed partial class GameHost(
     void MigrateBindings()
     {
         var bindings = Session.Bindings;
-        UseSavedBindings(bindings, Install, Config);
+        UseSavedBindings(bindings, Install, Config, Modding.KeyActions);
 
         // Right is the command button by default; older saved configs bound it to orbit (kept when Command has moved off it).
         if (bindings.Get(InputAction.Command).Contains(Binding.Of(EngineButton.Right)))
@@ -806,13 +820,15 @@ sealed partial class GameHost(
     }
 
     /// <summary>
-    /// The install's controls.cfg as the defaults, then the config's changes over them; skipped lines are reported on the console.
+    /// The install's controls.cfg as the defaults, then the config's changes over them, then the code mods' key actions; skipped lines are reported on
+    /// the console.
     /// </summary>
-    internal static void UseSavedBindings(InputBindings bindings, GameInstall install, UserConfig config)
+    internal static void UseSavedBindings(InputBindings bindings, GameInstall install, UserConfig config, IReadOnlyList<ModKeyAction> modActions)
     {
         bindings.UseGameControls(GameControls.Read(install.Root, out var problems));
         foreach (var problem in problems) Console.Error.WriteLine($"controls.cfg binding skipped: {problem}");
         foreach (var problem in bindings.ApplySaved(config.Bindings)) Console.Error.WriteLine($"config    binding skipped: {problem}");
+        foreach (var problem in bindings.UseModActions(modActions, config.ModBindings)) Console.WriteLine($"mods      key action: {problem}");
     }
 
     /// <summary>
@@ -833,6 +849,7 @@ sealed partial class GameHost(
         Player.ShowNames = Config.ShowNames;
         Player.Floaters = Config.Floaters;
         Player.FeedbackButtonInPlay = Config.FeedbackButton;
+        Player.XpLabel = SkillXp.Label(Config);
         Player.Frontend.FixLoadButton = Config.FixLoadButton;
         Player.BuildingSelection.DeselectBuildings = Config.DeselectBuildings;
         Player.InventoryWindows.RotateItems = Config.RotateItems;
@@ -946,6 +963,7 @@ sealed partial class GameHost(
         if (start is not null)
         {
             PlayerSquad = Population.StartPlayer(Session.World, start);
+            Session.World.TellReady(fromSave: false);
             var lead = Session.World.Characters.Previous[PlayerSquad.Leader.Slot].Position;
             target = lead;
             Console.WriteLine($"player    {PlayerSquad.Members.Count} characters, leader at {lead.X:0}, {lead.Z:0}");
@@ -985,6 +1003,7 @@ sealed partial class GameHost(
             // The frame clock DrawWorld gives the foliage sway: a recorded flight poses the same every take.
             PoseClock = () => AnimClock ? AnimSeconds : RealTime.Elapsed.TotalSeconds,
             SoakClock = () => Session.Clock.GameSeconds,
+            MotionClock = () => Session.Clock.GameSeconds + Session.SimulationAlpha * Session.Simulation.TickSeconds,
             RainWetness = () => Gpu.Surfaces?.Wetness ?? 0,
         };
     }
@@ -998,7 +1017,7 @@ sealed partial class GameHost(
         var yaw = (WorldOptions.Yaw ?? 30) * MathF.PI / 180;
         var pitch = (WorldOptions.Pitch ?? Data.World.KenshiCamera.InitialPitchDegrees) * MathF.PI / 180;
         var distance = WorldOptions.Distance ?? Data.World.KenshiCamera.InitialDistance;
-        Session.Camera.Place(new Vector2(target.X, target.Z), yaw, pitch, distance);
+        Session.Camera.Place(new Vector2(target.X, target.Z), yaw, pitch, distance, target.Y);
 
         SendFocus();
         ApplyCamera(Session.Camera.Current);
@@ -1013,11 +1032,17 @@ sealed partial class GameHost(
         if (StartSave is not { } save || GameOptions.Load is not { } folder) return;
 
         Saves.ReadingFolder = folder;
+        var read = Task.FromResult(save);
+
+        // The mesh round the player first, as the menu's load: the save's characters are seated on it when they are made.
+        LoadingStep("navmesh");
+        AwaitLoading(Saves.NavmeshOfPlayer(read));
+
         Task navmesh;
         string summary;
         try
         {
-            navmesh = Saves.SwapInSave(Task.FromResult(save), interactive, out summary);
+            navmesh = Saves.SwapInSave(read, interactive, out summary);
         }
         catch (SceneLoadFailed e)
         {
@@ -1042,6 +1067,7 @@ sealed partial class GameHost(
     {
         Modding.ConnectModUi(ui);
         ConnectSaves(ui);
+        ui.InventoryWindows.SplitStacks = Config.SplitStacks;
 
         // The region (BIOME_GROUP) under a point, for the biome banner.
         ui.BiomeBanner.RegionAt = (x, z) => ActiveWeather?.World.RegionAt(x, z).Def is { } def ? (def.StringId, def.Name) : null;
@@ -1607,6 +1633,7 @@ sealed partial class GameHost(
         UpdateWakes();
         UpdateSplashes();
         Modding.UpdateModHits();
+        Modding.UpdateModFaults();
         Rendering.Profiling.StageClock.Lap(Rendering.Profiling.StageClock.Blood, "blood marks");
 
         Birds.UpdateBirds(aspect);
@@ -1655,9 +1682,9 @@ sealed partial class GameHost(
     internal bool TickAhead;
 
     /// <summary>
-    /// Meitou's dynamic tick ahead (engine choice): on once a world tick takes <see cref="AheadOnMs"/> (smoothed), off again under
-    /// <see cref="AheadOffMs"/>, so a quiet world keeps the game's input delay and a big fight or crowd overlaps; a tick run ahead is slower (it
-    /// shares the cores with the draw), hence the gap.
+    /// Meitou's dynamic tick ahead (engine choice): on once a world tick takes <see cref="AheadOnMs"/> (smoothed, times the game speed when above
+    /// 1x: a frame at 5x runs that many more ticks), off again under <see cref="AheadOffMs"/>, so a quiet world keeps the game's input delay and a
+    /// big fight or crowd overlaps; a tick run ahead is slower (it shares the cores with the draw), hence the gap.
     /// </summary>
     const double AheadOnMs = 4, AheadOffMs = 2;
     /// <summary>
@@ -1671,9 +1698,15 @@ sealed partial class GameHost(
     internal bool TickAheadWanted() => Config.TickAhead switch
     {
         TickAheadMode.Always => true,
-        TickAheadMode.Dynamic => _worldBusy = Session.TickMs >= (_worldBusy ? AheadOffMs : AheadOnMs),
+        TickAheadMode.Dynamic => _worldBusy = SpeedTickMs() >= (_worldBusy ? AheadOffMs : AheadOnMs),
         _ => false,
     };
+
+    /// <summary>
+    /// The smoothed world tick's ms times the game speed (at least 1x), what the dynamic tick ahead weighs: the ticks a frame runs grow with the
+    /// speed.
+    /// </summary>
+    double SpeedTickMs() => Session.TickMs * Math.Max(1.0, Session.Simulation.Speed);
 
     #endregion
 }

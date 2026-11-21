@@ -7,8 +7,10 @@ using Meitou.Data.Gameplay.Ai;
 using Meitou.Simulation;
 using Meitou.Simulation.Aggro;
 using Meitou.Simulation.Bodies;
+using Meitou.Simulation.Ai;
 using Meitou.Simulation.Combat;
 using Meitou.Simulation.Construction;
+using Meitou.Simulation.Factions;
 using Meitou.Simulation.FirstAid;
 using Meitou.Simulation.Items;
 using Meitou.Simulation.Movement;
@@ -59,14 +61,14 @@ public class OrderQueueTests
     }
 
     /// <summary>
-    /// A player order that fails to plan stays queued and the chooser goes on (docs/game/ai-tasks.md "Precedence"): a First Aid order with no medkit
-    /// waits while the character's job (operating the well) runs, and starts once a kit is back. Catches a refused order being dropped, or one that
-    /// blocks the character's jobs.
+    /// The order step pops an order whose desire is 0 (docs/game/ai-tasks.md "Finished tests"): a First Aid order given with no medkit (a player
+    /// medic's need counts only with a kit, <c>FUN_140998200</c>) leaves the queue, and the character's job (operating the well) runs. Catches a
+    /// kitless order that blocks the character's jobs.
     /// </summary>
     [Fact]
-    public void An_order_that_cannot_run_stays_queued_while_a_job_runs_and_starts_once_it_can()
+    public void An_order_with_no_desire_leaves_the_queue_and_the_job_runs()
     {
-        using var rig = new TaskStartTests.Rig(carrying: false);
+        using var rig = new TaskStartTests.Rig(carrying: false, ai: true);
         rig.World.RunTicks(3);
         var f = rig.Fighter;
         var inventory = rig.Cold(f).Inventory!;
@@ -77,21 +79,10 @@ public class OrderQueueTests
         rig.Say(new StopCommand([f]) { Tick = rig.World.Tick });
         rig.Say(new AddJob([f], TaskType.OperateMachinery, rig.WellSite) { Tick = rig.World.Tick });
         rig.Say(new TreatOrder([f], rig.Mate) { Tick = rig.World.Tick });
-        rig.World.RunTick();
-
-        Assert.Equal([TaskType.FirstAidOrder], Rows(rig, f));
-        Assert.False(rig.Cold(f).OrderQueue[0].Started);
-
         rig.World.RunTicks(ProductionSystem.JobCheckTicks * 2);
 
+        Assert.Empty(Rows(rig, f));
         Assert.Equal(CharacterTask.Operate, rig.Task(f));
-        Assert.Equal([TaskType.FirstAidOrder], Rows(rig, f));
-
-        inventory.Add(kit);
-        rig.World.RunTicks(ProductionSystem.JobCheckTicks + 1);
-
-        Assert.Equal(CharacterTask.Treat, rig.Task(f));
-        Assert.True(rig.Cold(f).OrderQueue[0].Started);
     }
 
     /// <summary>
@@ -135,8 +126,8 @@ public class OrderQueueTests
     static TaskType[] Rows(SimWorld world, CharacterId id) => [.. world.Characters.Cold(id.Slot)!.OrderQueue.Select(e => e.Row)];
 
     /// <summary>
-    /// A player's turret (function 12) with a gunner of the player's next to it and an enemy fighter 120 away; movement, pursuit, body, production,
-    /// combat and retaliation; with <paramref name="aggro"/> also the attack-on-sight look, the two factions hostile (the urgent turret job's sensed
+    /// A player's turret (function 12) with a gunner of the player's next to it and an enemy fighter 120 away, each in a squad of its own; the AI,
+    /// movement, pursuit, body, production, combat and retaliation; with <paramref name="aggro"/> also the attack-on-sight look, the two factions hostile (the urgent turret job's sensed
     /// enemies). With <paramref name="town"/> the turret is a town's building instead (its <c>townwork:</c> site).
     /// </summary>
     internal sealed class TurretRig : IDisposable
@@ -166,7 +157,8 @@ public class OrderQueueTests
                     new CombatOptions { SelfApproach = false, TickMedical = false });
             World = new SimWorld(new WorldSettings { Seed = 7, PublishSnapshots = false }, _walk,
             [
-                new PlayerSystem(), new PursuitSystem(combat), new MovementSystem(new PathService(_walk, true)),
+                new PlayerSystem(), new AiSystem(data) { ThreatSource = combat }, new PursuitSystem(combat),
+                        new MovementSystem(new PathService(_walk, true)),
                         new BodySystem(BaseGame, BodyOptions.Default),
                 town ? new ProductionSystem(data) : new ProductionSystem(db, BaseGame, BodyOptions.Default, items, null), combat,
                         new RetaliationSystem(combat),
@@ -207,7 +199,17 @@ public class OrderQueueTests
                     Carriable = true };
             cold.IsPlayer = player;
             cold.Faction = player ? 1 : 2;
-            return World.Characters.Spawn(new CharacterHot { Position = new Vector3(x, 300, z), MaxSpeed = 40, WalkSpeed = 15 }, cold, 0);
+
+            // A squad of its own: the chooser runs only for a character with a platoon (FUN_1405112b0).
+            var squad = new Squad { Id = World.Squads.NextId(), TemplateId = "t", Faction = cold.Faction };
+            World.Squads.Add(squad);
+            if (player) World.Player.Squad = squad.Id;
+            cold.SquadId = squad.Id;
+            var id = World.Characters.Spawn(new CharacterHot { Position = new Vector3(x, 300, z), MaxSpeed = 40, WalkSpeed = 15 }, cold, 0);
+            squad.Members.Add(id);
+            squad.Leader = id;
+
+            return id;
         }
 
         public CharacterCold Cold(CharacterId id) => World.Characters.Cold(id.Slot)!;

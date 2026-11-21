@@ -235,6 +235,10 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// UI modes.
     /// </summary>
     internal TradeWindows TradeWindows => field ??= new(this);
+    /// <summary>
+    /// The split stack dialog of Meitou's stack splitting (Shift + Alt on a stack, <see cref="InventoryWindows.SplitStacks"/>).
+    /// </summary>
+    internal StackSplitDialog StackSplitDialog => field ??= new(this);
 
     #endregion
 
@@ -355,6 +359,11 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// The button during play (<see cref="UserConfig.FeedbackButton"/>); off, it still shows on the title and with the game menu open.
     /// </summary>
     public bool FeedbackButtonInPlay { get; set; } = true;
+
+    /// <summary>
+    /// The Squad XP label during play ("XP x10", <see cref="Settings.SkillXp.Label"/>); null while Show Squad XP is off.
+    /// </summary>
+    public string? XpLabel { get; set; }
 
     /// <summary>
     /// The original's <c>Show names</c> option (<c>FUN_1406e2fd0</c>): off, the name tag keeps only its icons.
@@ -488,6 +497,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public void Draw(DebugOverlay o, int width, int height, DebugOverlay.OverlayPass? pass = null)
     {
         InterfaceSounds.PollUiSounds();
+        StatsWindow.PollStatHover();
         Width = width;
         Height = height;
         BiomeBanner.PollBiome();
@@ -567,6 +577,10 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         /// </summary>
         public float? Fill { get; init; }
 
+        /// <summary>
+        /// The argument a button line's action gets (null: none).
+        /// </summary>
+        public string? Argument { get; init; }
 
         /// <summary>
         /// The line's tooltip user strings (the HUD's Fixed tooltip), null for none; a text tooltip wins over rows.
@@ -629,7 +643,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
 
                 // Kenshi_Button2 is a template (kenshi_templates.xml) whose root widget has the Kenshi_Button1Skin skin.
                 controls.Add(new($"{panel}-button-{i}", "Button", button with { Y = button.Y + 1, Height = button.Height - 2 },
-                    Loc.Tr(lines[i].Value), action, "Kenshi_Button1Skin", true, buttonProperties, Vector4.Zero, Clip: host.Clip));
+                    Loc.Tr(lines[i].Value), action, "Kenshi_Button1Skin", true, buttonProperties, Vector4.Zero, Argument: lines[i].Argument ?? "",
+                    Clip: host.Clip));
                 if (lines[i].Label.Length == 0) continue;
             }
             var columns = new[]
@@ -637,6 +652,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                 ("label", lines[i].Label, lines[i].LabelColour, "Left Top", labelProperties),
                 ("value", lines[i].Action is null ? lines[i].Value : "", lines[i].ValueColour, "Right Top", valueProperties),
             };
+            var (labelBox, valueBox) = LineColumns(row, lines[i], labelProperties["FontName"], valueProperties["FontName"]);
             foreach (var (part, text, colour, align, properties) in columns)
                 if (text.Length > 0)
                 {
@@ -646,11 +662,10 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                     // A line with a tooltip is a mouse target (the HUD's own tooltip, anchored on its panel).
                     if (tipProperties is not null) foreach (var pair in tipProperties) textProperties[pair.Key] = pair.Value;
 
-                    // A value beside a label keeps out of the label's column: a long one (a French weather notice) is cut short instead of running
-                    // over the label. A label beside a button keeps to its left: added after the button, a full-row label with a tooltip would take
-                    // its clicks.
-                    var box = part == "value" && lines[i].Label.Length > 0 ? row with { X = row.X + row.Width * 0.35f, Width = row.Width * 0.65f }
-                        : lines[i].Action is not null ? row with { Width = row.Width * (1 - Math.Clamp(lines[i].ButtonWidth, 0.1f, 1)) } : row;
+                    // A label beside a button keeps to its left: added after the button, a full-row label with a tooltip would take its clicks.
+                    var box = part == "value" ? valueBox
+                        : lines[i].Action is not null ? row with { Width = row.Width * (1 - Math.Clamp(lines[i].ButtonWidth, 0.1f, 1)) }
+                        : labelBox;
                     controls.Add(new($"{panel}-{part}-{i}", "TextBox", box, Loc.Tr(text), "", "Kenshi_TextboxStandardText", true,
                         textProperties, Vector4.Zero, Pickable: tipProperties is not null, Clip: host.Clip));
                 }
@@ -663,6 +678,31 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                 properties["FontPixels"] = Math.Max(8, (int)MathF.Round(p)).ToString(CultureInfo.InvariantCulture);
             return properties;
         }
+    }
+
+    /// <summary>
+    /// A text line's label and value boxes in <paramref name="row"/>. The value sits right of the label's column (35 % of the row), so a long one
+    /// (a French weather notice) is cut short instead of running over the label. When the label is wider than that column, as "Total Weight:" in
+    /// the inventory's narrow data panel at a small interface scale (#1038), the value starts after the label as measured; when both do not fit,
+    /// the value stays whole and the label is cut.
+    /// </summary>
+    (UiRect Label, UiRect Value) LineColumns(UiRect row, HudLine line, string labelFont, string valueFont)
+    {
+        var value = row with { X = row.X + row.Width * 0.35f, Width = row.Width * 0.65f };
+        if (line.Label.Length == 0) return (row, row);
+        if (line.Value.Length == 0 || line.Action is not null || UiPainter is not { } painter) return (row, value);
+
+        float minimum = TitleOpen ? 0 : StandardPixels;
+        float labelWidth = painter.MeasureText(labelFont, Loc.Tr(line.Label), Height, 0, minimum).Width;
+        float valueWidth = painter.MeasureText(valueFont, Loc.Tr(line.Value), Height, 0, minimum).Width;
+        float gap = 4 * UiScale;
+        float right = row.X + row.Width;
+        float start = Math.Max(value.X, row.X + labelWidth + gap);
+        start = Math.Max(row.X, Math.Min(start, right - valueWidth));
+        if (start == value.X) return (row, value);
+
+        var label = row with { Width = Math.Max(0, start - gap - row.X) };
+        return (labelWidth + gap + valueWidth > row.Width ? label : row, row with { X = start, Width = right - start });
     }
 
     /// <summary>
@@ -815,7 +855,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         Mouse = p;
         UiInput++;
-        (InventoryWindows.PressShift, InventoryWindows.PressCtrl) = (shift, ctrl);
+        (InventoryWindows.PressShift, InventoryWindows.PressCtrl, InventoryWindows.PressAlt) = (shift, ctrl, alt);
         TooltipRuntime.HideTooltip();   // a press captures the mouse, which hides a tooltip (MyGUI)
         if (button == MouseButton.Left && FeedbackPanel.FeedbackButtonDown(p)) return true;
         if (CharacterEditor.EditorPointerDown(button, p)) return true;
@@ -912,7 +952,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         var kind = Picking.PickAt(p).Kind;
         if (kind == WorldPicking.Picked.Character)
         {
-            var quick = QuickOrder(p)?.Do;
+            // A click that gives the character nothing goes on to its cage when it is one of the player's caged by another faction (FUN_1407fc6e0).
+            var quick = QuickOrder(p) is { } order ? order.Do : CageClick(p, alt);
             if (!ContextMenuWindow.ContextPress(p, quick)) quick?.Invoke();
             return;
         }
@@ -950,7 +991,21 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     }
 
     /// <summary>
-    /// The talk pointer: <c>s_talk</c> while the character holds a line for the player (Dialogue <c>playerInterruptionDialog</c> +0xc8,
+    /// The quick click's cage order on the character under the cursor with a selection (<see cref="Simulation.Locks.CageClickOrder"/>: Alt picks a
+    /// locked cage or escapes an unlocked one, else the hint) for a caged character of the player's; the simulation tests whose cage it is. Null with
+    /// nobody selected or on any other character.
+    /// </summary>
+    Action? CageClick(Vector2 p, bool alt)
+    {
+        if (SelectedIds().Count == 0 || Picking.PickWhereAt(p, _ => true) is not { } hit) return null;
+        if (Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == hit.Id) is not { IsPlayer: true, Prison: not null }) return null;
+
+        var occupant = hit.Id;
+        return () => Say(new Simulation.Locks.CageClickOrder([], occupant, alt) { Tick = Session.World.Tick, Clicked = true });
+    }
+
+    /// <summary>
+    /// The talk pointer:<c>s_talk</c> while the character holds a line for the player (Dialogue <c>playerInterruptionDialog</c> +0xc8,
     /// <c>FUN_1407fb410</c>), else <c>talk</c>.
     /// </summary>
     string TalkPointer(CharacterSnapshot c) => Session.World.WantsToTalk(c.Id) ? "s_talk" : "talk";
@@ -958,7 +1013,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// <summary>
     /// The quick right click on <paramref name="c"/> (<c>FUN_1407fb410</c>, docs/game/ui-input.md "Quick right click"). The lead is the selected
     /// character nearest to it (with nothing selected the nearest of the player's characters, which gives the pointer only). Own characters: dead,
-    /// loot; needing first aid (organic need above 0.01) 25, else robot repair 60 (all the selection); down and not carried, pick up (the nearest);
+    /// loot; needing first aid (organic need above 0.01) 25, else robot repair 60 (all the selection); a standing shopkeeper of the player's faction
+    /// (an independent member, <see cref="CharacterSnapshot.IsTrader"/>, Meitou only), trade; down and not carried, pick up (the nearest);
     /// carried by the lead, put down; carried by another, nothing. Others carried by a non-player: nothing. Hostile ones
     /// (<see cref="PointerView.Hostile(CharacterSnapshot)"/>): down, loot; standing and the lead sneaking, stealth KO (or loot of a slave); fighting
     /// or without a talk, attack (with a gunner on a turret, Shoot At); a prisoner, loot. Neutral ones: down, loot (<c>search</c> pointer for a
@@ -968,19 +1024,16 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     internal (string Pointer, CharacterId Target, Action? Do)? QuickOrderFor(CharacterSnapshot c, IReadOnlyList<CharacterId> selection)
     {
         var characters = Session.CurrentSnapshot.Characters;
-        CharacterSnapshot? lead = null;
-        float nearest = float.MaxValue;
-        foreach (var o in characters)
-        {
-            if (selection.Count > 0 ? !selection.Contains(o.Id) : !o.IsPlayer) continue;
-            float d = Vector3.DistanceSquared(o.Position, c.Position);
-            if (d < nearest) (lead, nearest) = (o, d);
-        }
-        if (lead is null) return null;
+        if (NearestTo(c, characters, o => selection.Count > 0 ? selection.Contains(o.Id) : o.IsPlayer) is not { } lead) return null;
+
+        // One character's order goes to the nearest selected that stands and is no animal (FUN_1407fae70); with only animals selected the click
+        // gives nothing.
+        var doer = NearestTo(c, characters, o => selection.Contains(o.Id) && !o.Down && !o.Animal)?.Id ?? default;
         var world = Session.World;
         long tick = world.Tick;
-        bool give = selection.Count > 0;
+        bool give = selection.Count > 0 && characters.Any(o => selection.Contains(o.Id) && !o.Animal);
         Action? Do(Action a) => give ? a : null;
+        Action? One(Action a) => doer.IsNone ? null : Do(a);
         bool carried = !c.CarriedBy.IsNone;
         if (carried && characters.FirstOrDefault(o => o.Id == c.CarriedBy) is not { IsPlayer: true }) return null;
         bool dead = c.Body is { Dead: true }, down = c.Down;
@@ -996,9 +1049,12 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                     Do(() => SquadWindows.OrderOrJob(robot ? Data.Gameplay.Ai.TaskType.FirstAidRobot : Data.Gameplay.Ai.TaskType.FirstAidOrder, id,
                     () => Say(new Simulation.FirstAid.TreatOrder(selection, id) { Tick = tick }))));
             }
+            // A standing member of an independent squad keeping a shop a code mod gave it trades, as a trader with no line to say (Meitou only).
+            if (!down && c.IsTrader && Independent(id))
+                return ("talk", id, One(() => Say(new Simulation.Trading.OpenTrade(doer, id) { Tick = tick })));
             if (!down) return null;
-            if (!carried) return lead.Id == id ? null : ("lift", id, Do(() => Say(new Simulation.Carrying.PickUpOrder([], id) { Tick = tick })));
-            return lead.Carrying == id ? ("lift", id, Do(() => Say(new Simulation.Carrying.PutDownOrder([lead.Id]) { Tick = tick }))) : null;
+            if (!carried) return lead.Id == id ? null : ("lift", id, One(() => Say(new Simulation.Carrying.PickUpOrder([], id) { Tick = tick })));
+            return lead.Carrying == id ? ("lift", id, One(() => Say(new Simulation.Carrying.PutDownOrder([doer]) { Tick = tick }))) : null;
         }
         bool sneaking = c.CanStealthKo;
         if (PointerPanel.Hostile(c))
@@ -1006,7 +1062,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             if (down) return ("search", id, loot);
             if (sneaking)
                 return c.Slave is { State: 1 } ? ("scavenge", id, loot)
-                    : ("knockout", id, Do(() => Say(new Simulation.Carrying.StealthKoOrder([lead.Id], id) { Tick = tick })));
+                    : ("knockout", id, One(() => Say(new Simulation.Carrying.StealthKoOrder([doer], id) { Tick = tick })));
             if (c.Prison is not null) return ("search", id, loot);
             if (c.InCombat || !(c.IsDiplomat || c.Slave is { State: 1 }) || !world.CanTalk(id, lead.Id))
             {
@@ -1014,33 +1070,40 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                 bool defence = c.FightsPlayer;
                 return ("attk", id, Do(() =>
                 {
-                    if (lead.Turret is not null) Say(new Simulation.Combat.ShootAtOrder(selection, id) { Tick = tick });
+                    // The quick click appends 235 to every selected character's queue, Shift or not (FUN_1407fb410 passes 1 to FUN_1407f9e20).
+                    if (lead.Turret is not null) Say(new Simulation.Combat.ShootAtOrder(selection, id) { Tick = tick, Queued = true });
                     else SquadWindows.OrderOrJob(Data.Gameplay.Ai.TaskType.MeleeAttack, id,
                         () => Say(new Simulation.Combat.AttackOrder(selection, id) { Tick = tick, Picked = true, Defensive = defence }));
                 }));
             }
-            return (TalkPointer(c), id, Do(() => Say(new Simulation.Dialogue.TalkOrder(lead.Id, id) { Tick = tick })));
+            return (TalkPointer(c), id, One(() => Say(new Simulation.Dialogue.TalkOrder(doer, id) { Tick = tick })));
         }
         if (down) return (c.NoLootGuilt ? "search" : "scavenge", id, loot);
         if (sneaking)
         {
             if (c.Prison is not null)
-                return ("lockpick", id, Do(() =>
+                return ("lockpick", id, One(() =>
                 {
-                    Say(new Simulation.Locks.PickLockOrder([lead.Id], id) { Tick = tick });
-                    Say(new Simulation.Locks.ShackleOrder([lead.Id], id, Simulation.Locks.ShackleWork.Pick) { Tick = tick });
+                    Say(new Simulation.Locks.PickLockOrder([doer], id) { Tick = tick });
+                    Say(new Simulation.Locks.ShackleOrder([doer], id, Simulation.Locks.ShackleWork.Pick) { Tick = tick });
                 }));
             return c.Slave is { State: 1 } ? ("scavenge", id, loot)
-                : ("knockout", id, Do(() => Say(new Simulation.Carrying.StealthKoOrder([lead.Id], id) { Tick = tick })));
+                : ("knockout", id, One(() => Say(new Simulation.Carrying.StealthKoOrder([doer], id) { Tick = tick })));
         }
 
         // Order 12 (Task_PlayerTalkto) walks over and starts the conversation, a trader's included: its trade window is a reply of that conversation
         // (DA_TRADE).
-        if (world.CanTalk(id, lead.Id)) return (TalkPointer(c), id, Do(() => Say(new Simulation.Dialogue.TalkOrder(lead.Id, id) { Tick = tick })));
+        if (world.CanTalk(id, lead.Id)) return (TalkPointer(c), id, One(() => Say(new Simulation.Dialogue.TalkOrder(doer, id) { Tick = tick })));
         // engine: a shop whose keeper has no line to say
-        if (c.IsTrader) return ("talk", id, Do(() => Say(new Simulation.Trading.OpenTrade(lead.Id, id) { Tick = tick })));
+        if (c.IsTrader) return ("talk", id, One(() => Say(new Simulation.Trading.OpenTrade(doer, id) { Tick = tick })));
         return world.RegardsFriendly(id, lead.Id) ? ("green", id, null) : null;   // slot 126: the target regards the lead as friendly
     }
+
+    /// <summary>
+    /// The one of <paramref name="characters"/> passing <paramref name="take"/> nearest <paramref name="target"/>; null when none does.
+    /// </summary>
+    static CharacterSnapshot? NearestTo(CharacterSnapshot target, IEnumerable<CharacterSnapshot> characters, Func<CharacterSnapshot, bool> take) =>
+        characters.Where(take).MinBy(o => Vector3.DistanceSquared(o.Position, target.Position));
 
     /// <summary>
     /// A pointer move: to the first that takes it (the character editor, a scroll thumb, the map, the screens), else a drag past the threshold starts
@@ -1257,7 +1320,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } c) return;
         var view = Session.Camera.Current;
         c = Carrier(c);
-        Session.Camera.Place(new Vector2(c.Position.X, c.Position.Z), view.Yaw, view.Pitch, view.Distance);
+        Session.Camera.Place(new Vector2(c.Position.X, c.Position.Z), view.Yaw, view.Pitch, view.Distance, c.Position.Y);
         Follow = follow ? id : null;
     }
 

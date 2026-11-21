@@ -35,7 +35,7 @@ Not built, by design: the original's in-game level editor and fog editor (`Kensh
 - [render-distance-benchmark](render-distance-benchmark.md)
 - [render-foliage](render-foliage.md)
 - [render-gi](render-gi.md)
-- [render-interior-cut](render-interior-cut.md): terrain, foliage and map features cut inside buildings
+- [render-interior-cut](render-interior-cut.md): terrain, foliage, map features and particles cut inside buildings
 - [render-lights](render-lights.md)
 - [render-objects](render-objects.md)
 - [render-post](render-post.md)
@@ -43,6 +43,7 @@ Not built, by design: the original's in-game level editor and fog editor (`Kensh
 - [render-shafts](render-shafts.md)
 - [render-sky](render-sky.md)
 - [render-terrain](render-terrain.md)
+- [render-title-dots](render-title-dots.md): unsolved light dots in the title scene, what was measured and ruled out
 - [render-water](render-water.md)
 - [renderer-native](renderer-native.md)
 - [resource-layer](resource-layer.md): the resources and the commands between the renderers and the API - the proposed neutral vocabulary

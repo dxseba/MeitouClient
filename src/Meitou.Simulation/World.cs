@@ -228,7 +228,9 @@ public sealed partial class World : IDisposable
         Settings = settings;
         GameHours = settings.StartHours;
         Walkability = walkability;
+        LastingIds = new LastingIds(this);
         this._systems = [.. systems ?? []];
+        foreach (var system in this._systems) ModFaults.Add(system);
         for (int k = 0; k < this._systems.Count; k++) _phases.Add(new SystemPhases(this, this._systems[k], k));
 
         _animations = this._systems.OfType<IAnimationSource>().FirstOrDefault();
@@ -243,18 +245,72 @@ public sealed partial class World : IDisposable
         {
             RegisterCombatHitObserver(this._systems[k], k);
             CombatHitFilters.Register(this._systems[k], k);
+            TradePriceFilters.Register(this._systems[k], k);
+            TradeObservers.Register(this._systems[k], k);
+            StorageFilters.Register(this._systems[k], k);
             ItemUseObservers.Register(this._systems[k], k);
+            GoodsTakenObservers.Register(this._systems[k], k);
+            TownSwitchObservers.Register(this._systems[k], k);
             RelationObservers.Register(this._systems[k], k);
+            DeathObservers.Register(this._systems[k], k);
+            ExperienceFilters.Register(this._systems[k], k);
+            CrimeObservers.Register(this._systems[k], k);
         }
-        foreach (var owner in this._systems.OfType<ITaskOwner>()) owner.RegisterTasks(Tasks);
-        foreach (var owner in this._systems.OfType<IDecisionOwner>()) owner.RegisterSources(Decisions);
+        for (int k = 0; k < this._systems.Count; k++) RegisterTasks(this._systems[k], k);
+        foreach (var owner in this._systems.OfType<IDecisionOwner>()) Decisions.RegisterFrom(owner);
+        BindChooser();
+        for (int k = 0; k < this._systems.Count; k++) if (this._systems[k] is Ai.AiSystem ai) Decisions.Bind(ai.Settings.ThinkEveryTicks);
         for (int k = 0; k < this._systems.Count; k++) if (DecidesAfter(this._systems[k])) _decideAfter = k;
 
         Characters = characters ?? new CharacterTable();
+        WatchCharacters();
         Grid = new SpatialGrid(settings.GridCellSize);
         _pool = new WorkerPool(settings.Threads);
         _buffers = new EffectBuffer[Math.Max(1, settings.Threads * settings.PartitionsPerThread)];
         for (int i = 0; i < _buffers.Length; i++) _buffers[i] = new EffectBuffer();
+    }
+
+    /// <summary>
+    /// System <paramref name="system"/>'s task handlers (<see cref="ITaskOwner"/>): a mod's checked and guarded (<see cref="TaskHandlers.RegisterMod"/>).
+    /// </summary>
+    void RegisterTasks(ITickSystem system, int index)
+    {
+        if (system is not ITaskOwner owner) return;
+
+        if (SimulationExtensions.FactoryOf(system) is not { } made)
+        {
+            Tasks.RegisterEngine(owner);
+            return;
+        }
+
+        Tasks.RegisterMod(owner, made.Owner, Extensions()?.TaskOwners, ModFaults, index);
+    }
+
+    /// <summary>
+    /// The code mods' chooser goals and jobs (<see cref="Ai.IChooserOwner"/>), then the AI's goals: the engine systems' and the mods'
+    /// (<see cref="Ai.AiSystem.BindGoals"/>), fixed from here on.
+    /// </summary>
+    void BindChooser()
+    {
+        var goals = new List<Ai.ModGoalClaim>();
+        var extensions = Extensions();
+        for (int k = 0; k < this._systems.Count; k++) Ai.ChooserRegistry.Collect(this, this._systems[k], k, extensions, goals, goalsOpen: true);
+
+        for (int k = 0; k < this._systems.Count; k++) if (this._systems[k] is Ai.AiSystem ai) ai.BindGoals(this._systems, goals);
+    }
+
+    /// <summary>
+    /// What the code mods add (their claimed task numbers among it), from the extensions the AI or player system was given; null without them.
+    /// </summary>
+    SimulationExtensions? Extensions()
+    {
+        foreach (var system in _systems)
+        {
+            if (system is Ai.AiSystem { Extensions: { } fromAi }) return fromAi;
+            if (system is Player.PlayerSystem { Extensions: { } fromPlayer }) return fromPlayer;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -273,9 +329,10 @@ public sealed partial class World : IDisposable
     public TaskHandlers Tasks { get; } = new();
 
     /// <summary>
-    /// The decision step for the player's characters (docs/simulation.md "Decision step"): run in the slow world right after the last of retaliation,
-    /// aggro and flight (after every system when the world has none of them), and for orders between ticks. Its sources are registered by the systems
-    /// that own them (<see cref="IDecisionOwner"/>; open to later additions).
+    /// The chooser's sources (docs/simulation.md "Decision step"): their look runs at the end of the schedule step, the starts of the think's picks in
+    /// the slow world right after the last of retaliation, aggro and flight (after every system when the world has none of them), and orders alone
+    /// between ticks. Its sources are the engine systems' own (<see cref="IDecisionOwner"/>), and the code mods add job sources
+    /// (<see cref="Ai.ChooserRegistry.Jobs"/>).
     /// </summary>
     public DecisionSystem Decisions { get; } = new();
     /// <summary>
@@ -312,6 +369,45 @@ public sealed partial class World : IDisposable
         if (Tick != 0) throw new InvalidOperationException("The seed is restored before the world's first tick.");
 
         Settings = Settings with { Seed = seed };
+    }
+
+    /// <summary>
+    /// Tells every <see cref="IWorldReady"/> system, in system order, that the world is ready to run (<paramref name="fromSave"/>: loaded from a
+    /// save, else a new game); one that throws is logged and the rest are still told, and a mod's is stopped with the player's notice
+    /// (<see cref="ModSystemFaults.Fault"/>). Between ticks, before the first.
+    /// </summary>
+    public void TellReady(bool fromSave)
+    {
+        for (int k = 0; k < _systems.Count; k++)
+        {
+            if (_systems[k] is not IWorldReady ready) continue;
+
+            try
+            {
+                ready.Ready(this, fromSave);
+            }
+            catch (Exception e)
+            {
+                ReadyFailed(k, ready, e);
+            }
+        }
+    }
+
+    /// <summary>
+    /// System <paramref name="index"/>'s <see cref="IWorldReady.Ready"/> threw <paramref name="e"/>: a log line; a mod's system is stopped as for a
+    /// throw of one of its phases.
+    /// </summary>
+    void ReadyFailed(int index, IWorldReady ready, Exception e)
+    {
+        string fault = $"{e.GetType().Name}: {e.Message}";
+        if (SimulationExtensions.FactoryOf(ready) is not { } factory)
+        {
+            Console.Error.WriteLine($"world ready of '{ready.GetType().FullName}' failed: {fault}");
+            return;
+        }
+
+        Console.Error.WriteLine($"mod       {factory.Owner}: world ready of '{factory.Name}' failed: {fault}");
+        ModFaults.Fault(index, "world ready", e);
     }
 
     /// <summary>
@@ -359,10 +455,26 @@ public sealed partial class World : IDisposable
     /// </summary>
     public bool BenchFacingFix { get; set; } = true;
     /// <summary>
+    /// A prisoner in a cage or on a pole plays only the fixture's pose, no hurt-part hold over it (Fixes settings, Meitou); off, it holds its wounds
+    /// there as the game does (docs/animation.md "Injury holds").
+    /// </summary>
+    public bool PrisonPoseFix { get; set; } = true;
+    /// <summary>
+    /// An animal in a cage or on a pole plays its standing idles, or its lying clip while down (Fixes settings, Meitou); off, it is left as a still
+    /// frame as the game does (docs/game/locks.md "Cages and beds").
+    /// </summary>
+    public bool CagedAnimalFix { get; set; } = true;
+    /// <summary>
     /// Guards' smuggling search and starving looters' food take reach into bags carried in the inventory grid (Fixes settings, Meitou); off, only
     /// the grid and the worn backpack, as the game does (docs/game/dialogue.md "Conditions", docs/game/carry-loot.md "NPC looting").
     /// </summary>
     public bool BagSearchFix { get; set; } = true;
+    /// <summary>
+    /// A shopkeeper at its counter is talked to and traded with from the counter's front (Gameplay settings, Meitou): its talk reach is
+    /// <see cref="Dialogue.DialogueSystem.CounterTalkReach"/>; off, the game's reach, so the customer walks round behind the counter
+    /// (docs/game/dialogue.md "Player conversation").
+    /// </summary>
+    public bool CounterTalk { get; set; } = true;
     /// <summary>
     /// The player's pick-ups and right-click takes out of loot, containers and storage go into the character's backpack first, then its slots and
     /// grid (Controls settings, off by default as in the game, where only an open bag window does that).
@@ -385,13 +497,45 @@ public sealed partial class World : IDisposable
     /// </summary>
     internal Items.ItemUseObservers ItemUseObservers { get; } = new();
     /// <summary>
+    /// The systems hearing of goods taken (<see cref="Crime.IGoodsTakenObserver"/>).
+    /// </summary>
+    internal Crime.GoodsTakenObservers GoodsTakenObservers { get; } = new();
+    /// <summary>
+    /// The systems that hear of towns changing version (<see cref="Population.ITownSwitchObserver"/>).
+    /// </summary>
+    internal Population.TownSwitchObservers TownSwitchObservers { get; } = new();
+    /// <summary>
     /// The systems filtering hits before they land (<see cref="Combat.ICombatHitFilter"/>).
     /// </summary>
     internal Combat.CombatHitFilters CombatHitFilters { get; } = new();
     /// <summary>
+    /// The systems adjusting trade prices (<see cref="Trading.ITradePriceFilter"/>).
+    /// </summary>
+    internal Trading.TradePriceFilters TradePriceFilters { get; } = new();
+    /// <summary>
+    /// The systems hearing of completed deals (<see cref="Trading.ITradeObserver"/>).
+    /// </summary>
+    internal Trading.TradeObservers TradeObservers { get; } = new();
+    /// <summary>
+    /// The systems asked about a storage the game picks for a character (<see cref="Items.IStorageFilter"/>).
+    /// </summary>
+    internal Items.StorageFilters StorageFilters { get; } = new();
+    /// <summary>
     /// The systems observing changed faction relations (<see cref="IRelationChangeObserver"/>).
     /// </summary>
     internal RelationObservers RelationObservers { get; } = new();
+    /// <summary>
+    /// The systems told of deaths (<see cref="Bodies.ICharacterDeathObserver"/>).
+    /// </summary>
+    internal Bodies.DeathObservers DeathObservers { get; } = new();
+    /// <summary>
+    /// The systems filtering experience gains (<see cref="Bodies.IExperienceFilter"/>).
+    /// </summary>
+    internal Bodies.ExperienceFilters ExperienceFilters { get; } = new();
+    /// <summary>
+    /// The systems told of crimes (<see cref="Crime.ICrimeObserver"/>).
+    /// </summary>
+    internal Crime.CrimeObservers CrimeObservers { get; } = new();
     /// <summary>
     /// The camera the host last passed (<see cref="CameraViewCommand"/>); null: none, nothing is tested against a screen.
     /// </summary>
@@ -409,6 +553,19 @@ public sealed partial class World : IDisposable
     /// The unique (story) characters made, dead or captured (docs/game/factions-squads-towns.md "Unique characters").
     /// </summary>
     public UniqueCharacters Uniques { get; } = new();
+    /// <summary>
+    /// The characters' lasting ids, which code mods key their data per character by (docs/modding.md "Character ids").
+    /// </summary>
+    public LastingIds LastingIds { get; }
+    /// <summary>
+    /// The values code mods set on their world states (docs/modding.md "World states"), to read; null until the first, so a world without one is the
+    /// game's. Values are set only through the claimed <see cref="ModWorldState"/> handles.
+    /// </summary>
+    public ModWorldStates? ModStatesOrNull { get; private set; }
+    /// <summary>
+    /// The code mods' world state values, made on first use (<see cref="ModWorldState.Set"/>).
+    /// </summary>
+    internal ModWorldStates ModStates => ModStatesOrNull ??= new();
     /// <summary>
     /// The player-built buildings and construction sites, in creation order (docs/simulation.md "Buildings").
     /// </summary>
@@ -429,6 +586,11 @@ public sealed partial class World : IDisposable
     /// The loose-item slots of the towns' interiors (docs/simulation.md "Ground items"); hashed once a town with any registered.
     /// </summary>
     public Items.ItemSlots ItemSlots { get; } = new();
+    /// <summary>
+    /// The writer of the houses' interiors into a save, with the entry ids it gave this session (<see cref="Saving.InteriorSave"/>). Only read by
+    /// saves, so not hashed.
+    /// </summary>
+    public Saving.InteriorSave Interiors { get; } = new();
     /// <summary>
     /// Every zone the population has had active in this world (docs/formats/save.md "Zone files": the original writes a file for each zone it
     /// loaded): a save writes a zone file for each that its loaded save has none of. Only read by saves, so not hashed.
@@ -462,6 +624,18 @@ public sealed partial class World : IDisposable
     /// The systems in tick order.
     /// </summary>
     public IReadOnlyList<ITickSystem> Systems => _systems;
+
+    /// <summary>
+    /// The mod-made systems and the ones stopped after a fault (<see cref="ModSystemFaults"/>).
+    /// </summary>
+    internal ModSystemFaults ModFaults { get; } = new();
+
+    /// <summary>
+    /// The next notice for the player about a mod's system that stopped after a fault, if any (docs/modding.md "Tick systems"); each is given
+    /// once.
+    /// </summary>
+    public bool TryTakeModFaultNotice(out string notice) => ModFaults.TryTakeNotice(out notice);
+
     /// <summary>
     /// The number of ticks run; during a tick, the number of the tick being run.
     /// </summary>
@@ -472,6 +646,14 @@ public sealed partial class World : IDisposable
     /// independent items: each call may change only its own item). The result must not depend on the order the items run in.
     /// </summary>
     internal void ParallelFor(int count, Action<int> body) => _pool.ForEach(count, body);
+
+    /// <summary>
+    /// Whether the storage filters let <paramref name="who"/> use <paramref name="storage"/> for <paramref name="record"/> (null: not one item,
+    /// such as any food); true without a filter. Thread-safe, for the game's own storage searches.
+    /// </summary>
+    internal bool StorageAllows(CharacterCold who, string storage, Items.StorageUse use, string? record) =>
+        !StorageFilters.Active || StorageFilters.Allows(this, who.Id, storage, use, record);
+
     /// <summary>
     /// Game seconds per game hour (docs/game/game-loop.md "The clock", Verified; the engine's <c>GameClock</c> has the same).
     /// </summary>
@@ -507,6 +689,12 @@ public sealed partial class World : IDisposable
     /// (<see cref="Ragdolls.RagdollSystem.LimbReach"/>). An input like <see cref="GameHours"/>: not hashed, not saved.
     /// </summary>
     public System.Numerics.Vector3? ViewPosition { get; set; }
+    /// <summary>
+    /// The town buildings whose interior the player sees (by <see cref="Data.World.TownBuilding.Key"/>: one holding a player character, or left by
+    /// one within the keep-open time); a character inside another says no line for most events (<see cref="Dialogue.DialogueSystem"/>). Null without
+    /// a view (headless runs, tests): no such gate. An input like <see cref="ViewPosition"/>: not hashed, not saved.
+    /// </summary>
+    public IReadOnlySet<string>? ShownInteriors { get; set; }
     /// <summary>
     /// Within this distance of <see cref="ViewPosition"/> a character is near for the far cadence (<see cref="WorldSettings.FarTickPeriod"/>): the
     /// renderer's character draw distance plus its reach margin, so every drawn character steps every tick. The host sets it; an input like
@@ -569,7 +757,8 @@ public sealed partial class World : IDisposable
     public WorldSnapshot PreviousSnapshot { get; private set; } = WorldSnapshot.Empty;
 
     /// <summary>
-    /// Adds a system after the existing ones; before the first tick.
+    /// Adds a system after the existing ones, its hooks and task handlers registered as the made world's are (chooser goals excepted); before the
+    /// first tick.
     /// </summary>
     public void AddSystem(ITickSystem system)
     {
@@ -577,6 +766,7 @@ public sealed partial class World : IDisposable
 
         _systems.Add(system);
         _systemsByType.Clear();
+        ModFaults.Add(system);
         _phases.Add(new SystemPhases(this, system, _systems.Count - 1));
         _animations ??= system as IAnimationSource;
         _projectiles ??= system as IProjectileSource;
@@ -585,10 +775,40 @@ public sealed partial class World : IDisposable
         _ragdolls ??= system as Ragdolls.IRagdollSource;
         RegisterCombatHitObserver(system, _systems.Count - 1);
         CombatHitFilters.Register(system, _systems.Count - 1);
+        TradePriceFilters.Register(system, _systems.Count - 1);
+        TradeObservers.Register(system, _systems.Count - 1);
+        StorageFilters.Register(system, _systems.Count - 1);
         ItemUseObservers.Register(system, _systems.Count - 1);
+        GoodsTakenObservers.Register(system, _systems.Count - 1);
+        TownSwitchObservers.Register(system, _systems.Count - 1);
         RelationObservers.Register(system, _systems.Count - 1);
-        if (system is IDecisionOwner owner) owner.RegisterSources(Decisions);
+        DeathObservers.Register(system, _systems.Count - 1);
+        ExperienceFilters.Register(system, _systems.Count - 1);
+        CrimeObservers.Register(system, _systems.Count - 1);
+        RegisterTasks(system, _systems.Count - 1);
+        if (system is IDecisionOwner owner) Decisions.RegisterFrom(owner);
+        Ai.ChooserRegistry.Collect(this, system, _systems.Count - 1, Extensions(), [], goalsOpen: false);
         if (DecidesAfter(system)) _decideAfter = _systems.Count - 1;
+        WatchCharacters();
+    }
+
+    /// <summary>
+    /// Sets the table's watch on characters entering and leaving it (<see cref="CharacterWatch"/>) once a death observer or an experience filter
+    /// needs it, binding the stats of the characters already in it for the filters; none otherwise.
+    /// </summary>
+    void WatchCharacters()
+    {
+        // A table handed over from another world drops that world's watch and its stats' bindings to it, so nothing reports to it or keeps it.
+        if (Characters.Watch is { } foreign && !foreign.Of(this))
+        {
+            Characters.Watch = null;
+            Bodies.ExperienceFilters.UnbindAll(this);
+        }
+
+        if (!DeathObservers.Active && !ExperienceFilters.Active) return;
+
+        Characters.Watch ??= new CharacterWatch(this);
+        if (ExperienceFilters.Active) Bodies.ExperienceFilters.BindAll(this);
     }
 
     /// <summary>
@@ -616,6 +836,10 @@ public sealed partial class World : IDisposable
     /// Each partition's Stopwatch ticks (see <see cref="_timedBody"/>).
     /// </summary>
     long[] _jobTicks = [];
+    /// <summary>
+    /// The body of <see cref="ThinkWithoutMind"/> over one partition, made once.
+    /// </summary>
+    Action<int>? _thinkWithoutMind;
 
     /// <summary>
     /// One system's parallel phase over the partitions; profiled, it also sums its jobs' time and notes the slowest (<see cref="TickProfile.Jobs"/>).
@@ -653,29 +877,47 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
-    /// Runs one simulation tick; <paramref name="publish"/> false skips its snapshot (a tick the host will not draw: not one of a frame's last two).
+    /// Called after each serial step of a tick with its name (inputs, schedule, think move and act, commit, slow world), so
+    /// <c>meitou-tools mod-check</c> can hash the world part way through the tick that two runs first differ in; null in play.
     /// </summary>
-    public void RunTick(bool publish = true)
+    internal Action<World, string>? AfterPhase { get; set; }
+
+    /// <summary>
+    /// Runs one simulation tick; <paramref name="publish"/> false skips its snapshot (a tick the host will not draw: not one of a frame's last two),
+    /// <paramref name="views"/> false publishes only what the host interpolates from (a frame's second-to-last tick, docs/simulation.md
+    /// "Snapshots").
+    /// </summary>
+    public void RunTick(bool publish = true, bool views = true)
     {
         var table = Characters;
         var prof = Profile.Enabled ? Profile : null;
         prof?.Begin(_systems.Count);
         table.BeginTick();
+        ModFaults.Settle();
+        Walkability.TickStarts(Tick, TickSeconds);
 
         // 1. Inputs (serial).
         RunInputs(table, prof);
+        AfterPhase?.Invoke(this, "inputs");
 
         // 2. Schedule (serial): the grid of the last tick's positions, then the systems.
         RunSchedule(table, prof);
+        AfterPhase?.Invoke(this, "schedule");
 
         // 3-5. Think, move, act (parallel; each system's phase is a barrier).
         RunThinkMoveAct(table, prof);
+        AfterPhase?.Invoke(this, "think, move and act");
 
         // 6. Commit (serial): the effects in an order the partitioning cannot change.
         Commit(table, prof);
+        AfterPhase?.Invoke(this, "commit");
 
-        // 7. Slow world (serial).
+        // 7. Slow world (serial), then the deaths of the commit and the slow world that no site reported, then the code mods' status effects
+        // lose a tick (nothing without registered effects).
         RunSlowWorld(prof);
+        DeathObservers.Sweep(this);
+        Bodies.StatusEffects.Step(this);
+        AfterPhase?.Invoke(this, "slow world");
 
         // 8. Publish.
         Squads.Refresh(table, Player.Faction);
@@ -687,7 +929,7 @@ public sealed partial class World : IDisposable
         prof?.Part("end tick");   // F12: the squads, the prune, the table's end and the logs, apart from the snapshot
         Tick++;
         GameHours += TickSeconds / SecondsPerGameHour;
-        if (publish && Settings.PublishSnapshots) Publish(prof, farShared: true);
+        if (publish && Settings.PublishSnapshots) Publish(prof, farShared: true, views);
 
         prof?.Lap(TickProfile.Publish);
     }
@@ -703,7 +945,11 @@ public sealed partial class World : IDisposable
 
         for (int k = 0; k < _systems.Count; k++)
         {
-            _systems[k].Inputs(this, due);
+            if (ModFaults.IsMod(k))
+                ModFaults.Run(k, "inputs", _systems[k], this, due, static (s, w, d) => s.Inputs(w, d));
+            else
+                _systems[k].Inputs(this, due);
+
             prof?.Lap(TickProfile.Inputs, k);
         }
     }
@@ -725,9 +971,18 @@ public sealed partial class World : IDisposable
 
         for (int k = 0; k < _systems.Count; k++)
         {
-            _systems[k].Schedule(this);
+            if (ModFaults.IsMod(k))
+                ModFaults.Run(k, "schedule", _systems[k], this, 0, static (s, w, _) => s.Schedule(w));
+            else
+                _systems[k].Schedule(this);
+
             prof?.Lap(TickProfile.Schedule, k);
         }
+
+        // The chooser's serial look, after the systems' (the minds they give), before the think reads it.
+        Decisions.Look(this);
+        prof?.Part("decision look");
+        prof?.Lap(TickProfile.Schedule);
     }
 
     /// <summary>
@@ -736,9 +991,11 @@ public sealed partial class World : IDisposable
     void RunThinkMoveAct(CharacterTable table, TickProfile? prof)
     {
         table.Phase = TablePhase.Parallel;
+        ModFaults.Settle();   // a mod system that threw in Inputs or Schedule runs no parallel phase this tick
 
         // A system that leaves a phase at its empty default is skipped there: a barrier costs more than the nothing it would wait for.
         foreach (var p in _phases) if (p.Think is { } think) RunParallel(think, prof, TickProfile.Think, p.Index);
+        ThinkWithoutMind(prof);
         foreach (var p in _phases) if (p.Move is { } move) RunParallel(move, prof, TickProfile.Move, p.Index);
         foreach (var b in _buffers) b.Reset();
 
@@ -757,11 +1014,26 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
+    /// The chooser's ladder for the characters the look made a row for that no think ran (no mind, or no AI; parallel, after the systems' thinks,
+    /// <see cref="DecisionSystem.ThinkWithoutMind"/>); skipped when the look made no row.
+    /// </summary>
+    void ThinkWithoutMind(TickProfile? prof)
+    {
+        if (!Decisions.AnyRow) return;
+
+        _thinkWithoutMind ??= i => Decisions.ThinkWithoutMind(this, _partitions[i]);
+        _pool.ForEach(_partitions.Length, _thinkWithoutMind);
+        prof?.Part("decision ladder without a mind");
+    }
+
+    /// <summary>
     /// Phase 6: the effects sorted and applied, then the squads refreshed.
     /// </summary>
     void Commit(CharacterTable table, TickProfile? prof)
     {
         table.Phase = TablePhase.Commit;
+        ModFaults.Settle();   // a mod system that threw in a parallel phase stops here, before its effects of the tick are applied
+        DeathObservers.Sweep(this);   // the deaths of the parallel phases (and of the inputs), before the blows of the commit
 
         _effects.Clear();
         for (int i = 0; i < _partitions.Length; i++) _effects.AddRange(_buffers[i].Items);
@@ -771,7 +1043,12 @@ public sealed partial class World : IDisposable
 
         foreach (var e in _effects)
         {
-            _systems[e.System].Apply(this, e);
+            var system = _systems[e.System];
+            if (ModFaults.IsMod(e.System))
+                ModFaults.Run(e.System, "apply", system, this, e, static (s, w, effect) => s.Apply(w, effect));
+            else
+                system.Apply(this, e);
+
             prof?.Lap(TickProfile.Commit, e.System);
         }
 
@@ -787,7 +1064,11 @@ public sealed partial class World : IDisposable
     {
         for (int k = 0; k < _systems.Count; k++)
         {
-            _systems[k].SlowWorld(this);
+            if (ModFaults.IsMod(k))
+                ModFaults.Run(k, "slow world", _systems[k], this, 0, static (s, w, _) => s.SlowWorld(w));
+            else
+                _systems[k].SlowWorld(this);
+
             prof?.Lap(TickProfile.SlowWorld, k);
             if (k == _decideAfter) RunDecisions(prof);
         }
@@ -866,11 +1147,11 @@ public sealed partial class World : IDisposable
     public int DeferredCount => _deferred.Count;
 
     /// <summary>
-    /// The commands due this tick: the deferred ones due, then the host's.
+    /// The commands due this tick: the deferred ones due, then the host's, the order giver's skip applied to those (<see cref="Simulation.Player.OrderGiver"/>).
     /// </summary>
     IReadOnlyList<SimCommand> TakeDue()
     {
-        var external = Commands.TakeDue(Tick);
+        var external = Simulation.Player.OrderGiver.SkipGettingUp(this, Commands.TakeDue(Tick));
         if (_deferred.Count == 0) return external;
 
         var due = new List<SimCommand>(_deferred.Count + external.Count);
@@ -986,10 +1267,12 @@ public sealed partial class World : IDisposable
             return;
         }
 
+        // Only the characters the player leads keep themselves and their neighbours at full rate; a squad the player does not lead or a code mod
+        // put to sleep is stepped as NPCs are (Squad.Independent, Squad.Dormant).
         var prev = table.Previous;
         _playerSpots.Clear();
         for (int i = 0; i < n; i++)
-            if (prev[i].Alive && table.Cold(i) is { IsPlayer: true }) _playerSpots.Add(prev[i].Position);
+            if (prev[i].Alive && table.Cold(i) is { IsPlayer: true } led && Led(led)) _playerSpots.Add(prev[i].Position);
 
         float near2 = NearRadius * NearRadius;
         int skipped = 0;
@@ -1003,9 +1286,12 @@ public sealed partial class World : IDisposable
                 continue;
             }
 
+            // A sleeping squad's member gets no far tick: it stands still away from the camera and the led characters.
             var at = prev[i].Position;
-            bool near = (Tick + i) % period == 0 || System.Numerics.Vector3.DistanceSquared(at, eye) <= near2
-                || table.Cold(i) is { IsPlayer: true } || NearPlayer(at);
+            var cold = table.Cold(i);
+            bool farTick = (Tick + i) % period == 0 && !(cold is { IsPlayer: true } && Squads.IsDormant(cold.SquadId));
+            bool led = cold is { IsPlayer: true } && Led(cold);
+            bool near = farTick || System.Numerics.Vector3.DistanceSquared(at, eye) <= near2 || led || NearPlayer(at);
 
             if (!near)
             {
@@ -1022,7 +1308,12 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
-    /// Whether <paramref name="at"/> is within <see cref="PlayerNearRadius"/> of a player character.
+    /// Whether a player character is one the player leads for the cadence: not in a squad the player does not lead or one put to sleep.
+    /// </summary>
+    bool Led(CharacterCold cold) => Squads.Find(cold.SquadId) is not ({ Independent: true } or { Dormant: true });
+
+    /// <summary>
+    /// Whether <paramref name="at"/> is within <see cref="PlayerNearRadius"/> of a player character the player leads.
     /// </summary>
     bool NearPlayer(System.Numerics.Vector3 at)
     {
@@ -1046,6 +1337,58 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
+    /// One part of <see cref="StateHash"/>: adds that part's state to the hasher.
+    /// </summary>
+    delegate void StatePart(World world, ref StateHasher hasher);
+
+    /// <summary>
+    /// The parts of <see cref="StateHash"/> in hashing order, each by name (<c>meitou-tools mod-check</c> names the parts two runs differ in). A part
+    /// that adds nothing until it holds something keeps worlds without it hashing as before.
+    /// </summary>
+    static readonly (string Name, StatePart Hash)[] StateParts =
+    [
+        ("characters", static (World w, ref StateHasher h) => w.Characters.Hash(ref h)),
+        ("squads", static (World w, ref StateHasher h) => w.Squads.Hash(ref h)),
+        ("platoons", static (World w, ref StateHasher h) => w.Platoons.Hash(ref h)),
+        ("player", static (World w, ref StateHasher h) => w.Player.Hash(ref h)),
+
+        // only once a unique is tracked
+        ("uniques", static (World w, ref StateHasher h) => { if (w.Uniques.Count > 0) w.Uniques.Hash(ref h); }),
+
+        // only once a town with buildings registered
+        ("fixtures", static (World w, ref StateHasher h) => { if (w.Fixtures.Count > 0) w.Fixtures.Hash(ref h); }),
+
+        // only once the player has a site
+        ("buildings", static (World w, ref StateHasher h) => w.HashBuildings(ref h)),
+
+        // only once something lies on the ground
+        ("ground items", static (World w, ref StateHasher h) => { if (w.GroundItems.Count > 0) w.GroundItems.Hash(ref h); }),
+
+        // only once a town with item slots registered
+        ("item slots", static (World w, ref StateHasher h) => { if (w.ItemSlots.Count > 0) w.ItemSlots.Hash(ref h); }),
+
+        // only once the player has a working building
+        ("machines", static (World w, ref StateHasher h) => { if (w.Machines.Count > 0) w.Machines.Hash(ref h); }),
+
+        // only once research changed in play
+        ("research", static (World w, ref StateHasher h) => { if (w.Research.Changed) w.Research.Hash(ref h); }),
+
+        // only once a mod asked for a character id or a save held some
+        ("lasting ids", static (World w, ref StateHasher h) => { if (w.LastingIds.Any) w.LastingIds.Hash(ref h); }),
+
+        // only while a code mod's world state has a value
+        ("mod states", static (World w, ref StateHasher h) => w.HashModStates(ref h)),
+
+        ("systems", static (World w, ref StateHasher h) => w.HashSystems(ref h)),
+        ("hook faults", static (World w, ref StateHasher h) => w.HashHookFaults(ref h)),
+    ];
+
+    /// <summary>
+    /// The names of the parts of <see cref="StateHash"/>, in hashing order (<see cref="StatePartHash"/>).
+    /// </summary>
+    internal static IReadOnlyList<string> StatePartNames { get; } = [.. StateParts.Select(p => p.Name)];
+
+    /// <summary>
     /// A hash of the canonical state after the last tick: the tick number, every character's state in slot order and the free list. Equal worlds give
     /// equal hashes at any thread count.
     /// </summary>
@@ -1054,36 +1397,78 @@ public sealed partial class World : IDisposable
         var h = new StateHasher();
         h.Add(Seed);
         h.Add(Tick);
-        Characters.Hash(ref h);
-        Squads.Hash(ref h);
-        Platoons.Hash(ref h);
-        Player.Hash(ref h);
-        if (Uniques.Count > 0)
-            Uniques.Hash(ref h);   // only once a unique is tracked, so worlds without one hash as before
+        foreach (var (_, part) in StateParts) part(this, ref h);
 
-        if (Fixtures.Count > 0)
-            Fixtures.Hash(ref h);   // only once a town with buildings registered, so worlds without them hash as before
+        return h.Value;
+    }
 
-        if (Buildings.Count > 0 || Buildings.Towns.Count > 0)
-            Buildings.Hash(ref h);   // only once the player has a site, so worlds without one hash as before
+    /// <summary>
+    /// One part of <see cref="StateHash"/> hashed on its own (part <paramref name="part"/> of <see cref="StatePartNames"/>), so two runs that differ
+    /// can name the parts that do. During a tick it hashes the state as it stands (<see cref="AfterPhase"/>).
+    /// </summary>
+    internal ulong StatePartHash(int part)
+    {
+        var h = new StateHasher();
+        StateParts[part].Hash(this, ref h);
+        return h.Value;
+    }
 
-        if (GroundItems.Count > 0)
-            GroundItems.Hash(ref h);   // only once something lies on the ground, so worlds without hash as before
+    /// <summary>
+    /// The player's sites and towns' part of <see cref="StateHash"/>.
+    /// </summary>
+    void HashBuildings(ref StateHasher h)
+    {
+        if (Buildings.Count > 0 || Buildings.Towns.Count > 0) Buildings.Hash(ref h);
+    }
 
-        if (ItemSlots.Count > 0) ItemSlots.Hash(ref h);   // only once a town with item slots registered
-        if (Machines.Count > 0) Machines.Hash(ref h);   // only once the player has a working building
-        if (Research.Changed) Research.Hash(ref h);   // only once research changed in play
+    /// <summary>
+    /// The code mods' world states' part of <see cref="StateHash"/>.
+    /// </summary>
+    void HashModStates(ref StateHasher h)
+    {
+        if (ModStatesOrNull is { Count: > 0 } modStates) modStates.Hash(ref h);
+    }
+
+    /// <summary>
+    /// The hashed systems' part of <see cref="StateHash"/> (<see cref="IStateHashed"/>), in system order.
+    /// </summary>
+    void HashSystems(ref StateHasher h)
+    {
         foreach (var s in _systems) if (s is IStateHashed hashed) hashed.Hash(ref h);
+    }
 
+    /// <summary>
+    /// The code mod hooks' faults' part of <see cref="StateHash"/>: each hook adds its disabled or faulted entries, nothing while none failed.
+    /// </summary>
+    void HashHookFaults(ref StateHasher h)
+    {
         HashCombatHitObserverFaults(ref h);
         CombatHitFilters.HashFaults(ref h);
+        TradePriceFilters.HashFaults(ref h);
+        TradeObservers.HashFaults(ref h);
+        StorageFilters.HashFaults(ref h);
         ItemUseObservers.HashFaults(ref h);
+        GoodsTakenObservers.HashFaults(ref h);
+        TownSwitchObservers.HashFaults(ref h);
         RelationObservers.HashFaults(ref h);
-        return h.Value;
+        DeathObservers.HashFaults(ref h);
+        ExperienceFilters.HashFaults(ref h);
+        CrimeObservers.HashFaults(ref h);
+        Decisions.HashFaults(ref h);
+        ModFaults.HashFaults(ref h);
     }
 
     /// <summary>
     /// Stops the worker pool.
     /// </summary>
-    public void Dispose() => _pool.Dispose();
+    public void Dispose()
+    {
+        _pool.Dispose();
+
+        // a stats object kept past the world (by a mod, say) must not keep the world alive through its experience binding
+        if (Characters.Watch?.Of(this) != true) return;
+
+        Bodies.ExperienceFilters.UnbindAll(this);
+        Characters.Watch = null;
+    }
 }

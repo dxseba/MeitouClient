@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.World;
 using Meitou.Simulation.Aggro;
@@ -25,7 +26,8 @@ public enum PackageClass : byte
     /// </summary>
     Retreat = 1,
     /// <summary>
-    /// <c>GoOutOnPatrol</c> (6) and <c>GoOutOnPatrol_Cannibal</c> (4): a walk round the outskirts of the home town every few hours.
+    /// <c>GoOutOnPatrol</c> (6) and <c>GoOutOnPatrol_Cannibal</c> (4): starts while the leader is out of every town or after 8 hours in one, and
+    /// is finished after 12 hours or once the squad is not intact (<see cref="AiSystem"/>'s <c>PatrolCanStart</c>, <c>PatrolFinished</c>).
     /// </summary>
     Patrol = 2,
     /// <summary>
@@ -45,8 +47,7 @@ public enum PackageClass : byte
     /// </summary>
     Contract = 6,
     /// <summary>
-    /// Wars and campaigns (19, 20, 32, 31: the campaign drives its squads, <see cref="PopulationSystem"/>) and the rest of the unread classes: not
-    /// built; never start (except as a lone slot-0 package), never finish.
+    /// The unread classes: not built; never start (except as a lone slot-0 package), never finish.
     /// </summary>
     Unbuilt = 7,
     /// <summary>
@@ -83,6 +84,27 @@ public enum PackageClass : byte
     /// (docs/game/ai.md "Package classes", Verified by code).
     /// </summary>
     Refugee = 15,
+    /// <summary>
+    /// <c>Package_WarBase</c> (19, a campaign's assembly): finished once its platoon is out of its campaign; no update and an empty sensing hook
+    /// (docs/game/ai.md "Package classes", Verified by code). Started only as a campaign's override (engine choice; the original's can always start).
+    /// The campaign march moves its squad.
+    /// </summary>
+    WarBase = 16,
+    /// <summary>
+    /// <c>Package_WarAssault</c> (20, a campaign's assault): as <see cref="WarBase"/>, and its update marks every member of its squad "ordered"
+    /// (<c>CharacterCold.Ordered</c>, Verified by code).
+    /// </summary>
+    WarAssault = 17,
+    /// <summary>
+    /// <c>Package_WarAssault_Cannibal</c> (32): as <see cref="WarAssault"/>, and its update then runs the cannibals' carrier rule (Verified by code;
+    /// Meitou keeps that rule in the campaign, <c>PopulationCampaigns.CannibalsLoaded</c>).
+    /// </summary>
+    WarAssaultCannibal = 18,
+    /// <summary>
+    /// <c>Campaign_DefendPlayerBase</c> (31, an ally's defence of the player's town): <c>Contract_DefendPlayerBase</c> (15) but for its finished
+    /// test, which after the contract hours waits while a hostile campaign runs (docs/game/ai.md "Package classes", Verified by code).
+    /// </summary>
+    CampaignDefend = 19,
 }
 
 /// <summary>
@@ -110,8 +132,19 @@ public static class PackageClasses
         29 => PackageClass.PassingAssault,
         30 => PackageClass.OccupyTown,
         22 => PackageClass.Refugee,
+        19 => PackageClass.WarBase,
+        20 => PackageClass.WarAssault,
+        32 => PackageClass.WarAssaultCannibal,
+        31 => PackageClass.CampaignDefend,
         _ => PackageClass.Unbuilt,
     };
+
+    /// <summary>
+    /// The class package signal <paramref name="signal"/> is built as when it runs as the blackboard's override (a contract, a campaign's phase
+    /// package): signal 0 becomes 33, <c>Contract_Timed</c> (<c>FUN_140272240</c>, <b>Verified</b>), so a plain package given that way runs for its
+    /// hours; every other signal keeps its class.
+    /// </summary>
+    public static PackageClass OfOverride(int signal) => signal == 0 ? PackageClass.Contract : Of(signal);
 }
 
 /// <summary>
@@ -129,7 +162,7 @@ public interface IPackageRules
     bool Finished(Blackboard board, AiPackage package, PackageClass kind);
 
     /// <summary>
-    /// A package of the class just started (a patrol lays out its route, a bar package moves the home).
+    /// A package of the class just started (a patrol stamps its hour, a bar package moves the home).
     /// </summary>
     void Started(Blackboard board, AiPackage package, PackageClass kind);
 
@@ -146,8 +179,9 @@ public interface IPackageRules
 
 /// <summary>
 /// A guarded gate: its door leaf's centre at the leaf's foot, the unit X/Z way through it pointing away from the town, and half the leaf's width.
+/// <paramref name="Inside"/>: its guards stand on the town's side of the leaf (a gate the player built, so they never pass through it).
 /// </summary>
-public readonly record struct GatePost(TownBuilding Building, Vector3 Door, Vector2 Out, float HalfWidth);
+public readonly record struct GatePost(TownBuilding Building, Vector3 Door, Vector2 Out, float HalfWidth, bool Inside = false);
 
 /// <summary>
 /// A seat a member sitting around claimed: the piece <paramref name="Index"/> (<see cref="TownBuilding.SeatAt"/>) of <paramref name="Building"/>.
@@ -167,7 +201,7 @@ public readonly record struct CrowdEntry(CharacterId Who, TaskType Type, Charact
 
 /// <summary>
 /// A squad's AI state (docs/game/ai.md "Blackboard update"): its packages by slot, the package running and the role lists it loaded, a contract
-/// package that overrides the slots, and what the running package needs: a home building, a patrol route. Changed only in <see cref="AiSystem"/>'s
+/// package that overrides the slots, and what the running package needs: a home building, a patrol's start hour. Changed only in <see cref="AiSystem"/>'s
 /// serial step; the members' think reads it.
 /// </summary>
 public sealed class Blackboard
@@ -262,9 +296,41 @@ public sealed class Blackboard
     public double ContractEnd { get; private set; }
 
     /// <summary>
+    /// The contract is a campaign's phase package (<c>AiSystem.InstallPhasePackage</c>): it ends by its class's finished test, as the original ends
+    /// every override (<c>FUN_140272570</c> asks the override's +0x68 on each visit, <b>Verified</b>), so a retreat outlives its campaign until its
+    /// own test passes. No war or retreat class's finished test reads <see cref="ContractEnd"/>; of the finished tests checked, the contract classes'
+    /// do (<c>Contract_Timed</c> among them, <see cref="PackageClasses.OfOverride"/>) and the campaign's defence's. A contract dialogue or a code mod
+    /// started ends at its hours whatever its class (engine choice). Saved as
+    /// <see cref="Saving.AiSave.PhaseKey"/>; hashed only while set.
+    /// </summary>
+    public bool PhaseContract { get; private set; }
+
+    /// <summary>
+    /// The war classes' mission target (package <c>+0x28</c>, written once by their start <c>FUN_14028fc80</c>, <b>Verified</b>): the platoon id of
+    /// the campaign's lead as it was when the package started, for a platoon that was not the lead then; -1 for the lead platoon, a campaign with no
+    /// lead yet and any other package, whose 215 aims at the campaign's target. Nothing refreshes the copy while the package runs (the war update
+    /// <c>FUN_140287670</c> is empty). Not saved: a loaded package starts again and copies the campaign's lead then (<c>FUN_140272c20</c>
+    /// installs the saved override, whose activation runs the start). Hashed while set.
+    /// </summary>
+    public int WarLead { get; set; } = -1;
+
+    /// <summary>
+    /// The campaign's <c>travel speed loaded</c>, copied by the war classes' start for 215's pace (<see cref="MissionFormation"/>). Hashed with
+    /// <see cref="WarLead"/>.
+    /// </summary>
+    public MoveSpeed WarSpeed { get; set; } = MoveSpeed.Run;
+
+    /// <summary>
+    /// The point 215 walks to while it aims at the campaign's target (<see cref="WarLead"/> -1): the target town's own point (Town vfunc 0x38,
+    /// <see cref="TownExit"/>), found again on each package cadence by the serial step (<c>AiSystem.StepWar</c>); null without a target. Hashed while
+    /// set.
+    /// </summary>
+    public Vector2? WarPoint { get; set; }
+
+    /// <summary>
     /// The town the squad belongs to (a site index, -1: none) and the building it lives in (null: none known); <see cref="OwnHome"/> is the one it
     /// was given, <see cref="Home"/> the one in use (a bar package moves it to the bar). An autonomous player squad's is its assigned home's town
-    /// (<see cref="SquadAutonomy"/>).
+    /// (<see cref="SquadAutonomy"/>). The town goals' finders read the squad's town through <see cref="HomeTown"/>, which also answers an outpost.
     /// </summary>
     public int Town { get; set; } = -1;
 
@@ -361,22 +427,9 @@ public sealed class Blackboard
     public bool Intact { get; set; } = true;
 
     /// <summary>
-    /// A patrol's route (world X/Z) and the point the leader walks to next; empty when no patrol runs.
+    /// The game hour the running patrol package started (<c>GoOutOnPatrol</c> +0xb0, stamped by its activation), from which its 12 hours count.
     /// </summary>
-    public Vector2[] Route { get; set; } = [];
-    /// <summary>
-    /// The index in <see cref="Route"/> of the point the leader walks to next.
-    /// </summary>
-    public int RouteIndex { get; set; }
-
-    /// <summary>
-    /// The game hours from which the next patrol may start, and when the running one gives up.
-    /// </summary>
-    public double NextPatrol { get; set; }
-    /// <summary>
-    /// The game hours at which the running patrol gives up (see <see cref="NextPatrol"/>).
-    /// </summary>
-    public double PatrolGiveUp { get; set; }
+    public double PatrolStart { get; set; }
 
     /// <summary>
     /// The town (site index) a retreat or slave shipping package goes to, set when it starts; -1: none.
@@ -384,9 +437,9 @@ public sealed class Blackboard
     public int MissionTown { get; set; } = -1;
 
     /// <summary>
-    /// The town the squad is in (the original's Blackboard +0x138, docs/game/ai.md "Package classes": its leader's town, else the town whose radius
-    /// holds the squad) and the game hour it came in (+0x140); <see cref="CampaignTown.None"/> outside every town. Set on the package cadence before
-    /// the choice.
+    /// The town the squad is in (the original's Blackboard +0x138, docs/game/ai.md "Package classes": its leader's status town, a nest included,
+    /// else the town whose radius holds the squad) and the game hour it came in (+0x140); <see cref="CampaignTown.None"/> outside every town. Set
+    /// on the package cadence before the choice.
     /// </summary>
     public CampaignTown InTown { get; set; } = CampaignTown.None;
     /// <summary>
@@ -415,6 +468,22 @@ public sealed class Blackboard
     /// spent before the command, or in another town, does not count toward the stay (engine API, not in the original).
     /// </summary>
     public bool VisitArrivalPending { get; set; }
+    /// <summary>
+    /// The town the trader last left (+0xb0, set when it drops its town): any other town it is in counts as arriving, so a town it only passes
+    /// through on the way is a stop too. Not saved, like the trader's other state.
+    /// </summary>
+    public CampaignTown TraderLeft { get; set; } = CampaignTown.None;
+    /// <summary>
+    /// A war assault package (20, 32) marked the members "ordered" on a package step (<c>AiSystem.StepWar</c>); the first step after it stops
+    /// running clears the marks. Not saved (nor are the marks); hashed only while set.
+    /// </summary>
+    public bool MarksOrdered { get; set; }
+    /// <summary>
+    /// A bar package started while its town was not loaded, so it holds no table yet and takes one once the town is loaded (the original's start
+    /// needs the town's zone loaded and is run again by the target query until then, docs/game/ai-tasks.md "Hang-around-bar package"). Not saved:
+    /// the package starts again at a load and works the wait out afresh.
+    /// </summary>
+    public bool BarWaits { get; set; }
 
     /// <summary>
     /// The passing-by assault (<c>Package_PassingByTownAssault</c>): the game hour it started (+0xb8), the faction it attacks (+0x100, the town's),
@@ -462,21 +531,35 @@ public sealed class Blackboard
     public int RefugeeTarget { get; set; } = -1;
 
     /// <summary>
-    /// One pass of the original's package choice (docs/game/ai.md "Blackboard update", Verified): a running contract first; then slots from the
-    /// highest down until one reports success. In a slot the list is scanned in order: the current package stays while it is not finished, or hands
-    /// over to its <c>Leads to</c> package when it is; an entry before it that can start pre-empts it; a lone slot-0 package starts even when it
-    /// cannot. Without <paramref name="rules"/> every package keeps the base class's rules except that only plain packages can start.
+    /// One pass of the original's package choice (docs/game/ai.md "Blackboard update", Verified): a running contract first, until it has ended
+    /// (<see cref="ContractEnded"/>); then slots from the highest down until one reports success. In a slot the list is scanned in order: the
+    /// current package stays while it is not finished, or hands over to its <c>Leads to</c> package when it is; an entry before it that can start
+    /// pre-empts it; a lone slot-0 package starts even when it cannot. Without <paramref name="rules"/> every package keeps the base class's rules
+    /// except that only plain packages can start.
     /// </summary>
     public void Update(IPackageRules? rules = null, double hours = 0)
     {
         if (Contract is { } contract)
         {
-            if (hours < ContractEnd) return;
+            if (!ContractEnded(contract, rules, hours)) return;
             EndRunning(contract);
         }
 
         foreach (var (slot, list) in _slots.Reverse())
             if (TrySlot(slot, list, rules)) return;
+    }
+
+    /// <summary>
+    /// Whether the running contract has ended at <paramref name="hours"/>: at its <see cref="ContractEnd"/>; a campaign's phase package
+    /// (<see cref="PhaseContract"/>) by the finished test of the class it is built as (<see cref="PackageClasses.OfOverride"/>: the contract classes
+    /// read the hours, a plain one never finishes). An unbuilt class keeps the hours (engine stand-in), as does a board with no rules.
+    /// </summary>
+    bool ContractEnded(AiPackage contract, IPackageRules? rules, double hours)
+    {
+        var kind = PackageClasses.OfOverride(contract.Signal);
+        if (!PhaseContract || rules is null || kind is PackageClass.Contract or PackageClass.Unbuilt) return hours >= ContractEnd;
+
+        return kind != PackageClass.Plain && rules.Finished(this, contract, kind);
     }
 
     /// <summary>
@@ -489,7 +572,8 @@ public sealed class Blackboard
             if (Current != list[0]) Start(list[0], 0, rules);
             else if (Finished(list[0], rules))
             {
-                // Finished and alone: its Leads to, else itself again once it can start (a patrol's next round).
+                // Finished and alone: its Leads to, else itself again once it can start (a patrol never does: its start test refuses the
+                // finished running package, so it stays as it is).
                 if (list[0].LeadsTo is { } hop && Find(hop) is { } follow && MayLead(list[0], rules)) Start(follow.Package, follow.Slot, rules);
                 else if (CanStart(list[0], rules)) Start(list[0], 0, rules);
             }
@@ -559,8 +643,8 @@ public sealed class Blackboard
     }
 
     /// <summary>
-    /// Starts a package in <paramref name="slot"/> (-1: a contract): ends the one it replaces, loads its roles, bumps the version, resets the route,
-    /// home, bar table, mission town, destination and refugee state, then tells the rules it started.
+    /// Starts a package in <paramref name="slot"/> (-1: a contract): ends the one it replaces, loads its roles, bumps the version, resets the home,
+    /// bar table, mission town, destination and refugee state, then tells the rules it started.
     /// </summary>
     void Start(AiPackage package, int slot, IPackageRules? rules)
     {
@@ -570,19 +654,20 @@ public sealed class Blackboard
         CurrentIndex = slot >= 0 && _slots.TryGetValue(slot, out var list) ? list.IndexOf(package) : -1;
         Roles = package.Roles;
         Version++;
-        Route = [];
-        RouteIndex = 0;
         Home = OwnHome;
         BarTable = -1;
+        BarWaits = false;
         MissionTown = -1;
         Destination = CampaignTown.None;
+        WarLead = -1;
+        WarPoint = null;
         RefugeeBroken = false;
         RefugeeTarget = -1;
         rules?.Started(this, package, PackageClasses.Of(package.Signal));
     }
 
     /// <summary>
-    /// Makes the members think again at once (a patrol moved on).
+    /// Makes the members think again at once (the squad's home or autonomy changed).
     /// </summary>
     public void Touch() => Version++;
 
@@ -592,18 +677,25 @@ public sealed class Blackboard
     /// it). It takes precedence over the slots until it ends; then the slots choose again. Starting the contract already running does nothing (end
     /// time and target kept); a different one replaces it and the old one ends first, its end talk to the old target (<c>FUN_140272240</c>,
     /// <c>FUN_14026a110</c>, <b>Verified</b>); to start it again, end it first (<see cref="EndContract"/>). <paramref name="anyRange"/>: see
-    /// <see cref="MissionAnyRange"/>.
+    /// <see cref="MissionAnyRange"/>. <paramref name="phase"/>: a campaign's phase package, which ends by its class's test
+    /// (<see cref="PhaseContract"/>); given for the contract already running, it marks that one so.
     /// </summary>
     public void StartContract(AiPackage package, double now, double hours, IPackageRules? rules = null, CharacterId? target = null,
-        bool anyRange = false)
+        bool anyRange = false, bool phase = false)
     {
         if (Contract is { } running)
         {
-            if (running.Id == package.Id) return;
+            if (running.Id == package.Id)
+            {
+                PhaseContract |= phase;
+                return;
+            }
+
             _ended = (running, MissionEmployer);
         }
 
         Contract = package;
+        PhaseContract = phase;
         ContractEnd = now + (hours < 1 ? 10.0 / 60 : hours);
         ContractTown = Population.CampaignTown.None;
         MissionTarget = MissionEmployer = target ?? CharacterId.None;
@@ -631,6 +723,7 @@ public sealed class Blackboard
     {
         _ended = (contract, MissionEmployer);
         Contract = null;
+        PhaseContract = false;
         ContractTown = Population.CampaignTown.None;
         MissionTarget = MissionEmployer = CharacterId.None;
         MissionAnyRange = false;
@@ -660,19 +753,25 @@ public sealed class Blackboard
     /// save named none, or a character that is not in the world) for <paramref name="employer"/> (none: the target). As the original's load
     /// (<c>FUN_140272c20</c>), the package starts first, then the saved state replaces what the start set: the blackboard's target town
     /// <paramref name="targetTown"/> (<see cref="Destination"/>) when the save names one, and the package's mission town <paramref name="town"/>
-    /// (<see cref="ContractTown"/>; none when the save names none).
+    /// (<see cref="ContractTown"/>; none when the save names none; for a class whose start set its own <see cref="MissionTown"/>, a retreat or a
+    /// shipping, the saved town replaces that when it names a placed town, and an unnamed one keeps what the start chose).
+    /// <paramref name="phase"/>: see <see cref="PhaseContract"/>.
     /// </summary>
     public void ResumeContract(AiPackage package, double end, IPackageRules? rules = null, CharacterId? target = null, bool anyRange = false,
-        CharacterId? employer = null, CampaignTown? town = null, CampaignTown? targetTown = null)
+        CharacterId? employer = null, CampaignTown? town = null, CampaignTown? targetTown = null, bool phase = false)
     {
         Contract = package;
+        PhaseContract = phase;
         ContractEnd = end;
         MissionTarget = target ?? CharacterId.None;
         MissionEmployer = employer is { IsNone: false } hirer ? hirer : MissionTarget;
         MissionAnyRange = anyRange && !MissionTarget.IsNone;
         Start(package, -1, rules);
         if (targetTown is { IsNone: false } saved) Destination = saved;
-        if (town is { } mission) ContractTown = mission;
+        if (town is not { } mission) return;
+
+        if (MissionTown < 0) ContractTown = mission;
+        else if (mission.Site >= 0) (MissionTown, Destination) = (mission.Site, targetTown is { IsNone: false } kept ? kept : mission);
     }
 
     /// <summary>
@@ -693,6 +792,13 @@ public sealed class Blackboard
     /// squad's town for its town goals (<c>FUN_140269cd0</c>). None without one. Saved with the contract (<see cref="Saving.AiSave"/>); not hashed.
     /// </summary>
     public Population.CampaignTown ContractTown { get; set; } = Population.CampaignTown.None;
+
+    /// <summary>
+    /// The running contract's mission town (the override's own +0x8 hand, which the original saves as <c>mission town</c>): a retreat's or a
+    /// shipping's (<see cref="MissionTown"/>, set by its start), else the contract classes' (<see cref="ContractTown"/>, none without one).
+    /// </summary>
+    public Population.CampaignTown ContractMissionTown =>
+        MissionTown >= 0 ? Population.CampaignTown.OfSite(MissionTown) : ContractTown;
 
     /// <summary>
     /// Whom the running contract works for (the package's <c>mission employer</c>, <c>FUN_140285ba0</c> writes the dialogue target into it and the
@@ -745,6 +851,17 @@ public sealed class Blackboard
     }
 
     /// <summary>
+    /// Adds <paramref name="packages"/> to slot 0 after its own, each one the slot does not hold yet (<c>FUN_14026c160</c>): a restored platoon's
+    /// faction <c>AI fallback</c>, which its constructor adds after its saved <c>replacementAI</c> (<c>FUN_1407ee2d0</c>). The running package stays.
+    /// </summary>
+    public void AddAtSlotZero(IEnumerable<AiPackage> packages)
+    {
+        if (!_slots.TryGetValue(0, out var list)) _slots[0] = list = [];
+        foreach (var p in packages)
+            if (!list.Contains(p)) list.Add(p);
+    }
+
+    /// <summary>
     /// Adds the board's state to the world's state hash (the derived claims are left out).
     /// </summary>
     internal void Hash(ref StateHasher hasher)
@@ -757,18 +874,17 @@ public sealed class Blackboard
         if (!MissionTarget.IsNone) hasher.Add(MissionTarget);
         if (!MissionEmployer.IsNone && MissionEmployer != MissionTarget) hasher.Add(MissionEmployer);   // differs only for a town mission
         if (MissionAnyRange) hasher.Add(0x416E7952);   // only when a code mod set it, so worlds without one hash as before
+        if (PhaseContract) HashPhase(ref hasher);
         if (Replacement is not null) hasher.Add(Rng.StableHash(Replacement.Id));
         hasher.Add(Intact);
-        hasher.Add(Route.Length);
-        foreach (var p in Route) hasher.Add(p);
-        hasher.Add(RouteIndex);
-        hasher.Add(NextPatrol);
-        hasher.Add(PatrolGiveUp);
+        hasher.Add(PatrolStart);
         hasher.Add(Home?.Position ?? default);
         if (BarTable >= 0) hasher.Add(BarTable);
         if (MissionTown >= 0) hasher.Add(MissionTown + 0x4D69);
 
         // The package classes' own state, only once one has run (worlds without them hash as before).
+        if (BarWaits) hasher.Add(0x62617277);
+        if (MarksOrdered) hasher.Add(0x4F726472);
         if (!Destination.IsNone)
         {
             hasher.Add(Destination.Site);
@@ -781,7 +897,14 @@ public sealed class Blackboard
             hasher.Add(TraderWait);
             hasher.Add(InTown.Site);
             hasher.Add(InTown.PlayerTown);
+            if (InTown.Nest > 0) hasher.Add(InTown.Nest + 0x4E657374);   // only in a nest, so the other worlds hash as before
             hasher.Add(InTownSince);
+            if (!TraderLeft.IsNone)
+            {
+                hasher.Add(TraderLeft.Site);
+                hasher.Add(TraderLeft.PlayerTown);
+                if (TraderLeft.Nest > 0) hasher.Add(TraderLeft.Nest + 0x4E657374);
+            }
         }
 
         // Only a code mod's visit sets it, so a world without one hashes as before.
@@ -802,6 +925,29 @@ public sealed class Blackboard
             hasher.Add(RefugeeTarget);
         }
     }
+
+    /// <summary>
+    /// A campaign's phase package: its mark, and the war classes' mission (<see cref="ContractTown"/>, <see cref="WarLead"/>,
+    /// <see cref="WarSpeed"/>, <see cref="WarPoint"/>) once their start set it. Only a campaign sets these, so worlds without one hash as before.
+    /// </summary>
+    void HashPhase(ref StateHasher hasher)
+    {
+        hasher.Add(0x50686173);
+        if (!ContractTown.IsNone)
+        {
+            hasher.Add(ContractTown.Site);
+            hasher.Add(ContractTown.PlayerTown);
+            hasher.Add(ContractTown.Nest);
+        }
+
+        if (WarLead >= 0)
+        {
+            hasher.Add(WarLead);
+            hasher.Add((int)WarSpeed);
+        }
+
+        if (WarPoint is { } point) hasher.Add(point);
+    }
 }
 
 /// <summary>
@@ -821,6 +967,47 @@ public enum FleeAsk : byte
     /// A goal 35 of its lists: from the enemies it senses, until none is in sight and nobody attacks it (the squads' rule).
     /// </summary>
     Enemies = 2,
+}
+
+/// <summary>
+/// Where goal 148 Find and rescue if there's beds stood for a character whose goal lists weigh it, at the carry system's last rescue beat
+/// (<see cref="AiMind.BedRescueNote"/>): a debugging aid the action log writes (docs/simulation.md "Action log").
+/// </summary>
+public enum BedRescueNote : byte
+{
+    /// <summary>
+    /// Not looked at: its goal lists do not hold 148, or no beat ran yet.
+    /// </summary>
+    None = 0,
+    /// <summary>
+    /// Not eligible: on Hold, carrying, or it is not able to lift (no usable left arm, or the row is not in its repertoire).
+    /// </summary>
+    CannotLift = 1,
+    /// <summary>
+    /// Not eligible: nobody in the world is knocked out.
+    /// </summary>
+    NobodyDown = 2,
+    /// <summary>
+    /// Not eligible: no downed ally its finder takes (own or allied faction, sensed or in sight, not given up; none while its squad fights).
+    /// </summary>
+    NoBody = 3,
+    /// <summary>
+    /// Not eligible: a downed ally, but the bed search finds no bed for it.
+    /// </summary>
+    NoBed = 4,
+    /// <summary>
+    /// Wanted, not chosen: its think chose another goal.
+    /// </summary>
+    NotChosen = 5,
+    /// <summary>
+    /// The lift started (row 148).
+    /// </summary>
+    Lifting = 8,
+    /// <summary>
+    /// Not eligible: the downed ally found is one goal 106 would not lay in a bed (a grudge tag, a bounty owed to a police-like rescuer, not regarded
+    /// as friendly).
+    /// </summary>
+    NoPutIn = 9,
 }
 
 /// <summary>
@@ -870,9 +1057,22 @@ public sealed class AiMind
     public Vector2 Post { get; set; }
 
     /// <summary>
-    /// The game hours (<see cref="World.GameHours"/>) until which it is committed to its goal (docs/game/ai.md "Packages and goals").
+    /// The game hours (<see cref="World.GameHours"/>) until which it is committed to its goal: the goal's timer (<c>AITaskSytem</c> <c>+0x280</c>,
+    /// docs/game/ai-tasks.md "Desire and commitment"). Not saved.
     /// </summary>
     public double CommitUntil { get; set; }
+
+    /// <summary>
+    /// The task's timer (<c>AITaskSytem</c> <c>+0x288</c>, <c>FUN_14050d130</c>, <b>Verified</b>): rolled from now at each start of a step whose
+    /// commit step commits (<see cref="AiSystem.CommitStep"/>); a row with TaskData <c>+0x21</c> ends when it passes. Not saved.
+    /// </summary>
+    public double TaskCommitUntil { get; set; }
+
+    /// <summary>
+    /// Its <c>+0x21</c> commitment ended at this think (<see cref="TierRungs.Begin"/>): the serial looks that skip a committed character look at it
+    /// again before its next choice (<see cref="Kidnap.CaptiveGoals"/>). Cleared by its next think; hashed while set.
+    /// </summary>
+    public bool CommitEnded { get; set; }
 
     /// <summary>
     /// The tick its current goal was taken up (<see cref="AiSystem"/>'s act-out): an engine task started before it does not displace that goal's plan.
@@ -895,23 +1095,18 @@ public sealed class AiMind
     public float WanderRadius { get; set; }
 
     /// <summary>
-    /// Its routine is the engine's, not the AI's: it is a member of a squad the AI does not run (a roaming platoon's active half, whose trip is the
-    /// population's, or a squad whose template lists no AI packages). The AI weighs only its combat goals (<see cref="EngineGoals"/> and its race's)
-    /// and Self preservation, on that routine and in its fights, and acts nothing else out (docs/simulation.md "AI").
-    /// </summary>
-    public bool Engine { get; init; }
-
-    /// <summary>
-    /// A player character's mind (a member of an autonomous squad, <see cref="SquadAutonomy"/>): it weighs its squad's package goals only; Self
-    /// preservation and its race's goals stay the decision step's (<see cref="DecisionSystem"/>).
+    /// A player-faction character's mind (always with <see cref="PlayerSide"/>). Its own lists' goals are weighed only once their type is on the
+    /// chooser's rungs or a code mod's (<see cref="AiSystem.OnRungs"/>); the rest stay the sources' (<see cref="DecisionSystem"/>).
     /// </summary>
     public bool Player { get; init; }
 
     /// <summary>
-    /// A player character's mind wants an urgent (priority 3) package goal, as its last think found: the decision step's source
-    /// (<see cref="SquadAutonomy"/>) then takes it off a job and keeps the jobs from taking it back. Hashed with <see cref="Player"/>.
+    /// The mind <c>Character::setupAI</c> (<c>FUN_140621b70</c>, <b>Verified</b>) gives a player-faction character (with <see cref="Player"/>): its
+    /// own lists in <see cref="RaceGoals"/>, the role lists of its squad's package when the AI runs the squad (<see cref="SquadAutonomy"/>, else
+    /// none: the player's platoon runs no package), and the one chooser (<see cref="Ladder"/>) with the sources' rungs for a player character. Made
+    /// each tick for any member that lacks it (<c>AiSystem</c>'s schedule step); not saved, as the original builds it at every load.
     /// </summary>
-    public bool Urgent { get; set; }
+    public bool PlayerSide { get; init; }
 
     /// <summary>
     /// The tick and row of the last task the think started for a player character (<see cref="RunningTask.Tick"/>, <see cref="RunningTask.Row"/>):
@@ -929,14 +1124,10 @@ public sealed class AiMind
     public bool Owns(RunningTask run) => run.Source == TaskSource.Goal && run.Tick == OwnTick && run.Row == OwnRow;
 
     /// <summary>
-    /// The combat goals of its platoon's package for its role (none without a package), set by the AI's serial step on the package cadence. Follow
-    /// from the package, so not hashed.
-    /// </summary>
-    public IReadOnlyList<AiGoal> EngineGoals { get; set; } = [];
-
-    /// <summary>
-    /// Its race's <c>AI Goals</c>, looked up once when the mind is made (the lookup takes a lock; the think runs on every worker). Follows from the
-    /// race, so not hashed.
+    /// Its own goal lists beside its squad's (<c>setupAI</c> <c>FUN_140621b70</c>, <b>Verified</b>): its faction's <c>AI Goals</c> when no contract
+    /// ran as the mind was made, then its race's (<see cref="AiDatabase.OwnGoals"/>; a debug spawn that must aggro also gets Attack enemies),
+    /// looked up once when the mind is made (the lookup takes a lock; the think runs on every worker). Follows from the race and faction, so not
+    /// hashed.
     /// </summary>
     public IReadOnlyList<AiGoal> RaceGoals { get; init; } = [];
 
@@ -1049,6 +1240,16 @@ public sealed class AiMind
     /// </summary>
     public bool DitchRequest { get; set; }
     /// <summary>
+    /// The plan's step 92 Collecting resource from a loose item or a storage (row 94's sources) is due: the think sets it,
+    /// <see cref="Kidnap.TownDutySystem"/> starts the errand and clears it (derived, not hashed).
+    /// </summary>
+    public bool FetchRequest { get; set; }
+    /// <summary>
+    /// The plan's step 69 Putting down is due: the think sets it, the AI's serial step has the carry system put the body down and clears it
+    /// (derived, not hashed).
+    /// </summary>
+    public bool PutDownRequest { get; set; }
+    /// <summary>
     /// The faction owning the machine of <see cref="WorkOperate"/> (-1: none; derived, not hashed).
     /// </summary>
     public int WorkOwner { get; set; }
@@ -1063,6 +1264,13 @@ public sealed class AiMind
     /// another goal or when no workplace had a free slot. Not saved: a load claims again (derived, not hashed).
     /// </summary>
     public TownBuilding? WorkPost { get; set; }
+
+    /// <summary>
+    /// The town the worker goals (189, 190) find their workplaces in: the character's own status town, as their finders read it
+    /// (<c>FUN_1408cac60</c>, status <c>+0x88</c>); stamped by the serial schedule, a player-faction mind's every tick, an NPC mind's on the package
+    /// cadence (derived, not hashed).
+    /// </summary>
+    public CampaignTown WorkTown { get; set; } = CampaignTown.None;
 
     /// <summary>
     /// The clip it plays at its work (the ANIMATION its building's functionality names), cleared with <see cref="CharacterCold.ActionClip"/> when it
@@ -1131,34 +1339,107 @@ public sealed class AiMind
     public bool MedicAsk { get; set; }
 
     /// <summary>
-    /// The captive goals (<see cref="AiBehaviour.Captive"/>) whose job would start, each with the original's desire, found on the character's last
-    /// captive sweep turn or at the end of its job (<see cref="Kidnap.CaptiveSystem"/>). Kept for a character awake that the sweep does not take
-    /// (seated, in a job, on a duty), so its think weighs them. Not saved; hashed while set.
+    /// The think reached Fixing Legs' own step (<see cref="AiBehaviour.HealLegs"/>): the serial step of the same tick starts the treatment of the
+    /// character itself (<see cref="FirstAid.FirstAidSystem.SendGoalTreatments"/>) and clears it (not hashed).
     /// </summary>
-    public List<(TaskType Type, float Desire)> CaptiveOffers { get; } = [];
+    public bool HealLegsAsk { get; set; }
 
     /// <summary>
-    /// The think chose a captive goal: the serial step of the same tick starts its job (<see cref="Kidnap.CaptiveSystem.SendGoalJobs"/>) and clears
+    /// The think acts 129 Approaching fast out: the serial step of the same tick has the campaign's announcement said (<c>AiSystem.SendAnnouncements</c>,
+    /// <see cref="PopulationSystem.Announce"/>) and clears it (not hashed).
+    /// </summary>
+    public bool AnnounceAsk { get; set; }
+
+    /// <summary>
+    /// The announcement of the running 129 has been said (<c>Task_MakeAnnouncement</c> +0x78, set as its line starts, cleared when the goal is taken
+    /// up anew): with the character's message delivered after it, its finished test holds (<see cref="TaskFinished"/>). Hashed while set.
+    /// </summary>
+    public bool Announced { get; set; }
+
+    /// <summary>
+    /// The running 129 has said its arrival line (<c>Task_MakeAnnouncement</c> +0x7a, once per run: cleared when the goal is taken up anew). Hashed
+    /// while set.
+    /// </summary>
+    public bool ArrivalSaid { get; set; }
+
+    /// <summary>
+    /// The engine and mod goal types whose start answered false for this character (<see cref="IDutyGoal.Start"/>, <see cref="IModGoal.Start"/>), each
+    /// weighed at 0 until its tick (exclusive), so a goal its system will not start does not hold the character standing; null when none. An entry
+    /// goes at the first think after its tick, and the list with its last entry. Hashed while set.
+    /// </summary>
+    public List<(TaskType Type, long Until)>? Backoffs { get; internal set; }
+
+    /// <summary>
+    /// The goal record whose act-out an engine system runs for this character (<see cref="DutyGoals"/>): the goal holds the character, so the AI
+    /// keeps thinking for it (<see cref="AiSystem.Holds"/>) and a goal that scores higher takes it over. Null when none. Set and cleared by the AI's
+    /// serial step; hashed while set.
+    /// </summary>
+    public AiGoal? Duty { get; internal set; }
+
+    /// <summary>
+    /// The start tick of the task the engine goal's start left running (<see cref="Duty"/>): that task, or a goal's task started since, is the
+    /// act-out (<see cref="AiSystem.OnDuty"/>).
+    /// </summary>
+    public long DutyTick { get; internal set; }
+
+    /// <summary>
+    /// The think chose an engine goal (<see cref="AiBehaviour.Duty"/>): the serial step of the same tick starts it (<see cref="DutyGoals"/>) and clears
     /// it (not hashed).
     /// </summary>
-    public bool CaptiveAsk { get; set; }
+    public bool DutyAsk { get; internal set; }
 
     /// <summary>
-    /// The desire kept for the captive goal <paramref name="type"/> (<see cref="CaptiveOffers"/>); 0 without one.
+    /// The think chose another goal over the running <see cref="Duty"/>: the serial step of the same tick ends it and clears this (not hashed).
     /// </summary>
-    public float CaptiveDesire(TaskType type)
+    public bool DutyLeave { get; internal set; }
+
+    /// <summary>
+    /// Whether goal <paramref name="type"/> is backed off at <paramref name="tick"/> (<see cref="Backoffs"/>).
+    /// </summary>
+    internal bool BackedOff(TaskType type, long tick)
     {
-        foreach (var (t, d) in CaptiveOffers)
-            if (t == type) return d;
-        return 0;
+        if (Backoffs is not { } list) return false;
+
+        foreach (var (t, until) in list)
+        {
+            if (t == type) return tick < until;
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// The Assault order a dialogue attack effect gave this character (<c>FUN_140680560</c> cases 6, 0x37 and 0x39 order goal 101, or 248 for 0x37,
-    /// on the effect's target): the member of the target's squad it attacks, picked again whenever it is free
-    /// (<see cref="AiSystem.AssaultTargetFor"/>); none when it has no such order. Not saved; hashed while set.
+    /// Backs goal <paramref name="type"/> off until <paramref name="until"/>, replacing an earlier entry of the type.
     /// </summary>
-    public CharacterId ForcedAssault { get; set; } = CharacterId.None;
+    internal void BackOff(TaskType type, long until)
+    {
+        var list = Backoffs ??= [];
+        list.RemoveAll(e => e.Type == type);
+        list.Add((type, until));
+    }
+
+    /// <summary>
+    /// Drops the back-offs that ended by <paramref name="tick"/>, and the list once empty (the think, on its own mind).
+    /// </summary>
+    internal void PruneBackoff(long tick)
+    {
+        if (Backoffs is not { } list) return;
+
+        list.RemoveAll(e => e.Until <= tick);
+        if (list.Count == 0) Backoffs = null;
+    }
+
+    /// <summary>
+    /// The detour nest of its running travel step (<c>Task_TravelToTargetTown</c> <c>+0x90</c>, <see cref="TownTravel"/>): set when the way to a nest
+    /// town failed; none at the step's start. Not saved (a task is not); hashed while set.
+    /// </summary>
+    public CampaignTown TravelDetour { get; internal set; } = CampaignTown.None;
+
+    /// <summary>
+    /// The package call its travel step's exit asks of the serial step of the same tick (<see cref="TownTravel.Step"/>), which clears it (not
+    /// hashed).
+    /// </summary>
+    public TravelAsk TravelAsk { get; internal set; }
 
     /// <summary>
     /// Where the stranger a static guard stands beside is (<see cref="AiSystem"/>'s <c>GuardFactor</c>, FUN_14099edd0); null: the plain guard post.
@@ -1185,10 +1466,22 @@ public sealed class AiMind
     public CharacterId FightTarget { get; set; } = CharacterId.None;
 
     /// <summary>
-    /// The leader rescue goal's factor (<see cref="AiBehaviour.RescueLeader"/>): 1 while the squad leader is down and can be lifted, kept by the
-    /// carry system's serial sweep (the think reads it).
+    /// The turret 234's finder took for Self preservation's plan [146, 234, 32] at this tick's think (<see cref="AiSystem"/>'s
+    /// <c>GuardTurretPick</c>), for the serial claim of the same tick (<c>ClaimGuards</c>), which clears it; never set between ticks (not hashed).
     /// </summary>
-    public float RescueWant { get; set; }
+    public GuardTurret? GuardAsk { get; set; }
+
+    /// <summary>
+    /// The turret Self preservation's 146 mans, as the serial claim granted it (no squad mate holds it); cleared when the plan leaves it. Hashed
+    /// while set; not saved (a plan is not).
+    /// </summary>
+    public GuardTurret? Guard { get; set; }
+
+    /// <summary>
+    /// Where goal 148 stood at the last rescue beat (a debugging aid for the action log; written by the rescue goals' serial look,
+    /// <see cref="Carrying.RescueGoals"/>, read only by the log, so it changes nothing in the world). Not saved, not hashed.
+    /// </summary>
+    public BedRescueNote BedRescueNote { get; set; }
 
     /// <summary>
     /// The tick the last fight the serial step started for it begins (<see cref="CharacterCold.Running"/>'s <c>Tick</c> of that fight; 0: none yet):
@@ -1197,17 +1490,37 @@ public sealed class AiMind
     public long FightFrom { get; set; }
 
     /// <summary>
-    /// The think of a fighter chose a goal that is no fight: the serial step of the same tick ends the fight, and it thinks again at the next tick.
+    /// The think of a fighter chose a goal that is no fight, or an urgent goal outscored the character's own Fixing Legs treatment: the serial step
+    /// of the same tick ends the fight or the treatment, and it thinks again at the next tick.
     /// Never set between ticks (not hashed).
     /// </summary>
     public bool LeaveFight { get; set; }
 
     /// <summary>
-    /// It thinks at the next tick whatever its cadence (a replan request, engine stand-in for the original's triggers): set by a sighting of its own
-    /// or of a squad mate, a new enemy sensed while it fights (<see cref="AggroSystem"/>), an alert near it (<see cref="RetaliationSystem"/>), a
-    /// mate's fight start and the end of its own fight (<see cref="Combat.CombatSystem"/>); cleared by that think.
+    /// It thinks at the next tick whatever its cadence, its goal kept (a plain "think again", Meitou's own asks: a sighting of its own or of a squad
+    /// mate, a new enemy sensed while it fights (<see cref="AggroSystem"/>), an alert near it, a mate's fight start, a duty's or a mod goal's end);
+    /// cleared by that think. The original's replan request sets it too (<see cref="AskReplan"/>).
     /// </summary>
     public bool Replan { get; set; }
+
+    /// <summary>
+    /// The original's replan request is pending (<c>AITaskSytem</c> <c>+0x1b0</c>, set by its vfunc 3 <c>FUN_140506cf0</c>, <b>Verified</b>): the next
+    /// think runs no plan step, clears the current goal and its plan unless it commits and its commitment has not run out, and chooses with no
+    /// continuity (<c>FUN_140511130</c>; docs/game/ai-tasks.md "Precedence"). Set only by <see cref="AskReplan"/>; cleared by that think. Not saved;
+    /// hashed while set.
+    /// </summary>
+    public bool ReplanAsked { get; set; }
+
+    /// <summary>
+    /// The original's replan request (vfunc 3: an order added or pushed to the front, a job or second-list entry added, a plan or task that ended
+    /// with nothing queued, a melee alert or a hit with the fight off): the think at the next tick chooses afresh (<see cref="ReplanAsked"/>). Any
+    /// phase, its own slot or a serial one.
+    /// </summary>
+    public void AskReplan()
+    {
+        Replan = true;
+        ReplanAsked = true;
+    }
 
     /// <summary>
     /// The AI task system's plan reset (<c>FUN_1405074a0</c>): the pending steps and the committed goal go, so the next think chooses again.
@@ -1252,11 +1565,10 @@ public sealed class AiMind
     /// </summary>
     internal void Hash(ref StateHasher hasher)
     {
-        if (Engine) hasher.Add(0x456E6769);
+        if (PlayerSide) hasher.Add(0x506C5364);   // "PlSd"
         if (Player)
         {
             hasher.Add(0x506C6179);
-            hasher.Add(Urgent);
             hasher.Add(OwnTick);
             hasher.Add((int)OwnRow);
         }
@@ -1268,6 +1580,10 @@ public sealed class AiMind
             hasher.Add((int)step.Type);
             hasher.Add(step.Target.Kind);
             hasher.Add(step.Target.Position);
+            if (step.Target.Character is { } character) hasher.Add(character);   // a finder's character or fixture: only while set
+            if (step.Target.Fixture is { } fixture) hasher.Add(Rng.StableHash(fixture));
+            if (step.Target.Record is { } record) hasher.Add(Rng.StableHash(record));
+            if (step.Target.Item >= 0) hasher.Add(step.Target.Item);
         }
         hasher.Add((int)Behaviour);
         hasher.Add(Version);
@@ -1284,6 +1600,8 @@ public sealed class AiMind
         hasher.Add(HomeUnreachable);
         hasher.Add(SeatUnreachable);
         hasher.Add(CommitUntil);
+        if (TaskCommitUntil != 0) hasher.Add(TaskCommitUntil);
+        if (CommitEnded) hasher.Add(0x436D4564);   // "CmEd": only between the think that ended an +0x21 commitment and the next
         hasher.Add(Target ?? new Vector3(float.NaN));
         if (WorkActive || WorkEpoch != 0)
         {
@@ -1303,22 +1621,6 @@ public sealed class AiMind
             hasher.Add(MedicScore);
         }
 
-        if (CaptiveOffers.Count > 0)
-        {
-            hasher.Add(0x434F6666);   // "COff"
-            foreach (var (t, d) in CaptiveOffers)
-            {
-                hasher.Add((int)t);
-                hasher.Add(d);
-            }
-        }
-
-        if (!ForcedAssault.IsNone)
-        {
-            hasher.Add(0x466F7241);
-            hasher.Add(ForcedAssault);
-        }
-
         if (GuardVisitorAt is { } visitor)
         {
             hasher.Add(0x47756172);
@@ -1326,10 +1628,56 @@ public sealed class AiMind
         }
 
         if (FightFrom != 0) hasher.Add(FightFrom);
+        if (Guard is { } guard)
+        {
+            hasher.Add(0x47726454);   // "GrdT": only while Self preservation holds a turret
+            hasher.Add(guard.Site);
+            hasher.Add(Rng.StableHash(guard.Key));
+        }
+
+        if (!TravelDetour.IsNone)
+        {
+            hasher.Add(0x54726176);   // "Trav": only while a travel step walks to a detour nest
+            hasher.Add(TravelDetour.Nest);
+        }
+
+        if (Announced) hasher.Add(0x416E6E63);   // "Annc": only while the running 129 has said its line
+        if (ArrivalSaid) hasher.Add(0x41727253);   // "ArrS": only while the running 129 has said its arrival line
+        if (Duty is { } duty)
+        {
+            hasher.Add(0x44757479);   // "Duty": only while an engine goal holds the character
+            hasher.Add((int)duty.Task.Type);
+            hasher.Add((int)duty.Task.Target);
+            hasher.Add(DutyTick);
+        }
+
+        if (Backoffs is { } backoff)
+        {
+            hasher.Add(0x4D6F6452);   // "ModR": only while a refused engine or mod goal is backed off
+            foreach (var (t, until) in backoff)
+            {
+                hasher.Add((int)t);
+                hasher.Add(until);
+            }
+        }
+
         if (Replan) hasher.Add(0x5265706C);
+        if (ReplanAsked) hasher.Add(0x52706C41);   // "RplA": only while the original's replan request waits for the think
         if (LookAbout != Crime.CrimeSystem.FirstLookAboutSeconds) hasher.Add(LookAbout);
         if (NextBuyTick != 0) hasher.Add(NextBuyTick);
         if (FateCage is { } fateCage) hasher.Add(Rng.StableHash(fateCage));
         Shopping.Hash(ref hasher);
     }
+}
+
+/// <summary>
+/// A turret Self preservation's 234 took (<see cref="AiMind.Guard"/>): a town's (its site and building) or a placed one (site -1, no town
+/// building), with its key (a town building's key, a placed building's id) and its post.
+/// </summary>
+public sealed record GuardTurret(int Site, string Key, TurretPost Post, TownBuilding? Building)
+{
+    /// <summary>
+    /// Where the turret building stands.
+    /// </summary>
+    public Vector3 Position => Building?.Position ?? Post.Position;
 }

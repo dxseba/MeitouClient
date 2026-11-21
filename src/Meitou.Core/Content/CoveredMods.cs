@@ -12,15 +12,15 @@ public sealed record MatchedItem(ulong Id, long Updated);
 public sealed record BuiltInMod(string? ModName, string? CodeId, string Setting, MatchedItem[] Items);
 
 /// <summary>
-/// An RE_Kenshi mod whose plugin does not run in Meitou, with a code mod on the Steam workshop that does the same, offered as a suggestion
-/// (other ports may exist): the RE_Kenshi mod's <c>.mod</c> name and the workshop items that carry it, and the suggested mod's title,
-/// <c>.mod</c> name and workshop item.
+/// An RE_Kenshi mod whose plugin does not run in Meitou, with a port on the Steam workshop that Meitou endorses (docs/formats/rekenshi.md
+/// "Endorsed ports"; the port's source is its maintainer's, not this repository's): the RE_Kenshi mod's <c>.mod</c> name and the workshop
+/// items that carry it, and the port's title, <c>.mod</c> name, workshop item and maintainer.
 /// </summary>
-public sealed record SuggestedMod(string ModName, MatchedItem[] Items, string By, string ByModName, ulong ByWorkshopId);
+public sealed record EndorsedPort(string ModName, MatchedItem[] Items, string Port, string PortModName, ulong PortWorkshopId, string Maintainer);
 
 /// <summary>
 /// The mods Meitou covers, one table for the game (which takes in a built-in mod's settings and does not run its code mod) and the launcher
-/// (which notes both kinds on the Mods page and suggests a code mod for an RE_Kenshi one).
+/// (which notes both kinds on the Mods page and offers to subscribe to the endorsed port of an RE_Kenshi mod).
 /// </summary>
 public static class CoveredMods
 {
@@ -36,17 +36,86 @@ public static class CoveredMods
     public static readonly BuiltInMod XpPort = new(null, "player-only-xp", "Squad XP in the Advanced settings", []);
 
     /// <summary>
-    /// The mods Meitou has built in.
+    /// ikahurula's data mod "Swamp Turtle FIX" (workshop 2237731365, matched against its 2020-09-24 update): it gives the Swamp Turtle the
+    /// elephant creature weapon, whose moves the Swamp turtle attacks fix gives it.
     /// </summary>
-    public static IReadOnlyList<BuiltInMod> BuiltIn { get; } = [RekenshiXp, XpPort];
+    public static readonly BuiltInMod SwampTurtleFix =
+        new("Swamp Turtle FIX", null, "Swamp turtle attacks on the Fixes page", [new(2237731365, 1600962568)]);
 
     /// <summary>
-    /// The RE_Kenshi mods with a suggested code mod: Emkej's "Loot-Scoot-Execute" (workshop 3675700748, matched against its 2026-04-26 update,
-    /// and its "MCM fork" 3813852124, its 2026-11-13 update), with "[MeitouClient] Execution".
+    /// BFrizFoShiz's RE_Kenshi plugin "Character Highlight" (workshop 3688641949, matched against its 2026-06-23 update): Alt outlines the
+    /// characters near, as Meitou's hover outline does.
     /// </summary>
-    public static IReadOnlyList<SuggestedMod> Suggested { get; } =
+    public static readonly BuiltInMod CharacterHighlight =
+        new("Character Highlight", null, "Hover outline in the Advanced settings", [new(3688641949, 1782253588)]);
+
+    /// <summary>
+    /// The mods Meitou has built in.
+    /// </summary>
+    public static IReadOnlyList<BuiltInMod> BuiltIn { get; } = [RekenshiXp, XpPort, SwampTurtleFix, CharacterHighlight];
+
+    /// <summary>
+    /// Emkej's "Loot-Scoot-Execute" (workshop 3675700748, matched against its 2026-04-26 update, and its "MCM fork" 3813852124, its 2026-11-13
+    /// update), with Jame's "[MeitouClient] Execution".
+    /// </summary>
+    static readonly EndorsedPort Execution = new(
+        "Loot-Scoot-Execute", [new(3675700748, 1777211773), new(3813852124, 1794544300)], "[MeitouClient] Execution", "Execution", 3838346946, "Jame");
+
+    /// <summary>
+    /// Shutori's "Proving Grounds" (workshop 3774745195, matched against its 2026-09-26 update), with roscatoday's "[Meitou] Proving Grounds".
+    /// </summary>
+    static readonly EndorsedPort ProvingGrounds = new(
+        "Proving Grounds", [new(3774745195, 1790470536)], "[Meitou] Proving Grounds", "ProvingGroundsMeitou", 3841575072, "roscatoday");
+
+    /// <summary>
+    /// Dafi's "Disarm (RE_Kenshi)" (workshop 3759461630, matched against its 2026-08-12 update), with dxseba's "[Meitou Client] Disarm Port".
+    /// </summary>
+    static readonly EndorsedPort Disarm = new(
+        "Disarm", [new(3759461630, 1786501591)], "[Meitou Client] Disarm Port", "Disarm", 3841646137, "dxseba");
+
+    /// <summary>
+    /// Grynn's "It. Tickles. Me" (workshop 3731488940, matched against its 2026-06-16 update), with dxseba's "[Meitou Client] It. Tickles. Me. Port".
+    /// </summary>
+    static readonly EndorsedPort ItTicklesMe = new(
+        "It. Tickles. Me", [new(3731488940, 1781649808)], "[Meitou Client] It. Tickles. Me. Port", "ItTicklesMe", 3841647083, "dxseba");
+
+    /// <summary>
+    /// luckyren's "Kill Counter" (workshop 3779464387, matched against its 2026-08-09 update), with dxseba's "[Meitou Client] Kill Counter Port".
+    /// </summary>
+    static readonly EndorsedPort KillCounter = new(
+        "KillCounter", [new(3779464387, 1786291833)], "[Meitou Client] Kill Counter Port", "KillCounter", 3841647109, "dxseba");
+
+    /// <summary>
+    /// Walnuts's "[RE_Kenshi] Level Up Notifications" (workshop 3701534964, matched against its 2026-10-10 update),
+    /// with dxseba's "[Meitou Client] Level Up Notify Port".
+    /// </summary>
+    static readonly EndorsedPort LevelUpNotify = new(
+        "LevelUpNotify", [new(3701534964, 1791669646)], "[Meitou Client] Level Up Notify Port", "LevelUpNotify", 3841647147, "dxseba");
+
+    /// <summary>
+    /// zuop's "Speed menu" (workshop 3818592083, matched against its 2026-10-14 update), with dxseba's "[Meitou Client] Speed Menu Port".
+    /// </summary>
+    static readonly EndorsedPort SpeedMenu = new(
+        "Speed Menu", [new(3818592083, 1791936783)], "[Meitou Client] Speed Menu Port", "SpeedMenu", 3841647205, "dxseba");
+
+    /// <summary>
+    /// Jakematt2004's "Stack Sort" (workshop 3813810734, matched against its 2026-10-05 update), with dxseba's "[Meitou Client] Stack Sort Port".
+    /// </summary>
+    static readonly EndorsedPort StackSort = new(
+        "StackSort", [new(3813810734, 1791166681)], "[Meitou Client] Stack Sort Port", "StackSort", 3841647266, "dxseba");
+
+    /// <summary>
+    /// tata's "Taunt Expansion" (workshop 3771499164, matched against its 2026-07-25 update), with dxseba's "[Meitou Client] Taunt Expansion Port".
+    /// </summary>
+    static readonly EndorsedPort TauntExpansion = new(
+        "TauntExpansion", [new(3771499164, 1784997418)], "[Meitou Client] Taunt Expansion Port", "TauntExpansion", 3841647315, "dxseba");
+
+    /// <summary>
+    /// The RE_Kenshi mods with an endorsed port on the Steam workshop.
+    /// </summary>
+    public static IReadOnlyList<EndorsedPort> Endorsed { get; } =
     [
-        new("Loot-Scoot-Execute", [new(3675700748, 1777211773), new(3813852124, 1794544300)], "[MeitouClient] Execution", "Execution", 3838346946),
+        Execution, ProvingGrounds, Disarm, ItTicklesMe, KillCounter, LevelUpNotify, SpeedMenu, StackSort, TauntExpansion,
     ];
 
     /// <summary>
@@ -67,15 +136,15 @@ public static class CoveredMods
         BuiltIn.FirstOrDefault(c => c.ModName == modName || (codeId is not null && c.CodeId == codeId));
 
     /// <summary>
-    /// The entry suggesting a code mod for <paramref name="mod"/>, an RE_Kenshi plugin without code of its own, by its <c>.mod</c> name or its
-    /// workshop item; null when none does.
+    /// The endorsed port of <paramref name="mod"/>, an RE_Kenshi plugin without code of its own, by its <c>.mod</c> name or its workshop item;
+    /// null when it has none.
     /// </summary>
-    public static SuggestedMod? SuggestionOf(ModInfo mod)
+    public static EndorsedPort? PortOf(ModInfo mod)
     {
         if (!mod.HasNativePlugin || mod.HasCode) return null;
 
         ulong? item = WorkshopId(mod);
-        return Suggested.FirstOrDefault(r => r.ModName == mod.Name || (item is { } id && r.Items.Any(i => i.Id == id)));
+        return Endorsed.FirstOrDefault(r => r.ModName == mod.Name || (item is { } id && r.Items.Any(i => i.Id == id)));
     }
 
     /// <summary>
@@ -93,11 +162,11 @@ public static class CoveredMods
     }
 
     /// <summary>
-    /// Whether <paramref name="mods"/> hold the code mod <paramref name="suggested"/> names: a workshop mod by its item, a local mod (a copy in
-    /// Kenshi's mods folder) by its <c>.mod</c> name.
+    /// Whether <paramref name="mods"/> hold the port <paramref name="port"/> names: a workshop mod by its item, a local mod (a copy in Kenshi's
+    /// mods folder) by its <c>.mod</c> name and its code (several ports keep the original's <c>.mod</c> name, so a local original is no port).
     /// </summary>
-    public static bool HasSuggestion(SuggestedMod suggested, IEnumerable<ModInfo> mods) =>
-        mods.Any(m => WorkshopId(m) is { } id ? id == suggested.ByWorkshopId : m.Name == suggested.ByModName);
+    public static bool HasPort(EndorsedPort port, IEnumerable<ModInfo> mods) =>
+        mods.Any(m => WorkshopId(m) is { } id ? id == port.PortWorkshopId : m.HasCode && m.Name == port.PortModName);
 
     /// <summary>
     /// The workshop item of <paramref name="mod"/>: a workshop mod's folder is named by its published file id. Null for a local mod.

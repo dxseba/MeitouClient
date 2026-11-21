@@ -121,6 +121,17 @@ sealed class WorldPicking(PlayerInterface player)
     }
 
     /// <summary>
+    /// How far along the ray a building pick looks, with the distance of the terrain hit (null: none, the reach is <paramref name="open"/>): up to
+    /// the terrain, or on through the room it lies in when the terrain is cut there (<see cref="FloorReach"/>), as the original's walk goes on past
+    /// a terrain hit inside a building (docs/game/ui-input.md "Building picking and selection"; a bench in a house dug into a hillside, #1049).
+    /// </summary>
+    internal (float Reach, float? Terrain) PickReach(Vector3 origin, Vector3 direction, float open = 6000)
+    {
+        var (reach, terrain) = SharedReach(origin, direction);
+        return terrain is null ? (open, null) : (reach, terrain);
+    }
+
+    /// <summary>
     /// The distance within <paramref name="limit"/> at which the ray first meets a steep building face: of a building with rooms
     /// (<see cref="InteriorFaceHit"/>) or of one without (<see cref="StaticFaceHit"/>).
     /// </summary>
@@ -158,7 +169,7 @@ sealed class WorldPicking(PlayerInterface player)
             // inside, and a click on a closed house's wall goes in.
             if (candidate.Plot || HasRooms?.Invoke(b.Key) == true || player.LevelEditorPanel.Services?.IsCleared(b.Key) == true) continue;
 
-            var mesh = ClosedMeshOf(b.BuildingId, b.Key);
+            var mesh = ClosedMeshOf(b.BuildingId, b.Key, host.Placement.LevelDestroyed(b));
             float y = b.WorldY ?? player.Ground(b.Position.X, b.Position.Z) + b.Position.Y;
             var hull = candidate.Footprint.Place(b.Position, b.Rotation);
             if (mesh.Count == 0 || BuildMode.RayPrism(origin, direction, hull, y + candidate.Footprint.YMin, y + candidate.Footprint.YMax) is null)
@@ -181,7 +192,7 @@ sealed class WorldPicking(PlayerInterface player)
             if (HasRooms?.Invoke(site.Id) == true || player.Furniture.AboveViewedFloor?.Invoke(site.Position) == true) continue;
             if (host.Placement.Footprint(site.Record) is not { } footprint) continue;
 
-            var mesh = ClosedMeshOf(site.Record, site.Id);
+            var mesh = ClosedMeshOf(site.Record, site.Id, site.Destroyed);
             var yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, PlacementCheck.YawOf(site.Rotation));
             var hull = footprint.Place(site.Position, yaw);
             float y = site.Position.Y;
@@ -194,12 +205,13 @@ sealed class WorldPicking(PlayerInterface player)
 
     /// <summary>
     /// The collision triangles of building record <paramref name="record"/> placed as <paramref name="placement"/>, without the parts of its doors
-    /// that are open (an open gate's leaves): a click through an open gateway goes to the ground beyond it.
+    /// that are open (an open gate's leaves): a click through an open gateway goes to the ground beyond it. A <paramref name="destroyed"/> one's
+    /// are its ruin's, which has no doors at all (the Hub's ruined gates).
     /// </summary>
-    IReadOnlyList<(Vector3[] Vertices, int[] Indices)> ClosedMeshOf(string record, string placement)
+    IReadOnlyList<(Vector3[] Vertices, int[] Indices)> ClosedMeshOf(string record, string placement, bool destroyed)
     {
-        var mesh = CollisionMeshOf(record);
-        var doors = CollisionDoorsOf(record);
+        var mesh = CollisionMeshOf(record, destroyed);
+        var doors = CollisionDoorsOf(record, destroyed);
         if (doors.Count != mesh.Count || !doors.Any(d => d >= 0)) return mesh;
 
         var open = player.Session.CurrentSnapshot.Doors;
@@ -283,6 +295,23 @@ sealed class WorldPicking(PlayerInterface player)
 
         var p = origin + direction * hi;
         return new Vector3(p.X, player.Ground(p.X, p.Z), p.Z);
+    }
+
+    /// <summary>
+    /// Whether the ray from its origin up to <paramref name="limit"/> along it passes within <paramref name="reach"/> of <paramref name="position"/>
+    /// in X/Z, a unit wider for rounding far from the origin: a hit before the limit on anything within that X/Z reach lies on that part of the ray,
+    /// whatever its height (the coarse cull of the picks).
+    /// </summary>
+    internal static bool RayPassesXz((Vector3 Origin, Vector3 Direction) ray, Vector3 position, float reach, float limit = float.MaxValue)
+    {
+        var to = new Vector2(position.X - ray.Origin.X, position.Z - ray.Origin.Z);
+        var along = new Vector2(ray.Direction.X, ray.Direction.Z);
+        float lengthSquared = along.LengthSquared();
+
+        // The nearest point to the position of the ray's part up to limit (the origin for a ray straight up or down).
+        float s = lengthSquared < 1e-12f ? 0 : Math.Clamp(Vector2.Dot(to, along) / lengthSquared, 0, MathF.Max(limit, 0));
+        float widened = reach + 1;
+        return (to - along * s).LengthSquared() <= widened * widened;
     }
 
     /// <summary>
@@ -580,34 +609,35 @@ sealed class WorldPicking(PlayerInterface player)
     /// against the collision shapes, not a prism over their merged hull. The hull prism stays as the first, cheap test; a building that has collision
     /// files is then tested triangle by triangle, so ground, characters and neighbours next to a building are not taken for it.
     /// </summary>
-    readonly Dictionary<string, IReadOnlyList<(Vector3[] Vertices, int[] Indices)>> _collisionMeshes = [];
+    readonly Dictionary<(string Record, bool Destroyed), IReadOnlyList<(Vector3[] Vertices, int[] Indices)>> _collisionMeshes = [];
 
     /// <summary>
-    /// Each shape of <see cref="_collisionMeshes"/>' meshes, by record: the index of the door it is a part of, -1 for none.
+    /// Each shape of <see cref="_collisionMeshes"/>' meshes, by record and state: the index of the door it is a part of, -1 for none.
     /// </summary>
-    readonly Dictionary<string, IReadOnlyList<int>> _collisionDoors = [];
+    readonly Dictionary<(string Record, bool Destroyed), IReadOnlyList<int>> _collisionDoors = [];
 
     /// <summary>
-    /// The collision triangles of building record <paramref name="record"/>, read once (empty without collision files).
+    /// The collision triangles of building record <paramref name="record"/>, intact or <paramref name="destroyed"/> (a ruin's: no doors), read once
+    /// (empty without collision files).
     /// </summary>
-    IReadOnlyList<(Vector3[] Vertices, int[] Indices)> CollisionMeshOf(string record)
+    IReadOnlyList<(Vector3[] Vertices, int[] Indices)> CollisionMeshOf(string record, bool destroyed)
     {
-        if (_collisionMeshes.TryGetValue(record, out var known)) return known;
+        if (_collisionMeshes.TryGetValue((record, destroyed), out var known)) return known;
 
-        var mesh = player.Build.Services?.Placement.CollisionMesh(record) ?? [];
-        _collisionMeshes[record] = mesh;
+        var mesh = player.Build.Services?.Placement.CollisionMesh(record, destroyed) ?? [];
+        _collisionMeshes[(record, destroyed)] = mesh;
         return mesh;
     }
 
     /// <summary>
     /// The door index of each of <see cref="CollisionMeshOf"/>'s shapes for building record <paramref name="record"/>, read once.
     /// </summary>
-    IReadOnlyList<int> CollisionDoorsOf(string record)
+    IReadOnlyList<int> CollisionDoorsOf(string record, bool destroyed)
     {
-        if (_collisionDoors.TryGetValue(record, out var known)) return known;
+        if (_collisionDoors.TryGetValue((record, destroyed), out var known)) return known;
 
-        var doors = player.Build.Services?.Placement.CollisionMeshDoors(record) ?? [];
-        _collisionDoors[record] = doors;
+        var doors = player.Build.Services?.Placement.CollisionMeshDoors(record, destroyed) ?? [];
+        _collisionDoors[(record, destroyed)] = doors;
         return doors;
     }
 
@@ -621,7 +651,7 @@ sealed class WorldPicking(PlayerInterface player)
         if (BuildMode.RayPrism(ray.Origin, ray.Direction, hull, y + yMin, y + yMax) is not { } prism) return null;
         if (record is null) return prism;
 
-        var mesh = CollisionMeshOf(record);
+        var mesh = CollisionMeshOf(record, destroyed: false);
         return mesh.Count == 0 ? prism : RayMesh(ray, mesh, new Vector3(position.X, y, position.Z), rotation);
     }
 
@@ -700,6 +730,50 @@ sealed class WorldPicking(PlayerInterface player)
         if (best is not { } met) return null;
 
         return (met, Vector3.Transform(normal.LengthSquared() < 1e-12f ? Vector3.UnitY : Vector3.Normalize(normal), q));
+    }
+
+    #endregion
+
+    #region Shared pick
+
+    /// <summary>
+    /// The shared pick open (<see cref="BeginShared"/>), else 0; a new number for each.
+    /// </summary>
+    public int SharedScope { get; private set; }
+
+    /// <summary>
+    /// The last scope's number, so each <see cref="BeginShared"/> gets a new one.
+    /// </summary>
+    int _lastScope;
+
+    /// <summary>
+    /// The ground reach of the shared pick: its scope, ray and <see cref="SharedReach"/>'s answer.
+    /// </summary>
+    (int Scope, Vector3 Origin, Vector3 Direction, float Reach, float? Terrain) _reach;
+
+    /// <summary>
+    /// Opens a shared pick (the pointer's): until <see cref="EndShared"/> nothing the picks read changes, so the ground reach and the site pick are
+    /// worked out once and reused by every pick in it.
+    /// </summary>
+    public void BeginShared() => SharedScope = ++_lastScope;
+
+    /// <summary>
+    /// Closes the shared pick: picks work everything out again.
+    /// </summary>
+    public void EndShared() => SharedScope = 0;
+
+    /// <summary>
+    /// The ray's floor reach and terrain distance (null: it meets no terrain, the reach then meaningless), kept for the shared pick's same ray.
+    /// </summary>
+    (float Reach, float? Terrain) SharedReach(Vector3 origin, Vector3 direction)
+    {
+        if (SharedScope != 0 && _reach.Scope == SharedScope && _reach.Origin == origin && _reach.Direction == direction)
+            return (_reach.Reach, _reach.Terrain);
+
+        var hit = GroundHit(origin, direction);
+        (float, float?) found = hit is { } h ? (FloorReach(origin, direction, h), Vector3.Distance(origin, h)) : (0, null);
+        if (SharedScope != 0) _reach = (SharedScope, origin, direction, found.Item1, found.Item2);
+        return found;
     }
 
     #endregion

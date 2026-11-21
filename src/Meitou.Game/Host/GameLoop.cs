@@ -62,9 +62,10 @@ sealed class GameLoop(GameHost host)
     bool _savedVSync, _savedFullScreen;
 
     /// <summary>
-    /// Read at start-up only: a change in the settings waits for a restart.
+    /// The frame generation the setting last asked for, and the one the display is set up for (that one, or off where it cannot be had):
+    /// <see cref="FollowFrameGeneration"/>.
     /// </summary>
-    FrameGenerationMethod _frameGenerationAtStart;
+    FrameGenerationMethod _frameGenerationAsked, _frameGenerationLoaded;
     /// <summary>
     /// Whether the run draws in HDR (read at start-up only).
     /// </summary>
@@ -113,6 +114,12 @@ sealed class GameLoop(GameHost host)
     /// The cinema (or the tour) holds the drawn camera: the rig's state is not applied until a camera input takes it back.
     /// </summary>
     bool _cinemaHolds;
+
+    /// <summary>
+    /// Last frame the lens keys were live (the free camera or one the cinema holds): leaving them for the strategy camera puts the lens back.
+    /// </summary>
+    bool _lensWasLive;
+
     /// <summary>
     /// Photo mode (docs/viewer.md "Photo mode"): while it is on it owns the camera, the interface's visibility and the pause.
     /// </summary>
@@ -339,10 +346,12 @@ sealed class GameLoop(GameHost host)
         if (!host.GameOptions.NoPrecompile) host.Modding.StartWarmup();
         // The world's files are read on a worker from here on: while the window and the device are made, then behind the loading screen.
         _sceneRead = host.LoadScene is { } readScene ? Task.Run(readScene) : null;
+        // The title's character comes from the save Continue loads: read on a worker from the start too, it was 1 to 3 s of the title's boot.
+        if (host.GameOptions.BootsToTitle && host.StartSave is null) Title.TitleScreen.PrefetchTitleSave(host.Install);
         host.Sound.BeginAudio();
         _hdrAtStart = host.GameOptions.Hdr ?? host.Config.Hdr;   // read at start-up only
-        // Read at start-up only; HDR output keeps the plain swapchain.
-        _frameGenerationAtStart = _hdrAtStart ? FrameGenerationMethod.Off : host.Config.FrameGenerationMethod;
+        // HDR output keeps the plain swapchain.
+        _frameGenerationAsked = _hdrAtStart || _headless ? FrameGenerationMethod.Off : host.Config.FrameGenerationMethod;
 
         // Load before the device so the settings panel can switch to DLSS without restarting.
         _display = new VulkanDisplay(_headless ? null : WindowOptions.Default with
@@ -353,7 +362,8 @@ sealed class GameLoop(GameHost host)
             IsVisible = false,
             FramesPerSecond = 0,
             UpdatesPerSecond = 0,
-        }, _vsync, dlss: true, frameGeneration: _headless ? FrameGenerationMethod.Off : _frameGenerationAtStart, hdr: _hdrAtStart);
+        }, _vsync, dlss: true, frameGeneration: _frameGenerationAsked, hdr: _hdrAtStart, monitor: host.WorldOptions.Monitor);
+        _frameGenerationLoaded = FrameGenerationSetup.Available(_display, _frameGenerationAsked) ? _frameGenerationAsked : FrameGenerationMethod.Off;
         host.Streamline = _display.Streamline;
         host.Ngx = _display.Ngx;
         _window = _headless ? null : _display.Window!;
@@ -374,7 +384,7 @@ sealed class GameLoop(GameHost host)
         bool fullScreen = host.Config.FullScreen && !host.WorldOptions.Windowed && !_headless;
         (_savedVSync, _savedFullScreen) = (_vsync, fullScreen);
         if (_window is null) { }
-        else if (fullScreen) BorderlessFullScreen.Toggle(_window);
+        else if (fullScreen) BorderlessFullScreen.Toggle(_window, _display.Monitor);
         else if (!host.WorldOptions.SizeGiven && !host.WorldOptions.HiddenWindow)
             _window.WindowState = WindowState.Maximized;   // maximising would show a hidden window
         host.BeginLoadingScreen(_display);   // its textures and fonts are made before the window shows
@@ -486,8 +496,8 @@ sealed class GameLoop(GameHost host)
         {
             UpscalerStatus = () => host.Gpu.Post?.ActiveUpscaler ?? "Off",
             // The loaded frame generation's state; a change it cannot follow shows as pending until the restart.
-            FrameGenerationStatus = () => FrameGenerationSetup.FrameGenerationState(_display, _frameGenerationAtStart,
-                host.Config.FrameGenerationMethod),
+            FrameGenerationStatus = () => FrameGenerationSetup.FrameGenerationState(_display, _frameGenerationLoaded,
+                host.Config.FrameGenerationMethod, _hdrAtStart),
             ModSettings = () => host.Modding.Mods?.Settings ?? [],
             AudioChanged = host.Sound.AudioSettingsChanged,
             GameplayChanged = host.Saves.ApplyGameplay,
@@ -502,8 +512,12 @@ sealed class GameLoop(GameHost host)
             LateDefencesChanged = on => EachSystem<Simulation.Combat.CombatSystem>(combat => combat.LateDefences = on),
             GunnerFacingChanged = on => EachSystem<Simulation.Combat.CombatSystem>(combat => combat.GunnerFacesBarrel = on),
             PunchReachChanged = on => EachSystem<Simulation.Combat.CombatSystem>(combat => combat.PunchReachFix = on),
+            AnimalMovesChanged = on => EachSystem<Simulation.Combat.CombatSystem>(combat => combat.AnimalMovesFix = on),
             BenchFacingChanged = on => host.Session.World.BenchFacingFix = on,
+            PrisonPoseChanged = on => host.Session.World.PrisonPoseFix = on,
+            CagedAnimalsChanged = on => host.Session.World.CagedAnimalFix = on,
             BagSearchChanged = on => host.Session.World.BagSearchFix = on,
+            CounterTalkChanged = on => host.Session.World.CounterTalk = on,
             TakeIntoBackpackChanged = on => host.Session.World.TakeIntoBackpack = on,
             TimeSpeedsChanged = () => host.Session.Simulation.SetFastSpeeds(host.Config.FastSpeed, host.Config.FastestSpeed),
             AnimalsPickUpChanged = on => EachSystem<Simulation.Player.PlayerSystem>(players => players.AnimalsPickUp = on),
@@ -530,6 +544,7 @@ sealed class GameLoop(GameHost host)
                 (host.Config.KeepRoamers, host.Config.OffscreenFights, host.Config.OffscreenHealing);
             (population.CampaignAncestorsOnce, population.KeepWild, population.ResidentSchedule) =
                 (host.Config.CampaignAncestorsOnce, host.Config.KeepWild, host.Config.ResidentSchedule);
+            population.OffscreenOverrides = host.Config.OffscreenOverrides;
         }
 
         foreach (var production in host.Session.World.Systems.OfType<Simulation.Production.ProductionSystem>())
@@ -757,6 +772,7 @@ sealed class GameLoop(GameHost host)
         // PageUp / PageDown step the viewed floor in the strategy camera: in the free camera and on a held one the cinema takes them for the lens.
         if (actions.Pressed(InputAction.FloorUp)) host.Interiors.StepFloor(1);
         if (actions.Pressed(InputAction.FloorDown)) host.Interiors.StepFloor(-1);
+        host.Modding.PressKeyActions(actions);
         if (actions.Pressed(InputAction.CycleProfiler) && host.DebugMenu.Profiler is not null)
             host.DebugMenu.Profiler.Showing = (FrameProfiler.Mode)(((int)host.DebugMenu.Profiler.Showing + 1) % 3);
         // The camera the cinema left (a cut, a scrub, the end of a flight) goes back to the rig at the first camera input: the free camera at
@@ -788,7 +804,7 @@ sealed class GameLoop(GameHost host)
     /// </summary>
     void ToggleFullScreen()
     {
-        if (_window is not null) BorderlessFullScreen.Toggle(_window);
+        if (_window is not null) BorderlessFullScreen.Toggle(_window, _display.Monitor);
     }
 
     /// <summary>
@@ -1162,9 +1178,9 @@ sealed class GameLoop(GameHost host)
             if (host.Covered || PanelLive() && _panel?.Scroll(wheel.Y) == true) return;
             if (_photo.Active)
             {
-                // Over the panel the wheel steps the setting under it; over the picture it zooms, or sets the fly speed with Ctrl.
+                // Over the panel the wheel steps the setting under it; over the picture it zooms, or sets the fly speed with Alt.
                 if (!_photo.Panel.Wheel(Pixels(_orbitAnchor ?? m.Position), wheel.Y))
-                    _photo.Wheel(wheel.Y, Held(SilkKey.ControlLeft, SilkKey.ControlRight));
+                    _photo.Wheel(wheel.Y, Held(SilkKey.AltLeft, SilkKey.AltRight));
                 return;
             }
 
@@ -1248,9 +1264,9 @@ sealed class GameLoop(GameHost host)
 
         if (physical == EngineButton.Left)
         {
-            // A click on the picture is where the lens focuses.
+            // A click on the picture is where the lens focuses, or on the Pose tab the character it chooses or drags.
             var size = FramebufferSizeNow();
-            _photo.FocusAt(new Vector2(at.X / Math.Max(size.X, 1), at.Y / Math.Max(size.Y, 1)));
+            _photo.PicturePress(at, new Vector2(size.X, size.Y), Held(SilkKey.ControlLeft, SilkKey.ControlRight));
             return;
         }
 
@@ -1265,6 +1281,12 @@ sealed class GameLoop(GameHost host)
         if (_photo.Active)
         {
             _photo.Panel.MouseUp();
+            if (physical == EngineButton.Left)
+            {
+                _photo.Poses.Release();
+                _photo.Lights.Release();
+                _photo.Gizmo.Release();
+            }
             if (physical is { } photoButton) host.Session.Input.SetMouseButton(photoButton, false);
             return;
         }
@@ -1303,7 +1325,13 @@ sealed class GameLoop(GameHost host)
             _lastMouse = p;
             return;
         }
-        if (_cinema.MouseMove(Pixels(p)) || _photo.Active && !host.OrbitHeld() && _photo.Panel.MouseMove(Pixels(p)))
+        // Photo mode's Pose tab: the chosen character follows the pointer over the ground while it is dragged.
+        if (_photo.Active && _photo.Poses.Dragging) _photo.Poses.Drag(Pixels(p));
+        if (_photo.Active && _photo.Lights.Dragging) _photo.Lights.Drag(host.Player, Pixels(p));
+        if (_photo.Active && _photo.Gizmo.Dragging) _photo.Gizmo.Drag(host.Player, Pixels(p));
+        if (_cinema.MouseMove(Pixels(p))
+            || _photo.Active && !host.OrbitHeld()
+                && (_photo.Poses.Dragging || _photo.Lights.Dragging || _photo.Gizmo.Dragging || _photo.Panel.MouseMove(Pixels(p))))
         {
             _lastMouse = p;
             return;
@@ -1347,6 +1375,7 @@ sealed class GameLoop(GameHost host)
     /// </summary>
     bool Frame()
     {
+        Rendering.Frame.FrameTick.Advance();
         host.PlayBench.BenchLap(PlayBench.BenchTail);
         _display.BeginLatencyFrame();   // DLSS frame generation's Reflex: before the input is read
         _window?.DoEvents();
@@ -1377,10 +1406,11 @@ sealed class GameLoop(GameHost host)
         if (host.Gpu.Reflection is { } reflection) reflection.Warm = warmPasses;
         host.Gpu.Sky.Clouds.Warm = warmPasses;
         host.UpdateView(size.X, size.Y);
+        FollowFrameGeneration();
         var pointer = PreparePointer(takeFile);
         host.PlayBench.BenchLap(5);
         if (_display.BeginFrame(size.X, size.Y)) DrawFrame(size, pointer, takeFile);
-        else if (host.ScreenshotRequested && host.AgentChannel.ShotPath is not null && ++host.ShotNoFrame >= 30)
+        else if (host is { ScreenshotRequested: true, AgentChannel.ShotPath: not null } && ++host.ShotNoFrame >= 30)
             host.AgentChannel.ControlShotFailed("the frame cannot be drawn (window minimised or device lost)");
         UpdateStats(dt);
         _totalFrames++;
@@ -1454,7 +1484,10 @@ sealed class GameLoop(GameHost host)
         host.Session.World.Profile.Enabled = host.DebugMenu.Profiler is { Showing: not FrameProfiler.Mode.Off }
             || host.GameOptions.PlayBench is not null || SpikeLog.Enabled;
         host.UpdateLoadingPause();
+
+        // TICKS HAPPEN HERE!
         if (!host.Covered) host.Session.Advance(frameDt);   // loading and arrival preserve the loaded world's exact time
+
         host.Duel.DuelHoldClock();
         double advanceMs = Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
         host.AdvanceTotal += advanceMs;
@@ -1483,20 +1516,38 @@ sealed class GameLoop(GameHost host)
         host.AgentWorld.ControlCameraMoveTick();   // a timed `camera ... --over` move, before the camera is drawn
         if (_photo.Active && (host.Covered || host.TitleScreen.TitleVisible)) _photo.Abandon();   // its world is gone
         if (!_cinemaHolds) host.ApplyCamera(host.Session.CameraAt());
+        ResetLensOnLeavingFree();
         _cinema.Advance(_cinema.FrameTime(dt));   // a flight through the keys moves the camera (and takes it from the rig)
         // The camera effects (docs/render-post.md "Camera effects order"): for these cameras, never over the title.
         host.WorldOptions.Post.CinematicView = !host.TitleScreen.TitleVisible
             && (host.Session.Camera.IsFree || _cinemaHolds || _cinema.Playing || _cinema.Recording || _cinema.EditorVisible);
+
+        // The near tree fade (FoliageNearFade): the gameplay camera only, not the cameras above, photo mode or the title.
+        if (host.Gpu.Foliage is { } foliage)
+            foliage.NearFade.Gameplay = !host.WorldOptions.Post.CinematicView && !host.TitleScreen.TitleVisible && !_photo.Active;
         _photo.Apply();
         if (_tour.Active && !_tour.Advance(dt, host.Camera, TourPosition)) EndTour();
-        host.Gpu.Ahead = _tour.ArrivalEye(TourPosition);   // the streaming loads the landing view during the flight
+        host.Gpu.Ahead = _tour.ArrivalEye(TourPosition) ?? host.LoadAhead;   // the streaming loads the landing view during the flight or the load
         host.Session.ViewEye = _cinemaHolds ? host.Camera.Eye : null;   // the simulation's far cadence follows the flying camera, not the rig it left
         host.Gpu.CameraFlying = _tour.Moving;   // the far shadow cascades wait for the landing (docs/render-shadows.md "Flights")
         host.Gpu.Kept = !host.Config.KeepTexturesAtCharacters ? []
             : host.Config.KeepTexturesAtAllSquads
                 ? [.. host.Session.CurrentSnapshot.PlayerSquads.SelectMany(s => s.Members).Select(TourPosition).OfType<Vector3>()]
             : [.. host.Player.PortraitBar.SquadBarMembers().Select(c => TourPosition(c.Id)).OfType<Vector3>()];
+        // A load's destination is a kept point too: the grass walk follows the eye and the kept points only, and its pages can be made during the climb.
+        if (host.LoadAhead is { } destination) host.Gpu.Kept = [.. host.Gpu.Kept, destination];
         host.ViewAspect = FramebufferSizeNow().X / (float)Math.Max(FramebufferSizeNow().Y, 1);   // headless: no window, the size asked for
+    }
+
+    /// <summary>
+    /// Back in the strategy camera from the free camera or one the cinema held, the lens they zoomed returns to its default; photo mode puts back
+    /// its own.
+    /// </summary>
+    void ResetLensOnLeavingFree()
+    {
+        bool live = host.Session.Camera.IsFree || _cinemaHolds;
+        if (_lensWasLive && !live && !_photo.Active) _cinema.ResetLens();
+        _lensWasLive = live;
     }
 
     /// <summary>
@@ -1537,7 +1588,7 @@ sealed class GameLoop(GameHost host)
     {
         if (host.SkyArrival is not null || host.TitleScreen.TitleVisible || !(_tour.Active || !host.Session.Camera.IsFree && !_cinemaHolds)) return;
         var eye = host.Camera.Eye;
-        float shortfall = host.Session.Camera.EyeGroundAt(eye.X, eye.Z) + Data.World.KenshiCamera.EyeClearance(host.Camera.Distance) - eye.Y;
+        float shortfall = host.Session.Camera.EyeGroundAt(eye.X, eye.Z, eye.Y) + Data.World.KenshiCamera.EyeClearance(host.Camera.Distance) - eye.Y;
         // Over a hair only: at the clearance's edge the ground read under the eye wavers by a few ten-thousandths frame to frame, and lifting by
         // that moved the eye by a float step now and then, a jump of a pixel or two for a character close to it.
         if (shortfall > 1e-3f) host.Camera.Target += new Vector3(0, shortfall, 0);
@@ -1642,6 +1693,10 @@ sealed class GameLoop(GameHost host)
         else
             host.Gpu.HoverKeys = outlining && pointerWorld && host.Player.PointerPanel.HoverTarget is { } hover
                 ? [(host.DrawKey(hover.Id), hover.Colour)] : [];
+        // Photo mode's Pose tab outlines the chosen character (never in a saved picture).
+        if (_photo.Active && _photo.PanelShown && _photo.Panel.Group == PhotoMode.PoseGroup && _photo.Poses.Selected is { } chosen
+                && !host.ScreenshotRequested && takeFile is null)
+            host.Gpu.HoverKeys = [(host.DrawKey(chosen), PhotoPanel.ChosenOutline)];
         host.Gpu.OutlinedBuildings = outlines && host.Config.BuildingOutline
             ? host.Player.BuildingSelection.OutlinedBuildings(hover: pointerWorld) : [];
     }
@@ -1693,6 +1748,25 @@ sealed class GameLoop(GameHost host)
     }
 
     /// <summary>
+    /// Follows the Frame generation setting between two frames, without a restart: when it changes, the generator goes (before the swapchain
+    /// it configures), the display sets its swapchain up for the method asked (<see cref="VulkanDisplay.ApplyFrameGeneration"/>: AMD's layer,
+    /// DLSS's feature, or neither), and the next frame makes the generator for it. Where the method cannot be had the plain swapchain stays.
+    /// </summary>
+    void FollowFrameGeneration()
+    {
+        var wanted = _hdrAtStart || _headless ? FrameGenerationMethod.Off : host.Config.FrameGenerationMethod;
+        if (wanted == _frameGenerationAsked) return;
+
+        _frameGenerationAsked = wanted;
+        _frameGen?.Dispose();
+        (_frameGen, _frameGenTried) = (null, false);
+        if (host.Gpu.Post is { } post) post.FrameGen = null;
+        _frameGenerationLoaded = _display.ApplyFrameGeneration(wanted) ? wanted : FrameGenerationMethod.Off;
+        Console.WriteLine($"frame generation  setting {FrameGenerationSetup.FrameGenerationName(wanted)}: "
+            + (_frameGenerationLoaded == wanted ? "set up" : "not available, off"));
+    }
+
+    /// <summary>
     /// The backbuffer the chain draws into (headless: one of its own), frame generation for this frame, and the interface's cleared layer.
     /// </summary>
     GpuTexture PrepareTargets(Vector2D<int> size, string? takeFile, out GpuTexture uiTarget)
@@ -1703,7 +1777,8 @@ sealed class GameLoop(GameHost host)
             Use: TextureUse.ColourTarget | TextureUse.TransferSrc | TextureUse.Sampled, Name: "headless backbuffer")));
         host.Gpu.Post!.Target = backbuffer;
         host.Gpu.Post.Options.HdrPeak = _display.HdrActive ? PostOptions.HdrPeakFor(host.Config.HdrPeakNits, host.Config.HdrPaperNitsNow) : 0;
-        // Frame generation (the one loaded at start-up): made on the first frame; wanted except under the loading screen and for saved pictures.
+        // Frame generation (the one the display is set up for, FollowFrameGeneration): made on its first frame; wanted except under the loading
+        // screen and for saved pictures.
         if (_frameGen is FrameGeneration && _display.FrameGenerationLayer is null)
                 {
                     // the layer fell back to the plain swapchain
@@ -1715,7 +1790,9 @@ sealed class GameLoop(GameHost host)
             _frameGenTried = true;
             _frameGen = FrameGenerationSetup.CreateFrameGenerator(_display);
         }
-        bool frameGenWanted = !host.Covered && !host.TitleHidesWorld && !host.ScreenshotRequested && !host.FeedbackCapture.FeedbackShotRequested && takeFile is null;
+        bool frameGenWanted = _frameGenerationLoaded != FrameGenerationMethod.Off
+            && !host.Covered && !host.TitleHidesWorld && !host.ScreenshotRequested && !host.FeedbackCapture.FeedbackShotRequested && takeFile is null
+            && !_photo.WorldMarksShown;   // photo mode's marks and gizmos follow the real frames only (PhotoMode.WorldMarksShown)
         _frameGen?.BeginFrame(frameGenWanted, size.X, size.Y);
         host.Gpu.Post!.FrameGen = _frameGen;
         // The interface draws into a transparent layer of its own, laid over the backbuffer just before the present.
@@ -1790,9 +1867,13 @@ sealed class GameLoop(GameHost host)
         if (ui && !feedbackShot) _panel?.Draw(size.X, size.Y);
         StageClock.UiPart(StageClock.UiSettings);
         // Over everything: the letterbox and the cinema's editor (F6, also with F7); the game hides its status line.
+        // Flushed at once: left queued, it went out with the next frame's first flush, under that frame's HUD.
         if (_overlay is not null && !covered)
+        {
             _cinema.Draw(_overlay, size.X, size.Y,
                 shot || take || feedbackShot || (host.AgentChannel.InterfaceHidden && !_cinema.EditorVisible), showStatus: false);
+            _overlay.Flush(size.X, size.Y);
+        }
         if (_overlay is not null && !covered && _photo.Active)
         {
             _photo.Panel.Draw(_overlay, size.X, size.Y, shot || take || feedbackShot);
@@ -1994,15 +2075,19 @@ sealed class GameLoop(GameHost host)
             FramebufferCapture.SavePng(_display.Context, picture, takeFile, size.X, size.Y, topDown: topDown);
             _cinema.FrameDone();
         }
-        else if (shot && host.AgentChannel.ShotPath is { } shotPath)
+        else if (shot && host.AgentChannel.ShotPath is { } photoPath && _photo.Saving)
+        {
+            _photo.PictureSaved(photoPath, host.AgentChannel.SaveControlShot(file => SavePhoto(file, size, picture, topDown)));
+        }
+        else if (shot && host.AgentChannel.ShotPath is not null)
         {
             host.AgentChannel.SaveControlShot(_display.Context, picture, size.X, size.Y, topDown: topDown);
-            host.Photo?.PictureSaved(shotPath);
         }
         else if (shot && GameScreenshots.Multiplier(host.Install.Root) is >= 2 and var multiplier)
             SaveSupersampled(_display.Context, multiplier, size.X, size.Y);
         else if (shot) SaveScreenshot(_display.Context, picture, size.X, size.Y, topDown: topDown);
         if (shot) host.Player.EndScreenshot();
+        host.CharacterEditor.SaveStudioShot(_display.Context);
         if (feedbackShot)
         {
             host.Player.FeedbackPanel.ShotWithoutMenus = false;
@@ -2157,6 +2242,60 @@ sealed class GameLoop(GameHost host)
     }
 
     /// <summary>
+    /// Photo mode's picture into <paramref name="file"/>: the frame as drawn, or the world drawn again larger by the Picture size
+    /// (<see cref="PhotoMode.PictureScale"/>, <see cref="DrawLarger"/>); then the frame's shape cut out of it (<see cref="PhotoMode.Cropped"/>). The
+    /// size saved.
+    /// </summary>
+    (int Width, int Height) SavePhoto(string file, Vector2D<int> size, GpuTexture picture, bool topDown)
+    {
+        float scale = _photo.PictureScale(size.X, size.Y);
+        var (pixels, width, height) = scale > 1
+            ? DrawLarger(_display.Context, (int)MathF.Round(size.X * scale), (int)MathF.Round(size.Y * scale), scale)
+            : (FramebufferCapture.ReadPicture(_display.Context, picture, size.X, size.Y, topDown), size.X, size.Y);
+        var (kept, w, h) = _photo.Cropped(pixels, width, height);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(file));
+        if (dir is not null) Directory.CreateDirectory(dir);
+        Data.Textures.PngWriter.Write(file, w, h, kept);
+        return (w, h);
+    }
+
+    /// <summary>
+    /// The world alone (no interface) drawn once more as a whole view at <paramref name="width"/> x <paramref name="height"/>, as RGBA8 rows from the
+    /// top: the lens, depth of field and every camera effect as in the window (unlike the tiled shot, whose tiles are no whole view), the depth of
+    /// field's largest blur grown by <paramref name="scale"/> (<see cref="PostOptions.PictureScale"/>). The temporal history is dropped and warmed up
+    /// again, the exposure of the live view pinned, as for the tiled shot.
+    /// </summary>
+    (byte[] Pixels, int Width, int Height) DrawLarger(GpuContext context, int width, int height, float scale)
+    {
+        var post = host.Gpu.Post!;
+        int warm = post.WarmupFrames;
+        var (adapted, _) = post.ReadExposure();
+        if (!float.IsNaN(adapted)) post.HoldExposure(adapted, warm + 3);
+        var live = post.Target;
+        using var target = context.CreateTexture(new TextureDesc(InternalFormat.Rgba8, width, height,
+            Use: TextureUse.ColourTarget | TextureUse.TransferSrc | TextureUse.Sampled, Name: "photo picture"));
+        post.Target = target;
+        post.Options.PictureScale = scale;
+        try
+        {
+            post.ResetHistory();
+            for (int i = 0; i <= warm; i++)
+            {
+                host.DrawWorld(width, height);
+                context.EndFrame();   // headless frames: the window's own frame was presented already
+            }
+            context.Finish();
+            return (FramebufferCapture.ReadPicture(context, target, width, height), width, height);
+        }
+        finally
+        {
+            post.Options.PictureScale = 1;
+            post.Target = live;
+            post.ResetHistory();
+        }
+    }
+
+    /// <summary>
     /// The guard band of a tiled shot's tiles: an eighth of the height, at least 16 pixels.
     /// </summary>
     static int TileGuard(int width, int height) => Math.Max(16, Math.Min(width, height) / 8);
@@ -2288,6 +2427,7 @@ sealed class GameLoop(GameHost host)
             _panel.Tiers.SavePreset();
         }
         host.Config.Bindings = host.Session.Bindings.ToDictionary();
+        host.Config.ModBindings = host.Session.Bindings.ModChanges(host.Config.ModBindings);
         if (!host.GameOptions.LowEnd || host.Player.UiMode != Data.Ui.UiMode.Faithful)
             host.Config.UiMode = host.Player.UiMode;   // --low-end's Faithful UI is for the run
         host.Config.Save();

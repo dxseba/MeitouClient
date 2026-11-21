@@ -124,7 +124,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         _merged.Dispose();
         _upscaleExposure.Dispose();
         _bloom.Dispose();
-        DisposeDepthOfField();
+        _depthOfField?.Dispose();
         DisposeGtao();
         DisposeLampShadows();
         Hiz?.Dispose();
@@ -277,16 +277,17 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         /// </summary>
         public readonly SamplerSlot Luminance, Last;
         /// <summary>
-        /// The program's uniforms <c>uLevel</c>, <c>uBlend</c>, <c>uBand</c>.
+        /// The program's uniforms <c>uLevel</c>, <c>uBlend</c>, <c>uBand</c>, <c>uIndoor</c>, <c>uShade</c>.
         /// </summary>
-        public readonly UniformHandle Level, Blend, Band;
+        public readonly UniformHandle Level, Blend, Band, Indoor, Shade;
         /// <summary>
         /// Compiles the program and resolves its handles.
         /// </summary>
         public AdaptPass(GpuContext gpu) : base(gpu, PostProcessShaders.Adapt, "post adapt")
         {
             (Luminance, Last) = (P.Sampler("uLuminance"), P.Sampler("uLast"));
-            (Level, Blend, Band) = (P.Uniform("uLevel"), P.Uniform("uBlend"), P.Uniform("uBand"));
+            (Level, Blend, Band, Indoor) = (P.Uniform("uLevel"), P.Uniform("uBlend"), P.Uniform("uBand"), P.Uniform("uIndoor"));
+            Shade = P.Uniform("uShade");
         }
     }
 
@@ -308,6 +309,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         public readonly UniformHandle Auto, Exposure, UseAo, Dither, SceneSize, Sharpen, Tone, ToneMix, Grade, Saturation, Contrast, Night, Balance,
             BloomStrength, HdrPeak;
         /// <summary>
+        /// The program's uniforms <c>uFilterR</c>, <c>uFilterG</c>, <c>uFilterB</c>, <c>uFilterContrast</c>, <c>uVignette</c>, <c>uGrain</c>.
+        /// </summary>
+        public readonly UniformHandle FilterR, FilterG, FilterB, FilterContrast, Vignette, Grain;
+        /// <summary>
         /// Compiles the program and resolves its handles.
         /// </summary>
         public CompositePass(GpuContext gpu) : base(gpu, PostProcessShaders.Composite, "post composite")
@@ -320,6 +325,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
                 P.Uniform("uContrast"));
             (Night, Balance) = (P.Uniform("uNight"), P.Uniform("uBalance"));
             (Bloom, BloomStrength) = (P.Sampler("uBloom"), P.Uniform("uBloomStrength"));
+            (FilterR, FilterG, FilterB, FilterContrast) = (P.Uniform("uFilterR"), P.Uniform("uFilterG"), P.Uniform("uFilterB"), P.Uniform("uFilterContrast"));
+            (Vignette, Grain) = (P.Uniform("uVignette"), P.Uniform("uGrain"));
         }
     }
 
@@ -588,11 +595,16 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         public readonly SamplerSlot Cache;
 
         /// <summary>
+        /// Which part is drawn (<c>uPart</c>): 0 the probes' light, 1 the share of the sky's ambient taken back.
+        /// </summary>
+        public readonly UniformHandle Part;
+
+        /// <summary>
         /// Compiles the variant and resolves its handles.
         /// </summary>
         public GiResolvePass(GpuContext gpu, bool relocate, bool cache)
             : base(gpu, Gi.GiResolveShaders.ResolveFor(relocate, cache), "post gi resolve") =>
-            Cache = cache ? P.Sampler("uGiCache") : default;
+            (Cache, Part) = (cache ? P.Sampler("uGiCache") : default, P.Uniform("uPart"));
     }
 
     /// <summary>
@@ -601,9 +613,9 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     sealed class GiApplyPass : GiPass
     {
         /// <summary>
-        /// The program's sampler <c>uLow</c>.
+        /// The program's samplers <c>uLow</c> and <c>uLowSky</c>.
         /// </summary>
-        public readonly SamplerSlot Low;
+        public readonly SamplerSlot Low, LowSky;
         /// <summary>
         /// The program's uniform <c>uLowSize</c>.
         /// </summary>
@@ -611,8 +623,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         /// <summary>
         /// Compiles the program and resolves its handles.
         /// </summary>
-        public GiApplyPass(GpuContext gpu) : base(gpu, Gi.GiResolveShaders.Apply, "post gi apply") => (Low, LowSize) = (P.Sampler("uLow"),
-            P.Uniform("uLowSize"));
+        public GiApplyPass(GpuContext gpu) : base(gpu, Gi.GiResolveShaders.Apply, "post gi apply") =>
+            (Low, LowSky, LowSize) = (P.Sampler("uLow"), P.Sampler("uLowSky"), P.Uniform("uLowSize"));
     }
 
     /// <summary>
@@ -747,9 +759,9 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         new[] { _sceneColour, _sceneDepth, _motion, _upscaleDepth, _reactive, _historyA, _historyB, _occlusion.A, _occlusion.B, _occlusion.Mask,
                 _ldr, _ldrFxaa, _smaaEdges, _smaaWeights, _luminance, _adaptA, _adaptB, _lowTargets[0].Accum, _lowTargets[0].Depth,
                 _lowTargets[0].Soft, _lowTargets[1].Accum, _lowTargets[1].Depth, _lowTargets[1].Soft, _softDepth, _fogRate.Distance, _fogRate.Image,
-                _fogRate.Neutral, _giAlbedo, _giLow, _shafts.Injected, _shafts.Light, _shafts.Scatter, _shafts.Raw, _shafts.History,
+                _fogRate.Neutral, _giAlbedo, _giLow, _giLowSky, _ssrLowSky, _shafts.Injected, _shafts.Light, _shafts.Scatter, _shafts.Raw, _shafts.History,
                 _gtaoPacked, _terrainResolve, _lampLost, _ssrHit, _ssrLow, _tracedTerm, _tracedMask, _tracedScratch, _tracedFiltered, _lampScratch,
-                _lampFiltered, _lampTotal, _lampTotal1 }
+                _lampFiltered, _lampTotal, _lampTotal1, _characterVisibility, _characterGatherLast, _characterGatherPooled, _roomMask }
             .OfType<Target2D>();
 
     /// <summary>
@@ -765,12 +777,14 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         _gtaoPacked = _terrainResolve = null;
         _ldr = _ldrFxaa = _smaaEdges = _smaaWeights = _luminance = _adaptA = _adaptB = null;
         foreach (var l in _lowTargets) l.Accum = l.Depth = l.Soft = null;
-        _giAlbedo = _giLow = _softDepth = null;
+        _giAlbedo = _giLow = _giLowSky = _ssrLowSky = _softDepth = null;
         _tracedTerm = _tracedMask = _tracedScratch = _tracedFiltered = _lampScratch = _lampFiltered = _lampTotal = _lampTotal1 = null;
         _lampLost = _ssrHit = _ssrLow = null;
+        _characterVisibility = _characterGatherLast = _characterGatherPooled = _roomMask = null;
         _shafts.Free();
         _bloom.Free();
-        FreeDepthOfField();
+        _depthOfField?.Free();
+        _dofPicture = null;
         _adaptedValid = _historyValid = _softDepthReady = false;
         _adaptedFrames = 0;
     }
@@ -1151,6 +1165,34 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     Target2D _postColour = null!;
 
     /// <summary>
+    /// The depth of field, made the first time it runs (<see cref="DepthOfField"/>).
+    /// </summary>
+    DepthOfField? _depthOfField;
+
+    /// <summary>
+    /// The depth of field's output as a target the rest of the chain reads (made again only when the output texture is).
+    /// </summary>
+    Target2D? _dofPicture;
+
+    /// <summary>
+    /// The picture through the lens, or <paramref name="scene"/> when the depth of field does not run: it is off, or the camera is not one of the
+    /// camera effects' (<see cref="PostOptions.CameraEffectsAllowed"/>), or the view is not a whole view of a scene.
+    /// </summary>
+    Target2D RunDepthOfField(Target2D scene)
+    {
+        if (!Options.DepthOfFieldOn || !_haveScene || !ViewWindow.Current.IsWhole || !Options.CameraEffectsAllowed) return scene;
+
+        _depthOfField ??= new DepthOfField(Gpu);
+        var camera = new DepthOfField.Camera(_fovNow, _planes.X, _planes.Y, JitterPixels);
+        var picture = _depthOfField.Run(Segment(), scene.Texture, _sceneDepth!.Texture, Options, camera);
+        Stamp("dof");
+
+        if (_dofPicture?.Texture != picture) _dofPicture = new Target2D(picture, TextureMinFilter.Linear, TextureMagFilter.Linear);
+
+        return _dofPicture;
+    }
+
+    /// <summary>
     /// Binds the scene framebuffer (recreating it when the size or the upscaler changed) and clears nothing: the caller does.
     /// </summary>
     public void Begin(int w, int h)
@@ -1305,6 +1347,22 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         c.P.Set(c.Balance, o.Balance);
         Bind(c.P, c.Bloom, bloom);
         c.P.Set(c.BloomStrength, bloom is null ? 0f : Math.Clamp(o.BloomAmount, 0, 1));
+        SetLook(c, o);
+    }
+
+    /// <summary>
+    /// The composite's look after the grade: photo mode's filter, the vignette and the film grain (<see cref="CompositeLook"/>).
+    /// </summary>
+    void SetLook(CompositePass c, PostOptions o)
+    {
+        bool whole = _haveScene && ViewWindow.Current.IsWhole && !o.CameraEffectsHeld;
+        var look = CompositeLook.Of(o, whole, _displayWidth, _displayHeight, Gpu.Frame.Number);
+        c.P.Set(c.FilterR, look.FilterR);
+        c.P.Set(c.FilterG, look.FilterG);
+        c.P.Set(c.FilterB, look.FilterB);
+        c.P.Set(c.FilterContrast, look.FilterContrast);
+        c.P.Set(c.Vignette, look.Vignette);
+        c.P.Set(c.Grain, look.Grain);
     }
 
     /// <summary>
@@ -1719,6 +1777,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         var external = ExternalFor(Options.Upscale.Kind);
         bool merged = MergeVelocity && MergeSupported;
         PrepareSunMotion();
+        // The rooms in view at their own exposure (MergedKernels.Exposure's gain, from last frame's picture), before anything reads the colour.
+        if (RoomMaskNow is { } roomPixels && _sceneColour is not null) _merged.InteriorGain(roomPixels, _sceneColour);
         RunVelocity(external, merged);
         if (ObjectMotion is { } objectMotion) RunObjectMotion(objectMotion);
         if (CloudMotion is { } clouds && !reset) RunCloudMotion(clouds);
@@ -2369,7 +2429,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// <summary>
     /// The GI resolve (docs/render-gi.md "Resolve"): the lit fragments' albedo, the probes' light at 1/giDivisor of the render size.
     /// </summary>
-    Target2D? _giAlbedo, _giLow;
+    Target2D? _giAlbedo, _giLow, _giLowSky;
     /// <summary>
     /// The divisor the GI targets were made for.
     /// </summary>
@@ -2459,7 +2519,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// </summary>
     public void RunGiResolve(bool early = false)
     {
-        if (_giResolved || GiResolve <= 0 || _giAlbedo is null || _giLow is null || _sceneColour is null || !_haveScene) return;
+        if (_giResolved || GiResolve <= 0 || _giAlbedo is null || _giLow is null || _giLowSky is null || _sceneColour is null || !_haveScene)
+        {
+            return;
+        }
 
         _giResolved = true;
         if (!early) MarkScene();
@@ -2473,9 +2536,14 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         foreach (var g in (ReadOnlySpan<GiPass>)[r, a]) SetGiView(g);
         r.P.ApplyGlobals();   // the atmosphere's and the probes' uniforms, through the frame globals
         if (cache is not null) r.P.Bind(r.Cache, new SampledTexture(Point(), cache.View()));
+        r.P.Set(r.Part, 0f);
         Draw(r.P, _giLow);
+        r.P.Set(r.Part, 1f);
+        Draw(r.P, _giLowSky);
         Bind(a.P, a.Low, _giLow);
+        Bind(a.P, a.LowSky, _giLowSky);
         a.P.Set(a.LowSize, (float)_giLow.Width, (float)_giLow.Height);
+        a.P.ApplyGlobals();   // the atmosphere's uniforms: each pixel's own sky ambient
         Draw(a.P, _sceneColour.Attachment, _sceneColour.Format, _width, _height, _width, _height, GiAddState);
         Stamp("gi");
         CloseSegment();
@@ -2491,6 +2559,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
 
         _giAlbedo?.Texture.Dispose();
         _giLow?.Texture.Dispose();
+        _giLowSky?.Texture.Dispose();
         _giDivisor = divisor;
         using var batch = Gpu.Uploads.Begin();
 
@@ -2501,6 +2570,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             TextureMinFilter.Nearest, TextureMagFilter.Nearest);
         _giLow = Make(batch, (_width + _giDivisor - 1) / _giDivisor, (_height + _giDivisor - 1) / _giDivisor, InternalFormat.Rgba16F,
             TextureMinFilter.Nearest, "post gi resolve");
+        _giLowSky = Make(batch, _giLow.Width, _giLow.Height, InternalFormat.Rgba16F, TextureMinFilter.Nearest, "post gi resolve sky");
     }
 
     #endregion
@@ -2861,6 +2931,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// </summary>
     const float AdaptationRate = 0.5f;
     /// <summary>
+    /// The adaptation rate with Adaptive exposure (1 / s): 90 % of a change in 1.2 s, against the game's 4.6 s.
+    /// </summary>
+    public const float AdaptiveExposureRate = 2;
+    /// <summary>
     /// Kenshi's exposure: the luminance measure (mipmapped) and the adapted value (1 × 1, ping-pong).
     /// </summary>
     Target2D? _luminance, _adaptA, _adaptB;
@@ -2890,6 +2964,52 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// way.
     /// </summary>
     public (float Min, float Max)? AutoExposure { get; set; }
+    /// <summary>
+    /// Adaptive exposure (<see cref="IWorldPostChain.ShadeExposure"/>): under the band's minimum the adaptation's target is the mean times Scale,
+    /// no lower than Floor; Scale 0 keeps the game's band. Not applied while an exposure is held.
+    /// </summary>
+    public (float Scale, float Floor) ShadeExposure { get; set; }
+    /// <summary>
+    /// The mean luminance of an open desert by day, which a darker scene is exposed as (<see cref="ShadeExposure"/>): 0.567, the new game's
+    /// start at 10:00 (0.574 with every switch Faithful), under the game's daytime minimum 0.8 like most daytime views.
+    /// </summary>
+    public const float ShadeExposureReference = 0.57f;
+    /// <summary>
+    /// Above 0 (an interior is in view, lit by its probes): the band's minimum follows the scene down, to the mean luminance times this, and no
+    /// lower than <see cref="IndoorExposureFloor"/> of itself. The game's minimum is set for a room lit evenly by its ambient; a room lit by
+    /// its lamps alone is several times darker and stayed under it, at one fixed exposure.
+    /// </summary>
+    public float IndoorExposure { get; set; }
+    /// <summary>
+    /// The band's minimum over a lamp-lit room's mean luminance as the game showed it: in the Hub's bar at night the minimum is 0.42 and the
+    /// room lit by the game's ambient measured 0.1435 (linear, the picture's mean before exposure).
+    /// </summary>
+    public const float IndoorExposureScale = 2.9f;
+    /// <summary>
+    /// The least share of the band's minimum the indoor exposure goes down to: a room with no lamp lit stays dark.
+    /// </summary>
+    public const float IndoorExposureFloor = 1f / 3f;
+    /// <summary>
+    /// The least adapted luminance an interior in view goes down to, whatever the hour (0: <see cref="IndoorExposureFloor"/> of the band's
+    /// minimum alone): the night's minimum times <see cref="IndoorExposureFloor"/>. A room's lamps are the same by day, when the band's minimum
+    /// is the open sky's: a third of that left the room 2.4 times darker at noon than at midnight.
+    /// </summary>
+    public float IndoorExposureMin { get; set; }
+    /// <summary>
+    /// The most an interior's pixels are scaled over the picture's exposure (<see cref="MergedKernels.InteriorGain"/>).
+    /// </summary>
+    public const float IndoorExposureMaxGain = 8;
+
+    /// <summary>
+    /// The share of <paramref name="bandMin"/> the indoor exposure goes down to (<see cref="IndoorExposureMin"/>).
+    /// </summary>
+    float IndoorFloorShare(float bandMin) =>
+        IndoorExposureMin > 0 ? MathF.Min(IndoorExposureFloor, IndoorExposureMin / MathF.Max(bandMin, 1e-4f)) : IndoorExposureFloor;
+    /// <summary>
+    /// The adaptation rate (1 / s): <see cref="AdaptiveExposureRate"/> with Adaptive exposure, else the game's.
+    /// </summary>
+    internal static float Rate(PostOptions o) => o.AdaptiveExposure ? AdaptiveExposureRate : AdaptationRate;
+
     /// <summary>
     /// Skip the smoothing: the exposure settles at once (screenshots, benchmarks).
     /// </summary>
@@ -2935,9 +3055,13 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             _adaptClock.Restart();
 
             // Seed both ping-pong targets before smoothing; the next frame reads the other one.
-            float mblend = InstantAdaptation || !_adaptedValid || _adaptedFrames < 2 ? 1 : 1 - MathF.Exp(-mdt * AdaptationRate);
+            float mblend = InstantAdaptation || !_adaptedValid || _adaptedFrames < 2 ? 1 : 1 - MathF.Exp(-mdt * Rate(Options));
             (_adaptA, _adaptB) = (_adaptB, _adaptA);
-            _merged.Exposure(mblend, ExposureBand(), _postColour, _adaptA!, _adaptB!);
+            var mband = ExposureBand();
+            var rooms = RoomMaskNow;
+            var mshade = _exposureHold is null ? ShadeExposure : default;
+            float indoor = rooms is null ? 0 : IndoorExposure;
+            _merged.Exposure(mblend, mband, _postColour, _adaptA!, _adaptB!, indoor, IndoorFloorShare(mband.Min), rooms, mshade);
             _adaptedValid = true;
             _adaptedFrames = Math.Min(_adaptedFrames + 1, 2);
             return;
@@ -2952,7 +3076,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         _adaptClock.Restart();
 
         // Seed both ping-pong targets before smoothing; the next frame reads the other one.
-        float blend = InstantAdaptation || !_adaptedValid || _adaptedFrames < 2 ? 1 : 1 - MathF.Exp(-dt * AdaptationRate);
+        float blend = InstantAdaptation || !_adaptedValid || _adaptedFrames < 2 ? 1 : 1 - MathF.Exp(-dt * Rate(Options));
         var previous = _adaptB;   // the target written last frame; the swap below makes it adaptA
         (_adaptA, _adaptB) = (_adaptB, _adaptA);
         var ap = _adaptPass;
@@ -2960,8 +3084,12 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         Bind(ap.P, ap.Last, previous);
         ap.P.Set(ap.Level, MathF.Log2(LuminanceSize));
         ap.P.Set(ap.Blend, blend);
+        bool pinned = _exposureHold is not null;
         var band = ExposureBand();
         ap.P.Set(ap.Band, band.Min, band.Max);
+        ap.P.Set(ap.Indoor, pinned ? 0 : IndoorExposure, IndoorFloorShare(band.Min));
+        var shade = pinned ? default : ShadeExposure;
+        ap.P.Set(ap.Shade, shade.Scale, shade.Floor);
         Draw(ap.P, _adaptB!);
         _adaptedValid = true;
         _adaptedFrames = Math.Min(_adaptedFrames + 1, 2);

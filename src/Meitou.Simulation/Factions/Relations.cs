@@ -171,13 +171,6 @@ public sealed class FactionDeeds(FactionRelations relations, PopulationData? dat
     public FactionRelations Relations { get; } = relations;
 
     /// <summary>
-    /// The doer's threat rating (the character status float <c>+0xac</c> the game compares with 0.1 and 0.15; what sets it is <b>Unknown</b>). Engine
-    /// choice: every doer rates above both, so a landed blow is a <see cref="RelationEventKind.Hit"/> and a downing blow a
-    /// <see cref="RelationEventKind.Knockout"/>.
-    /// </summary>
-    public const float DoerRating = 1;
-
-    /// <summary>
     /// The amount of a deed against <paramref name="victim"/> (<c>FUN_140796020</c>, <b>Observed</b>): its CHARACTER <c>faction importance</c> times
     /// 1 inside its own squad's town, 0.6 inside a town whose faction is allied with (or is) the victim's, else 0.025 (outside every town too). The
     /// town is the one the victim stands in (the status object's <c>+0x88</c>, read here as <see cref="PopulationData.TownAt"/>); its own town is its
@@ -212,7 +205,7 @@ public sealed class FactionDeeds(FactionRelations relations, PopulationData? dat
     /// A blow that landed on <paramref name="victim"/> (the melee hit <c>FUN_1404394f0</c> and the bolt hit <c>FUN_140439c90</c>, through
     /// <c>FUN_140999f00</c> / <c>FUN_140999d50</c>): in this order: <see cref="RelationEventKind.Killed"/> when the blow killed (the death function
     /// runs inside the damage, <c>FUN_1407a6200</c>, crediting the killer); <see cref="RelationEventKind.Hit"/> when the striker rates above 0.1
-    /// (<see cref="DoerRating"/>); when the victim is now down, <see cref="RelationEventKind.Knockout"/>
+    /// (<see cref="Ai.TaskAggression.OfGoal"/>); when the victim is now down, <see cref="RelationEventKind.Knockout"/>
     /// (<see cref="RelationEventKind.KnockoutMinor"/> for a striker rated 0.15 or less, 0.1 or less for a bolt, and for a bolt not aimed at the
     /// victim) and, dead, <see cref="RelationEventKind.KillingBlow"/>. A stray bolt never counts as a hit. The test is the victim's state after the
     /// blow, so a blow on one already down counts again.
@@ -221,11 +214,14 @@ public sealed class FactionDeeds(FactionRelations relations, PopulationData? dat
     {
         if (down || dead) Remember(world, striker, victim, dead);
         float x = Weight(world, victim);
-        if (x == 0) return;
+        if (x == 0 || world.Characters.Cold(striker) is not { } doer) return;
+
+        float rating = Ai.TaskAggression.OfGoal(doer);
         if (dead) Apply(world, striker, victim, RelationEventKind.Killed, x);
-        if (aimed && DoerRating > 0.1f) Apply(world, striker, victim, RelationEventKind.Hit, x);
+        if (aimed && rating > 0.1f) Apply(world, striker, victim, RelationEventKind.Hit, x);
         if (!down && !dead) return;
-        bool minor = bolt ? DoerRating <= 0.1f || !aimed : DoerRating <= 0.15f;
+
+        bool minor = bolt ? rating <= 0.1f || !aimed : rating <= 0.15f;
         Apply(world, striker, victim, minor ? RelationEventKind.KnockoutMinor : RelationEventKind.Knockout, x);
         if (dead) Apply(world, striker, victim, RelationEventKind.KillingBlow, x);
     }

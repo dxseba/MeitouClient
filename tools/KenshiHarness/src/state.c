@@ -21,6 +21,10 @@
 #define OBJECT_FLOOR 0xA4
 // Character::_isOnARoof (KenshiLib Character.h): on top of a building (a roof or roofless part over its floor).
 #define CHARACTER_ON_ROOF 0xD5
+// Character::isVisibleUpdateMode (KenshiLib Character.h): updated every frame as a visible character (the update budget's tier C).
+#define CHARACTER_VISIBLE_UPDATE 0xE4
+// Character::isOnScreen (KenshiLib Character.h): within the camera's view and range.
+#define CHARACTER_ON_SCREEN 0x1A9
 
 // How far above a character's position (its feet) its `screen` point is taken: about the chest of a human, so a click
 // there lands on the body.
@@ -116,6 +120,8 @@ static void add_character(Text* out, void* character, int detailed)
     text_key(out, "floor");
     text_add(out, "%d", *(int*)((char*)character + OBJECT_FLOOR));
     add_flag(out, "onRoof", ((char*)character)[CHARACTER_ON_ROOF]);
+    add_flag(out, "onScreen", ((char*)character)[CHARACTER_ON_SCREEN]);
+    add_flag(out, "visibleUpdate", ((char*)character)[CHARACTER_VISIBLE_UPDATE]);
 
     V3 body = {position.x, position.y + BODY_HEIGHT, position.z};
     if (game_project(body, &x, &y))
@@ -191,6 +197,9 @@ static void say_stats(Text* out, const char* stats)
     text_add(out, "\n");
 }
 
+// state --addr: each character's address goes into the text, for `peek`.
+static int s_addresses;
+
 static void say_character(Text* out, void* character, int detailed)
 {
     char name[128], faction[128];
@@ -203,8 +212,11 @@ static void say_character(Text* out, void* character, int detailed)
     character_faction(character, faction, sizeof faction);
 
     text_add(out, "  %s [%s]", name, faction);
+    if (s_addresses) text_add(out, " @%llX", (unsigned long long)(uintptr_t)character);
     if (character_is_selected(character)) text_add(out, " selected");
     if (((char*)character)[CHARACTER_ON_ROOF]) text_add(out, " on-roof");
+    if (((char*)character)[CHARACTER_ON_SCREEN]) text_add(out, " on-screen");
+    if (((char*)character)[CHARACTER_VISIBLE_UPDATE]) text_add(out, " visible-update");
     if (medical[MEDICAL_DEAD]) text_add(out, " DEAD");
     else if (medical[MEDICAL_UNCONSCIOUS]) text_add(out, " unconscious");
 
@@ -268,10 +280,10 @@ static void add_clock(Text* out)
              minutes / 60, minutes % 60);
 }
 
-// state [--near=<radius>] [--brief] [--json]: the clock, the speed, the camera and the player's characters with their
+// state [--near=<radius>] [--brief] [--addr] [--json]: the clock, the speed, the camera and the player's characters with their
 // health and stats; with --near also everyone else within that distance of the point the camera looks at. `screen` is
 // where a character's body is in the window (a point to click), absent when it is out of view. --brief leaves out body
-// parts and stats. Text by default; --json gives the same as JSON, with every figure unrounded.
+// parts and stats; --addr adds each character's address to the text (for peek). Text by default; --json gives the same as JSON, with every figure unrounded.
 int cmd_state(Command* c)
 {
     const Lektor* squad = game_squad();
@@ -294,6 +306,7 @@ int cmd_state(Command* c)
 
     if (!json)
     {
+        s_addresses = option(c, "--addr");
         say_state(out, squad, radius, detailed);
         return 1;
     }

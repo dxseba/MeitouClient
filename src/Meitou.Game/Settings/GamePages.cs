@@ -1,4 +1,5 @@
 using Meitou.Data.Ui;
+using Meitou.Data.World;
 using Meitou.Game.Effects;
 using Meitou.Game.Host;
 using Meitou.Game.Host.Cameras;
@@ -84,6 +85,11 @@ sealed class GamePages(SettingsMenu menu)
     /// The squad and others' XP sliders, made on first use.
     /// </summary>
     Slider? _squadXpSlider, _othersXpSlider;
+
+    /// <summary>
+    /// The skills' own Squad XP sliders, in <see cref="SkillXp.Skills"/>' order, made on first use.
+    /// </summary>
+    Slider[]? _skillXpSliders;
 
     /// <summary>
     /// The dropped items kept slider, made on first use.
@@ -272,12 +278,58 @@ sealed class GamePages(SettingsMenu menu)
     /// <summary>
     /// The squad XP slider, marked at the game's rate.
     /// </summary>
-    Slider SquadXpSlider => _squadXpSlider ??= XpRate("Squad XP", () => menu.Config.SquadXp, v => menu.Config.SquadXp = v);
+    Slider SquadXpSlider => _squadXpSlider ??= XpRate("Squad XP", () => menu.Config.SquadXp, SetSquadXp);
+
+    /// <summary>
+    /// Sets Squad XP and the label that shows it (<see cref="PlayerInterface.XpLabel"/>).
+    /// </summary>
+    void SetSquadXp(float value)
+    {
+        menu.Config.SquadXp = value;
+        menu.Player.XpLabel = SkillXp.Label(menu.Config);
+    }
+
+    /// <summary>
+    /// Shows or hides the Squad XP label (<see cref="UserConfig.ShowSquadXp"/>).
+    /// </summary>
+    void ShowSquadXp(bool on)
+    {
+        menu.Config.ShowSquadXp = on;
+        menu.Player.XpLabel = SkillXp.Label(menu.Config);
+    }
 
     /// <summary>
     /// The others' XP slider, marked at the game's rate.
     /// </summary>
     Slider OthersXpSlider => _othersXpSlider ??= XpRate("Others' XP", () => menu.Config.OthersXp, v => menu.Config.OthersXp = v);
+
+    /// <summary>
+    /// The skills' own Squad XP sliders, folded under Squad XP (<see cref="FeatureGrouping.FeatureGroups"/>).
+    /// </summary>
+    Slider[] SkillXpSliders => _skillXpSliders ??= [.. SkillXp.Skills.Select(s => SkillXpRate(s.Label, SkillXp.Key(s.Stat)))];
+
+    /// <summary>
+    /// A skill's own Squad XP multiplier (<see cref="UserConfig.SquadSkillXp"/>, by its config key <paramref name="key"/>), in hundredths like
+    /// <see cref="XpRate"/>; at its left end, shown as "Squad XP", the skill follows Squad XP.
+    /// </summary>
+    Slider SkillXpRate(string label, string key) =>
+        new(SquadXpSlider.Label + " " + label, SkillXp.Follows, UserConfig.MaxXpRate,
+            () => menu.Config.SquadSkillXp.GetValueOrDefault(key, SkillXp.Follows),
+            v => SetSkillXp(key, v),
+            "0.##", Text: v => v < 0 ? "Squad XP" : $"{v:0.##}x", Faithful: SkillXp.Follows, Step: 0.25f);
+
+    /// <summary>
+    /// Sets a skill's own multiplier to <paramref name="value"/> in hundredths, or makes it follow Squad XP below 0, and applies it to the running
+    /// world at once.
+    /// </summary>
+    void SetSkillXp(string key, float value)
+    {
+        float rate = MathF.Round(value * 100) / 100;
+        if (rate < 0) menu.Config.SquadSkillXp.Remove(key);
+        else menu.Config.SquadSkillXp[key] = rate == 0 ? 0 : Math.Min(rate, UserConfig.MaxXpRate);   // a typed -0 is kept as 0
+
+        menu.GameplayChanged?.Invoke();
+    }
 
     /// <summary>
     /// An XP multiplier in hundredths (typed by clicking its number; the arrow keys move it in quarters), applied to the running world at once.
@@ -393,7 +445,7 @@ sealed class GamePages(SettingsMenu menu)
     }
 
     /// <summary>
-    /// The Controls page: the camera's speeds and mouse, then one row per bindable action.
+    /// The Controls page: the camera's speeds and mouse, then one row per bindable action, the code mods' last.
     /// </summary>
     internal void ControlsRows(List<SettingsMenu.Entry> result)
     {
@@ -430,6 +482,10 @@ sealed class GamePages(SettingsMenu menu)
             Toggle: new("Loot into backpack", () => menu.Config.TakeIntoBackpack, SetTakeIntoBackpack, OnOff: true)));
         foreach (var action in Enum.GetValues<InputAction>().Where(a => a != InputAction.Quit && a != InputAction.ToggleFps))
             result.Add(new(SettingsMenu.ActionLabel(action), SettingHints.BindingHint(action), Binding: action));
+
+        // The code mods' key actions follow the game's, in load order (docs/modding.md "Key actions").
+        foreach (var mod in menu.Bindings.ModActions)
+            result.Add(new(mod.Caption, Loc.Tr("A key of the mod {1}: {2}.", mod.OwnerName, mod.Label), Binding: mod.Action));
     }
 
     /// <summary>
@@ -520,7 +576,8 @@ sealed class GamePages(SettingsMenu menu)
         result.Add(new("Tutorials", "Shows the tutorial hints as you play (the game: on).",
             Toggle: new("Tutorials", () => menu.Config.Tutorials != false, v => { menu.Config.Tutorials = v; menu.TutorialsChanged?.Invoke(v); },
                 OnOff: true)));
-        result.Add(new("Reset Tutorials", "Every tutorial can show again, the ones already seen included.", Run: () => menu.ResetTutorials?.Invoke()));
+        result.Add(new("Reset Tutorials", "Every tutorial can show again, the ones already seen included.", Run: () => menu.ResetTutorials?.Invoke(),
+            RunLabel: "Reset"));
     }
 
     /// <summary>
@@ -534,6 +591,16 @@ sealed class GamePages(SettingsMenu menu)
             + "The game counts them twice, so inherited squads come up more often and follow-up raids are about twice as likely.",
             Toggle: new("Raids as written", () => menu.Config.CampaignAncestorsOnce,
                 v => { menu.Config.CampaignAncestorsOnce = v; menu.OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
+        result.Add(new("Raids keep their progress",
+            "A raid under way when you save goes on where it was when that save is loaded. "
+            + "The game starts its current stage over at every load, so its waits and time limits begin again.",
+            Toggle: new("Raids keep their progress", () => menu.Config.FixRaidClocks, v => menu.Config.FixRaidClocks = v, Remaster: true,
+                OnOff: true)));
+        result.Add(new("Guards stop passing bodies",
+            "A guard picks up a knocked-out prisoner only when a cage is free for them, and never takes one from a guard of his own faction. "
+            + "The game lets guards lift and grab prisoners anyway, so at a full prison they hand the same body round without end.",
+            Toggle: new("Guards stop passing bodies", () => menu.Config.FixArrestLifts, v => menu.Config.FixArrestLifts = v, Remaster: true,
+                OnOff: true)));
         result.Add(new("Door break sound",
             "Doors and gates make their breaking sound when they are bashed or broken open. "
             + "The game never picks which breaking sound to play, so it plays none.",
@@ -562,22 +629,77 @@ sealed class GamePages(SettingsMenu menu)
             + "The game's data gives it a negative reach, so they throw it only when nearly touching their target.",
             Toggle: new("Weak punch reach", () => menu.Config.FixPunchReach,
                 v => { menu.Config.FixPunchReach = v; menu.PunchReachChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
+        result.Add(new("Swamp turtle attacks",
+            "A swamp turtle butts and bites when it fights. "
+            + "In the game it fights with a sword or club drawn for it, whose moves its body cannot play, so its blows land without any motion.",
+            Toggle: new("Swamp turtle attacks", () => menu.Config.FixAnimalMoves,
+                v => { menu.Config.FixAnimalMoves = v; menu.AnimalMovesChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
         result.Add(new("Bench facing",
             "A character on a bench with the table behind it sits facing away from the table. "
             + "The game mirrors the bench's look point through the middle of the world map, so the sitter faces an unrelated direction.",
             Toggle: new("Bench facing", () => menu.Config.FixBenchFacing,
                 v => { menu.Config.FixBenchFacing = v; menu.BenchFacingChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
+        result.Add(new("Prisoners hold still",
+            "A wounded prisoner on a pole or in a cage keeps the pole's or cage's pose. "
+            + "In the game it clutches its wounds there instead.",
+            Toggle: new("Prisoners hold still", () => menu.Config.FixPrisonPose,
+                v => { menu.Config.FixPrisonPose = v; menu.PrisonPoseChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
+        result.Add(new("Caged animals idle",
+            "An animal in a cage or on a pole breathes, looks around and lies down when knocked out. "
+            + "In the game it stands frozen there, since the cage's poses are for people only.",
+            Toggle: new("Caged animals idle", () => menu.Config.FixCagedAnimals,
+                v => { menu.Config.FixCagedAnimals = v; menu.CagedAnimalsChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
         result.Add(new("Walls inside buildings",
             "Seen into a building your characters are in, parts of other buildings that run through it are left out, such as the Hub's town wall "
             + "in the Shinobi Thieves tower. The game's world places them there and draws them inside the room.",
             Toggle: new("Walls inside buildings", () => menu.Config.FixPartsInBuildings, v => menu.Config.FixPartsInBuildings = v,
+                Remaster: true, OnOff: true)));
+        result.Add(new("Rain in open buildings",
+            "Seen into a building with its roof hidden, no rain or ash falls over the open room. "
+            + "The game leaves out only what falls inside it, so with the camera pulled back the rain in front still streaks across the room.",
+            Toggle: new("Rain in open buildings", () => menu.Config.FixRainInBuildings, v => menu.Config.FixRainInBuildings = v,
+                Remaster: true, OnOff: true)));
+        result.Add(new("Ground in buried ruins",
+            "The ash filling a half-buried Ash Dome ruin stays drawn while your characters are in it, and they are ordered onto it. "
+            + "The game hides the ground inside the ruin, showing buried floors nobody can reach under characters that seem to walk on air.",
+            Toggle: new("Ground in buried ruins", () => menu.Config.FixRuinGround, v => menu.Config.FixRuinGround = v,
                 Remaster: true, OnOff: true)));
         result.Add(new("Bags in the inventory",
             "Guards searching for smuggled or stolen goods and bandits after food or loot also look inside bags carried in the inventory, and guards "
             + "confiscating stolen goods inside the worn backpack. The game misses those bags, so goods hidden in them are never found.",
             Toggle: new("Bags in the inventory", () => menu.Config.FixBagSearch,
                 v => { menu.Config.FixBagSearch = v; menu.BagSearchChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
+        result.Add(new("Guards spare their own",
+            "Slavers and other cage guards leave their own faction's people in their cages alone instead of making them slaves. "
+            + "In the game they enslave them too. Arrests that end in slavery are not affected.",
+            Toggle: new("Guards spare their own", () => menu.Config.CagesSpareOwn,
+                v => { menu.Config.CagesSpareOwn = v; menu.GameplayChanged?.Invoke(); }, Remaster: true, OnOff: true)));
+        result.Add(new("Head turns back",
+            "A character that turned its head toward what it was talking to or watching looks ahead again once it stops looking. "
+            + "In the game the head stays turned until the next thing it looks at.",
+            Toggle: new("Head turns back", () => menu.Config.FixHeadTurnBack, v => menu.Config.FixHeadTurnBack = v, Remaster: true, OnOff: true)));
+        result.Add(GroundRow());
         result.Insert(0, menu.PageSidesEntry(result, "All fixes", "Every bug on this page as the game ships it, or every fix.", "fix"));
+    }
+
+    /// <summary>
+    /// The Fixes page's ground row (<see cref="UserConfig.FixGround"/>): read when the game starts, so tagged for a restart once changed; greyed
+    /// without a tag, naming the mod, while a mod's heightmap stands in for the game's.
+    /// </summary>
+    SettingsMenu.Entry GroundRow()
+    {
+        const string label = "Holes and needles in the ground";
+        var toggle = new Toggle(label, () => menu.Config.FixGround, v => menu.Config.FixGround = v, Remaster: true, OnOff: true);
+        if (HeightmapRepair.Replaced)
+        {
+            string by = HeightmapRepair.ReplacedBy is { } mod ? $"The mod {mod}" : "A mod";
+            return new(label, $"{by} replaces the ground, so its map is used as it is and this fix does nothing.", Toggle: toggle, Locked: true);
+        }
+
+        string hint = "Small pits in the ground are filled and thin needles of ground standing above flat land are lowered, such as the pit near "
+            + "the Dead Workshop and some needles in the Crater. Off, the ground is exactly as the game's map file has it.";
+        bool pending = menu.Config.FixGround != HeightmapRepair.IsOn;
+        return new(label, hint, Toggle: toggle, Tag: pending ? "Restart to apply" : "Needs restart", TagHot: pending);
     }
 
     /// <summary>
@@ -650,6 +772,11 @@ sealed class GamePages(SettingsMenu menu)
             + "In the game they are where they stood when you left.",
             Toggle: new("Towns keep their schedule", () => menu.Config.ResidentSchedule,
                 v => { menu.Config.ResidentSchedule = v; menu.OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
+        result.Add(new("Towns change far away",
+            "A town far from your squads is taken over or destroyed as soon as its story calls for it, so the map and the factions show it at once. "
+            + "In the game it changes only when you come near.",
+            Toggle: new("Towns change far away", () => menu.Config.OffscreenOverrides,
+                v => { menu.Config.OffscreenOverrides = v; menu.OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
         result.Add(new("Production far away",
             "Farms, mines, wells and generators away from your squads keep working. "
             + "In the game they stop while their area is unloaded, and only farms catch up when you come back.",
@@ -658,7 +785,7 @@ sealed class GamePages(SettingsMenu menu)
     }
 
     /// <summary>
-    /// The world and play rows: decapitation, ragdolls, XP, the speeds, pausing, animals, cage guards, outlines, selection and ground items.
+    /// The world and play rows: decapitation, ragdolls, XP, the speeds, pausing, animals, outlines, selection and ground items.
     /// </summary>
     void AddWorldRows(List<SettingsMenu.Entry> result)
     {
@@ -676,8 +803,19 @@ sealed class GamePages(SettingsMenu menu)
                 v => { menu.Config.AdvancedRagdolls = v; menu.GameplayChanged?.Invoke(); }, Remaster: true)));
         result.Add(new(SquadXpSlider.Label,
             "How fast your characters and the rest of your faction learn: every skill and stat gain is multiplied by this (the game: 1x). "
-            + "0 stops it. Click the number to type an exact value. A training dummy still stops at its level.",
-            Slider: SquadXpSlider));
+            + "0 stops it. Click the number to type an exact value. A training dummy still stops at its level. "
+            + "Open it to give single skills their own multiplier.",
+            Slider: SquadXpSlider, Raw: SquadXpSlider.Label));
+        foreach (var (slider, skill) in SkillXpSliders.Zip(SkillXp.Skills))
+        {
+            result.Add(new(slider.Label,
+                "This skill's own multiplier for your faction, in place of Squad XP. At the far left (Squad XP) it follows Squad XP.",
+                Slider: slider, Raw: SkillXp.Raw(skill.Stat)));
+        }
+
+        result.Add(new("Show Squad XP", "Shows the Squad XP multiplier (\"XP x10\") at the top left of the screen during play.",
+            Toggle: new("Show Squad XP", () => menu.Config.ShowSquadXp, ShowSquadXp, OnOff: true)));
+
         result.Add(new(OthersXpSlider.Label,
             "The same for everyone outside your faction: other factions, enemies and wild animals (the game: 1x).", Slider: OthersXpSlider));
         result.Add(new(FastSpeedSlider.Label, "The game speed of the second speed button (two arrows) and its key (the game: 2x).",
@@ -688,7 +826,7 @@ sealed class GamePages(SettingsMenu menu)
             Slider: FastestSpeedSlider));
         result.Add(new("Pause after loading",
             "A save starts paused once it has loaded, so nothing happens before you look around. In the game it runs at once.",
-            Toggle: new("Pause after loading", () => menu.Config.PauseOnLoad, v => menu.Config.PauseOnLoad = v, Remaster: true, OnOff: true)));
+            Toggle: new("Pause after loading", () => menu.Config.PauseOnLoad, v => menu.Config.PauseOnLoad = v)));
         result.Add(new("Pause while loading",
             "Faithful, as in the game: when the camera comes to places that are not loaded yet (a jump to a squad far away), the game pauses and "
             + "shows Loading... until they are. Meitou: the game runs on while they load.",
@@ -702,16 +840,21 @@ sealed class GamePages(SettingsMenu menu)
             + "until OPEN BAG is pressed for it.",
             Toggle: new("Open bags at once", () => menu.Config.AutoOpenBags,
                 v => menu.Player.InventoryWindows.AutoOpenBags = menu.Config.AutoOpenBags = v, Remaster: true, OnOff: true)));
+        result.Add(new("Split stacks",
+            "A click on a stack picks up all of it, Shift+click half, Alt+click one item, and Shift+Alt+click asks how many with a slider. "
+            + "In the game a click picks up one item and Shift or Ctrl the whole stack.",
+            Toggle: new("Split stacks", () => menu.Config.SplitStacks,
+                v => menu.Player.InventoryWindows.SplitStacks = menu.Config.SplitStacks = v, Remaster: true, OnOff: true)));
         result.Add(new("Animals pick up items",
             "Faithful, as in the game: your pack animals pick up an item you point them at, into the bag they wear (or wear a bag they pick up). "
             + "Meitou: only people pick items up, and an animal only a limb to carry in its mouth.",
             Toggle: new("Animals pick up items", () => !menu.Config.AnimalsPickUp,
                 v => { menu.Config.AnimalsPickUp = !v; menu.AnimalsPickUpChanged?.Invoke(!v); }, Remaster: true)));
-        result.Add(new("Guards spare their own",
-            "Slavers and other cage guards leave their own faction's people in their cages alone instead of making them slaves. "
-            + "In the game they enslave them too. Arrests that end in slavery are not affected.",
-            Toggle: new("Guards spare their own", () => menu.Config.CagesSpareOwn,
-                v => { menu.Config.CagesSpareOwn = v; menu.GameplayChanged?.Invoke(); }, Remaster: true, OnOff: true)));
+        result.Add(new("Talk across shop counters",
+            "Faithful, as in the game: to talk or trade with a shopkeeper behind a counter, your character often walks round the counter to stand "
+            + "behind them. Meitou: shopkeepers can be reached from the customer's side of the counter.",
+            Toggle: new("Talk across shop counters", () => menu.Config.CounterTalk,
+                v => { menu.Config.CounterTalk = v; menu.CounterTalkChanged?.Invoke(v); }, Remaster: true)));
         result.Add(new("Hover outline", "Outline and tint the character under the cursor, in the colour of what a right click would do.",
             Toggle: new("Hover outline", () => menu.Config.HoverOutline, v => menu.Config.HoverOutline = v, Remaster: true, OnOff: true)));
         result.Add(new("Building outline",
@@ -841,19 +984,19 @@ sealed class GamePages(SettingsMenu menu)
         result.Add(new("Character flights",
             "A double click on a squad member far from the view (or a double tap of their number) flies the camera there in an arc instead of "
             + "cutting.",
-            Toggle: new("Character flights", () => menu.Config.CharacterFlights, v => menu.Config.CharacterFlights = v, Remaster: true, OnOff: true)));
+            Toggle: new("Character flights", () => menu.Config.CharacterFlights, v => menu.Config.CharacterFlights = v)));
         result.Add(new("Keep textures at characters",
             "Keeps the meshes and textures around every squad member loaded, not only around the camera, so a flight or jump to them lands on finished "
             + "detail. "
             + "Costs video memory.",
             Toggle: new("Keep textures at characters", () => menu.Config.KeepTexturesAtCharacters,
-                v => menu.Config.KeepTexturesAtCharacters = v, Remaster: true, OnOff: true)));
+                v => menu.Config.KeepTexturesAtCharacters = v)));
         if (menu.Config.KeepTexturesAtCharacters)
         {
             result.Add(new("Keep textures at all squads",
                 "Also keeps the surroundings of your other squads' members loaded, not only the squad on the squad bar. Costs more video memory.",
                 Toggle: new("Keep textures at all squads", () => menu.Config.KeepTexturesAtAllSquads,
-                    v => menu.Config.KeepTexturesAtAllSquads = v, OnOff: true)));
+                    v => menu.Config.KeepTexturesAtAllSquads = v)));
         }
 
         result.Add(new(_characterFlightTime.Label, "Seconds a character flight takes, and each hop of the squad tour (numpad /).",
@@ -866,7 +1009,7 @@ sealed class GamePages(SettingsMenu menu)
                 menu.ConfirmTitle = "Clear cached files?";
                 menu.Confirmation = action.Question();
                 menu.Focus = -1;
-            }));
+            }, RunLabel: "Clear cache"));
         }
     }
 }

@@ -239,6 +239,38 @@ public enum InputAction
     /// </summary>
     ToggleBuild,
     /// <summary>
+    /// Build map: the game's <c>build_rotate_left</c> (default <c>,</c>), turns the held building left.
+    /// </summary>
+    BuildRotateLeft,
+    /// <summary>
+    /// Build map: the game's <c>build_rotate_right</c> (default <c>.</c>), turns the held building right.
+    /// </summary>
+    BuildRotateRight,
+    /// <summary>
+    /// Build map: the game's <c>build_move_up</c> (default <c>=</c>), raises the held building.
+    /// </summary>
+    BuildMoveUp,
+    /// <summary>
+    /// Build map: the game's <c>build_move_down</c> (default <c>-</c>), lowers the held building.
+    /// </summary>
+    BuildMoveDown,
+    /// <summary>
+    /// Build map: the game's <c>build_tilt_increase</c> (default <c>]</c> and NUM+), tilts the held building more to the slope.
+    /// </summary>
+    BuildTiltIncrease,
+    /// <summary>
+    /// Build map: the game's <c>build_tilt_decrease</c> (default <c>[</c> and NUM-), tilts the held building less.
+    /// </summary>
+    BuildTiltDecrease,
+    /// <summary>
+    /// Build map: the game's <c>build_undo</c> (event 0xb, default Backspace), drops the wall line being laid, else the last queued building.
+    /// </summary>
+    BuildUndo,
+    /// <summary>
+    /// Build map: the game's <c>build_apply</c> (event 0xc, default Space), queues the held building where it stands.
+    /// </summary>
+    BuildApply,
+    /// <summary>
     /// Orders panel hotkey <c>toggle_block</c> (events 0x17..0x21 run the panel button's own handler; default numpad 0).
     /// </summary>
     ToggleBlock,
@@ -315,22 +347,29 @@ public sealed class ActionState
     /// </summary>
     static readonly int Count = Enum.GetValues<InputAction>().Length;
     /// <summary>
-    /// Each action is held at this tick.
+    /// Each action is held at this tick: the game's by number, then the mods' (<see cref="Index"/>).
     /// </summary>
-    readonly bool[] _held = new bool[Count];
+    readonly bool[] _held;
     /// <summary>
     /// Each action went down this tick.
     /// </summary>
-    readonly bool[] _pressed = new bool[Count];
+    readonly bool[] _pressed;
     /// <summary>
     /// Each action went up this tick.
     /// </summary>
-    readonly bool[] _released = new bool[Count];
+    readonly bool[] _released;
 
     /// <summary>
-    /// An empty state for <paramref name="input"/>'s tick (<see cref="InputBindings.Resolve"/> fills it).
+    /// An empty state for <paramref name="input"/>'s tick with room for <paramref name="modActions"/> mod actions (<see cref="InputBindings.Resolve"/>
+    /// fills it).
     /// </summary>
-    internal ActionState(TickInput input) => Input = input;
+    internal ActionState(TickInput input, int modActions = 0)
+    {
+        Input = input;
+        _held = new bool[Count + modActions];
+        _pressed = new bool[Count + modActions];
+        _released = new bool[Count + modActions];
+    }
 
     /// <summary>
     /// The raw input of the tick.
@@ -348,25 +387,31 @@ public sealed class ActionState
     /// <summary>
     /// Whether any binding of the action is down.
     /// </summary>
-    public bool Held(InputAction a) => _held[(int)a];
+    public bool Held(InputAction a) => Index(a) is var i && i < _held.Length && _held[i];
     /// <summary>
     /// Went down this tick: true in exactly one tick per press.
     /// </summary>
-    public bool Pressed(InputAction a) => _pressed[(int)a];
+    public bool Pressed(InputAction a) => Index(a) is var i && i < _pressed.Length && _pressed[i];
     /// <summary>
     /// Went up this tick (and no other key bound to it is still down).
     /// </summary>
-    public bool Released(InputAction a) => _released[(int)a];
+    public bool Released(InputAction a) => Index(a) is var i && i < _released.Length && _released[i];
 
     /// <summary>
     /// Sets an action's three states.
     /// </summary>
     internal void Set(InputAction a, bool isHeld, bool isPressed, bool isReleased)
     {
-        _held[(int)a] = isHeld;
-        _pressed[(int)a] = isPressed;
-        _released[(int)a] = isReleased;
+        int i = Index(a);
+        _held[i] = isHeld;
+        _pressed[i] = isPressed;
+        _released[i] = isReleased;
     }
+
+    /// <summary>
+    /// An action's place in the arrays: a game action's number, a mod action's after the game's (<see cref="InputBindings.FirstModAction"/>).
+    /// </summary>
+    static int Index(InputAction a) => a < InputBindings.FirstModAction ? (int)a : Count + (a - InputBindings.FirstModAction);
 
     /// <summary>
     /// A state with nothing held, for ticks driven without a host.
@@ -378,12 +423,17 @@ public sealed class ActionState
 /// Maps actions to keys and mouse buttons: each action has any number of bindings and counts as held while any is down. The defaults are an engine
 /// choice except the time controls and <c>;</c> for the free camera, which are the game's (docs/game/ui-input.md: pause Space, speed_1..3 F2..F4) and
 /// the camera keys (arrows and WASD move, Q / E rotate, , and . tilt), and the game view's hotkeys (the windows, squad keys and the orders on the
-/// numpad), which are the game's too. The install's <c>controls.cfg</c> replaces the defaults of the actions it names
+/// numpad) and the build map, which are the game's too. The install's <c>controls.cfg</c> replaces the defaults of the actions it names
 /// (<see cref="UseGameControls"/>), and a config file overrides them through <see cref="Apply"/> with strings such as <c>"W,Up"</c> or
 /// <c>"Mouse:Middle"</c>.
 /// </summary>
 public sealed class InputBindings
 {
+    /// <summary>
+    /// The first code mods' action number (docs/modding.md "Key actions"): theirs follow the game's from here, in load order.
+    /// </summary>
+    public const InputAction FirstModAction = (InputAction)1000;
+
     /// <summary>
     /// Each action's bindings.
     /// </summary>
@@ -397,6 +447,10 @@ public sealed class InputBindings
     /// </summary>
     static readonly (InputAction Action, Binding Alias)[] MeitouAliases =
         [(InputAction.Medic, Key.H), (InputAction.Rescue, Key.J), (InputAction.Highlight, Key.RightAlt)];
+    /// <summary>
+    /// The code mods' key actions and their defaults; null without any, so the bindings are the game's alone.
+    /// </summary>
+    ModKeyBindings? _mod;
 
     /// <summary>
     /// Starts with the default bindings.
@@ -411,7 +465,80 @@ public sealed class InputBindings
     /// <summary>
     /// Replaces an action's bindings (none unbinds it).
     /// </summary>
-    public void Set(InputAction action, params Binding[] bindings) => _map[action] = bindings;
+    public void Set(InputAction action, params Binding[] bindings)
+    {
+        _map[action] = bindings;
+        if (action >= FirstModAction) _mod?.Touch(action);
+    }
+
+    /// <summary>
+    /// Every action: the game's in order, then the code mods' (<see cref="FirstModAction"/> and up).
+    /// </summary>
+    public IEnumerable<InputAction> Actions => _mod is null ? Enum.GetValues<InputAction>() : Enum.GetValues<InputAction>().Concat(_mod.Numbers);
+
+    /// <summary>
+    /// The code mod's key action numbered <paramref name="action"/>; null for a game action.
+    /// </summary>
+    public ModKeyAction? ModAction(InputAction action) => _mod?.Find(action);
+
+    /// <summary>
+    /// The code mods' key actions, in load order (none without mods).
+    /// </summary>
+    public IReadOnlyList<ModKeyAction> ModActions => _mod?.Actions ?? [];
+
+    /// <summary>
+    /// Whether the settings keep <paramref name="binding"/> for themselves (Escape cancels a rebinding, F6 is the cinema's, the modifiers modify): no
+    /// action may take it there, and no code mod's action asks for it.
+    /// </summary>
+    public static bool Reserved(Binding binding) =>
+        !binding.IsMouse
+            && binding.Key is Key.Escape or Key.F6 or Key.LeftAlt or Key.RightAlt or Key.LeftControl or Key.RightControl or Key.LeftShift
+                or Key.RightShift;
+
+    /// <summary>
+    /// Whether the game takes <paramref name="binding"/> before the bindings see it, or the Controls page keeps it: Insert opens the console, Delete
+    /// and Backspace unbind a row there (Backspace also restarts a duel or battle). A code mod's action never gets one by default or from a saved
+    /// entry. (The numpad divide key, the squad tour's, has no <see cref="Key"/>, so no binding can name it.)
+    /// </summary>
+    public static bool HostKey(Binding binding) => !binding.IsMouse && binding.Key is Key.Insert or Key.Delete or Key.Backspace;
+
+    /// <summary>
+    /// The action of <paramref name="except"/>'s key map (the build map or the general one, <see cref="IsBuildMap"/>) that holds
+    /// <paramref name="binding"/>, other than <paramref name="except"/>; null when none. A key of the other map is no conflict, as on the Controls
+    /// page.
+    /// </summary>
+    internal InputAction? Holder(Binding binding, InputAction except)
+    {
+        foreach (var (action, list) in _map)
+            if (action != except && IsBuildMap(action) == IsBuildMap(except) && list.Contains(binding)) return action;
+        return null;
+    }
+
+    /// <summary>
+    /// Adds the code mods' key actions after the game's bindings are set (the install's and the player's): first the player's saved keys
+    /// (<paramref name="saved"/>: mod id to action name to bindings, as <see cref="Apply"/> reads them), then, for the actions without a saved
+    /// entry, the default keys no other action holds. Nothing happens without actions. Returns the skipped entries and the keys left out.
+    /// </summary>
+    public IReadOnlyList<string> UseModActions(IReadOnlyList<ModKeyAction> actions, IReadOnlyDictionary<string, Dictionary<string, string>>? saved)
+    {
+        if (actions.Count == 0) return [];
+
+        _mod = new ModKeyBindings(actions);
+        return _mod.Start(this, saved);
+    }
+
+    /// <summary>
+    /// <paramref name="saved"/> with the running mods' key actions as they are now (<see cref="ModKeyBindings.Changes"/>: an action the player did
+    /// not change keeps its entry as it was); the entries of mods not running stay. Returns <paramref name="saved"/> itself without mod actions, and
+    /// null when nothing is left to keep.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>>? ModChanges(Dictionary<string, Dictionary<string, string>>? saved) =>
+        _mod is null ? saved : _mod.Changes(this, saved);
+
+    /// <summary>
+    /// Whether a code mod's key action has <paramref name="key"/>.
+    /// </summary>
+    public bool IsModBound(Key key) => _mod is not null && _mod.Actions.Any(a => Get(a.Action).Contains(Binding.Of(key)));
 
     /// <summary>
     /// Takes the install's <c>controls.cfg</c> bindings as the defaults of the actions they name, and resets to the defaults.
@@ -429,19 +556,32 @@ public sealed class InputBindings
     {
         SetEngineDefaults();
         OverlayGameControls();
+        foreach (var problem in _mod?.Reset(this) ?? []) Console.WriteLine($"mods      key action: {problem}");
     }
 
     /// <summary>
     /// Each action <c>controls.cfg</c> names takes its bindings there, as in the original (its loader clears an action's defaults at the
-    /// action's first line, docs/game/ui-input.md), plus Meitou's alias of the action while no other action has that key.
+    /// action's first line, docs/game/ui-input.md), plus Meitou's alias of the action while no action of its map has that key.
     /// </summary>
     void OverlayGameControls()
     {
         foreach (var (action, bindings) in _game) _map[action] = bindings;
 
         foreach (var (action, alias) in MeitouAliases)
-            if (_game.ContainsKey(action) && !_map.Values.Any(b => b.Contains(alias))) _map[action] = [.. _map[action], alias];
+            if (_game.ContainsKey(action) && !SameMap(action).Any(a => Get(a).Contains(alias))) _map[action] = [.. _map[action], alias];
     }
+
+    /// <summary>
+    /// The actions of <paramref name="action"/>'s key map: the build map's while building, else the general map's. The two maps are separate in
+    /// the original (docs/game/ui-input.md section 4), so a key can be in both.
+    /// </summary>
+    public static IEnumerable<InputAction> SameMap(InputAction action) =>
+        Enum.GetValues<InputAction>().Where(a => IsBuildMap(a) == IsBuildMap(action));
+
+    /// <summary>
+    /// Whether <paramref name="action"/> is one of the build map's (the game's <c>build_</c> actions, checked first in build mode).
+    /// </summary>
+    public static bool IsBuildMap(InputAction action) => action is >= InputAction.BuildRotateLeft and <= InputAction.BuildApply;
 
     /// <summary>
     /// The engine's defaults (the game's keys where it has them, docs/game/ui-input.md, Meitou's otherwise).
@@ -482,6 +622,15 @@ public sealed class InputBindings
         for (int i = 0; i < 10; i++) Set(InputAction.SelectMember1 + i, i < 9 ? Key.D1 + i : Key.D0);   // select_0..8 on 1..9, select_9 on 0
         Set(InputAction.StopMovement, Key.R);
         Set(InputAction.ToggleBuild, Key.B);
+        // The build map (docs/game/ui-input.md section 4): its own key map, so its keys may also be the general map's (, . [ ] Space).
+        Set(InputAction.BuildRotateLeft, Key.Comma);
+        Set(InputAction.BuildRotateRight, Key.Period);
+        Set(InputAction.BuildMoveUp, Key.Equal);
+        Set(InputAction.BuildMoveDown, Key.Minus);
+        Set(InputAction.BuildTiltIncrease, Key.RightBracket, Key.KeypadAdd);
+        Set(InputAction.BuildTiltDecrease, Key.LeftBracket, Key.KeypadSubtract);
+        Set(InputAction.BuildUndo, Key.Backspace);
+        Set(InputAction.BuildApply, Key.Space);
         // The orders on the numpad as in the game; Medic and Rescue keep Meitou's H and J besides, Jobs and Prospect are unbound in the game too.
         Set(InputAction.ToggleBlock, Key.Keypad0);
         Set(InputAction.ToggleHold, Key.Keypad1);
@@ -584,25 +733,45 @@ public sealed class InputBindings
     /// Every action's bindings as strings in the form <see cref="Apply"/> reads.
     /// </summary>
     Dictionary<string, string> ToStrings() =>
-        _map.ToDictionary(p => p.Key.ToString(), p => string.Join(",", p.Value.Select(b => b.ToString())));
+        _map
+            .Where(p => p.Key < FirstModAction)
+            .ToDictionary(p => p.Key.ToString(), p => Text(p.Value));
+
+    /// <summary>
+    /// Bindings as one string in the form <see cref="Apply"/> reads.
+    /// </summary>
+    internal static string Text(IEnumerable<Binding> bindings) => string.Join(",", bindings.Select(b => b.ToString()));
 
     /// <summary>
     /// Resolves one tick's input into actions.
     /// </summary>
     public ActionState Resolve(TickInput input)
     {
-        var state = new ActionState(input);
-        foreach (var action in Enum.GetValues<InputAction>())
+        var state = new ActionState(input, _mod?.Actions.Count ?? 0);
+        foreach (var action in Enum.GetValues<InputAction>()) ResolveOne(state, input, action);
+        if (_mod is null)
         {
-            bool held = false, pressed = false, released = false;
-            foreach (var b in Get(action))
-            {
-                held |= input.IsDown(b);
-                pressed |= input.WasPressed(b);
-                released |= input.WasReleased(b);
-            }
-            state.Set(action, held, pressed, released && !held);
+            return state;
+        }
+
+        {
+            foreach (var action in _mod.Actions) ResolveOne(state, input, action.Action);
         }
         return state;
+    }
+
+    /// <summary>
+    /// One action's held, pressed and released from its bindings.
+    /// </summary>
+    void ResolveOne(ActionState state, TickInput input, InputAction action)
+    {
+        bool held = false, pressed = false, released = false;
+        foreach (var b in Get(action))
+        {
+            held |= input.IsDown(b);
+            pressed |= input.WasPressed(b);
+            released |= input.WasReleased(b);
+        }
+        state.Set(action, held, pressed, released && !held);
     }
 }

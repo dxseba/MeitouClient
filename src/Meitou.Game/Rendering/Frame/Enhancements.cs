@@ -380,6 +380,11 @@ public static class Enhancements
             "the game draws a bolt in flight as its mesh alone, stretched a little with its speed, which is hard to follow at a distance; "
                 + "Meitou draws a faint streak behind it that grows out of the crossbow and shrinks into where the bolt stops; "
                 + "drawn with the particles, so none with --no-particles (docs/game/combat.md \"Bolt visuals\")"),
+        new("dustlight", "Lit dust", "unlit", "lit",
+            () => post.LitDust, v => post.LitDust = v,
+            "the game draws the dust and the spray a running foot throws up as glowing sprites, as bright by night as by day and in shade as in "
+                + "the sun; Meitou lights them as the ground is lit: the sun through its shadows, the sky, the lamps, the same as the game's by day "
+                + "(docs/render-post.md \"Lit dust\")"),
         new("fog", "Fog", "hard-edged, flat", "soft, lit",
             () => post.MeitouFog, v => post.MeitouFog = v,
             "the game's dust and smoke sprites cut straight into the ground and walls they cross (all but its mist and steam, which fade; Faithful "
@@ -429,6 +434,13 @@ public static class Enhancements
                 + "lets a weapon take the blood of what it wounds on its blade (wet and bright, then dried and dark, then flaking off; washed away "
                 + "in water and rain) and lets worn armour and clothing show the splatter of the body part under them, as the skin does "
                 + "(docs/game/blood-decals.md \"On weapons and gear\")"),
+        new("sway", "Gear sway", "glued", "swings",
+            () => Characters.GearSway.Enabled, v => Characters.GearSway.Enabled = v,
+            "the game fixes a sheathed weapon, its scabbard and a crossbow on the back to their bone, and a backpack to the spine, so they move as "
+                + "one block with the hip or the back; Meitou lets them swing a little behind the body's motion (a damped spring on each hanging "
+                + "point, stepped in game time: at most 22 degrees for a weapon, 7 for a backpack, which never swings into the back and whose "
+                + "straps stay on the chest) for people near enough to see it (docs/character-renderer.md \"Gear sway\")",
+            optional: true),
         new("grazesun", "Soft grazing sun", "off", "bumps fade",
             () => Sky.GrazingSun.Enabled, v => Sky.GrazingSun.Enabled = v,
             "the game lights every bump of a normal map as if nothing stood between it and the sun, so ground and walls the sun only grazes break "
@@ -439,6 +451,16 @@ public static class Enhancements
             "the game keeps everything in focus; Meitou blurs what is away from the focus as a real lens does, by the field of view, the f-number "
                 + "and the distance, for the free and cinematic cameras (the cinema's keys can set focus and aperture; docs/render-post.md \"Depth "
                 + "of field\")",
+            optional: true),
+        new("vignette", WorldFrame.VignetteSwitch, "off", "darker corners",
+            () => post.Vignette, v => post.Vignette = v,
+            "the game's picture is as bright at its corners as at its centre; Meitou can darken it towards the corners as a camera lens does, by the "
+                + "Vignette strength, in every camera (photo mode's Look tab is this same switch; docs/render-post.md \"Vignette and film grain\")",
+            optional: true),
+        new("grain", WorldFrame.FilmGrainSwitch, "off", "grain",
+            () => post.FilmGrain, v => post.FilmGrain = v,
+            "the game's picture is clean; Meitou can lay a fine film grain over it, new each frame and strongest in the mid-tones, by the Film grain "
+                + "strength, in every camera (photo mode's Look tab is this same switch; docs/render-post.md \"Vignette and film grain\")",
             optional: true),
         new("gtao", "Ground-truth occlusion", "SSAO", "GTAO",
             () => post.Gtao, v => post.Gtao = v,
@@ -482,6 +504,11 @@ public static class Enhancements
             "the game draws its sake and rum bottles solid; Meitou draws them as glass: the scene behind bent and tinted through the walls, "
                 + "reflections of the sun, sky and lamps brighter towards the edges, the drink inside up to its level, the neck or cork solid "
                 + "(docs/render-objects.md \"See-through items\")"),
+        new("exposure", "Adaptive exposure", "the game's band", "follows the shade",
+            () => post.AdaptiveExposure, v => post.AdaptiveExposure = v,
+            "the game's exposure follows the picture's brightness only down to a daytime minimum, so a canyon or a street in a cliff's shadow at "
+                + "noon stays dark; Meitou lets it adapt by day to halfway between the game's day and night minimums (up to 1.7 times brighter in "
+                + "deep shade); nights, open sunny views and rooms are as before (docs/render-post.md \"Adaptive exposure\")"),
     ];
 
     #endregion

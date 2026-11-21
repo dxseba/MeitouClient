@@ -33,6 +33,11 @@ sealed class BuildingSelection(PlayerInterface player)
     internal UseableLines Useable { get; } = new(player);
 
     /// <summary>
+    /// The code mods' buttons on the panel.
+    /// </summary>
+    internal BuildingModButtons ModButtons { get; } = new(player);
+
+    /// <summary>
     /// A left click on the ground ends the building's selection (Advanced settings "Click away deselects"); false: it stays, as in the game.
     /// </summary>
     public bool DeselectBuildings { get; set; } = true;
@@ -124,7 +129,7 @@ sealed class BuildingSelection(PlayerInterface player)
         if (player.Ray(pixel) is not { } ray) return null;
         if (PickFurnitureAt(pixel) is { } furniture) return furniture;
 
-        float limit = player.Picking.GroundHit(ray.Origin, ray.Direction) is { } groundPoint ? Vector3.Distance(ray.Origin, groundPoint) : 6000;
+        var (limit, terrain) = player.Picking.PickReach(ray.Origin, ray.Direction);
         float bestT = limit;
         SelectedBuilding? best = null;
         var site = player.Build.PickSiteAt(pixel);
@@ -145,7 +150,7 @@ sealed class BuildingSelection(PlayerInterface player)
                 float y = b.WorldY ?? player.Ground(b.Position.X, b.Position.Z) + b.Position.Y;
                 var hull = candidate.Footprint.Place(b.Position, b.Rotation);
                 float? hit = candidate.Plot
-                    ? WorldPicking.PlotT(ray, hull, limit < 6000 ? limit : null)
+                    ? WorldPicking.PlotT(ray, hull, terrain)
                     : player.Picking.BuildingRayT(ray, hull, candidate.Footprint.YMin, candidate.Footprint.YMax,
                         b.BuildingId, b.Position, y, b.Rotation);
                 if (hit is not { } t || t >= bestT) continue;
@@ -214,7 +219,7 @@ sealed class BuildingSelection(PlayerInterface player)
     {
         if (player.Ray(pixel) is not { } ray || player.Build.Services is not { } host) return null;
 
-        float limit = player.Picking.GroundHit(ray.Origin, ray.Direction) is { } ground ? Vector3.Distance(ray.Origin, ground) : 6000;
+        float limit = player.Picking.PickReach(ray.Origin, ray.Direction).Reach;
         (Data.World.TownPiece Piece, Data.World.BuildingPlacement House, float T)? best = null;
         foreach (var candidate in host.Placement.StaticAlong(ray.Origin, ray.Direction, limit))
         {
@@ -434,7 +439,7 @@ sealed class BuildingSelection(PlayerInterface player)
         }
         else
         {
-            AddWorkLines(focus, detail, own, mine, stats, extended, ref status, ref bad);
+            AddWorkLines(focus, detail, mine, stats, extended, ref status, ref bad);
         }
 
         AddPublicLines(focus, site, detail, mine, playerSite, stats);
@@ -453,7 +458,7 @@ sealed class BuildingSelection(PlayerInterface player)
         var inspected = player.Session.CurrentSnapshot.InspectedRichness is { } ir && ir.Instance == focus.Instance
             ? ir : (Simulation.Production.RichnessView?)null;
         if ((focus.Town ?? site?.TownName ?? detail?.Bed?.Town ?? inspected?.TownName) is { Length: > 0 } town) state.Add(new("Town:", town));
-        Useable.AddEmptyLine(focus, site?.Record ?? focus.Record, state);
+        Useable.AddEmptyLine(focus, site?.Record ?? focus.Record, detail, state);
         Useable.AddStateLine(site?.Record ?? focus.Record, state);
         if (own && player.Session.CurrentSnapshot.InspectedTurret is { } turret && turret.Instance == focus.Instance)
             AddHeightLines(turret, state);
@@ -497,10 +502,10 @@ sealed class BuildingSelection(PlayerInterface player)
     }
 
     /// <summary>
-    /// The stats lines of what the building does: its first door, a rock's richness, a machine's lines (or an unmined rock's), which may change
-    /// the status word.
+    /// The stats lines of what the building does: its first door, a rock's richness, a machine's lines (<see cref="PanelMachine"/>, or an unmined
+    /// rock's), which may change the status word.
     /// </summary>
-    void AddWorkLines(SelectedBuilding focus, Simulation.Locks.BuildingDetail? detail, bool own, bool mine, List<PlayerInterface.HudLine> stats,
+    void AddWorkLines(SelectedBuilding focus, Simulation.Locks.BuildingDetail? detail, bool mine, List<PlayerInterface.HudLine> stats,
         List<PlayerInterface.HudLine> extended, ref string status, ref bool bad)
     {
         if (FirstDoor(focus) is { } door)
@@ -518,15 +523,17 @@ sealed class BuildingSelection(PlayerInterface player)
 
         var rich = player.Session.CurrentSnapshot.InspectedRichness is { } r && r.Instance == focus.Instance
             ? r : (Simulation.Production.RichnessView?)null;
-        if (rich is { } richness && player.Production.Machine(focus.SiteId)?.Farm is null)
-            ProductionWindows.AddRichnessLine(richness, stats);
+        var panelMachine = PanelMachine(focus);
+        if (rich is { } richness && panelMachine?.Farm is null) ProductionWindows.AddRichnessLine(richness, stats);
 
-        bool bedLines = detail?.Bed is not null && !Useable.IsSkeletonBed(focus.Record ?? player.Production.Machine(focus.SiteId)?.Record);
-        if (!bedLines && own && player.Production.Machine(focus.SiteId) is { } machine)
+        bool bedLines = detail?.Bed is not null && !Useable.IsSkeletonBed(focus.Record ?? panelMachine?.Record);
+        if (!bedLines && panelMachine is { } machine)
         {
             Simulation.Combat.TurretPanelView? turretPanel =
                 player.Session.CurrentSnapshot.InspectedTurret is { } tp && tp.Instance == focus.Instance ? tp : null;
-            player.Production.AddMachineLines(machine, stats, extended, ref status, ref bad, rich, turretPanel, mine);
+            // The buttons act on the selection's site (SiteAction): a town machine selected without one shows its lines alone.
+            bool buttons = mine && focus.SiteId is not null;
+            player.Production.AddMachineLines(machine, stats, extended, ref status, ref bad, rich, turretPanel, buttons);
         }
         else if (rich is { Efficiency: { } e } unmined)
         {
@@ -751,6 +758,26 @@ sealed class BuildingSelection(PlayerInterface player)
             : null;
 
     /// <summary>
+    /// The machine the selected building's panels show: its site's (the player's, a mined rock's, a town machine's selected by its Loot order),
+    /// else a town's farm or producer that a left click selected (its <c>townwork:</c> machine): the original's farm and production sections
+    /// (slot 40) test no owner. Null for none. The machine's window still opens only by the Loot order.
+    /// </summary>
+    internal Simulation.Production.MachineSnapshot? PanelMachine(SelectedBuilding focus) =>
+        player.Production.Machine(focus.SiteId) ?? TownMachine(focus);
+
+    /// <summary>
+    /// The machine of a town building or layout object selected without a site, when it is a farm or has an output (a well, a mine, a refinery);
+    /// null for any other, whose lines stay the UseableStuff ones (<see cref="UseableLines.AddStatsLines"/>).
+    /// </summary>
+    Simulation.Production.MachineSnapshot? TownMachine(SelectedBuilding focus)
+    {
+        if (focus.SiteId is not null) return null;
+
+        var machine = player.Production.Machine(Simulation.Production.ProductionSystem.TownWorkPrefix + focus.Instance);
+        return machine is { Farm: not null } or { Output: not null } ? machine : null;
+    }
+
+    /// <summary>
     /// The medical panel's rows of a selected building (its section 4, docs/game/ui-screens.md "Selected building"): the first door's <c>Door
     /// Condition</c>, then <c>Building Condition</c> (<c>Condition</c> without doors), each the construction progress as the number and its fraction
     /// of the target as the bar, then while unfinished a row per material, delivered over required. Meitou models no building damage, so a finished
@@ -778,7 +805,7 @@ sealed class BuildingSelection(PlayerInterface player)
         var progressValue = ((int)progress).ToString(CultureInfo.InvariantCulture);
         rows.Add(Bar(Loc.Tr(door is null ? "Condition" : "Building Condition"), fraction, progressValue, tip));
 
-        if (complete && player.Production.Machine(focus.SiteId)?.Farm is { } farm) FarmPanel.AddRows(farm, rows);
+        if (complete && PanelMachine(focus)?.Farm is { } farm) FarmPanel.AddRows(farm, rows);
 
         // A wind generator's rows (WindGeneratorBuilding::getGUIPower section 4): Wind, its share as a whole percent and the bar; Power Output,
         // the output as an int over the rated.

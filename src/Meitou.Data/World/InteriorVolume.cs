@@ -43,6 +43,18 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     public IReadOnlyList<string> MaskMeshes { get; init; } = [];
 
     /// <summary>
+    /// An <c>interior terrain</c> building with a mask mesh reaching under the terrain it stands in (the Ash Dome Ruins): its mask holds the ground
+    /// the building is walked on (docs/render-interior-cut.md, "Interior terrain").
+    /// </summary>
+    public bool MaskHoldsGround { get; init; }
+
+    /// <summary>
+    /// A building with a mask mesh whose <c>interior</c> list draws nothing, so its rooms' floors, ramps and inner walls are parts of its shell (the
+    /// Ash Dome, the Ash Dome Ruin, the Ancient Factory; <b>Verified</b>, a scan of the install's merged records: the only three).
+    /// </summary>
+    public bool ShellHoldsRooms { get; init; }
+
+    /// <summary>
     /// The building's node (position, rotation, <c>scale</c>) the mask meshes are placed with.
     /// </summary>
     public Matrix4x4 Node { get; init; } = Matrix4x4.Identity;
@@ -358,9 +370,10 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     /// The volume of a building placed at <paramref name="position"/> / <paramref name="rotation"/>, or null when it has no <c>interior mask</c> part
     /// with a readable collision file, or is a gateway and <paramref name="gateways"/> is false (a gateway is walked under, not entered: no room, but
     /// its hull still answers the audio ray, <see cref="IsGateway"/>). <paramref name="collision"/> loads a record's collision path (shared, cached).
+    /// <paramref name="ground"/> is the terrain's height at the building, when known: what <see cref="MaskHoldsGround"/> is told by.
     /// </summary>
     public static InteriorVolume? For(GameDatabase db, GameRecord building, string placementId, Vector3 position, Quaternion rotation,
-        InteriorCollisions collision, bool gateways = false)
+        InteriorCollisions collision, bool gateways = false, float? ground = null)
     {
         bool gateway = building.GetBool("is gateway");
         if (gateway && !gateways) return null;
@@ -389,6 +402,10 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
         if (points.Count < 3) return null;
         var hull = ConvexHull2(points);
         if (hull.Length < 3) return null;
+
+        // The terrain is such a building's floor (docs/render-interior-cut.md, "Interior terrain"): a mask holding it cuts the ground walked on.
+        bool holdsGround = ground is { } level && building.GetBool("interior terrain") && meshes.Any(m => ReachesUnder(collision, m, node, level));
+
         return new InteriorVolume(placementId, hull, yMin, yMax)
         {
             Ambience = building.GetInt("interior ambience"),
@@ -396,6 +413,8 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
             Cavernous = building.GetBool("cavernous"),
             IsGateway = gateway,
             MaskMeshes = meshes,
+            MaskHoldsGround = holdsGround,
+            ShellHoldsRooms = meshes.Count > 0 && !building.GetReferences("interior").Any(r => DrawsMesh(db, r.TargetStringId, 0)),
             Node = node,
             _maskCorners = [.. corners],
             _pieces = [.. pieces],
@@ -403,6 +422,28 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
             _roofCover = new Lazy<RoofCover>(() => RoofCover.For(db, building, placementId, position, rotation, collision)),
             _drawnMask = new Lazy<Vector3[]>(() => [.. meshes.SelectMany(m => collision.RenderTriangles(m)).Select(v => Vector3.Transform(v, node))]),
         };
+    }
+
+    /// <summary>
+    /// Whether the part <paramref name="partId"/> or one of its <c>parts</c> (a few levels down) names a render mesh.
+    /// </summary>
+    static bool DrawsMesh(GameDatabase db, string partId, int depth)
+    {
+        if (db.Find(partId) is not { } part) return false;
+        if (part.GetPath("phs or mesh").Contains(".mesh", StringComparison.OrdinalIgnoreCase)) return true;
+        return depth < 3 && part.GetReferences("parts").Any(r => DrawsMesh(db, r.TargetStringId, depth + 1));
+    }
+
+    /// <summary>
+    /// Whether the mask mesh at <paramref name="recordPath"/>, placed with <paramref name="node"/>, reaches under the height
+    /// <paramref name="level"/>: by its lowest placed vertex. False for a missing or unreadable mesh.
+    /// </summary>
+    static bool ReachesUnder(InteriorCollisions collision, string recordPath, Matrix4x4 node, float level)
+    {
+        foreach (var v in collision.RenderTriangles(recordPath))
+            if (Vector3.Transform(v, node).Y < level) return true;
+
+        return false;
     }
 
     /// <summary>
@@ -502,6 +543,17 @@ public sealed partial class FloorSurfaces
     }
 
     /// <summary>
+    /// The surfaces of a map feature's collision (<c>features.dat</c>: a rock, a cliff block; collision group 14) placed with <paramref name="node"/>:
+    /// one floor-0 part, its convex shapes' flat undersides left out as a building part's are.
+    /// </summary>
+    public static FloorSurfaces ForFeature(CollisionMesh mesh, Matrix4x4 node)
+    {
+        var result = new FloorSurfaces();
+        result.AddMesh(mesh, node, 0, stairs: false, roof: false);
+        return result;
+    }
+
+    /// <summary>
     /// How far (units, unscaled) the collision of <paramref name="building"/>'s floor parts reaches from its origin: the farthest vertex of the
     /// parts <see cref="For"/> reads, in building space; 0 without any. A placement's floors lie within this times its scale of its position.
     /// </summary>
@@ -536,11 +588,17 @@ public sealed partial class FloorSurfaces
     /// <summary>
     /// Adds a part's collision, placed with <paramref name="node"/>: its floor (or unwalkable roof) triangles and its flat undersides.
     /// </summary>
-    void AddPart(GameRecord part, CollisionMesh mesh, Matrix4x4 node)
+    void AddPart(GameRecord part, CollisionMesh mesh, Matrix4x4 node) =>
+        AddMesh(mesh, node, Math.Clamp(part.GetInt("building floor"), 0, 3), part.GetBool("is stairs"), part.GetBool("is unwalkable roof"));
+
+    /// <summary>
+    /// Adds a collision mesh placed with <paramref name="node"/> as one part on <paramref name="floor"/>: its floor (or unwalkable roof) triangles
+    /// and its flat undersides.
+    /// </summary>
+    void AddMesh(CollisionMesh mesh, Matrix4x4 node, int floor, bool stairs, bool roof)
     {
         // A solid's flat underside (outward and facing down: a slab's or steps' bottom) is no floor; a wall hit dropped onto it put the goal
         // under the building.
-        bool roof = part.GetBool("is unwalkable roof");
         var kept = new List<Vector3>(mesh.Indices.Length);
         var under = new List<Vector3>();
         for (int t = 0; t + 2 < mesh.Indices.Length; t += 3)
@@ -556,8 +614,7 @@ public sealed partial class FloorSurfaces
             list.Add(c);
         }
 
-        int floor = Math.Clamp(part.GetInt("building floor"), 0, 3);
-        if (Of(floor, part.GetBool("is stairs"), kept) is { } surface) (roof ? _roofs : _surfaces).Add(surface);
+        if (Of(floor, stairs, kept) is { } surface) (roof ? _roofs : _surfaces).Add(surface);
         if (Of(floor, false, under) is { } bottom) _undersides.Add(bottom);
     }
 

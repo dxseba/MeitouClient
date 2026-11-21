@@ -116,7 +116,25 @@ static class WorldSurvey
         var roads = world.Roads().ToList();
         Console.WriteLine($"  roads: {roads.Count} segments, {roads.Sum(r => r.Points.Count)} points, "
             + $"width {roads.Min(r => r.Width):0.#}..{roads.Max(r => r.Width):0.#}");
+        SurveyRoadPoints(world, roads);
         return problems;
+    }
+
+    /// <summary>
+    /// How the roads' points relate to their instances: roads of over 16 points (their ids sort as text out of order), roads whose points stop
+    /// before their instances do, and where the last-point mark (a rotation x of 1 or more) sits.
+    /// </summary>
+    static void SurveyRoadPoints(WorldLevelData world, List<RoadPath> roads)
+    {
+        var records = world.Level.OfType(FcsRecordType.Road).ToDictionary(r => r.StringId);
+        static string LastId(GameRecord r) => (r.Instances.Count - 1).ToString("x");
+
+        int shorter = roads.Count(r => r.Points.Count < records[r.StringId].Instances.Values.Count(i => !i.IsCleared));
+        int markedLast = records.Values.Count(r => r.Instances.TryGetValue(LastId(r), out var last) && last.Rotation.X >= 1);
+        int markedOther = records.Values.Sum(r => r.Instances.Count(i => i.Value.Rotation.X >= 1 && i.Key != LastId(r)));
+
+        Console.WriteLine($"  road points: {roads.Count(r => r.Points.Count > 16)} roads of over 16; {shorter} roads end before their instances; "
+            + $"last-point mark on the highest id of {markedLast} roads, on {markedOther} other points");
     }
 
     /// <summary>
@@ -278,7 +296,7 @@ static class WorldSurvey
         var all = file.All().ToList();
         int inZone = all.Count(a => WorldLayout.ZoneOf(a.Feature.Position.X, a.Feature.Position.Z) == a.Zone);
         int yaw = all.Count(a => a.Feature.Rotation.X == 0 && a.Feature.Rotation.Z == 0);
-        Console.WriteLine($"Map features {MapFeatureFile.RelativePath}: {file.Zones.Count} zone slots, "
+        Console.WriteLine($"Map features {MapFeatureFile.PathOf(install)}: {file.Zones.Count} zone slots, "
             + $"{file.Zones.Count(z => z.Count > 0)} used, {all.Count} features");
         Console.WriteLine($"  inside their slot's zone {inZone}; pure yaw rotations (read w first) {yaw}; "
             + $"unit quaternions {all.Count(a => Math.Abs(a.Feature.Rotation.Length() - 1) < 1e-3)}");

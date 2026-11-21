@@ -5,15 +5,24 @@ using Meitou.Simulation.Player;
 namespace Meitou.Simulation.Production;
 
 /// <summary>
-/// A recipe slot as the host shows it: the item, how many are held of how many, and the level (input) or progress (output) 0..1.
+/// A recipe slot as the host shows it: the item, how many are held of how many, the level (input) or progress (output) 0..1, the section's size in
+/// cells, whether it is a bench section the bound craft takes nothing from (<see cref="InputSlot.Idle"/>) and the item's footprint (0: the section's).
 /// </summary>
-public readonly record struct MachineSlotView(string Item, string Name, int Count, int Capacity, float Fill, int Width = 1, int Height = 1);
+public readonly record struct MachineSlotView(string Item, string Name, int Count, int Capacity, float Fill, int Width = 1, int Height = 1,
+    bool Idle = false, int ItemWidth = 0, int ItemHeight = 0)
+{
+    /// <summary>
+    /// The held stack as the item it comes out as (null while empty): what its cell's item tooltip lists, as an inventory item's.
+    /// </summary>
+    public InventoryItemView? Held { get; init; }
+}
 
 /// <summary>
-/// A farm as the host shows it (docs/simulation.md "Production").
+/// A farm as the host shows it (docs/simulation.md "Production"); <c>HarvestProgress</c> is the plant being harvested, 0..1 (the building window's
+/// output bar).
 /// </summary>
 public readonly record struct FarmView(float Growth, float Death, int Harvested, int Plants, FarmStatus Status, float Fertility, float CropMatch,
-    float Ripeness)
+    float HarvestProgress)
 {
     /// <summary>
     /// Each plant's growth (a copy; -10 harvested): what its crop mesh is drawn at.
@@ -332,21 +341,50 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
     };
 
     /// <summary>
-    /// The host's view of a machine: its slots with their items, its storage, farm, crafting, power and efficiency.
+    /// An input section's view: a bench whose sections start empty has them all <see cref="CraftBench.InputWidth"/> x
+    /// <see cref="CraftBench.InputHeight"/>, any other section is its item's footprint.
+    /// </summary>
+    static MachineSlotView InputView(Machine m, InputSlot i, ItemFactory items)
+    {
+        var info = items.Info(i.Item);
+        int itemWidth = info?.Width ?? 1, itemHeight = info?.Height ?? 1;
+        var (width, height) = m.Data.Craft is { PresetInputs: false } bench ? (bench.InputWidth, bench.InputHeight) : (itemWidth, itemHeight);
+
+        return new MachineSlotView(i.Item, info?.Name ?? i.Item, i.Count, i.Recipe.Capacity, Math.Clamp(i.Level, 0, 1), width, height, i.Idle,
+            itemWidth, itemHeight) { Held = HeldView(i.Item, i.Count, items) };
+    }
+
+    /// <summary>
+    /// The output section's view, its item's footprint.
+    /// </summary>
+    static MachineSlotView OutputView(OutputSlot o, ItemFactory items)
+    {
+        var info = items.Info(o.Recipe.Item);
+
+        return new MachineSlotView(o.Recipe.Item, info?.Name ?? o.Recipe.Item, o.Count, o.Recipe.Capacity, Math.Clamp(o.Progress, 0, 1),
+            info?.Width ?? 1, info?.Height ?? 1) { Held = HeldView(o.Recipe.Item, o.Count, items) };
+    }
+
+    /// <summary>
+    /// A slot's stack made as the item a take or a drop hands out (<see cref="ItemFactory.Create"/>); null while empty.
+    /// </summary>
+    static InventoryItemView? HeldView(string record, int count, ItemFactory items) =>
+        count > 0 && items.Create(record, count) is { } item ? InventoryItemView.Of(0, item) : null;
+
+    /// <summary>
+    /// The host's view of a machine: its slots with their items, its storage, farm, crafting, power and efficiency. Every machine state read here (or in the helpers it calls) is also recorded by
+    /// <see cref="MachineViewCache"/>, which reuses the view while none changed; keep them in step.
     /// </summary>
     internal static MachineSnapshot Of(Machine m, ItemFactory items)
     {
         string Name(string record) => items.Info(record)?.Name ?? record;
-        var inputs = m.Inputs.Select(i => new MachineSlotView(i.Item, Name(i.Item), i.Count, i.Recipe.Capacity, Math.Clamp(i.Level, 0, 1),
-            items.Info(i.Item)?.Width ?? 1, items.Info(i.Item)?.Height ?? 1)).ToArray();
-        MachineSlotView? output = m.Output is { } o
-            ? new MachineSlotView(o.Recipe.Item, Name(o.Recipe.Item), o.Count, o.Recipe.Capacity, Math.Clamp(o.Progress, 0, 1),
-                items.Info(o.Recipe.Item)?.Width ?? 1, items.Info(o.Recipe.Item)?.Height ?? 1)
-            : null;
+        var inputs = m.Inputs.Select(i => InputView(m, i, items)).ToArray();
+        MachineSlotView? output = m.Output is { } o ? OutputView(o, items) : null;
         InventoryView? storage = m.Storage is { } s ? new InventoryView(s.Width, s.Height, 0, 0,
             Array.AsReadOnly(s.Items.Select((item, index) => InventoryItemView.Of(index, item) with { Section = "main" }).ToArray())) : null;
         FarmView? farm = m.Farm is { } f && m.Data.Farm is { } fd
-            ? new FarmView(f.Growth, f.Death, f.Harvested, f.Plants.Length, f.Status, m.Yield, m.CropMatch, ProductionSystem.Ripeness(f))
+            ? new FarmView(f.Growth, f.Death, f.Harvested, f.Plants.Length, f.Status, m.Yield, m.CropMatch,
+                Math.Clamp(f.HarvestProgress, 0, 1))
             {
                 PlantGrowth = [.. f.Plants],
                 Data = fd,

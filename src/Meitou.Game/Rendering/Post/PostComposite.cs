@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Meitou.Data.Ogre;
 using Meitou.Data.Textures;
 using Meitou.Game.Rendering.Frame;
@@ -22,10 +23,6 @@ sealed class PostComposite : IDisposable
     /// The luminance measure's side in pixels, and its mip count (256 down to 1).
     /// </summary>
     const int LuminanceSize = 256, LuminanceLevels = 9;
-    /// <summary>
-    /// The game's adaptation rate (`AUTOEXP_ADAPTATION_RATE`, 1 / s), as <see cref="PostProcess"/>'s.
-    /// </summary>
-    const float AdaptationRate = 0.5f;
 
     /// <summary>
     /// The device the passes run on.
@@ -46,9 +43,13 @@ sealed class PostComposite : IDisposable
     /// </summary>
     readonly UniformHandle _exposure, _useAo, _dither, _auto, _tone, _toneMix, _grade, _saturation, _contrast, _night, _balance, _sceneSize;
     /// <summary>
-    /// The luminance program's cell size, and the adaptation program's level, blend and band.
+    /// The composite program's look uniforms: photo mode's filter, the vignette and the film grain (<see cref="CompositeLook"/>).
     /// </summary>
-    readonly UniformHandle _lumCell, _adaptLevel, _adaptBlend, _adaptBand;
+    readonly UniformHandle _filterR, _filterG, _filterB, _filterContrast, _vignette, _grain;
+    /// <summary>
+    /// The luminance program's cell size, and the adaptation program's level, blend, band and Adaptive exposure's scale and floor.
+    /// </summary>
+    readonly UniformHandle _lumCell, _adaptLevel, _adaptBlend, _adaptBand, _adaptShade;
     /// <summary>
     /// The samplers: the composite's scene, occlusion and adapted luminance, the luminance pass's scene, the adaptation pass's luminance and last
     /// value.
@@ -79,6 +80,24 @@ sealed class PostComposite : IDisposable
     /// The light shafts' scatter pass.
     /// </summary>
     readonly ShaftScatterPass _shaftScatterP;
+    /// <summary>
+    /// The sky's ambient radiance for the light shafts' scan kernel (<see cref="LightShaftShaders.ScanSky"/>).
+    /// </summary>
+    readonly LegacyProgram _shaftSkyP;
+    /// <summary>
+    /// The shafts' integrate and scatter as one compute kernel (<see cref="LightShaftShaders.ScanImages"/>, as the Vulkan chain's <c>shafts-scan</c>):
+    /// each cell column walks its slices once, where the fragment passes looped from the eye to every slice in every cell (slices squared reads).
+    /// <c>MEITOU_METAL_SHAFT_SCAN=0</c>: the fragment passes.
+    /// </summary>
+    static readonly bool ShaftScan = Environment.GetEnvironmentVariable("MEITOU_METAL_SHAFT_SCAN") != "0";
+    /// <summary>
+    /// The scan kernel's program and pipeline, made the first time it runs.
+    /// </summary>
+    (GpuProgram Program, GpuComputePipeline Pipeline)? _shaftScan;
+    /// <summary>
+    /// The sky's ambient radiance from above for the scan kernel (1 × 1), made with the kernel.
+    /// </summary>
+    GpuTexture? _shaftSky;
     /// <summary>
     /// The merged scene layers at half the render size (fog volumes, and the shafts' apply while fog is in view).
     /// </summary>
@@ -185,8 +204,11 @@ sealed class PostComposite : IDisposable
     /// <summary>
     /// What <see cref="ApplyScene"/> and <see cref="Draw"/> need from the frame's camera.
     /// </summary>
+    /// <remarks>
+    /// <c>HaveScene</c>: a scene was drawn this frame (the vignette and the grain are not for a frame that is none).
+    /// </remarks>
     public readonly record struct SceneInputs(Vector3 Eye, Matrix4x4 View, float FieldOfView, float Aspect, float Near, float Far,
-        bool CharactersDrawn = true, float? WaterHeight = null, int SsaoTaps = PostOptions.DefaultSsaoTaps);
+        bool CharactersDrawn = true, float? WaterHeight = null, int SsaoTaps = PostOptions.DefaultSsaoTaps, bool HaveScene = true);
 
     /// <summary>
     /// Compiles the composite, exposure and fullscreen pass programs and looks up their uniforms.
@@ -209,6 +231,7 @@ sealed class PostComposite : IDisposable
         _shaftInjectP = new ShaftInjectPass(ctx, vertex);
         _shaftIntegrateP = new ShaftIntegratePass(ctx, vertex);
         _shaftScatterP = new ShaftScatterPass(ctx, vertex);
+        _shaftSkyP = LegacyProgram.Create(ctx, vertex, LightShaftShaders.ScanSky, "post shafts sky");
         _layersHalfP = new LayersHalfPass(ctx, vertex);
         _sceneLayersP = new SceneLayersPass(ctx, vertex);
         _ssaoMaskP = new SsaoMaskPass(ctx, vertex);
@@ -232,6 +255,9 @@ sealed class PostComposite : IDisposable
         _night = c.Uniform("uNight");
         _balance = c.Uniform("uBalance");
         _sceneSize = c.Uniform("uSceneSize");
+        (_filterR, _filterG, _filterB, _filterContrast) = (c.Uniform("uFilterR"), c.Uniform("uFilterG"), c.Uniform("uFilterB"),
+            c.Uniform("uFilterContrast"));
+        (_vignette, _grain) = (c.Uniform("uVignette"), c.Uniform("uGrain"));
         _sceneSlot = c.Sampler("uScene");
         _aoSlot = c.Sampler("uAo");
         _adaptedSlot = c.Sampler("uAdapted");
@@ -242,6 +268,7 @@ sealed class PostComposite : IDisposable
         _adaptLevel = _adapt.Uniform("uLevel");
         _adaptBlend = _adapt.Uniform("uBlend");
         _adaptBand = _adapt.Uniform("uBand");
+        _adaptShade = _adapt.Uniform("uShade");
         _sceneSampler = Sample(TextureMinFilter.Linear, TextureMagFilter.Linear);
         _luminanceSampler = Sample(TextureMinFilter.LinearMipmapNearest, TextureMagFilter.Linear);
         _plainSampler = Sample(TextureMinFilter.Linear, TextureMagFilter.Linear);
@@ -312,22 +339,23 @@ sealed class PostComposite : IDisposable
     public bool ShaftsPending => _pendingShafts is not null;
 
     /// <summary>
-    /// Draws the scene through exposure and the tone map, then FXAA and the heat haze, into <paramref name="target"/>.
+    /// Draws the scene through exposure and the tone map, then FXAA and the heat haze, into <paramref name="target"/>. <paramref name="shade"/>:
+    /// Adaptive exposure's scale and floor (<see cref="IWorldPostChain.ShadeExposure"/>).
     /// </summary>
     public void Draw(IGpuCommandList cmd, GpuTexture scene, GpuTexture depth, GpuTexture target, PostOptions o, (float Min, float Max) band,
-        in SceneInputs inputs, bool temporal = false)
+        in SceneInputs inputs, bool temporal = false, (float Scale, float Floor) shade = default)
     {
         EnsureDisplay(target.Desc.Width, target.Desc.Height);
         MakeTargets(o, temporal);
         RunLuminance(cmd, scene);
-        RunAdaptation(cmd, band);
+        RunAdaptation(cmd, band, shade, PostProcess.Rate(o));
 
         // The composite: auto exposure (0.55 / adapted), the game's tone map, grade and dither.
         bool smaaOn = o.Smaa && !temporal && _ldr is not null;
         bool fxaaOn = o.Fxaa && !smaaOn && !temporal && _ldr is not null;
         bool hazeOn = o.HeatHaze && HasHeatHaze && HeatHazeAmount * o.HeatHazeScale > 0 && _ldr is not null;
         var compositeTarget = fxaaOn || smaaOn || hazeOn ? _ldr! : target;
-        RunComposite(cmd, scene, o, compositeTarget);
+        RunComposite(cmd, scene, o, compositeTarget, inputs.HaveScene);
 
         GpuTexture picture = compositeTarget;
         if (fxaaOn) picture = RunFxaa(cmd, picture, target, hazeOn);
@@ -366,7 +394,7 @@ sealed class PostComposite : IDisposable
     /// The adaptation: this frame's mean against the last output, blended at the game's rate (instant for a still)
     /// inside the band. adaptB is the target written last frame; the swap below makes it adaptA.
     /// </summary>
-    void RunAdaptation(IGpuCommandList cmd, (float Min, float Max) band)
+    void RunAdaptation(IGpuCommandList cmd, (float Min, float Max) band, (float Scale, float Floor) shade, float rate)
     {
         var previous = _adaptB;
         (_adaptA, _adaptB) = (_adaptB, _adaptA);
@@ -376,21 +404,23 @@ sealed class PostComposite : IDisposable
 
         // Both history targets must be seeded before the smoothing starts: the second ping-pong target is read on
         // the next frame, and an undefined texture there makes the exposure alternate dark/bright as it converges.
-        float blend = !_adaptedValid || _adaptedFrames < 2 ? 1 : 1 - MathF.Exp(-dt * AdaptationRate);
+        float blend = !_adaptedValid || _adaptedFrames < 2 ? 1 : 1 - MathF.Exp(-dt * rate);
         _adapt.Bind(_lumSlot, _luminanceSampler with { View = _luminanceTarget!.View() });
         _adapt.Bind(_lastSlot, previous is { } last ? _plainSampler with { View = last.View() } : _ctx.Dummy(_adapt.SamplerInfo(_lastSlot)));
         _adapt.Set(_adaptLevel, MathF.Log2(LuminanceSize));
         _adapt.Set(_adaptBlend, blend);
         _adapt.Set(_adaptBand, band.Min, band.Max);
+        _adapt.Set(_adaptShade, shade.Scale, shade.Floor);
         Fullscreen(cmd, _adapt, _adaptB!, 1, 1);
         _adaptedValid = true;
         _adaptedFrames = Math.Min(_adaptedFrames + 1, 2);
     }
 
     /// <summary>
-    /// The composite pass of the scene into <paramref name="compositeTarget"/>: auto exposure, the tone map, grade and dither.
+    /// The composite pass of the scene into <paramref name="compositeTarget"/>: auto exposure, the tone map, grade, photo mode's filter, the vignette,
+    /// the film grain and dither.
     /// </summary>
-    void RunComposite(IGpuCommandList cmd, GpuTexture scene, PostOptions o, GpuTexture compositeTarget)
+    void RunComposite(IGpuCommandList cmd, GpuTexture scene, PostOptions o, GpuTexture compositeTarget, bool haveScene)
     {
         var p = _composite;
         p.Bind(_sceneSlot, _sceneSampler with { View = scene.View() });
@@ -408,7 +438,24 @@ sealed class PostComposite : IDisposable
         p.Set(_night, Math.Clamp(o.NightGradeAmount, 0, 1));
         p.Set(_balance, o.Balance);
         p.Set(_sceneSize, 0f, 0f);
+        SetLook(p, o, haveScene, compositeTarget);
         Fullscreen(cmd, _composite, compositeTarget, compositeTarget.Desc.Width, compositeTarget.Desc.Height);
+    }
+
+    /// <summary>
+    /// The composite's look (<see cref="CompositeLook"/>) for a picture the size of <paramref name="target"/>, as <see cref="PostProcess"/> sets it:
+    /// the vignette and the grain only in a whole view of a scene.
+    /// </summary>
+    void SetLook(LegacyProgram p, PostOptions o, bool haveScene, GpuTexture target)
+    {
+        bool whole = haveScene && ViewWindow.Current.IsWhole && !o.CameraEffectsHeld;
+        var look = CompositeLook.Of(o, whole, target.Desc.Width, target.Desc.Height, _ctx.Frame.Number);
+        p.Set(_filterR, look.FilterR);
+        p.Set(_filterG, look.FilterG);
+        p.Set(_filterB, look.FilterB);
+        p.Set(_filterContrast, look.FilterContrast);
+        p.Set(_vignette, look.Vignette);
+        p.Set(_grain, look.Grain);
     }
 
     /// <summary>
@@ -539,6 +586,17 @@ sealed class PostComposite : IDisposable
         inject.P.ApplyGlobals();
         Fullscreen(cmd, inject.P, _shaftInjected!, aw, ah);
 
+        // The apply is the merged scene layers' (ApplyScene); the frame's grid is what the fog's shadow reads.
+        _shaftFrame = (grid, range, tan, Math.Clamp(darkening, 0, 1));
+        _pendingShafts = new PendingShafts(air, new Vector4(Math.Clamp(darkening, 0, 1), PostOptions.ShaftSky, 0f, 0f), aw, ah);
+        if (ShaftScan)
+        {
+            var scan = ShaftScanParams.For(_ctx.Globals, grid, range, i.Eye, new Vector3(r.M11, r.M21, r.M31), UpAxis(r),
+                new Vector3(r.M13, r.M23, r.M33), tan, air.X > 0 ? air : default);
+            RunShaftScan(cmd, in scan, across, down, air.X > 0);
+            return;
+        }
+
         var integrate = _shaftIntegrateP;
         Common(integrate);
         integrate.P.Bind(integrate.Injected, _pointSampler with { View = _shaftInjected!.View() });
@@ -554,10 +612,46 @@ sealed class PostComposite : IDisposable
             scatter.P.ApplyGlobals();
             Fullscreen(cmd, scatter.P, _shaftScatter!, aw, ah);
         }
+    }
 
-        // The apply is the merged scene layers' (ApplyScene); the frame's grid is what the fog's shadow reads.
-        _shaftFrame = (grid, range, tan, Math.Clamp(darkening, 0, 1));
-        _pendingShafts = new PendingShafts(air, new Vector4(Math.Clamp(darkening, 0, 1), PostOptions.ShaftSky, 0f, 0f), aw, ah);
+    /// <summary>
+    /// The light atlas and, with the air layer on (<paramref name="withAir"/>), the scatter atlas from the injected one, in one dispatch over the
+    /// <paramref name="across"/> × <paramref name="down"/> cell columns.
+    /// </summary>
+    void RunShaftScan(IGpuCommandList cmd, in ShaftScanParams scan, int across, int down, bool withAir)
+    {
+        var (program, pipeline) = _shaftScan ??= MakeShaftScan();
+        if (withAir)
+        {
+            _shaftSkyP.ApplyGlobals();   // the sky's irradiance and the environment light's factor
+            Fullscreen(cmd, _shaftSkyP, _shaftSky!, 1, 1);
+        }
+
+        var data = _ctx.Frame.WriteConstants(MemoryMarshal.AsBytes(new ReadOnlySpan<ShaftScanParams>(in scan)), 256);
+        Span<GpuBinding> bindings =
+        [
+            GpuBinding.StorageImage(0, new SampledTexture(default, _shaftInjected!.View())),
+            GpuBinding.StorageImage(1, new SampledTexture(default, _shaftLight!.View())),
+            GpuBinding.StorageImage(2, new SampledTexture(default, _shaftScatter!.View())),
+            GpuBinding.StorageImage(3, new SampledTexture(default, _shaftSky!.View())),
+            GpuBinding.Uniform(4, new GpuBufferBinding(data.Handle, data.Offset, (ulong)Marshal.SizeOf<ShaftScanParams>())),
+        ];
+        cmd.Order();
+        cmd.BindPipeline(pipeline);
+        cmd.BindProgramResources(program, 0, bindings);
+        cmd.Dispatch((uint)((across + 7) / 8), (uint)((down + 7) / 8));
+        cmd.Order();
+    }
+
+    /// <summary>
+    /// The scan kernel's program and pipeline, and its sky target.
+    /// </summary>
+    (GpuProgram, GpuComputePipeline) MakeShaftScan()
+    {
+        _shaftSky = _ctx.CreateTexture(new TextureDesc(InternalFormat.Rgba32F, 1, 1, Use: TextureUse.ColourTarget | TextureUse.Sampled,
+            Name: "post shafts sky"));
+        var program = _ctx.Shaders.Compute(LightShaftShaders.ScanImages, "post shafts scan");
+        return (program, _ctx.Pipelines.Get(new ComputePipelineDesc(program, "post shafts scan")));
     }
 
     /// <summary>
@@ -571,10 +665,9 @@ sealed class PostComposite : IDisposable
         _shaftScatter?.Dispose();
         _shaftInjected = _ctx.CreateTexture(new TextureDesc(InternalFormat.Rgba16F, aw, ah,
             Use: TextureUse.ColourTarget | TextureUse.Sampled, Name: "post shafts injected"));
-        _shaftLight = _ctx.CreateTexture(new TextureDesc(InternalFormat.R32F, aw, ah,
-            Use: TextureUse.ColourTarget | TextureUse.Sampled, Name: "post shafts light"));
-        _shaftScatter = _ctx.CreateTexture(new TextureDesc(InternalFormat.Rgba16F, aw, ah,
-            Use: TextureUse.ColourTarget | TextureUse.Sampled, Name: "post shafts scatter"));
+        var written = TextureUse.ColourTarget | TextureUse.Sampled | (ShaftScan ? TextureUse.Storage : 0);
+        _shaftLight = _ctx.CreateTexture(new TextureDesc(InternalFormat.R32F, aw, ah, Use: written, Name: "post shafts light"));
+        _shaftScatter = _ctx.CreateTexture(new TextureDesc(InternalFormat.Rgba16F, aw, ah, Use: written, Name: "post shafts scatter"));
     }
 
     /// <summary>
@@ -1015,6 +1108,9 @@ sealed class PostComposite : IDisposable
         _shaftInjected?.Dispose();
         _shaftLight?.Dispose();
         _shaftScatter?.Dispose();
+        _shaftSky?.Dispose();
+        if (_shaftScan is { } scan) _ctx.Shaders.Dispose(scan.Program);
+        _shaftSkyP.Dispose();
         _flowTexture?.Dispose();
         _perturbationTexture?.Dispose();
         _composite.Dispose();

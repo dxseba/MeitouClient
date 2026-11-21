@@ -141,7 +141,8 @@ indices track creation/last update but their full uses unknown.
 **Verified** FcsSchemaTests.Record_type_names_match_fcs_def_against_base_game checks78 used types;
 record census/runner-up matching statistics are not additional format rules. fcs.def declares
 sections/field defaults/types/ranges/enums/category headings; undeclared saved keys may still be
-valid. Infer kind from schema declaration, not an item's display name. Schema details follow.
+valid, and the editor keeps them ([below](#editor-and-undeclared-fields)). Infer kind from schema
+declaration, not an item's display name. Schema details follow.
 
 ## File
 
@@ -219,6 +220,14 @@ Verified by the round-trip: bools are always 0/1, no record repeats a key within
 reference list name, and the `byteSize` values in rebirth.mod equal the real record sizes (the writer
 recomputes them and the output is identical).
 
+## Fields Meitou adds
+
+Records may store fields fcs.def does not declare; the game ignores them. Meitou reads ARMOUR `metalness` (float, 0 to 1, -1 none: how
+much of the item's bare-metal parts is metal; [character renderer "Metal"](../character-renderer.md)). The editor lists such a stored field
+under `misc` and keeps it, but sets only declared ones (its Set Field Value needs a declared default), so a modder adds
+`metalness: -1.0 "Meitou: metal of the bare parts, 0 to 1; -1 none"` under `[ARMOUR]` in the editor's fcs.def; new armour made in the mod
+then stores -1. **Verified** in the decompiled editor (`ObjectPropertyBox.addGridItem`, `SetFieldValue.bOk_Click`, `Item.setMissingValues`).
+
 ## Schema: `fcs.def` (Verified by `FcsSchema` parsing the whole file)
 
 `Meitou.Data.Fcs.FcsSchema` parses it. Text, one section per record type:
@@ -260,6 +269,15 @@ Leader AI Goals: AI_TASK (0, 24,0) "...val0 and val1 is start and finish time...
 - Enum names refer to `fcs_enums.def` (`enum Name { A, B=5, ... }`; not parsed yet). The editor
   also has many enums built in (e.g. `DialogConditionEnum`, `DialogActionEnum`) that aren't in the
   .def files; the dialogue ones are in [dialogue](../game/dialogue.md#enums).
+
+### Editor and undeclared fields
+
+**Verified** (editor decompile: `GameData.Item.load`, `Item.save`, the `Cleanup` window): the editor
+does not filter a record's fields by `fcs.def` when it loads a file; every key read goes into the
+record's table (only the tag filter of the older file types applies), and saving writes back
+every key of the active mod's table. So a field `fcs.def` does not declare survives a load and a
+save in the editor. The Cleanup window's "Remove deprecated fields" deletes, among the values the
+active mod set, the fields `fcs.def` does not define on records whose type it defines.
 
 ## Item categories
 

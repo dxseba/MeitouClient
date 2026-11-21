@@ -3,7 +3,7 @@ using Meitou.Game.Rendering.Frame;
 namespace Meitou.Game.Settings;
 
 /// <summary>
-/// The Graphics tabs as features (docs/native-ui.md "Settings"): each feature is one header row (its switch, or a title when it has none) with its
+/// The Graphics tabs (and Advanced's Squad XP) as features (docs/native-ui.md "Settings"): each feature is one header row (its switch, or a title when it has none) with its
 /// own settings folded under it, closed until opened. Settings in no group stay rows of their own.
 /// </summary>
 sealed class FeatureGrouping(SettingsMenu menu)
@@ -24,7 +24,7 @@ sealed class FeatureGrouping(SettingsMenu menu)
     const string SkinGroup = "Skin";
 
     /// <summary>
-    /// The features, in the Graphics tabs' order: each group's id, heading setting, members, title and hint.
+    /// The features, in the Graphics tabs' order (then the Advanced page's): each group's id, heading setting, members, title and hint.
     /// </summary>
     internal static readonly FeatureGroup[] FeatureGroups =
     [
@@ -38,7 +38,8 @@ sealed class FeatureGrouping(SettingsMenu menu)
             "Contact shadows", "Lamp shadows"]),
         new("Soft grazing sun", "Soft grazing sun", []),
         new("Indirect light", "Indirect light", [SettingsMenu.TechniqueKey(WorldFrame.GiChoice), "Indoor GI", WorldFrame.GiRelocateSwitch,
-            WorldFrame.GiCloudShadowsSwitch, WorldFrame.GiCacheSwitch, WorldFrame.GiRaysSwitch], LauncherHeader: WorldFrame.GiChoice),
+            WorldFrame.GiCloudShadowsSwitch, WorldFrame.GiCacheSwitch, WorldFrame.GiRaysSwitch, WorldFrame.GiCharactersSwitch],
+            LauncherHeader: WorldFrame.GiChoice),
         new("Ambient occlusion", "Ambient occlusion", [SettingsMenu.TechniqueKey(WorldFrame.OcclusionChoice), WorldFrame.GtaoQualitySlider],
             LauncherHeader: WorldFrame.OcclusionChoice),
         new("Light shafts", "Light shafts", [
@@ -69,6 +70,7 @@ sealed class FeatureGrouping(SettingsMenu menu)
         new("Far impostors", "Far impostors", ["Impostor distance (F7 Meitou)", "Large impostor distance (F7 Meitou)",
             WorldFrame.ImpostorBudgetSlider]),
         new(WorldFrame.GrassCoverSwitch, WorldFrame.GrassCoverSwitch, []),
+        new(WorldFrame.NearTreeFadeSwitch, WorldFrame.NearTreeFadeSwitch, []),
 
         // Objects
         new("Draw distances", "Draw distances", [WorldFrame.ObjectDistanceSlider, "Landmark distance (Meitou)", "Distant towns (zones)",
@@ -80,7 +82,7 @@ sealed class FeatureGrouping(SettingsMenu menu)
         // Characters: the skin switch, then one row per race (added by Entries)
         new(SkinGroup, "Skin", []),
         new("Advanced materials", "Advanced materials", [WorldFrame.MaterialHairSwitch, WorldFrame.MaterialClothSwitch, WorldFrame.MaterialSkinSwitch,
-            WorldFrame.MaterialEyesSwitch, WorldFrame.MaterialMetalSwitch, WorldFrame.MaterialBeadsSwitch]),
+            WorldFrame.MaterialEyesSwitch, WorldFrame.MaterialMetalSwitch, WorldFrame.MaterialPolishSwitch, WorldFrame.MaterialBeadsSwitch]),
         new("Blood on weapons and gear", "Blood on weapons and gear", []),
         new("Blood cells", "Blood cells", []),
         new("Blood on surfaces", "Blood on surfaces", []),
@@ -91,16 +93,23 @@ sealed class FeatureGrouping(SettingsMenu menu)
         new("Clouds", "Clouds", [WorldFrame.CloudHeightSlider, "Cloud shadows", "Cloud shadows in fog"]),
         new("Weather particles", WorldFrame.ParticleSliders[0], [WorldFrame.ParticleSliders[1]]),
         new("Fog", "Fog", []),
+        new("Lit dust", "Lit dust", []),
         new(WorldFrame.WetWorldSwitch, WorldFrame.WetWorldSwitch, []),
 
         // Colour
         new("Tone map and grade", "Tone map and grade", ["Tone map (0 = game)", "Hybrid tone map: ACES share", "Grading (0 = game)"]),
+        new("Adaptive exposure", "Adaptive exposure", [WorldFrame.AdaptiveExposureSlider]),
         new("Night grading", "Night grading", ["Night grading strength (0 = game)"]),
 
         // Post FX
         new(WorldFrame.BloomSwitch, WorldFrame.BloomSwitch, [WorldFrame.BloomStrengthSlider]),
         new(WorldFrame.DepthOfFieldSwitch, WorldFrame.DepthOfFieldSwitch, [WorldFrame.DofApertureSlider, WorldFrame.CameraEffectsSwitch]),
+        new(WorldFrame.VignetteSwitch, WorldFrame.VignetteSwitch, [WorldFrame.VignetteStrengthSlider]),
+        new(WorldFrame.FilmGrainSwitch, WorldFrame.FilmGrainSwitch, [WorldFrame.GrainStrengthSlider]),
         new("Heat haze", "Heat haze", ["Heat haze strength (1 = game)"]),
+
+        // Advanced: each skill's own multiplier under Squad XP
+        new("Squad XP", "Squad XP", SkillXp.Rows),
     ];
 
     /// <summary>

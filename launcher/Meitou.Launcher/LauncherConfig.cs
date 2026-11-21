@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Meitou.Content;
 
 namespace Meitou.Launcher;
 
@@ -133,14 +134,34 @@ public sealed class LauncherConfig
     public bool AutoUpdateLauncher { get; set; } = true;
 
     /// <summary>
+    /// The window's width at the last close, when it was not maximised (its size before that); null before the first close.
+    /// </summary>
+    public double? WindowWidth { get; set; }
+
+    /// <summary>
+    /// The window's height at the last close, as <see cref="WindowWidth"/>.
+    /// </summary>
+    public double? WindowHeight { get; set; }
+
+    /// <summary>
+    /// Whether the window was maximised or full screen at the last close (Normal otherwise).
+    /// </summary>
+    public Avalonia.Controls.WindowState WindowState { get; set; }
+
+    /// <summary>
+    /// Whether the Mods page shows the selected mod's details in its side pane.
+    /// </summary>
+    public bool ModDetailsShown { get; set; } = true;
+
+    /// <summary>
     /// The saved mod presets.
     /// </summary>
     public List<ModPreset> Presets { get; set; } = [];
 
     /// <summary>
-    /// The RE_Kenshi mods (by name) whose suggested code mods the Mods page has offered once (<see cref="Meitou.Content.CoveredMods.Suggested"/>).
+    /// The RE_Kenshi mods (by name) whose endorsed ports the Mods page has offered once (<see cref="Meitou.Content.CoveredMods.Endorsed"/>).
     /// </summary>
-    public List<string> OfferedSuggestions { get; set; } = [];
+    public List<string> OfferedPorts { get; set; } = [];
 
     /// <summary>
     /// Reads <c>launcher.json</c>; defaults when it is missing or cannot be read.
@@ -164,7 +185,7 @@ public sealed class LauncherConfig
     public void Save()
     {
         Directory.CreateDirectory(DataDirectory);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, LauncherJson.Default.LauncherConfig));
+        AtomicFile.WriteAllText(FilePath, JsonSerializer.Serialize(this, LauncherJson.Default.LauncherConfig));
     }
 }
 

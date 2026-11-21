@@ -35,10 +35,38 @@ public sealed class CharacterStats
     ModSkillLevels? _modSkills;
 
     /// <summary>
+    /// The code mods' status effects on this character, made on first use (<see cref="Effects"/>).
+    /// </summary>
+    ActiveStatusEffects? _effects;
+
+    /// <summary>
+    /// The world whose experience filters this character's gains pass (<see cref="BindExperience"/>): set while the character is in a world that
+    /// has a filter, null otherwise.
+    /// </summary>
+    World? _xpWorld;
+
+    /// <summary>
+    /// The character these stats belong to in <see cref="_xpWorld"/>.
+    /// </summary>
+    CharacterId _xpOwner = CharacterId.None;
+
+    /// <summary>
+    /// The code mods' carrying capacity modifiers, made on first use (<see cref="CarryModifiers"/>).
+    /// </summary>
+    CarryModifiers? _carryModifiers;
+
+    /// <summary>
     /// What this character's XP gains are multiplied by (Advanced settings "Squad XP" and "Others' XP", <see cref="BodyOptions.SquadXp"/>; Meitou
     /// only, the game has 1). <see cref="BodySystem"/> sets it on every body step from the character's side; not saved.
     /// </summary>
     public float XpRate { get; set; } = 1;
+
+    /// <summary>
+    /// What each stat's XP gains are multiplied by in place of <see cref="XpRate"/>, by stat number (Advanced settings "Squad XP", one per skill,
+    /// <see cref="BodyOptions.SquadSkillXp"/>); a number below 0, or a stat past the list's end, follows <see cref="XpRate"/>. Set with it; null
+    /// for none.
+    /// </summary>
+    public IReadOnlyList<float>? SkillXpRates { get; set; }
 
     /// <summary>
     /// Stats that read as 1 for a character built without data (the editor's default of a STATS field).
@@ -52,18 +80,29 @@ public sealed class CharacterStats
     /// <summary>
     /// The value of a stat: the stored value plus the <see cref="Modifiers"/> (0 for a number without storage); <see cref="StatsEnumerated.HiveMedic"/>
     /// and <see cref="StatsEnumerated.Vet"/> read <see cref="StatsEnumerated.Medic"/>. Setting writes the stored value; a number without storage does
-    /// nothing. Code that trains or keeps a stat reads <see cref="Stored"/>, so a modifier is never baked in.
+    /// nothing. Code that trains or keeps a stat reads <see cref="Stored"/>, so a modifier is never baked in. A code mod's skill's number
+    /// (<see cref="ModSkill.Stat"/>) reads and writes its level (no modifiers), so a weapon that names the skill uses it as any weapon skill.
     /// </summary>
     public float this[StatsEnumerated stat]
     {
-        get => StatsInfo.StorageOf(stat) is var s && s != StatsEnumerated.None ? Value(s) : 0;
-        set { if (StatsInfo.StorageOf(stat) is var s && s != StatsEnumerated.None) _values[(int)s] = value; }
+        get => StatsInfo.StorageOf(stat) is var s && s != StatsEnumerated.None ? Value(s) : ModLevel(stat);
+        set
+        {
+            if (StatsInfo.StorageOf(stat) is var s && s != StatsEnumerated.None) _values[(int)s] = value;
+            else Bodies.ModSkills.Of(stat)?.Set(this, value);
+        }
     }
 
     /// <summary>
-    /// The stored (trained) value of a stat, without the <see cref="Modifiers"/> (0 for a number without storage).
+    /// The stored (trained) value of a stat, without the <see cref="Modifiers"/> (0 for a number without storage; a mod skill's level for its
+    /// number).
     /// </summary>
-    public float Stored(StatsEnumerated stat) => StatsInfo.StorageOf(stat) is var s && s != StatsEnumerated.None ? _values[(int)s] : 0;
+    public float Stored(StatsEnumerated stat) => StatsInfo.StorageOf(stat) is var s && s != StatsEnumerated.None ? _values[(int)s] : ModLevel(stat);
+
+    /// <summary>
+    /// The level of the code mod's skill numbered <paramref name="stat"/>; 0 for any number that is not one (every number without mods).
+    /// </summary>
+    float ModLevel(StatsEnumerated stat) => Bodies.ModSkills.Of(stat) is { } skill ? skill.Level(this) : 0;
 
     /// <summary>
     /// The code mods' temporary amounts on this character's stats (docs/modding.md "Stat modifiers"), made on first use.
@@ -84,6 +123,27 @@ public sealed class CharacterStats
     /// The mod skill levels if any were ever made.
     /// </summary>
     internal ModSkillLevels? ModSkillsOrNull => _modSkills;
+
+    /// <summary>
+    /// The code mods' status effects on this character (docs/modding.md "Status effects"), null if none was ever put on; put them on and take them
+    /// off through <see cref="StatusEffect"/>.
+    /// </summary>
+    public ActiveStatusEffects? EffectsOrNull => _effects;
+
+    /// <summary>
+    /// The status effects, made on first use.
+    /// </summary>
+    internal ActiveStatusEffects Effects => _effects ??= new();
+
+    /// <summary>
+    /// The code mods' amounts on this character's carrying capacity (docs/modding.md "Carry capacity"), made on first use.
+    /// </summary>
+    public CarryModifiers CarryModifiers => _carryModifiers ??= new();
+
+    /// <summary>
+    /// The carrying capacity modifiers if any were ever made (the capacity's readers and the state hash).
+    /// </summary>
+    internal CarryModifiers? CarryModifiersOrNull => _carryModifiers;
 
     /// <summary>
     /// A storage's value with its modifiers.
@@ -193,23 +253,109 @@ public sealed class CharacterStats
     /// <summary>
     /// Trains a stat by <paramref name="amount"/> through the core curve; returns the new value. A stat without storage is left alone. A NaN stat
     /// stays NaN: in game the XP entries (<c>xpStat_eventBased</c>, <c>xpGeneral</c>) never reach the core's reset to 20 for one (<b>Verified</b> in
-    /// game, issue #3).
+    /// game, issue #3). A code mod's skill's number trains that skill on the same curve (<see cref="ModSkill.Gain(CharacterStats, float)"/>).
     /// </summary>
-    public float Gain(StatsEnumerated stat, float amount, float cap = XpCap)
+    public float Gain(StatsEnumerated stat, float amount, float cap = XpCap) => Gain(stat, amount, cap, ExperienceSource.Other);
+
+    /// <summary>
+    /// <see cref="Gain(StatsEnumerated, float, float)"/> for one of the game's own gains, which the code mods' experience filters see as
+    /// <paramref name="source"/>.
+    /// </summary>
+    internal float Gain(StatsEnumerated stat, float amount, float cap, ExperienceSource source)
     {
         var s = StatsInfo.StorageOf(stat);
-        if (s == StatsEnumerated.None) return 0;
-        if (float.IsNaN(_values[(int)s])) return _values[(int)s];
-        return _values[(int)s] = CoreGain(_values[(int)s], Rated(_values[(int)s], amount, cap), cap);
+        if (s == StatsEnumerated.None) return Bodies.ModSkills.Of(stat)?.Gain(this, amount, cap) ?? 0;
+        float value = _values[(int)s];
+        if (float.IsNaN(value)) return value;
+        return _values[(int)s] = CoreGain(value, Filtered(stat, value, Rated(s, value, amount, cap), cap, source), cap);
     }
 
     /// <summary>
-    /// A gain times <see cref="XpRate"/>, held to the core's limit of 20 so a multiplied gain is never dropped. An amount the core ignores stays as it
-    /// is, and a stat at or past the gain's cap (a training dummy's level) takes no raise, so a dummy's limit stands.
+    /// Binds these stats to <paramref name="world"/>'s experience filters as <paramref name="owner"/>'s, as the character enters the world
+    /// (<see cref="CharacterWatch"/>).
     /// </summary>
-    internal float Rated(float stat, float amount, float cap)
+    internal void BindExperience(World world, CharacterId owner) => (_xpWorld, _xpOwner) = (world, owner);
+
+    /// <summary>
+    /// Clears the binding, as the character leaves the world or the world is discarded.
+    /// </summary>
+    internal void UnbindExperience() => (_xpWorld, _xpOwner) = (null, CharacterId.None);
+
+    /// <summary>
+    /// Takes the binding of <paramref name="old"/>, the stats these replace on a character, and clears it there.
+    /// </summary>
+    internal void TakeExperienceBinding(CharacterStats? old)
     {
-        float rate = XpRate;
+        if (old?._xpWorld is null) return;
+
+        (_xpWorld, _xpOwner) = (old._xpWorld, old._xpOwner);
+        old.UnbindExperience();
+    }
+
+    /// <summary>
+    /// A core gain's amount after the code mods' experience filters (<see cref="IExperienceFilter"/>), held as <see cref="Rated"/> holds the
+    /// rate: to the core's limit, and with no raise for a stat at or past the gain's cap. Only an amount in the core's range (above 0, at most its
+    /// limit) is asked: the core adds nothing for any other, and a filter cannot bring one back. The amount itself without a filter.
+    /// </summary>
+    float Filtered(StatsEnumerated stat, float value, float amount, float cap, ExperienceSource source)
+    {
+        if (_xpWorld is null || !(amount > 0 && amount <= MaxCoreGain)) return amount;
+
+        float filtered = Ask(stat, amount, source);
+        return value >= cap ? MathF.Min(filtered, amount) : MathF.Min(filtered, MaxCoreGain);
+    }
+
+    /// <summary>
+    /// An amount the game adds to a stat straight, past the core curve (first aid, mass combat), after the code mods' experience filters, held as
+    /// the game holds the XP rate setting there: no raise once the stat is at or past <paramref name="raiseBelow"/> (first aid's 100; mass combat
+    /// has no such limit). The amount itself without a filter or for one not above 0.
+    /// </summary>
+    internal float FilterStraight(StatsEnumerated stat, float amount, ExperienceSource source, float raiseBelow)
+    {
+        if (_xpWorld is null || !(amount > 0)) return amount;
+
+        float filtered = Ask(stat, amount, source);
+        return Stored(stat) >= raiseBelow ? MathF.Min(filtered, amount) : filtered;
+    }
+
+    /// <summary>
+    /// The filters' amount for a gain of these bound stats; the amount itself for stats no longer the bound character's (a safety: a stats object
+    /// a mod moved by hand is never charged to whoever now holds the slot).
+    /// </summary>
+    float Ask(StatsEnumerated stat, float amount, ExperienceSource source)
+    {
+        var world = _xpWorld!;
+        if (world.Characters.Cold(_xpOwner.Slot)?.Stats != this) return amount;
+
+        return world.ExperienceFilters.Pass(world, _xpOwner, stat, amount, source);
+    }
+
+    /// <summary>
+    /// What <paramref name="stat"/>'s XP gains are multiplied by: its own rate (<see cref="SkillXpRates"/>, by its storage) when it has one, else
+    /// <see cref="XpRate"/>.
+    /// </summary>
+    internal float RateOf(StatsEnumerated stat)
+    {
+        int s = (int)StatsInfo.StorageOf(stat);
+        return SkillXpRates is { } rates && s > 0 && s < rates.Count && rates[s] >= 0 ? rates[s] : XpRate;
+    }
+
+    /// <summary>
+    /// A gain of a skill no stat number holds (a code mod's) times <see cref="XpRate"/> (<see cref="RatedBy"/>).
+    /// </summary>
+    internal float Rated(float stat, float amount, float cap) => RatedBy(XpRate, stat, amount, cap);
+
+    /// <summary>
+    /// A gain of <paramref name="which"/> times its rate (<see cref="RateOf"/>, <see cref="RatedBy"/>).
+    /// </summary>
+    internal float Rated(StatsEnumerated which, float stat, float amount, float cap) => RatedBy(RateOf(which), stat, amount, cap);
+
+    /// <summary>
+    /// A gain times <paramref name="rate"/>, held to the core's limit of 20 so a multiplied gain is never dropped. An amount the core ignores stays as
+    /// it is, and a stat at or past the gain's cap (a training dummy's level) takes no raise, so a dummy's limit stands.
+    /// </summary>
+    static float RatedBy(float rate, float stat, float amount, float cap)
+    {
         if (rate == 1 || !(amount > 0 && amount <= MaxCoreGain)) return amount;
         if (rate > 1 && stat >= cap) return amount;
 
@@ -293,7 +439,8 @@ public sealed class CharacterStats
     /// Writes the saved STATS floats (docs/formats/save.md): the stat's field name (<c>strength</c>, <c>attack</c>, <c>toughness2</c>, <c>mass
     /// combat</c>...) to its value. The legacy keys (<c>endurance</c>, <c>warrior spirit</c>, <c>xp</c>, <c>free attribute points</c>...) are not
     /// kept; the save writer gives a new character the STATS template's <c>warrior spirit</c> and a loaded one keeps its saved value. The code mods'
-    /// skill levels follow under <see cref="ModSkillLevels.SaveKeyPrefix"/>, none without them.
+    /// skill levels follow under <see cref="ModSkillLevels.SaveKeyPrefix"/>, none without them, and their status effects under
+    /// <see cref="ActiveStatusEffects.SaveKeyPrefix"/> (the record's earlier effect keys removed first) once this character had one.
     /// </summary>
     public void WriteSave(IDictionary<string, float> floats)
     {
@@ -301,12 +448,14 @@ public sealed class CharacterStats
         for (int i = 1; i < StatsInfo.Count; i++)
             if (StatsInfo.FieldName((StatsEnumerated)i) is { } name) floats[name] = written[i];
         _modSkills?.WriteSave(floats);
+        _effects?.WriteSave(floats);
     }
 
     /// <summary>
     /// Reads the saved STATS floats written by <see cref="WriteSave"/> (a missing key keeps the default), except that a save without
     /// <c>lockpicking</c> gets half the character's thievery and one without <c>toughness2</c> its defence as toughness (<c>FUN_14064b6a0</c>,
-    /// docs/game/character-stats.md). Every mod skill level is kept, registered or not.
+    /// docs/game/character-stats.md). Every mod skill level and status effect is kept, registered or not; a registered effect's stat amounts are set
+    /// again.
     /// </summary>
     public static CharacterStats ReadSave(IReadOnlyDictionary<string, float> floats)
     {
@@ -317,6 +466,7 @@ public sealed class CharacterStats
         // FUN_14064b6a0: toughness = defence
         if (!floats.ContainsKey("toughness2")) stats._values[(int)StatsEnumerated.Toughness] = stats._values[(int)StatsEnumerated.MeleeDefence];
         stats._modSkills = ModSkillLevels.ReadSave(floats);
+        stats._effects = ActiveStatusEffects.ReadSave(floats, stats);
         return stats;
     }
 }

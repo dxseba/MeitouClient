@@ -107,6 +107,7 @@ sealed class NewGameLaunch(GameHost host)
                         world.RestoreSeed(seed);
                         world.Player.BanditsLoot = nextDifficulty.BanditsLoot;
                         spawned = built.Population!.StartPlayer(world, chosen);
+                        world.TellReady(fromSave: false);
                     });
                 }
                 catch (Exception e)
@@ -130,7 +131,7 @@ sealed class NewGameLaunch(GameHost host)
 
                 var lead = host.Session.World.Characters.Previous[spawned!.Leader.Slot].Position;
                 var view = host.Session.Camera.Current;
-                host.Session.Camera.Place(new Vector2(lead.X, lead.Z), view.Yaw, view.Pitch, view.Distance);
+                host.Session.Camera.Place(new Vector2(lead.X, lead.Z), view.Yaw, view.Pitch, view.Distance, lead.Y);
                 host.SettleNewWorld();
                 host.Player.Notice(Loc.Tr("Started {1}", chosen.Name));
                 ShowStartHints();

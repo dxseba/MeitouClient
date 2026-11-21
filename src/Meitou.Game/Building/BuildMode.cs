@@ -90,6 +90,10 @@ sealed class BuildMode(PlayerInterface player)
     /// </summary>
     readonly HashSet<Key> _buildHeld = [];
     /// <summary>
+    /// The build map's actions, in the order a key bound to several is looked up.
+    /// </summary>
+    static readonly InputAction[] BuildActions = [.. Enum.GetValues<InputAction>().Where(InputBindings.IsBuildMap)];
+    /// <summary>
     /// The timestamp of the last ghost update (<see cref="System.Diagnostics.Stopwatch"/>); 0 to start the frame time afresh.
     /// </summary>
     long _buildClock;
@@ -280,36 +284,41 @@ sealed class BuildMode(PlayerInterface player)
     #region Keys
 
     /// <summary>
-    /// A key press while build mode is on: the build map (docs/game/ui-input.md section 4, checked first in build mode) takes <c>,</c> <c>.</c>
-    /// rotate, <c>-</c> <c>=</c> move down / up, <c>[</c> <c>]</c> tilt, Backspace undo and Space apply. Returns true when the key was taken, so the
-    /// host does not also pause or turn the camera. NUM+ / NUM- are the original's second keys of both the move and the tilt pairs, and the later
-    /// registration (tilt) wins in its key map, so they tilt (<c>FUN_1403636c0</c>, <c>FUN_140362260</c>).
+    /// A key press while build mode is on: the build map (docs/game/ui-input.md section 4, checked first in build mode) takes the keys bound to its
+    /// actions (<see cref="InputBindings.IsBuildMap"/>; default <c>,</c> <c>.</c> rotate, <c>-</c> <c>=</c> move down / up, <c>[</c> <c>]</c> and
+    /// NUM- / NUM+ tilt, Backspace undo and Space apply). Returns true when the key was taken, so the host does not also pause or turn the camera.
     /// </summary>
     public bool BuildKey(Key key, bool shift)
     {
         player.UiInput++;
-        if (!Active) return false;
-        switch (key)
-        {
-            case EngineKey.Comma or EngineKey.Period or EngineKey.Minus or EngineKey.Equal
-                or EngineKey.LeftBracket or EngineKey.RightBracket or EngineKey.KeypadAdd or EngineKey.KeypadSubtract:
-                _buildHeld.Add(key);
-                return true;
-            case EngineKey.Backspace:
-                BuildUndo();
-                return true;
-            case EngineKey.Space:
-                QueueGhost();
-                return true;
-            default:
-                return false;
-        }
+        if (!Active || BuildAction(key) is not { } action) return false;
+
+        if (action == InputAction.BuildUndo) BuildUndo();
+        else if (action == InputAction.BuildApply) QueueGhost();
+        else _buildHeld.Add(key);
+        return true;
     }
 
     /// <summary>
-    /// Whether <paramref name="key"/> is a build map key that the cinema's numpad must not take (NUM+ / NUM- while building).
+    /// Whether <paramref name="key"/> is a build map key that the cinema's numpad must not take (NUM+ / NUM- by default, while building).
     /// </summary>
-    public bool OwnsBuildNumpad(Key key) => Active && key is EngineKey.KeypadAdd or EngineKey.KeypadSubtract;
+    public bool OwnsBuildNumpad(Key key) => Active && BuildAction(key) is not null;
+
+    /// <summary>
+    /// The build map action <paramref name="key"/> is bound to, or null.
+    /// </summary>
+    InputAction? BuildAction(Key key)
+    {
+        var binding = Binding.Of(key);
+        foreach (var action in BuildActions)
+            if (player.Session.Bindings.Get(action).Contains(binding)) return action;
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a key bound to <paramref name="action"/> is held.
+    /// </summary>
+    bool BuildHeld(InputAction action) => player.Session.Bindings.Get(action).Any(b => !b.IsMouse && _buildHeld.Contains(b.Key));
 
     /// <summary>
     /// A key went up: the build map's controls stop.
@@ -343,17 +352,17 @@ sealed class BuildMode(PlayerInterface player)
         long now = System.Diagnostics.Stopwatch.GetTimestamp();
         float dt = _buildClock == 0 ? 0 : (float)Math.Min(System.Diagnostics.Stopwatch.GetElapsedTime(_buildClock, now).TotalSeconds, 0.1);
         _buildClock = now;
-        float Held(Key plus, Key minus) => (_buildHeld.Contains(plus) ? 1f : 0f) - (_buildHeld.Contains(minus) ? 1f : 0f);
-        _ghostYaw += Held(EngineKey.Period, EngineKey.Comma) * RotateDegreesPerSecond * MathF.PI / 180 * dt;
+        float Held(InputAction plus, InputAction minus) => (BuildHeld(plus) ? 1f : 0f) - (BuildHeld(minus) ? 1f : 0f);
+        _ghostYaw += Held(InputAction.BuildRotateRight, InputAction.BuildRotateLeft) * RotateDegreesPerSecond * MathF.PI / 180 * dt;
 
         // The height keys (FUN_1404d5420): up goes by at most the up margin, and when it cannot (or is not held) down goes by at most the down
         // margin.
         float lift = (player.SlowModifier ? SlowMove : MoveUnitsPerSecond) * dt;
-        if (_buildHeld.Contains(EngineKey.Equal) && _ghostMargins.Up > 0) _ghostLift += MathF.Min(lift, _ghostMargins.Up);
-        else if (_buildHeld.Contains(EngineKey.Minus) && _ghostMargins.Down > 0) _ghostLift -= MathF.Min(lift, _ghostMargins.Down);
+        if (BuildHeld(InputAction.BuildMoveUp) && _ghostMargins.Up > 0) _ghostLift += MathF.Min(lift, _ghostMargins.Up);
+        else if (BuildHeld(InputAction.BuildMoveDown) && _ghostMargins.Down > 0) _ghostLift -= MathF.Min(lift, _ghostMargins.Down);
         if (MathF.Abs(_ghostLift) > MaxLift) _ghostLift = 0;
 
-        float tiltKeys = Math.Clamp(Held(EngineKey.RightBracket, EngineKey.LeftBracket) + Held(EngineKey.KeypadAdd, EngineKey.KeypadSubtract), -1, 1);
+        float tiltKeys = Held(InputAction.BuildTiltIncrease, InputAction.BuildTiltDecrease);
         _ghostTilt = Math.Clamp(_ghostTilt + tiltKeys * TiltPerSecond * dt, 0, 1);
 
         Ghost = null;
@@ -1066,6 +1075,18 @@ sealed class BuildMode(PlayerInterface player)
     readonly Dictionary<string, (Vector3 Min, Vector3 Max)?> _ghostBoxes = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// How far (X/Z) each building record's footprint hull and collision triangles reach from its position, turned about Y in any way: the bound
+    /// of <see cref="PickSiteAt"/>'s coarse cull, by record; made once a record's footprint has loaded.
+    /// </summary>
+    readonly Dictionary<string, float> _siteReach = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The site pick of the shared pick open (<see cref="WorldPicking.BeginShared"/>): its scope, pixel and answer, reused by the pointer's second
+    /// look (the building hover after the right-click target).
+    /// </summary>
+    (int Scope, Vector2 Pixel, (BuildingSnapshot Site, float T)? Result) _sitePick;
+
+    /// <summary>
     /// The nearest of the player's sites (and finished buildings) under a pixel, by a ray against each one's footprint prism (a sphere round its
     /// position without a footprint).
     /// </summary>
@@ -1076,34 +1097,40 @@ sealed class BuildMode(PlayerInterface player)
     /// </summary>
     internal (BuildingSnapshot Site, float T)? PickSiteAt(Vector2 pixel)
     {
+        int scope = player.Picking.SharedScope;
+        if (scope != 0 && _sitePick.Scope == scope && _sitePick.Pixel == pixel) return _sitePick.Result;
+
+        var result = FindSiteAt(pixel);
+        if (scope != 0) _sitePick = (scope, pixel, result);
+        return result;
+    }
+
+    /// <summary>
+    /// <see cref="PickSiteAt"/> worked out.
+    /// </summary>
+    (BuildingSnapshot Site, float T)? FindSiteAt(Vector2 pixel)
+    {
         if (Services is not { } host || player.Session.CurrentSnapshot.Buildings.Count == 0 || player.Ray(pixel) is not { } ray) return null;
 
         BuildingSnapshot? best = null;
 
         // Only what the ray meets before the ground counts, as in PickBuilding and the original's raycast (terrain ends the walk): a building's
         // hull and collision reach below the ground, and the part of the ray that has gone through the ground must not find them (the pointer
-        // showed the hammer on bare ground beside a building).
-        float ground = player.Picking.GroundHit(ray.Origin, ray.Direction) is { } groundPoint
-            ? Vector3.Distance(ray.Origin, groundPoint) : float.MaxValue;
+        // showed the hammer on bare ground beside a building). Terrain cut inside a building does not end it (PickReach).
+        var (ground, terrain) = player.Picking.PickReach(ray.Origin, ray.Direction, float.MaxValue);
         float bestT = ground;
         var hits = new List<(BuildingSnapshot Site, float T)>();
         foreach (var site in player.Session.CurrentSnapshot.Buildings)
         {
-            var yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, PlacementCheck.YawOf(site.Rotation));
-
-            // No selectable geometry: an invisible sitting node must leave the click to ground movement.
+            // The coarse cull before the floor and ray tests (no effect on the pick): a hit on a footprint's prism or collision lies within their
+            // X/Z reach of the site. A site without a footprint (a plot, a sitting node, one still loading) takes the full tests.
             var bounds = host.Placement.Footprint(site.Record);
-            bool invisible = bounds is null
-                && player.Production.Machine(site.Id)?.Function is TownBuildings.ChairFunction or TownBuildings.ThroneFunction;
-            if (invisible && host.Parts(site.Record).Count == 0) continue;
+            if (bounds is { } outline && !WorldPicking.RayPassesXz(ray, site.Position, SiteReach(host, site.Record, outline), ground)) continue;
 
-            float? t = bounds is { } footprint
-                ? player.Picking.BuildingRayT(ray, footprint.Place(site.Position, yaw), footprint.YMin, footprint.YMax, site.Record, site.Position,
-                    site.Position.Y, yaw)
-                : host.Placement.Plot(site.Record) is { } plot
-                    ? WorldPicking.PlotT(ray, plot.Place(site.Position, yaw), ground < float.MaxValue ? ground : null)
-                    : WorldPicking.RaySegment(ray.Origin, ray.Direction, site.Position, site.Position + new Vector3(0, 16, 0), 12);
-            if (t is not { } hit || hit >= ground) continue;
+            // Not drawn above the viewed floor of an opened house, so not picked there, as a bed or a container (FurnitureUse).
+            if (player.Furniture.AboveViewedFloor?.Invoke(site.Position) == true) continue;
+
+            if (SiteRayT(host, ray, site, bounds, terrain) is not { } hit || hit >= ground) continue;
 
             hits.Add((site, hit));
             if (hit < bestT) (bestT, best) = (hit, site);
@@ -1115,6 +1142,45 @@ sealed class BuildMode(PlayerInterface player)
             && hits.Where(h => StandsIn(h.Site, best) && !player.Hidden(ray, h.T)).OrderBy(h => h.T).FirstOrDefault() is { Site: not null } inside)
             (best, bestT) = inside;
         return best is null ? null : (WallOf(best), bestT);
+    }
+
+    /// <summary>
+    /// Where the ray meets a site: by its footprint's prism and collision, else its plot (a farm), else a 12-unit segment over its position; null
+    /// for none, or an invisible sitting node without parts (no selectable geometry: the click is left to ground movement).
+    /// </summary>
+    float? SiteRayT(BuildServices host, (Vector3 Origin, Vector3 Direction) ray, BuildingSnapshot site,
+        Simulation.Navigation.BuildingFootprint? bounds, float? terrain)
+    {
+        var yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, PlacementCheck.YawOf(site.Rotation));
+
+        // No selectable geometry: an invisible sitting node must leave the click to ground movement.
+        bool invisible = bounds is null
+            && player.Production.Machine(site.Id)?.Function is TownBuildings.ChairFunction or TownBuildings.ThroneFunction;
+        if (invisible && host.Parts(site.Record).Count == 0) return null;
+
+        return bounds is { } footprint
+            ? player.Picking.BuildingRayT(ray, footprint.Place(site.Position, yaw), footprint.YMin, footprint.YMax, site.Record, site.Position,
+                site.Position.Y, yaw)
+            : host.Placement.Plot(site.Record) is { } plot
+                ? WorldPicking.PlotT(ray, plot.Place(site.Position, yaw), terrain)
+                : WorldPicking.RaySegment(ray.Origin, ray.Direction, site.Position, site.Position + new Vector3(0, 16, 0), 12);
+    }
+
+    /// <summary>
+    /// <see cref="_siteReach"/> of <paramref name="record"/>, whose loaded footprint is <paramref name="footprint"/>.
+    /// </summary>
+    float SiteReach(BuildServices host, string record, Simulation.Navigation.BuildingFootprint footprint)
+    {
+        if (_siteReach.TryGetValue(record, out float known)) return known;
+
+        float reach = 0;
+        foreach (var p in footprint.Hull) reach = MathF.Max(reach, p.Length());
+        foreach (var (vertices, _) in host.Placement.CollisionMesh(record, false))
+        {
+            foreach (var v in vertices) reach = MathF.Max(reach, new Vector2(v.X, v.Z).Length());
+        }
+
+        return _siteReach[record] = reach;
     }
 
     /// <summary>
@@ -1242,8 +1308,8 @@ sealed class BuildMode(PlayerInterface player)
         }
         else if (machine.Function == MachineData.ItemFurnaceFunction) verbs.Add(("Inventory", () => OpenStorage(site)));
 
-        // A corpse machine (function 11) offers Corpse Disposal (136): with Shift the Corpse disposal job (137 and its finder 138), else the
-        // carried corpses go in.
+        // A corpse machine (function 11) offers Corpse Disposal (136): with Shift the Corpse disposal job (137 and its finder 138), else order 136
+        // for every selected character, its queue cleared (FUN_1407fa650 → FUN_1407f9e20).
         if (own && machine.Function == TownBuildings.CorpseDisposalFunction)
             verbs.Add(("Corpse Disposal", () => player.Say(player.SlowModifier
                 ? (SimCommand)new Simulation.Production.AddJob(selection, Data.Gameplay.Ai.TaskType.FeedCorpseIntoMachine, site.Id)
@@ -1321,10 +1387,11 @@ sealed class BuildMode(PlayerInterface player)
         if (player.SlowModifier && pending.Site.Complete && player.Production.Machine(pending.Site.Id) is { } job
             && (job.Operable || job.IsStorage
                 || job.Function is ObjectRanges.TurretFunction or MachineData.TrainingFunction
-                    or TownBuildings.ChairFunction or TownBuildings.ThroneFunction))
+                    or TownBuildings.ChairFunction or TownBuildings.ThroneFunction or TownBuildings.CorpseDisposalFunction))
         {
-            // A turret: 146 USE_TURRET, which becomes the job 234 Turret guard (PermaJobs).
+            // A turret: 146 USE_TURRET, which becomes the job 234 Turret guard (PermaJobs); a corpse machine: 136, the job 137 and its finder 138.
             var type = job.Function == ObjectRanges.TurretFunction ? Data.Gameplay.Ai.TaskType.UseTurret
+                : job.Function == TownBuildings.CorpseDisposalFunction ? Data.Gameplay.Ai.TaskType.FeedCorpseIntoMachine
                 : job.Function == MachineData.TrainingFunction ? Data.Gameplay.Ai.TaskType.UseTrainingDummy
                 : job.Function is TownBuildings.ChairFunction or TownBuildings.ThroneFunction ? Data.Gameplay.Ai.TaskType.OperateMachinery
                 : job.Operable ? (job.IsAutomatic ? Data.Gameplay.Ai.TaskType.OperateAutomaticMachinery : Data.Gameplay.Ai.TaskType.OperateMachinery)
@@ -1335,6 +1402,15 @@ sealed class BuildMode(PlayerInterface player)
 
         // With Shift the Build order becomes the Engineer job (125), which builds any unfinished site.
         if (QuickConstruction(pending.Site)) OrderConstruction(pending.Site, player.SelectedIds());
+        else if (player.Production.Machine(pending.Site.Id) is { Function: TownBuildings.CorpseDisposalFunction })
+        {
+            // the original's order 136 FEED_CORPSE_INTO_MACHINE for every selected character (FUN_1407fc6e0 → FUN_1407fa650 with 0)
+            var dispose = new Simulation.Production.DisposeCorpseOrder(player.SelectedIds(), pending.Site.Id)
+            {
+                Tick = player.Session.World.Tick, Clicked = true,
+            };
+            player.Say(dispose);
+        }
         else if (player.Production.Machine(pending.Site.Id) is { Operable: true }
             or { Function: MachineData.TrainingFunction or TownBuildings.ChairFunction or TownBuildings.ThroneFunction })
         {
@@ -1540,7 +1616,7 @@ sealed class BuildMode(PlayerInterface player)
         if (!_ghostBoxes.TryGetValue(record, out var box))
         {
             Vector3 min = new(float.MaxValue), max = new(float.MinValue);
-            foreach (var (vertices, _) in host.Placement.CollisionMesh(record))
+            foreach (var (vertices, _) in host.Placement.CollisionMesh(record, false))
                 foreach (var v in vertices) (min, max) = (Vector3.Min(min, v), Vector3.Max(max, v));
             _ghostBoxes[record] = box = min.X <= max.X ? (min, max) : null;
         }

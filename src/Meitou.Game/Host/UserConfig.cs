@@ -1,9 +1,11 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Meitou.Content;
 using Meitou.Game.Effects;
 using Meitou.Game.Settings;
 using Meitou.Game.Ui;
+using Meitou.Modding;
 
 namespace Meitou.Game.Host;
 
@@ -153,7 +155,8 @@ sealed class UserConfig
     /// <summary>
     /// Frame generation: a generated frame between each two rendered ones, by <see cref="FrameGenerationVendor"/>: FSR 3's frame-interpolation
     /// swapchain (Windows, Proton and Linux, needs <c>amd_fidelityfx_vk.dll</c> / <c>libamd_fidelityfx_vk.so</c>) or DLSS's through Streamline
-    /// (<c>FrameGeneration</c>). Off by default; read at start-up, so a change takes effect after a restart.
+    /// (<c>FrameGeneration</c>). Off by default; followed while the game runs, on, off and from one vendor to the other, without a restart
+    /// (<c>GameLoop.FollowFrameGeneration</c>).
     /// </summary>
     public bool FrameGeneration { get; set; }
 
@@ -185,8 +188,7 @@ sealed class UserConfig
     public float HdrPeakNits { get; set; } = 1000;
 
     /// <summary>
-    /// Whose frame generation <see cref="FrameGeneration"/> turns on: FSR 3 (the default) or DLSS (Windows, RTX 40 or later, through Streamline; read
-    /// at start-up).
+    /// Whose frame generation <see cref="FrameGeneration"/> turns on: FSR 3 (the default) or DLSS (Windows, RTX 40 or later, through Streamline).
     /// </summary>
     public FrameGenerationVendor FrameGenerationVendor { get; set; }
 
@@ -308,12 +310,12 @@ sealed class UserConfig
     public float InGameTransitionSpeed { get; set; } = 1.5f;
     /// <summary>
     /// A double click (or double tap) on a squad member farther than <see cref="FlightDistance"/> from the view flies the camera there in an arc
-    /// (Advanced settings; Meitou only, the game cuts).
+    /// (Advanced settings; off by default, the game cuts).
     /// </summary>
     public bool CharacterFlights { get; set; } = false;
     /// <summary>
     /// Keeps the object meshes and textures and the terrain textures around every squad bar character loaded, not only around the camera (Advanced
-    /// settings; Meitou only, costs video memory).
+    /// settings; on by default, costs video memory).
     /// </summary>
     public bool KeepTexturesAtCharacters { get; set; } = true;
     /// <summary>
@@ -372,6 +374,16 @@ sealed class UserConfig
     /// </summary>
     public bool CampaignAncestorsOnce { get; set; } = true;
     /// <summary>
+    /// A loaded raid goes on where it was: its phase, fight, arrival, announcement and carry clocks are read from the save (Fixes settings; off: they
+    /// start again at load, as the game does; read at load; <c>PopulationSettings.KeepCampaignClocks</c>, docs/formats/save.md "WAR_SAVESTATE").
+    /// </summary>
+    public bool FixRaidClocks { get; set; } = true;
+    /// <summary>
+    /// An arrest's guard lifts a downed target only with a cage free for it and never from another carrier of his faction (Fixes settings; off: he
+    /// lifts either way, as the game does, and guards at a full station pass the same body round; read at load; <c>ArrestSettings.LiftFix</c>).
+    /// </summary>
+    public bool FixArrestLifts { get; set; } = true;
+    /// <summary>
     /// Wild animals and homeless squads keep their characters while their area is unloaded (Advanced settings; Faithful off: removed and made anew,
     /// as the game does).
     /// </summary>
@@ -381,6 +393,11 @@ sealed class UserConfig
     /// stood, as the game does).
     /// </summary>
     public bool ResidentSchedule { get; set; } = true;
+    /// <summary>
+    /// A town away from the player's squads takes its override version (taken over, destroyed) as soon as the story allows (Advanced settings;
+    /// Faithful off: only when the player comes near, as the game does).
+    /// </summary>
+    public bool OffscreenOverrides { get; set; } = true;
     /// <summary>
     /// Farms, automatic machines and generators work in unloaded zones (Advanced settings; Faithful off: they stop there and farms catch up on load,
     /// as the game does).
@@ -402,6 +419,15 @@ sealed class UserConfig
     /// </summary>
     public float SquadXp { get; set; } = 1;
     /// <summary>
+    /// A skill's own multiplier in place of <see cref="SquadXp"/> (Advanced settings, under "Squad XP"), by its STATS field name
+    /// (<c>strength</c>, <c>attack</c>...; <see cref="SkillXp"/>); a skill not listed follows Squad XP.
+    /// </summary>
+    public Dictionary<string, float> SquadSkillXp { get; set; } = [];
+    /// <summary>
+    /// The Squad XP multiplier ("XP x10") at the top left of the screen during play (Advanced settings "Show Squad XP"; off).
+    /// </summary>
+    public bool ShowSquadXp { get; set; }
+    /// <summary>
     /// What every other character's XP gains are multiplied by (Advanced settings "Others' XP"; 1, as in the game).
     /// </summary>
     public float OthersXp { get; set; } = 1;
@@ -410,11 +436,12 @@ sealed class UserConfig
     /// </summary>
     public const float MinXpRate = 0, MaxXpRate = 1000;
     /// <summary>
-    /// The mods (by <c>mods.cfg</c> name) whose settings Meitou has taken into its own built-in feature, once each (<c>BuiltInMods</c>).
+    /// The mods (by <c>mods.cfg</c> name) whose settings Meitou has taken into its own built-in feature, once each (<c>BuiltInMods</c>); a name
+    /// followed by " (again)" marks a second takeover, of settings a later Meitou added to the feature.
     /// </summary>
     public List<string> AdoptedMods { get; set; } = [];
     /// <summary>
-    /// A loaded or imported save starts paused (Advanced settings, a Faithful / Meitou switch; on by default, Meitou: in the game it runs at once).
+    /// A loaded or imported save starts paused (Advanced settings; on by default; in the game it runs at once).
     /// <c>--load</c> is not paused.
     /// </summary>
     public bool PauseOnLoad { get; set; } = true;
@@ -428,6 +455,11 @@ sealed class UserConfig
     /// Meitou: in the game each bag stays shut until OPEN BAG is pressed once per session).
     /// </summary>
     public bool AutoOpenBags { get; set; } = true;
+    /// <summary>
+    /// Meitou's stack splitting (Advanced settings, a Faithful / Meitou switch; on by default, Meitou): a left press lifts the whole stack, Shift
+    /// half, Alt one unit, Shift + Alt asks how many. Off, as in the game: one unit, the whole stack with Shift or Ctrl.
+    /// </summary>
+    public bool SplitStacks { get; set; } = true;
     /// <summary>
     /// The player's animals pick up loose items into their bags (Advanced settings, a Faithful / Meitou switch whose
     /// Faithful side is on, as the game lets animals pick up; off by default, Meitou;
@@ -465,20 +497,59 @@ sealed class UserConfig
     /// </summary>
     public bool FixPunchReach { get; set; } = true;
     /// <summary>
+    /// An animal fighting with a weapon drawn from its manufacturer (the Swamp Turtle) attacks with the elephant creature moves (Fixes settings;
+    /// off: its weapon's moves, which its body cannot play, as the game does).
+    /// </summary>
+    public bool FixAnimalMoves { get; set; } = true;
+    /// <summary>
     /// A bench with its table behind is sat facing away from it (Fixes settings; off: towards the world origin, as the game does;
     /// docs/game/ai-tasks.md "Town goals").
     /// </summary>
     public bool FixBenchFacing { get; set; } = true;
+    /// <summary>
+    /// A prisoner in a cage or on a pole plays only the fixture's pose (Fixes settings; off: it holds its wounds there, as the game does;
+    /// docs/animation.md "Injury holds").
+    /// </summary>
+    public bool FixPrisonPose { get; set; } = true;
+    /// <summary>
+    /// An animal in a cage or on a pole plays its idles (Fixes settings; off: a still frame, as the game does; docs/game/locks.md "Cages and beds").
+    /// </summary>
+    public bool FixCagedAnimals { get; set; } = true;
     /// <summary>
     /// Guards' smuggling search and starving looters' food take reach into bags carried in the inventory grid (Fixes settings; off: only the grid
     /// and the worn backpack, as the game does; docs/game/dialogue.md "Conditions").
     /// </summary>
     public bool FixBagSearch { get; set; } = true;
     /// <summary>
+    /// A shopkeeper at its counter is talked to from the counter's front (Gameplay settings, Meitou; off: the game's talk reach, so the customer
+    /// walks round behind the counter; <c>World.CounterTalk</c>).
+    /// </summary>
+    public bool CounterTalk { get; set; } = true;
+    /// <summary>
     /// Other buildings' parts (the Hub's wall in the Shinobi Thieves tower) are cut inside a building in the interior view (Fixes settings; off:
     /// drawn, as the game does; docs/render-interior-cut.md).
     /// </summary>
     public bool FixPartsInBuildings { get; set; } = true;
+    /// <summary>
+    /// The rain (and the dust and ash the game cuts inside buildings) is also left out in front of a building in the interior view, over the open
+    /// room (Fixes settings; off: only inside it, as the game does; docs/render-interior-cut.md).
+    /// </summary>
+    public bool FixRainInBuildings { get; set; } = true;
+    /// <summary>
+    /// The terrain inside an Ash Dome Ruin stays drawn and orders land on it (Fixes settings; off: the ruin's interior mask cuts it, as the game
+    /// does; docs/render-interior-cut.md "Interior terrain").
+    /// </summary>
+    public bool FixRuinGround { get; set; } = true;
+    /// <summary>
+    /// A head a task turned toward something turns back to the front once nothing is looked at (Fixes settings; off by default: it stays turned
+    /// until the next look, as the game does; docs/animation.md "Head turning").
+    /// </summary>
+    public bool FixHeadTurnBack { get; set; }
+    /// <summary>
+    /// The game's own heightmap has its holes filled and its needles lowered (Fixes settings; off: read as the file holds it, as the game does;
+    /// read at start; <c>HeightmapRepair</c>, docs/formats/terrain.md "Holes and needles").
+    /// </summary>
+    public bool FixGround { get; set; } = true;
     /// <summary>
     /// The strategy camera's turn and tilt rate in degrees per second per unit of input (Controls settings): the original's <c>mouse speed pan</c> /
     /// <c>mouse speed tilt</c> (slider 2 … 50, default 6), one value for both here.
@@ -691,6 +762,13 @@ sealed class UserConfig
     /// <see cref="Input.InputBindings.Apply"/> reads them; an empty value unbinds.
     /// </summary>
     public Dictionary<string, string> Bindings { get; set; } = [];
+    /// <summary>
+    /// The code mods' key actions whose keys differ from their defaults (docs/modding.md "Key actions"): mod id to action name to comma-separated
+    /// keys, as <see cref="Bindings"/>; an empty value unbinds. Null, and not written, until a mod's action is rebound; a mod not running keeps its
+    /// entries.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, Dictionary<string, string>>? ModBindings { get; set; }
     /// <summary>
     /// The Meitou skin per race, where chosen against the default (RACE string id to on or off; Graphics > Skin): <c>CharacterRenderer.SkinRaces</c>.
     /// </summary>
@@ -961,6 +1039,19 @@ sealed class UserConfig
     }
 
     /// <summary>
+    /// Keeps the setting's value in <see cref="ModSettings"/>, or drops it when it is the default (and the mod's entry when it holds none); written
+    /// with the rest of the config.
+    /// </summary>
+    public void KeepModSetting(ModSetting setting)
+    {
+        string mod = setting.Group.ModId;
+        if (!ModSettings.TryGetValue(mod, out var saved)) ModSettings[mod] = saved = [];
+        if (setting.IsDefault) saved.Remove(setting.Key);
+        else saved[setting.Key] = setting.Text;
+        if (saved.Count == 0) ModSettings.Remove(mod);
+    }
+
+    /// <summary>
     /// Keeps a hand-edited or older config inside the values the Metal path can use.
     /// </summary>
     void Normalize()
@@ -974,6 +1065,7 @@ sealed class UserConfig
         AdoptedMods ??= [];
         SquadXp = float.IsFinite(SquadXp) ? Math.Clamp(SquadXp, MinXpRate, MaxXpRate) : 1;
         OthersXp = float.IsFinite(OthersXp) ? Math.Clamp(OthersXp, MinXpRate, MaxXpRate) : 1;
+        SquadSkillXp = SkillXp.Kept(SquadSkillXp);
         foreach (var (mod, saved) in ModSettings.ToList())
             if (saved is null) ModSettings.Remove(mod);
     }
@@ -985,7 +1077,7 @@ sealed class UserConfig
     {
         try
         {
-            File.WriteAllText(Path, JsonSerializer.Serialize(this, Json));
+            AtomicFile.WriteAllText(Path, JsonSerializer.Serialize(this, Json));
         }
         catch (IOException e)
         {
