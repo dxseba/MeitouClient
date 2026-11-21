@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.goprone",
+  "apiVersion": 1,
+  "assemblies": ["GoProne.dll"],
+  "entry": "Meitou.GoProne.GoProneMod"
+}
