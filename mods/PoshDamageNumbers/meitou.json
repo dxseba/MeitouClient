@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.poshdamagenumbers",
+  "apiVersion": 1,
+  "assemblies": ["PoshDamageNumbers.dll"],
+  "entry": "Meitou.PoshDamageNumbers.PoshDamageNumbersMod"
+}
