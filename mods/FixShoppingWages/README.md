@@ -11,4 +11,5 @@ Port of *Fix Shopping Wages* (workshop 3775703318), rebuilt from its Workshop de
 - **Skipped**: the poor by design (`wages` -1, or `wages` 0 with `money max` -1), the player's faction and player characters.
 - **Missing** (partial): the local (market) Dried Meat price (the record's base `value` is used); the original's JSON file (settings under Mod
   settings instead); squads off screen are not paid (only the loaded world's squads). The original's savings cap default is not published.
+- **Verified** by `meitou-tools record "Dried Meat"`: vanilla ITEM `42334-changes_otto.mod` has `value` 150 (also logged at start).
 - **Unknown**: not checked in game.

@@ -13,4 +13,4 @@ Port of *Equipment Durability* (workshop 3834344700), rebuilt from its Workshop 
   *Repair base* (0.15) + *Repair per skill* (0.35) x Weapon Smith / 100 and each worn armour piece the same by Armour Smith.
 - **Missing** (partial): the tooltip display (shown in the menu row instead), the armour debuff (the engine's armour absorption has no mod
   hook), wear on blocks, the repair animation and sounds, Finite Ore pairing; the original's wear rates and repair formula are not published.
-- **Unknown**: not checked in game; that vanilla data has an ITEM named exactly "Tools".
+- **Verified** by `meitou-tools record "Tools"`: vanilla ITEM `43404-changes_otto.mod` is named "Tools". **Unknown**: not checked in game.
