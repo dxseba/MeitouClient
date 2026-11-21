@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.wantedmap",
+  "apiVersion": 1,
+  "assemblies": ["WantedMap.dll"],
+  "entry": "Meitou.WantedMap.WantedMapMod"
+}
