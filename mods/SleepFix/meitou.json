@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.sleepfix",
+  "apiVersion": 1,
+  "assemblies": ["SleepFix.dll"],
+  "entry": "Meitou.SleepFix.SleepFixMod"
+}
