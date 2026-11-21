@@ -29,6 +29,7 @@
     <Project Path="mods/KenshiAffixes/Meitou.KenshiAffixes.csproj" />
     <Project Path="mods/ExtraInventorySections/Meitou.ExtraInventorySections.csproj" />
     <Project Path="mods/GoProne/Meitou.GoProne.csproj" />
+    <Project Path="mods/WeaponDodgeGuard/Meitou.WeaponDodgeGuard.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>
