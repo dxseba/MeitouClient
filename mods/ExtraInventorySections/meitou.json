@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.extrainventorysections",
+  "apiVersion": 1,
+  "assemblies": ["ExtraInventorySections.dll"],
+  "entry": "Meitou.ExtraInventorySections.ExtraInventorySectionsMod"
+}
