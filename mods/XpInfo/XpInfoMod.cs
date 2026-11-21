@@ -1,0 +1,224 @@
+using System.Globalization;
+using System.Numerics;
+using System.Reflection;
+using System.Text;
+using HarmonyLib;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Ui;
+using Meitou.Game.Host;
+using Meitou.Game.Ui;
+using Meitou.Modding;
+using Meitou.Simulation;
+
+namespace Meitou.XpInfo;
+
+/// <summary>
+/// Port of XP Info (workshop 3795213616, GPLv3; rebuilt from its description): rising text over a player character as it gains experience
+/// ("+3% Athletics", several skills merged into one label) and when a skill levels ("Athletics 24").
+/// </summary>
+public sealed class XpInfoMod : IMod
+{
+    public void Initialize(ModContext context)
+    {
+        var settings = new XpSettings();
+        context.AddSettings(settings);
+        context.AddSystem("xp", _ => new XpWatchSystem(settings), SystemAnchor.End);
+        XpFloat.Install(context, settings);
+        context.AddUi(new XpFloatUi());
+        context.Log("XP Info initialized");
+    }
+
+    internal static string Label(StatsEnumerated stat) => stat switch
+    {
+        StatsEnumerated.Thieving => "Thievery",
+        StatsEnumerated.FriendlyFire => "Precision Shooting",
+        StatsEnumerated.SmithingWeapon => "Weapon Smith",
+        StatsEnumerated.SmithingArmour => "Armour Smith",
+        StatsEnumerated.SmithingBow => "Bow Smith",
+        StatsEnumerated.Medic => "Field Medic",
+        _ => Spaced(stat.ToString()),
+    };
+
+    static string Spaced(string name)
+    {
+        var text = new StringBuilder();
+        foreach (char c in name)
+        {
+            if (char.IsUpper(c) && text.Length > 0) text.Append(' ');
+            text.Append(c);
+        }
+
+        return text.ToString();
+    }
+}
+
+public sealed class XpSettings
+{
+    [Setting("Enable XP Info", Hint = "Rising text over your characters as they gain experience.")]
+    public bool Enabled { get; set; } = true;
+
+    [Setting("Show gains", Hint = "Show '+N% Skill' as experience comes in.")]
+    public bool Gains { get; set; } = true;
+
+    [Setting("Show levels", Hint = "Show 'Skill N' when a skill levels.")]
+    public bool Levels { get; set; } = true;
+
+    [Setting("Smallest gain (%)", Hint = "Gains below this share of a level are summed until they reach it.", Min = 0.1, Max = 20, Step = 0.1)]
+    public float MinPercent { get; set; } = 1;
+
+    [Setting("Seconds", Hint = "How long a label stays.", Min = 1, Max = 10, Step = 0.5)]
+    public float Seconds { get; set; } = 2.5f;
+}
+
+/// <summary>A label for the floating text: who, the text, the tick.</summary>
+public readonly record struct XpLabel(CharacterId Character, string Text, long Tick, bool Level);
+
+/// <summary>
+/// Polls the player characters' stored stats every 10th tick in the serial slow phase: a rise is summed per stat until it reaches
+/// <see cref="XpSettings.MinPercent"/> of a level, then shown merged with the character's other gains of that poll; a new whole level shows on its
+/// own. A first sighting only records. Presentation only: not saved, not hashed.
+/// </summary>
+sealed class XpWatchSystem(XpSettings settings) : ITickSystem
+{
+    static readonly StatsEnumerated[] Watched = [.. StatsInfo.RecordStats];
+    const int Kept = 24;
+
+    readonly Dictionary<CharacterId, float[]> _seen = [];
+    readonly Dictionary<CharacterId, float[]> _pending = [];
+    volatile XpLabel[] _recent = [];
+
+    public XpLabel[] Recent => _recent;
+
+    public void SlowWorld(World world)
+    {
+        if (world.Tick % 10 != 0 || !settings.Enabled) return;
+
+        var labels = new List<XpLabel>();
+        var table = world.Characters;
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Stats: { } stats }) continue;
+            Check(world, table.IdOf(slot), stats, labels);
+        }
+
+        if (labels.Count > 0) _recent = [.. _recent.Concat(labels).TakeLast(Kept)];
+    }
+
+    void Check(World world, CharacterId id, Simulation.Bodies.CharacterStats stats, List<XpLabel> labels)
+    {
+        var now = Watched.Select(stats.Stored).ToArray();
+        if (!_seen.TryGetValue(id, out var before))
+        {
+            _seen[id] = now;
+            _pending[id] = new float[now.Length];
+            return;
+        }
+
+        var pending = _pending[id];
+        var gains = new List<string>();
+        for (int i = 0; i < now.Length; i++)
+        {
+            float delta = now[i] - before[i];
+            if (delta <= 0) continue;
+
+            string label = XpInfoMod.Label(Watched[i]);
+            if (settings.Levels && (int)now[i] > (int)before[i])
+                labels.Add(new(id, string.Create(CultureInfo.InvariantCulture, $"{label} {(int)now[i]}"), world.Tick, true));
+
+            pending[i] += delta * 100;
+            if (pending[i] < settings.MinPercent) continue;
+
+            gains.Add(string.Create(CultureInfo.InvariantCulture, $"+{pending[i]:0.#}% {label}"));
+            pending[i] = 0;
+        }
+
+        _seen[id] = now;
+        if (settings.Gains && gains.Count > 0) labels.Add(new(id, string.Join("  ", gains), world.Tick, false));
+    }
+}
+
+/// <summary>
+/// Projects the recent labels over their characters, rising as they age (a postfix on <c>PlayerInterface.BindUi</c>, as Level Up Notify).
+/// </summary>
+static class XpFloat
+{
+    public const string Key = "xpinfo.float.";
+    public const int Slots = 10;
+    const float Head = 24, Rise = 10, LevelGap = 4;
+
+    static XpSettings s_settings = new();
+    static FieldInfo? s_sessionField;
+    static MethodInfo? s_project;
+
+    public static void Install(ModContext context, XpSettings settings)
+    {
+        s_settings = settings;
+        var type = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
+        s_sessionField = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Single(f => f.FieldType == typeof(WorldSession));
+        s_project = AccessTools.Method(type, "Project", [typeof(Vector3)]) ?? throw new MissingMethodException(type.FullName, "Project");
+        var bind = AccessTools.Method(type, "BindUi") ?? throw new MissingMethodException(type.FullName, "BindUi");
+        context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(XpFloat), nameof(Bound)));
+    }
+
+    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
+    static void Bound(object __instance, UiBindings __result)
+    #pragma warning restore IDE1006
+    {
+        if (!s_settings.Enabled || s_sessionField?.GetValue(__instance) is not WorldSession session) return;
+        if (session.World.Systems.OfType<XpWatchSystem>().FirstOrDefault() is not { } watch) return;
+
+        float life = s_settings.Seconds / session.World.TickSeconds;
+        int slot = 0;
+        foreach (var label in watch.Recent.Reverse())
+        {
+            float age = (session.World.Tick - label.Tick) / life;
+            if (age is < 0 or > 1 || slot >= Slots) continue;
+            if (Screen(__instance, session, label, age) is not { } at) continue;
+
+            __result.Text[Key + slot++] = string.Create(CultureInfo.InvariantCulture, $"{at.X:0}|{at.Y:0}|{(label.Level ? 1 : 0)}|{label.Text}");
+        }
+    }
+
+    static Vector2? Screen(object player, WorldSession session, XpLabel label, float age)
+    {
+        var character = session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == label.Character);
+        if (character is null) return null;
+
+        var head = character.Position + new Vector3(0, Head + (label.Level ? LevelGap : 0) + Rise * age, 0);
+        return (Vector2?)s_project!.Invoke(player, [head]);
+    }
+}
+
+/// <summary>Draws the bound labels: gains in pale green, levels in gold.</summary>
+public sealed class XpFloatUi : IUiExtension
+{
+    const float Width = 320, Height = 22;
+
+    public string Id => "dxseba.xpinfo.float";
+
+    public void Register(UiRegistration registration)
+    {
+        string gain = registration.RegisterStyle("gain", new() { Text = new(.70f, .95f, .65f, 1), TextPadding = new(0, 0, 0, 0) });
+        string level = registration.RegisterStyle("level", new() { Text = new(.98f, .85f, .35f, 1), TextPadding = new(0, 0, 0, 0) });
+        registration.Contribute(UiSlots.Overlay, frame => Build(frame, gain, level), order: 42);
+    }
+
+    static UiNode Build(UiFrameContext frame, string gain, string level)
+    {
+        var root = new UiNode("xpinfo-float") { Placement = UiPlacement.Fill, Pickable = false };
+        for (int i = 0; i < XpFloat.Slots; i++)
+        {
+            var parts = frame.Text(XpFloat.Key + i).Split('|', 4);
+            if (parts.Length != 4 || !float.TryParse(parts[0], CultureInfo.InvariantCulture, out float x)
+                || !float.TryParse(parts[1], CultureInfo.InvariantCulture, out float y))
+                continue;
+
+            var placement = new UiPlacement(Width, Height, Left: x - Width / 2, Top: y - Height / 2);
+            string style = parts[2] == "1" ? level : gain;
+            root.Children.Add(new("xpinfo-float-" + i, UiNodeKind.Label) { Placement = placement, Text = parts[3], Style = style, Pickable = false });
+        }
+
+        return root;
+    }
+}

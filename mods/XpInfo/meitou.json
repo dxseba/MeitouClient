@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.xpinfo",
+  "apiVersion": 1,
+  "assemblies": ["XpInfo.dll"],
+  "entry": "Meitou.XpInfo.XpInfoMod"
+}
