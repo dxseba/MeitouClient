@@ -34,6 +34,7 @@
     <Project Path="mods/BuildingSearchBar/Meitou.BuildingSearchBar.csproj" />
     <Project Path="mods/XpInfo/Meitou.XpInfo.csproj" />
     <Project Path="mods/PoshDamageNumbers/Meitou.PoshDamageNumbers.csproj" />
+    <Project Path="mods/LimbToughness/Meitou.LimbToughness.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>
