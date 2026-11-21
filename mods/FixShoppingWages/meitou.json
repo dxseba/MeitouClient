@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.fixshoppingwages",
+  "apiVersion": 1,
+  "assemblies": ["FixShoppingWages.dll"],
+  "entry": "Meitou.FixShoppingWages.FixShoppingWagesMod"
+}
