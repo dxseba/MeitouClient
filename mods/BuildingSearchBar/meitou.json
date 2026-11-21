@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.buildingsearchbar",
+  "apiVersion": 1,
+  "assemblies": ["BuildingSearchBar.dll"],
+  "entry": "Meitou.BuildingSearchBar.BuildingSearchBarMod"
+}

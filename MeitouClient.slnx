@@ -31,6 +31,7 @@
     <Project Path="mods/GoProne/Meitou.GoProne.csproj" />
     <Project Path="mods/WeaponDodgeGuard/Meitou.WeaponDodgeGuard.csproj" />
     <Project Path="mods/WantedMap/Meitou.WantedMap.csproj" />
+    <Project Path="mods/BuildingSearchBar/Meitou.BuildingSearchBar.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>
