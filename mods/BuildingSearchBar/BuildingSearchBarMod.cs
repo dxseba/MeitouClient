@@ -2,80 +2,42 @@ using System.Reflection;
 using HarmonyLib;
 using Meitou.Data.Gameplay.Construction;
 using Meitou.Game.Building;
-using Meitou.Game.Host.Input;
 using Meitou.Game.Ui;
 using Meitou.Modding;
 
 namespace Meitou.BuildingSearchBar;
 
 /// <summary>
-/// Port of Building Search Bar (workshop 3786979230, GPLv3; rebuilt from its description): while the build window is open, the "Search buildings"
-/// key action starts typing a query; the build menu then lists only the unlocked buildings whose name, group, category or string id contains it.
-/// Typing is taken before the game's keys (a prefix on <c>PlayerInterface.UiKey</c>); the menu is filtered by postfixes on
-/// <c>BuildMenu.Categories</c> and <c>BuildMenu.Groups</c>.
+/// Port of Building Search Bar (workshop 3786979230, GPLv3; rebuilt from its description): while the build window is open, a search window with a
+/// text box shows; the build menu then lists only the unlocked buildings whose name, group, category or string id contains the query. The menu is
+/// filtered by postfixes on <c>BuildMenu.Categories</c> and <c>BuildMenu.Groups</c>.
 /// </summary>
 public sealed class BuildingSearchBarMod : IMod
 {
     public void Initialize(ModContext context)
     {
-        context.AddKeyAction("search", "Search buildings", _ => Search.Start(), Key.N);
         SearchHooks.Install(context);
-        context.AddUi(new SearchLabel());
+        context.AddUi(new SearchWindow());
         context.Log("Building Search Bar initialized");
     }
 }
 
-/// <summary>The query, typed on the interface thread and read there by the menu.</summary>
+/// <summary>The query, set by the text box on the interface thread and read there by the menu.</summary>
 static class Search
 {
+    /// <summary>The longest query the box takes.</summary>
+    public const int MaxLength = 40;
+
     static volatile string s_query = "";
 
     public static string Query => s_query;
 
-    /// <summary>Whether keys go to the query now.</summary>
-    public static volatile bool Typing;
-
     /// <summary>Whether the build window is open (polled each frame).</summary>
     public static volatile bool BuildOpen;
 
-    public static void Start()
-    {
-        if (BuildOpen) Typing = true;
-    }
+    public static void Set(string query) => s_query = query.Length > MaxLength ? query[..MaxLength] : query;
 
-    public static void Clear()
-    {
-        s_query = "";
-        Typing = false;
-    }
-
-    /// <summary>A key while typing: letters, digits, space and dash add, Backspace removes, Enter ends, Escape clears; true when taken.</summary>
-    public static bool Key(Key key, bool shift)
-    {
-        switch (key)
-        {
-            case Game.Host.Input.Key.Escape:
-                Clear();
-                return true;
-            case Game.Host.Input.Key.Enter:
-                Typing = false;
-                return true;
-            case Game.Host.Input.Key.Backspace:
-                if (s_query.Length > 0) s_query = s_query[..^1];
-                return true;
-        }
-
-        if (CharOf(key) is { } c && s_query.Length < 40) s_query += c;
-        return true;
-    }
-
-    static char? CharOf(Key key)
-    {
-        string name = key.ToString();
-        if (name.Length == 1 && char.IsAsciiLetter(name[0])) return char.ToLowerInvariant(name[0]);
-        if (name.Length == 2 && name[0] == 'D' && char.IsAsciiDigit(name[1])) return name[1];
-        return key switch { Game.Host.Input.Key.Space => ' ', Game.Host.Input.Key.Minus => '-', _ => null };
-    }
+    public static void Clear() => s_query = "";
 
     public static bool Matches(BuildingBuildData b)
     {
@@ -96,7 +58,6 @@ static class SearchHooks
     {
         var player = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
         s_openScreens = AccessTools.Property(player, "OpenScreens") ?? throw new MissingMemberException(player.FullName, "OpenScreens");
-        Patch(context, AccessTools.Method(player, "UiKey"), prefix: nameof(BeforeUiKey));
         Patch(context, AccessTools.Method(player, "BindUi"), postfix: nameof(AfterBindUi));
         Patch(context, AccessTools.Method(typeof(BuildMenu), nameof(BuildMenu.Categories)), postfix: nameof(AfterCategories));
         Patch(context, AccessTools.Method(typeof(BuildMenu), nameof(BuildMenu.Groups)), postfix: nameof(AfterGroups));
@@ -111,14 +72,6 @@ static class SearchHooks
     }
 
     #pragma warning disable IDE1006 // Harmony binds __instance / __result by name
-    static bool BeforeUiKey(Key key, bool shift, ref bool __result)
-    {
-        if (!Search.Typing || !Search.BuildOpen) return true;
-
-        __result = Search.Key(key, shift);
-        return false;
-    }
-
     /// <summary>Once a frame: notes whether the build window is open; closing it clears the query.</summary>
     static void AfterBindUi(object __instance)
     {
@@ -150,34 +103,55 @@ static class SearchHooks
         ? menu.Catalog.Count(b => unlocked.Contains(b.Id) && Search.Matches(b)) : -1;
 }
 
-/// <summary>The query line over the screen's top while the build window is open and a query is typed.</summary>
-sealed class SearchLabel : IUiExtension
+/// <summary>
+/// The search window at the screen's top while the build window is open: a caption, the query's text box and how many unlocked buildings match.
+/// </summary>
+sealed class SearchWindow : IUiExtension
 {
-    string _style = "";
+    const int Width = 420, Height = 34, Pad = 4;
+
+    string _panel = "", _caption = "", _typed = "", _clear = "";
 
     public string Id => "dxseba.buildingsearchbar.ui";
 
     public void Register(UiRegistration registration)
     {
-        _style = registration.RegisterStyle("label", new()
-        {
-            Background = new(.10f, .085f, .07f, .92f), Text = new(.91f, .86f, .74f, 1), TextPadding = new Data.Ui.UiInsets(8, 2, 8, 2),
-        });
+        _panel = registration.RegisterStyle("panel", new() { Skin = "Kenshi_GenericTextBoxFlatSkin" });
+        _caption = registration.RegisterStyle("caption", new() { Text = new(.91f, .86f, .74f, 1), TextPadding = new Data.Ui.UiInsets(6, 0, 4, 0) });
+        _typed = registration.RegisterAction("typed", c => Search.Set(c.Text));
+        _clear = registration.RegisterAction("clear", _ => Search.Clear());
         registration.Contribute(UiSlots.Overlay, Build, order: 61);
     }
 
     UiNode Build(UiFrameContext frame)
     {
-        if (!Search.BuildOpen || !Search.Typing && Search.Query.Length == 0) return new UiNode("bsb-hidden") { Visible = false };
+        if (!Search.BuildOpen) return new UiNode("bsb-hidden") { Visible = false };
 
-        int hits = SearchHooks.Hits();
-        string text = $"Search buildings: {Search.Query}{(Search.Typing ? "_" : "")}" + (hits >= 0 ? $"   ({hits} found)" : "")
-            + (Search.Typing ? "   Enter: done, Esc: clear" : "");
         var root = new UiNode("bsb") { Placement = UiPlacement.Fill, Pickable = false };
-        root.Children.Add(new UiNode("bsb-label", UiNodeKind.Label)
+        var window = new UiNode("bsb-window")
         {
-            Placement = new(520, 26, Left: (frame.Viewport.Width - 520) / 2, Top: 8), Text = text, Style = _style,
-        });
+            Placement = new(Width, Height, Left: (frame.Viewport.Width - Width) / 2, Top: 8), Style = _panel,
+            Flow = UiFlow.Row, Padding = Pad, Gap = Pad,
+        };
+        AddChildren(window);
+        root.Children.Add(window);
         return root;
+    }
+
+    void AddChildren(UiNode window)
+    {
+        int hits = SearchHooks.Hits();
+        string found = hits >= 0 && Search.Query.Trim().Length > 0 ? $"{hits} found" : "";
+        float row = Height - 2 * Pad;
+        window.Children.Add(new UiNode("bsb-caption", UiNodeKind.Label) { Placement = new(70, row), Text = "Search:", Style = _caption });
+        window.Children.Add(new UiNode("bsb-query", UiNodeKind.TextBox)
+        {
+            Placement = new(200, row), Text = Search.Query, Action = _typed, MaxLength = Search.MaxLength,
+        });
+        window.Children.Add(new UiNode("bsb-found", UiNodeKind.Label) { Placement = new(80, row), Text = found, Style = _caption });
+        window.Children.Add(new UiNode("bsb-clear", UiNodeKind.Button)
+        {
+            Placement = new(row, row), Text = "X", Action = _clear, Enabled = Search.Query.Length > 0,
+        });
     }
 }
