@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Numerics;
 using System.Text;
+using Meitou.Data;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -10,24 +11,26 @@ using Meitou.Simulation.Population;
 
 namespace Meitou.PersistentPrisoners;
 
-/// <summary>One overview row.</summary>
-sealed record PrisonerRow(string Name, string Faction, int Nutrition, string Condition, string Place, bool Loaded, bool OwnSquad);
+/// <summary>One overview row, with the original's columns: name, faction, cage, Nu (hunger x 100), condition, location and status.</summary>
+sealed record PrisonerRow(string Name, string Faction, string Cage, int Nu, string Condition, string Location, string Status, bool Dead, bool Loaded);
 
 /// <summary>
 /// Learns the player's cages while they are loaded (fixture ids, saved with the world, as a cage's fixture may be gone while its zone is out),
-/// answers the keep test for any thread, feeds caged prisoners with starvation off, and publishes the overview every 30th tick.
+/// answers the keep test for any thread, sets the hunger floor the original's <c>getMagicHungerSetting</c> hook gives, and publishes the overview
+/// every 30th tick.
 /// </summary>
-sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population) : ITickSystem, IModSaveData
+sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population, GameDatabase data) : ITickSystem, IModSaveData
 {
-    const int Version = 1;
+    const int Version = 2;
 
-    /// <summary>Hunger units a fed prisoner gains per game hour (the game's scale 0-3), below the minimum.</summary>
-    const float FeedPerHour = 0.25f;
+    /// <summary>The original's "no free food" floor for a prisoner who must starve or is carried by the player (<b>Verified</b>, DLL rdata -10).</summary>
+    const float NoFood = -10;
 
     readonly HashSet<string> _cages = new(StringComparer.Ordinal);
+    readonly Dictionary<string, string> _cageNames = new(StringComparer.Ordinal);
+    readonly Dictionary<CharacterId, float> _fed = [];
     volatile FrozenSet<string> _frozen = FrozenSet<string>.Empty;
     World? _world;
-    double _lastHours = double.NaN;
 
     /// <summary>The overview rows; refreshed while the world runs.</summary>
     public volatile IReadOnlyList<PrisonerRow> Rows = [];
@@ -50,7 +53,10 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
         foreach (var f in world.Fixtures.All)
         {
             if (f.Kind != FixtureKind.Cage) continue;
-            changed |= f.Owner == world.Player.Faction && world.Player.Faction >= 0 ? _cages.Add(f.Id) : _cages.Remove(f.Id);
+
+            bool mine = f.Owner == world.Player.Faction && world.Player.Faction >= 0;
+            changed |= mine ? _cages.Add(f.Id) : _cages.Remove(f.Id);
+            if (mine) _cageNames[f.Id] = data.Find(f.HostRecordId)?.Name ?? data.Find(f.RecordId)?.Name ?? "";
         }
 
         if (changed) _frozen = _cages.ToFrozenSet(StringComparer.Ordinal);
@@ -75,35 +81,62 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
 
     #endregion
 
-    #region Feeding
+    #region Hunger floor
 
+    /// <summary>
+    /// The original's hunger floor for a living non-player character of a race that hungers (<b>Verified</b>, original DLL (decompiled)): carried by
+    /// a player character, none (it starves); in a player cage, none with starvation allowed, else Minimum Nu / 100, so the game feeds it towards
+    /// that level by its own free-food rule. Set through <c>CharacterCold.FedTo</c> and taken back when it no longer applies.
+    /// </summary>
     void Feed(World world)
     {
-        double hours = double.IsNaN(_lastHours) ? 0 : Math.Clamp(world.GameHours - _lastHours, 0, 1);
-        _lastHours = world.GameHours;
-        if (settings.Starvation || hours <= 0) return;
-
-        float floor = settings.MinimumNutrition / 100f;
         var table = world.Characters;
+        var now = new Dictionary<CharacterId, float>();
         for (int slot = 0; slot < table.HighWater; slot++)
         {
-            if (!table.Next[slot].Alive || table.Cold(slot) is not { Medical: { Dead: false } medical } cold || !InPlayerCage(cold)) continue;
-            if (medical.Hunger < floor) medical.Hunger = Math.Min(floor, medical.Hunger + FeedPerHour * (float)hours);
+            if (!table.Next[slot].Alive || table.Cold(slot) is not { Medical: { Dead: false } } cold || Floor(world, cold) is not { } floor) continue;
+
+            var id = table.IdOf(slot);
+            if (cold.FedTo is null || _fed.TryGetValue(id, out float mine) && cold.FedTo == mine)
+            {
+                cold.FedTo = floor;
+                now[id] = floor;
+            }
         }
+
+        foreach (var (id, mine) in _fed)
+        {
+            if (!now.ContainsKey(id) && table.TryResolveNext(id, out int slot) && table.Cold(slot) is { } cold && cold.FedTo == mine) cold.FedTo = null;
+        }
+
+        _fed.Clear();
+        foreach (var (id, floor) in now) _fed[id] = floor;
     }
+
+    float? Floor(World world, CharacterCold cold)
+    {
+        if (cold.IsPlayer || cold.Race is not { HungerRate: > 0 }) return null;
+        if (CarriedByPlayer(world, cold)) return NoFood;
+        if (!InPlayerCage(cold)) return null;
+
+        return settings.Starvation ? NoFood : Math.Clamp(settings.MinimumNutrition, 1, 300) / 100f;
+    }
+
+    static bool CarriedByPlayer(World world, CharacterCold cold) =>
+        !cold.CarriedBy.IsNone && world.Characters.TryResolveNext(cold.CarriedBy, out int slot) && world.Characters.Cold(slot) is { IsPlayer: true };
 
     #endregion
 
     #region Overview
 
-    /// <summary>Prisoners in the player's cages, loaded and stored, and the player's own characters held anywhere.</summary>
+    /// <summary>The occupants of the player's cages, loaded and stored, dead or alive, and the player's own characters held anywhere.</summary>
     List<PrisonerRow> Overview(World world)
     {
         var rows = new List<PrisonerRow>();
         var table = world.Characters;
         for (int slot = 0; slot < table.HighWater; slot++)
         {
-            if (table.Cold(slot) is not { } cold || !cold.IsImprisoned) continue;
+            if (!table.Next[slot].Alive || table.Cold(slot) is not { IsImprisoned: true } cold) continue;
             if (InPlayerCage(cold) || cold.IsPlayer) rows.Add(Row(cold, table.Next[slot].Position, loaded: true));
         }
 
@@ -115,25 +148,48 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
             }
         }
 
-        return [.. rows.OrderBy(r => r.OwnSquad).ThenBy(r => r.Place, StringComparer.Ordinal).ThenBy(r => r.Name, StringComparer.Ordinal)];
+        return [.. rows.OrderBy(r => r.Status, StringComparer.Ordinal).ThenBy(r => r.Location, StringComparer.Ordinal).ThenBy(r => r.Name, StringComparer.Ordinal)];
     }
 
     PrisonerRow Row(CharacterCold cold, Vector3 at, bool loaded)
     {
         var medical = cold.Medical;
-        int nutrition = (int)MathF.Round((medical?.Hunger ?? 0) * 100);
-        string condition = medical is null ? "?" : medical.Dead ? "Dead" : medical.Unconscious ? "Unconscious" : nutrition < 100 ? "Starving" : "Awake";
-        string faction = population.Relations.Contains(cold.Faction) ? population.Relations.Factions[cold.Faction].Name : "Nobody";
-        return new(cold.Name, faction, nutrition, condition, Place(at), loaded, cold.IsPlayer);
+        int nu = (int)MathF.Round((medical?.Hunger ?? 0) * 100);
+        bool dead = medical?.Dead ?? cold.DiedTick >= 0;
+        string faction = population.Relations.Contains(cold.Faction) ? population.Relations.Factions[cold.Faction].Name : "Unknown";
+        string cage = cold.InWhat is { } id ? _cageNames.GetValueOrDefault(id, "") : "";
+        return new(cold.Name, faction, cage, nu, Condition(cold, medical, nu), Location(at), Status(cold, loaded), dead, loaded);
     }
 
-    /// <summary>The nearest town's name, within 3000 units; else the coordinates.</summary>
-    string Place(Vector3 at)
+    /// <summary>
+    /// The original's condition words: Dead, Dying, Unconscious or Alive, with "/ Starving" (or Starving alone) for a race that hungers at Nu below
+    /// 100. Dying: the original asks <c>MedicalSystem::isProbablyDying</c> or a pair of medical fields; the port has no such test and reads no blood
+    /// and still bleeding (<b>Unknown</b> whether that is what the original's fields mean).
+    /// </summary>
+    static string Condition(CharacterCold cold, MedicalState? medical, int nu)
+    {
+        if (medical is null) return "Alive";
+        if (medical.Dead) return "Dead";
+
+        bool starving = cold.Race is { HungerRate: > 0 } && nu < 100;
+        bool dying = medical.Blood <= 0 && medical.Bleeding > 0;
+        if (dying) return starving ? "Dying / Starving" : "Dying";
+        if (medical.Unconscious) return starving ? "Unconscious / Starving" : "Unconscious";
+        return starving ? "Starving" : "Alive";
+    }
+
+    /// <summary>The original's status words: Player squad, Player / Unloaded, Unloaded, else Protected.</summary>
+    static string Status(CharacterCold cold, bool loaded) => cold.IsPlayer
+        ? loaded ? "Player squad" : "Player / Unloaded"
+        : loaded ? "Protected" : "Unloaded";
+
+    /// <summary>The nearest town's name within 3000 units, else "Unknown location".</summary>
+    string Location(Vector3 at)
     {
         var near = population.Sites.MinBy(s => Vector2.DistanceSquared(new(s.Position.X, s.Position.Z), new(at.X, at.Z)));
         if (near is not null && Vector2.Distance(new(near.Position.X, near.Position.Z), new(at.X, at.Z)) < 3000) return near.Record.Name;
 
-        return $"{at.X:0}, {at.Z:0}";
+        return "Unknown location";
     }
 
     #endregion
@@ -145,16 +201,28 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Version);
         writer.Write(_cages.Count);
-        foreach (var cage in _cages.Order(StringComparer.Ordinal)) writer.Write(cage);
+        foreach (var cage in _cages.Order(StringComparer.Ordinal))
+        {
+            writer.Write(cage);
+            writer.Write(_cageNames.GetValueOrDefault(cage, ""));
+        }
     }
 
     public void Read(Stream stream)
     {
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
-        if (reader.ReadInt32() != Version) return;
+        int version = reader.ReadInt32();
+        if (version is not (1 or 2)) return;
 
         _cages.Clear();
-        for (int i = reader.ReadInt32(); i > 0; i--) _cages.Add(reader.ReadString());
+        _cageNames.Clear();
+        for (int i = reader.ReadInt32(); i > 0; i--)
+        {
+            string cage = reader.ReadString();
+            _cages.Add(cage);
+            if (version >= 2) _cageNames[cage] = reader.ReadString();
+        }
+
         _frozen = _cages.ToFrozenSet(StringComparer.Ordinal);
     }
 
