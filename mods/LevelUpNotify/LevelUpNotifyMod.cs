@@ -1,96 +1,79 @@
-using System.Text.RegularExpressions;
-using Meitou.Data.Gameplay.Bodies;
 using Meitou.Modding;
 using Meitou.Simulation;
 
 namespace Meitou.LevelUpNotify;
 
 /// <summary>
-/// When a player character's stat passes a whole level: floating text over the character ("Melee Attack 12") and a notice ("Mu: Melee Attack 12"),
-/// each optional, optionally only every Nth level.
+/// When a player character's skill reaches a new whole level (or passes a multiple of N), a toast "Mu: Dexterity Lv.12" fades in and out in a
+/// stack at a corner of the screen, as the original's.
 /// </summary>
-public sealed partial class LevelUpNotifyMod : IMod
+public sealed class LevelUpNotifyMod : IMod
 {
     public void Initialize(ModContext context)
     {
         var settings = new LevelUpSettings();
         context.AddSettings(settings);
         context.AddSystem("levels", _ => new LevelWatchSystem(settings), SystemAnchor.End);
-        FloatingText.Install(context, settings);
-        context.AddUi(new FloatingTextUi());
+        Toasts.Install(context, settings);
+        context.AddUi(new ToastUi(settings));
         context.Log("Level Up Notifications initialized");
     }
-
-    [GeneratedRegex("(?<=[a-z])(?=[A-Z])")]
-    internal static partial Regex WordBreak();
 }
 
-public sealed class LevelUpSettings
-{
-    [Setting("Level up notices", Hint = "A notice when a squad member's stat reaches a new whole level.")]
-    public bool Enabled { get; set; } = true;
-
-    [Setting("Notify every N levels", Hint = "1: every level; 5: levels 5, 10, 15...", Min = 1, Max = 100)]
-    public int Every { get; set; } = 1;
-
-    [Setting("Floating text", Hint = "The level rises over the character's head.")]
-    public bool Floating { get; set; } = true;
-
-    [Setting("Message", Hint = "Also post the level up in the message area.")]
-    public bool Message { get; set; } = true;
-
-    [Setting("Floating text seconds", Hint = "How long the floating text stays.", Min = 1, Max = 10, Step = 0.5)]
-    public float Seconds { get; set; } = 3;
-}
-
-/// <summary>A level up for the floating text: who, what, and the tick it happened.</summary>
-public readonly record struct LevelUp(CharacterId Character, string Text, long Tick);
+/// <summary>A level up: who, its toast text, and a running number the interface tells new ones by.</summary>
+public readonly record struct LevelUp(CharacterId Character, string Text, long Number);
 
 /// <summary>
-/// Polls player characters' stats twice a second in the serial slow phase. A character's first sighting (spawn, load, recruit) only records its levels.
-/// Notices are presentation only, so this state is neither saved nor hashed.
+/// Polls the player's characters' skills every <see cref="LevelUpSettings.PollMs"/> in the serial slow phase. A character's first sighting (spawn,
+/// load, recruit) only records its levels. Level ups are presentation only, so this state is neither saved nor hashed.
 /// </summary>
 sealed class LevelWatchSystem(LevelUpSettings settings) : ITickSystem
 {
-    static readonly StatsEnumerated[] Watched = [.. StatsInfo.RecordStats];
-    const int Kept = 16;
+    const int Kept = 64;
     readonly Dictionary<CharacterId, int[]> _seen = [];
     volatile LevelUp[] _recent = [];
+    long _count;
 
     /// <summary>The latest level ups, newest last; safe to read from the interface thread.</summary>
     public LevelUp[] Recent => _recent;
 
     public void SlowWorld(World world)
     {
-        if (world.Tick % 15 != 0) return;
+        long every = Math.Max(1, (long)MathF.Round(settings.PollMs / 1000f / world.TickSeconds));
+        if (world.Tick % every != 0) return;
 
         var table = world.Characters;
         for (int slot = 0; slot < table.HighWater; slot++)
         {
             if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Stats: { } stats } cold) continue;
-            Check(world, new(slot, table.Next[slot].Generation), cold.Name, stats);
+            Check(table.IdOf(slot), cold.Name, stats);
         }
     }
 
-    void Check(World world, CharacterId id, string name, Meitou.Simulation.Bodies.CharacterStats stats)
+    /// <summary>
+    /// The original's rule: a skill at level 1 or more that rose past a multiple of N since the last check (old / N &lt; new / N) notifies once with
+    /// its level now, unless muted.
+    /// </summary>
+    void Check(CharacterId id, string name, Simulation.Bodies.CharacterStats stats)
     {
         bool first = !_seen.TryGetValue(id, out var levels);
-        levels ??= _seen[id] = new int[Watched.Length];
+        levels ??= _seen[id] = new int[Skills.Watched.Length];
+        int n = Math.Max(1, settings.Every);
 
-        for (int i = 0; i < Watched.Length; i++)
+        for (int i = 0; i < Skills.Watched.Length; i++)
         {
-            int level = (int)MathF.Floor(stats[Watched[i]]);
-            if (!first && level > levels[i] && settings.Enabled && level % Math.Max(1, settings.Every) == 0) Notify(world, id, name, Watched[i], level);
+            int level = (int)MathF.Floor(stats[Skills.Watched[i].Stat]);
+            if (level <= 0) continue;
+
+            bool passed = !first && level > levels[i] && levels[i] / n < level / n;
+            if (passed && settings.Enabled && settings.Notifies(i)) Notify(id, name, Skills.Watched[i].Name, level);
             levels[i] = level;
         }
     }
 
-    void Notify(World world, CharacterId id, string name, StatsEnumerated stat, int level)
+    void Notify(CharacterId id, string name, string skill, int level)
     {
-        string text = $"{Label(stat)} {level}";
-        if (settings.Message) world.Post($"{name}: {text}");
-        if (settings.Floating) _recent = [.. _recent.TakeLast(Kept - 1), new LevelUp(id, text, world.Tick)];
+        string who = name.Length > 0 ? name : "<unknown>";
+        _recent = [.. _recent.TakeLast(Kept - 1), new LevelUp(id, $"{who}: {skill} Lv.{level}", ++_count)];
     }
-
-    static string Label(StatsEnumerated stat) => LevelUpNotifyMod.WordBreak().Replace(stat.ToString(), " ");
 }
