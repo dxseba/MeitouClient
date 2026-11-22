@@ -8,7 +8,8 @@ namespace Meitou.KenshiCompact;
 
 /// <summary>
 /// Port of farghul's Kenshi Compact (GPL-3.0): Shift+/ opens the character editor, in its in-play (recruit) mode, on the main selected character,
-/// unless it is in combat mode. A Harmony prefix on the interface's <c>GameHotkeys.Key</c>, which every game key passes through.
+/// unless it is in combat mode (melee or ranged). A Harmony prefix on the interface's <c>GameHotkeys.Key</c>, which every game key passes through;
+/// the key is not swallowed.
 /// </summary>
 public sealed class KenshiCompactMod : IMod
 {
@@ -38,12 +39,12 @@ public sealed class KenshiCompactMod : IMod
         if (!Settings.Enabled || key != Key.Slash || !shift) return true;
 
         var player = s_owner.GetValue(__instance)!;
-        if (Traverse.Create(player).Method("Lead").GetValue() is not CharacterSnapshot { CombatMode: false } lead) return false;
+        if (Traverse.Create(player).Method("Lead").GetValue() is not CharacterSnapshot { CombatMode: false } lead) return true;
 
         var editor = Traverse.Create(player).Property("CharacterEditor").GetValue()!;
         Traverse.Create(editor).Method("OpenEditor", [typeof(EditKind), typeof(IReadOnlyList<CharacterId>), typeof(CharacterId), typeof(bool)])
             .GetValue(EditKind.Recruit, (IReadOnlyList<CharacterId>)[lead.Id], default(CharacterId), false);
-        return false;
+        return true;   // the original's key handler only listens: the key goes on to the game as well
     }
 }
 
