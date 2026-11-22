@@ -56,11 +56,11 @@ static class MarkerKinds
     ];
 
     /// <summary>
-    /// The fork's Colour row in order (<b>Verified</b>, original DLL rdata table): "" is the "-" button that removes the tag, then white, red,
-    /// orange, yellow, green, cyan, blue, purple, pink, grey.
+    /// The Colour row: "" is the "-" button that removes the tag, then ten colours. The fork's row has the same layout (a "-" and ten swatches);
+    /// its palette is its author's choice and is not copied: these are the port's own.
     /// </summary>
     public static readonly string[] Swatches =
-        ["", "#FFFFFF", "#FF5A4E", "#FF9F45", "#FFD84D", "#7BE07B", "#5CD6E8", "#6FA8FF", "#C38BFF", "#FF7FC8", "#A0A0A0"];
+        ["", "#FFFFFF", "#E04848", "#F0902C", "#F2D541", "#69C95B", "#4CC3D9", "#5A8CE6", "#A97AE8", "#E86FB4", "#9A9A9A"];
 
     public static uint SwatchRgba(int i) => Convert.ToUInt32(Swatches[i][1..], 16) << 8 | 0xFF;
 

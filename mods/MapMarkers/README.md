@@ -14,8 +14,7 @@ Port of *Map markers* (MCM fork, workshop 3813852161) of Emkej8's mod (GPL-3.0 s
 - **Editor** (while a marker is selected), at the map's top right, in the MCM fork's layout (**Verified**, original DLL (decompiled): a
   510 x 198 panel, header at 16,16 with an "x" close at 470,13; type button 16,42 346 wide in the type's colour cycling the ten types, Delete at
   374,42; Label box 108,74 386 wide (Enter commits and deselects, losing the focus commits); Colour row at y 107: "-" and ten 22 px swatches
-  28 apart from x 108 (rdata order white `#FFFFFF`, `#FF5A4E`, `#FF9F45`, `#FFD84D`, `#7BE07B`, `#5CD6E8`, `#6FA8FF`, `#C38BFF`, `#FF7FC8`,
-  `#A0A0A0`; frame 0.05 grey); a swatch replaces the label's leading `#RRGGBB` tag (7 characters, not `##`) and commits, "-" drops it; the
+  28 apart from x 108 (frame 0.05 grey; port: its own ten colours, white first, the fork's palette is its author's and not copied); a swatch replaces the label's leading `#RRGGBB` tag (7 characters, not `##`) and commits, "-" drops it; the
   hint "MMB new marker | LMB move | Enter save" / "Del or the button - delete | RMB deselect" at 16,142). Port: sizes times the UI scale.
   Markers under the editor are hidden, as in the original. **Hover label**: "Type: label" in `#F5F5F5` on `#1A1A1AF2` above the marker, at
   most 480 px wide (the fork measures the text; the port estimates it, tags left out).
