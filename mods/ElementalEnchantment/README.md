@@ -12,13 +12,15 @@ Port of *Elemental Enchantment* (workshop 3832978749), rebuilt from its Workshop
 - **Speed** (`ICombatSpeedFilter`, the same strengths and shares; this port's factors): Wind multiplies attack and block play rates by
   (1 + 0.2 s), Lightning the attack rate by (1 + 0.1 s), past the game's caps. A pure read of the attacker's skills and its element.
 - **Looks** (`AddCombatHitFeed` + `ModContext.PlayEffect`, *Element effects* setting): each hit by a character with an element active plays
-  the element's impact on the victim's chest for 0.3 s and the parry sparks in the element's colour at the attacker's weapon bone
-  (`Bip01 Prop2`, where the game throws its block sparks) for 0.25 s. Impacts: Fire `small- fire2_torch`, Lightning `small- sparks1`, Ice
+  the element's impact on the victim's chest for 0.6 s and the parry sparks in the element's colour at the attacker's weapon bone
+  (`Bip01 Prop2`, where the game throws its block sparks) for 0.25 s; the element then keeps burning at that point for 3 s after the
+  character's last hit. Impacts: Fire `small- fire2_torch`, Lightning `small- sparks1`, Ice
   `small- smoke3_small` (EFFECT records, ids in `ElementEffects.cs`), Wind the system `Dustkick01`, Water `Footsplashes01`, each tinted.
   **Verified** with `meitou-tools record` and `particles effects` that the three EFFECT records are base-game (`gamedata.base`) with those
   systems, and that both systems have scripts in the base `data/particles/scripts`. **Unknown**: how they look and read at combat scale.
 - **Training**: every landed hit with an element active trains that skill by 2 x *Elemental XP* x the character's aptitude for it (a fixed
   0.5-1.5 roll of its lasting id; 1 with *All aptitudes at 100%*), on the game's curve.
-- **Missing** (partial): the ENCHANTMENT window and choosing the secondary element (the best other one is taken), a true swing trail (sparks
-  at the weapon on a hit instead), Wind's reload speed, Elemental Haven (the town, recalibrators, cores, wards, resonance), bosses using elements.
-- **Unknown**: not checked in game.
+- **Missing** (partial): the ENCHANTMENT window and choosing the secondary element (the best other one is taken), the glow along the whole blade
+  (the effects hook plays at one bone point, so the element burns at the grip instead), a true swing trail, Wind's reload speed, Elemental Haven (the town, recalibrators, cores, wards, resonance), bosses using elements.
+- **Observed** (2026-11-22, normal game, user play): the effect requests resolve and play (Ice, Wind seen in the log); in the animation
+  sandbox nothing plays, because its particles are off. How the weapon glow looks is **Unknown**.
