@@ -1,5 +1,22 @@
 # Taunt Expansion (port)
 
-Port of *Taunt Expansion* (workshop 3771499164). A postfix on `TargetScore.Score` changes only a taunting candidate's score: the vanilla +2 taunt
-term times *Taunt strength* (default 1.5), and, for an enemy whose current target is someone else, a share (*Re-targeting*, default 0.5) of its
-stubbornness term. Target choice, AI and pathing stay vanilla. **Observed** (2026-11-17): loads; loads. **Observed** (2026-11-18, windowed sandbox on origin/master f7ad84a35, user play): enemies favoured the taunting character.
+Port of *Taunt Expansion* (workshop 3771499164). A postfix on `TargetScore.Score` changes only a taunting candidate's score: the vanilla +2
+Taunt term becomes +2 x *Taunt multiplier*, and x *Re-target multiplier* again while the choosing fighter already has a target (set by a
+prefix on `CombatSystem.ChooseTarget`). Target choice, AI and pathing stay vanilla.
+
+## Facts
+
+- Settings, defaults and ranges as the original's `TauntExpansion.ini`: `[General] Enabled` true, `[Taunt] Multiplier` 5.0 (0 to 100),
+  `RetargetMultiplier` 2.0 (0 to 10). A missing key reads 1.0. **Verified** (original ini; original DLL (decompiled): the clamped reads).
+- The original rewrites only the taunt `addss` constant (2.0) of `AI::chooseBestAttackTarget` to 2 x Multiplier, and for a call whose old-target
+  `hand` is valid (and RetargetMultiplier is not 1) sets it to 2 x Multiplier x RetargetMultiplier for that call. **Verified** (original DLL
+  (decompiled): patch install and the `chooseBestAttackTarget` hook).
+- The second factor applies to every taunting candidate of such a call, the current target too. **Verified** (as above: one constant per call).
+- In Meitou the calls with an old target are the fighter's own choice (`ChooseTarget`); attacker lookups and the aggro and assault finders
+  have none. **Observed** (Meitou source).
+- **Observed** (2026-11-18, windowed sandbox, user play, older formula): enemies favoured the taunting character.
+
+## Missing
+
+- The `[Logging]` diagnostics (`LogCandidates`, `LogOnlyWhenTauntPresent`, `LogOnlyChangedSelection`, `MinimumLogIntervalMs`,
+  `MaximumCandidatesPerEntry`): a debug log of each choice, not ported.

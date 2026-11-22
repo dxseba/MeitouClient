@@ -6,16 +6,31 @@ using Meitou.Simulation.Combat;
 namespace Meitou.TauntExpansion;
 
 /// <summary>
-/// Strengthens the vanilla Taunt term of the fight target score and makes enemies already fighting someone else readier to switch to a taunter.
-/// The vanilla target choice, AI and pathing are kept: only <see cref="TargetScore.Score"/> of a taunting candidate changes.
+/// Scales the vanilla Taunt term of the fight target score, and scales it again while the chooser already has a target. The vanilla target
+/// choice, AI and pathing are kept: only <see cref="TargetScore.Score"/> of a taunting candidate changes.
 /// </summary>
 public sealed class TauntExpansionMod : IMod
 {
-    /// <summary>The vanilla taunt bonus in <see cref="TargetScore.Score"/>.</summary>
+    /// <summary>
+    /// The vanilla taunt bonus in <see cref="TargetScore.Score"/> (the original's ini: "Kenshi's confirmed vanilla Taunt bonus is +2.0").
+    /// </summary>
     const float VanillaBonus = 2;
 
-    // Copied from the settings in a serial step; read by the parallel phases that score targets.
-    static float s_bonusMultiplier = 1.5f, s_retarget = 0.5f;
+    /// <summary>
+    /// Copied from the settings in a serial step; read by the parallel phases that score targets.
+    /// </summary>
+    static bool s_enabled = true;
+
+    /// <summary>
+    /// The Taunt and re-targeting multipliers, copied with <see cref="s_enabled"/>.
+    /// </summary>
+    static float s_multiplier = 5, s_retarget = 2;
+
+    /// <summary>
+    /// Whether the fighter choosing on this thread has a current target (set for the length of <c>CombatSystem.ChooseTarget</c>).
+    /// </summary>
+    [ThreadStatic]
+    static bool s_chooserHasTarget;
 
     public void Initialize(ModContext context)
     {
@@ -23,38 +38,80 @@ public sealed class TauntExpansionMod : IMod
         context.AddSettings(settings);
         context.AddSystem("settings", _ => new SettingsCopy(settings), SystemAnchor.Before(StandardParts.Combat));
 
-        var score = AccessTools.Method(typeof(TargetScore), nameof(TargetScore.Score)) ?? throw new MissingMethodException(nameof(TargetScore), "Score");
-        context.Harmony.Patch(score, postfix: new HarmonyMethod(typeof(TauntExpansionMod), nameof(Scored)));
+        PatchScore(context.Harmony);
+        PatchChooser(context.Harmony);
         context.Log("Taunt Expansion initialized");
     }
 
-    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    static void Scored(in TargetCandidate c, bool prone, ref float? __result)
+    static void PatchScore(Harmony harmony)
+    {
+        var score = AccessTools.Method(typeof(TargetScore), nameof(TargetScore.Score))
+            ?? throw new MissingMethodException(nameof(TargetScore), nameof(TargetScore.Score));
+        harmony.Patch(score, postfix: new HarmonyMethod(typeof(TauntExpansionMod), nameof(Scored)));
+    }
+
+    /// <summary>
+    /// The original raises the bonus a second time only inside <c>AI::chooseBestAttackTarget</c> calls given a valid old target; in Meitou that is
+    /// the fighter's own target choice, whose slot names its current target.
+    /// </summary>
+    static void PatchChooser(Harmony harmony)
+    {
+        var choose = AccessTools.Method(typeof(CombatSystem), "ChooseTarget")
+            ?? throw new MissingMethodException(nameof(CombatSystem), "ChooseTarget");
+        var prefix = new HarmonyMethod(typeof(TauntExpansionMod), nameof(Choosing));
+        var finalizer = new HarmonyMethod(typeof(TauntExpansionMod), nameof(Chosen));
+        harmony.Patch(choose, prefix: prefix, finalizer: finalizer);
+    }
+
+    static void Choosing(in CombatSlot s) => s_chooserHasTarget = s.TargetSlot >= 0;
+
+    static void Chosen() => s_chooserHasTarget = false;
+
+    #pragma warning disable IDE1006 // Harmony binds __result by name
+    static void Scored(in TargetCandidate c, ref float? __result)
     #pragma warning restore IDE1006
     {
-        if (!c.Taunt || __result is not { } s) return;
+        if (!s_enabled || !c.Taunt || __result is not { } s) return;
 
-        s += VanillaBonus * (s_bonusMultiplier - 1);
-        // A chooser on another target keeps it by the stubbornness term; a taunter not yet its target gets part of that term back.
-        if (!c.Current) s += TargetScore.Stubbornness * (prone ? 4 : 1) * s_retarget;
-        __result = s;
+        // Effective bonus: 2 x Multiplier, or 2 x Multiplier x RetargetMultiplier while the chooser already has a target (the original ini).
+        float bonus = VanillaBonus * s_multiplier;
+        if (s_chooserHasTarget) bonus *= s_retarget;
+
+        __result = s + bonus - VanillaBonus;
     }
 
     sealed class SettingsCopy(TauntSettings settings) : ITickSystem
     {
         public void Inputs(World world, IReadOnlyList<SimCommand> commands)
         {
-            s_bonusMultiplier = settings.Multiplier;
-            s_retarget = settings.Retarget;
+            s_enabled = settings.Enabled;
+            s_multiplier = settings.Multiplier;
+            s_retarget = settings.RetargetMultiplier;
         }
     }
 }
 
+/// <summary>
+/// The original's <c>TauntExpansion.ini</c> keys, defaults and ranges.
+/// </summary>
 public sealed class TauntSettings
 {
-    [Setting("Taunt strength", Hint = "Times the vanilla taunt bonus in enemies' target choice (1 = vanilla).", Min = 1, Max = 5, Step = 0.1)]
-    public float Multiplier { get; set; } = 1.5f;
+    /// <summary>
+    /// <c>[General] Enabled</c>.
+    /// </summary>
+    [Setting("Enabled", Hint = "Off leaves the vanilla Taunt bonus.")]
+    public bool Enabled { get; set; } = true;
 
-    [Setting("Re-targeting", Hint = "Share of an enemy's stubbornness for its current target that a taunter offsets (0 = vanilla).", Min = 0, Max = 1, Step = 0.05)]
-    public float Retarget { get; set; } = 0.5f;
+    /// <summary>
+    /// <c>[Taunt] Multiplier</c>: effective bonus = +2 x Multiplier.
+    /// </summary>
+    [Setting("Taunt multiplier", Hint = "Effective Taunt bonus = +2 x this (1 = vanilla +2, 5 = +10).", Min = 0, Max = 100, Step = 0.5)]
+    public float Multiplier { get; set; } = 5;
+
+    /// <summary>
+    /// <c>[Taunt] RetargetMultiplier</c>: when the enemy already has a target the bonus is +2 x Multiplier x this.
+    /// </summary>
+    [Setting("Re-target multiplier", Hint = "When the enemy already has a target the bonus is +2 x Taunt multiplier x this (1 = no extra).",
+        Min = 0, Max = 10, Step = 0.1)]
+    public float RetargetMultiplier { get; set; } = 2;
 }
