@@ -1,12 +1,16 @@
 using System.Numerics;
 using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Ai;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Gameplay.Dialogue;
 using Meitou.Simulation;
 using Meitou.Simulation.Ai;
 using Meitou.Simulation.Bodies;
+using Meitou.Simulation.Dialogue;
 using Meitou.Simulation.Kidnap;
 using Meitou.Simulation.Locks;
 using Meitou.Simulation.Movement;
+using Meitou.Simulation.Player;
 using Meitou.Simulation.Population;
 
 namespace Meitou.Cannibalism;
@@ -30,6 +34,13 @@ sealed class CannibalismSystem(CannibalismSettings settings, PopulationData data
     /// <summary>The largest step, in game hours, of the feeding (a long frame or a fast-forward feeds no more than this).</summary>
     const double MaxStepHours = 0.05;
 
+    /// <summary>
+    /// The engine's eat job's numbers (<c>CaptiveSystem</c>): seconds between the eater's barks, and the toughness XP amount of a meal still awake.
+    /// </summary>
+    const float BarkSeconds = 10, AwakeToughnessXp = 10;
+
+    readonly XpService _xp = new(data.Bodies.Constants, data.BodyOptions);
+
     /// <summary>One eater and its victim: walking until it reaches the victim, then eating.</summary>
     sealed class Meal(CharacterId eater, CharacterId victim, long since)
     {
@@ -38,6 +49,11 @@ sealed class CannibalismSystem(CannibalismSettings settings, PopulationData data
         public long Since { get; } = since;
         public bool Eating { get; set; }
         public long EatingSince { get; set; }
+
+        /// <summary>
+        /// The meal's seconds of eating at which the eater barks next.
+        /// </summary>
+        public float NextBark { get; set; }
     }
 
     readonly List<EatAliveOrder> _orders = [];
@@ -135,7 +151,8 @@ sealed class CannibalismSystem(CannibalismSettings settings, PopulationData data
             || eater.ActionClip != CaptiveSystem.EatClip);
         if (!near || moved) return Stop(eater, meal);
 
-        Bite(world, eater, victim, c, hours);
+        Bark(world, meal, victim);
+        Bite(world, meal, eater, victim, c, hours);
         return true;
     }
 
@@ -155,23 +172,72 @@ sealed class CannibalismSystem(CannibalismSettings settings, PopulationData data
         return false;
     }
 
-    /// <summary>The victim is eaten at the engine's rate for its toughness; the eater regains hunger.</summary>
-    void Bite(World world, CharacterCold eater, CharacterCold victim, int c, double hours)
+    /// <summary>
+    /// The engine's eat barks every <see cref="BarkSeconds"/> from the start: the eater's eating sounds (event 52) and, for a caged victim, its
+    /// torture scream (event 11).
+    /// </summary>
+    static void Bark(World world, Meal meal, CharacterCold victim)
     {
-        var context = new MedicalContext(data.Bodies.Constants, data.BodyOptions, victim.Race!)
-        {
-            Toughness = victim.Stats?.ScaledToughness ?? 0,
-            Strength = victim.Stats?.Strength ?? 50,
-            HasStats = victim.Stats is not null,
-            Seed = world.Seed,
-            CharacterKey = Rng.Key(world.Characters.IdOf(c)),
-        };
+        float eating = (world.Tick - meal.EatingSince) * world.TickSeconds;
+        if (eating < meal.NextBark) return;
 
+        meal.NextBark = eating + BarkSeconds;
+        world.Defer(new DialogueEvent(meal.Eater, meal.Victim, CaptiveSystem.EatingSounds) { Tick = world.Tick + 1 });
+        if (victim.IsImprisoned) world.Defer(new DialogueEvent(meal.Victim, meal.Eater, CaptiveSystem.ScreamingTorture) { Tick = world.Tick + 1 });
+    }
+
+    /// <summary>
+    /// One bite, as the engine's eat job bites (<c>CaptiveSystem.Eat</c>): a victim still awake trains toughness, one playing dead gets up, it is
+    /// eaten at the engine's rate for its toughness (limbs lost as the dismemberment option allows, never dropped as items; vampiric eaters
+    /// drink), and the eater regains hunger.
+    /// </summary>
+    void Bite(World world, Meal meal, CharacterCold eater, CharacterCold victim, int c, double hours)
+    {
+        var medical = victim.Medical!;
+        if (victim.Stats is { } stats && !medical.Incapacitated)
+            _xp.Continuous(stats, victim.Race!, StatsEnumerated.Toughness, world.TickSeconds, AwakeToughnessXp, ExperienceSource.Injury);
+        if (medical.PlayingDead) medical.StandUp(Orders.Has(victim, CharacterOrders.Sneak));
+
+        var events = new List<MedicalEvent>();
         float rate = MedicalState.EatRate(victim.Stats?.Toughness ?? 0, victim.Stats?.Scale ?? 1);
-        victim.Medical!.BeingEaten(rate, world.TickSeconds, context, limbLoss: false, vampiric: eater.Race is { Vampiric: true });
+        bool limbs = data.BodyOptions.Dismemberment != Dismemberment.Never;
+        medical.BeingEaten(rate, world.TickSeconds, Context(world, victim, c), limbs, events, vampiric: eater.Race is { Vampiric: true });
+        BodyEvents(world, meal.Victim, c, medical, events);
+        if (medical.Dead && (victim.IsPlayer || world.Player.Faction >= 0 && victim.Faction == world.Player.Faction))
+            world.Post($"{victim.Name} has been eaten alive.");
 
         if (eater.Medical is { Dead: false } own)
             own.Hunger = Math.Min(MedicalState.MaxHunger, own.Hunger + settings.HungerPerHour * (float)hours);
+    }
+
+    /// <summary>
+    /// The victim's medical context (toughness, strength, the seed and its roll key).
+    /// </summary>
+    MedicalContext Context(World world, CharacterCold victim, int c) => new(data.Bodies.Constants, data.BodyOptions, victim.Race!)
+    {
+        Toughness = victim.Stats?.ScaledToughness ?? 0,
+        Strength = victim.Stats?.Strength ?? 50,
+        HasStats = victim.Stats is not null,
+        Seed = world.Seed,
+        CharacterKey = Rng.Key(world.Characters.IdOf(c)),
+    };
+
+    /// <summary>
+    /// What the engine does with a bite's medical events: a death or knock-out stands the victim, a lost limb goes to the renderer (no item drop,
+    /// as an eaten limb's) and the victim cries its lost-limb event.
+    /// </summary>
+    static void BodyEvents(World world, CharacterId victim, int c, MedicalState medical, List<MedicalEvent> events)
+    {
+        foreach (var e in events)
+        {
+            if (e.Kind is MedicalEventKind.Died or MedicalEventKind.KnockedOut) TaskStart.Stand(world.Characters, c);
+            else if (e.Kind == MedicalEventKind.PartSevered)
+            {
+                var part = medical.Parts[e.Part].Template;
+                world.Characters.LimbsChanged.Enqueue((c, part.LimbSlot, false));
+                if (DialogueEvents.LostLimb(part) is { } cry) world.Defer(new DialogueEvent(victim, CharacterId.None, cry) { Tick = world.Tick + 1 });
+            }
+        }
     }
 
     static float Distance(Vector3 a, Vector3 b) => Vector2.Distance(new(a.X, a.Z), new(b.X, b.Z));
