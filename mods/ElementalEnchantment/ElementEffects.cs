@@ -6,16 +6,14 @@ using Meitou.Simulation.Combat;
 namespace Meitou.ElementalEnchantment;
 
 /// <summary>
-/// The elements' looks, from the display-only hit feed: each hit by a character with an element active plays the element's impact on the
-/// victim's chest and a short spray of sparks in its colour at the attacker's weapon (<c>Bip01 Prop2</c>, where the game throws its parry sparks);
-/// the blade's own glow is <see cref="WeaponAura"/>.
+/// The hits' looks, from the display-only hit feed, as the original's: from level 40, with *Impact effects* on, a hit by an enchanted character
+/// bursts its main element's impact (<c>EE_Impact_*</c>) and its secondary's on the victim for up to a second; with *Device combat effects* on, a
+/// ward-wearer's hit shows the ward's effect (<c>EE_Device*</c>) at its pelvis. Base-game stand-ins in the element's colour without the original
+/// mod's particles. The blade's own particles are <see cref="WeaponAura"/>.
 /// </summary>
 sealed class ElementEffects(ModContext context, EnchantSettings settings)
 {
-    /// <summary>The weapon's bone on the game's rigs.</summary>
-    const string WeaponBone = "Bip01 Prop2";
-
-    /// <summary>EFFECT <c>small- sparks1</c> (system <c>kenshi_sparks</c>), the parry sparks.</summary>
+    /// <summary>EFFECT <c>small- sparks1</c> (system <c>kenshi_sparks</c>).</summary>
     const string Sparks = "5463-nodes_furniture1_otto.mod";
 
     /// <summary>EFFECT <c>small- fire2_torch</c> (system <c>kenshi_fire2_torch</c>).</summary>
@@ -27,43 +25,66 @@ sealed class ElementEffects(ModContext context, EnchantSettings settings)
     /// <summary>The footstep dust and splash systems (particle scripts <c>Dustkick01.pu</c>, <c>Footsplashes01.pu</c>).</summary>
     const string DustKick = "Dustkick01", Splash = "Footsplashes01";
 
-    const float ImpactSeconds = 0.6f, TrailSeconds = 0.25f;
+    /// <summary>
+    /// The original's impact life (1000 ms) and a device burst's.
+    /// </summary>
+    const float ImpactSeconds = 1f, DeviceSeconds = 1f;
+
+    /// <summary>
+    /// The bone the original hangs the ward's effect on.
+    /// </summary>
+    const string Pelvis = "Bip01 Pelvis";
 
     public void Feed(IReadOnlyList<CombatHit> hits)
     {
-        if (!settings.Enabled || !settings.Effects || ElementalEnchantmentMod.Running?.View is not { Count: > 0 } view) return;
+        if (!settings.Enabled || ElementalEnchantmentMod.Running?.View is not { Count: > 0 } view) return;
 
         foreach (var hit in hits)
         {
-            if (hit.Source == CombatHitSource.Execution || !view.TryGetValue(hit.Attacker, out var active)) continue;
-            if (active.Element == Element.None) continue;
+            if (hit.Source == CombatHitSource.Execution || !view.TryGetValue(hit.Attacker, out var shown) || !shown.Able) continue;
 
-            string original = OriginalImpact(active.Element);
-            if (context.HasEffect(original)) context.PlayEffect(original, hit.Victim, seconds: ImpactSeconds);
-            else context.PlayEffect(Impact(active.Element), hit.Victim, seconds: ImpactSeconds, tint: Tint(active.Element));
-            context.PlayEffect(Sparks, hit.Attacker, WeaponBone, TrailSeconds, Tint(active.Element));
+            var enchant = shown.Enchant;
+            if (settings.Effects && enchant.Main != Element.None && shown.Level >= Elements.ImpactLevel)
+            {
+                Impact(hit.Victim, enchant.Main);
+                if (enchant.Second != Element.None) Impact(hit.Victim, enchant.Second);
+            }
+
+            if (settings.DeviceEffects && enchant.Ward != Element.None) Device(hit.Attacker, enchant.Ward);
         }
     }
 
-    /// <summary>The original mod's own impact system for <paramref name="element"/>, used when its particles are installed and enabled.</summary>
-    static string OriginalImpact(Element element) => $"EE_Impact_{element}";
+    /// <summary>
+    /// One element's impact on the victim.
+    /// </summary>
+    void Impact(CharacterId victim, Element element)
+    {
+        string original = $"EE_Impact_{element}";
+        if (context.HasEffect(original)) context.PlayEffect(original, victim, seconds: ImpactSeconds);
+        else context.PlayEffect(StandIn(element), victim, seconds: ImpactSeconds, tint: WeaponAura.Colour(element));
+    }
 
-    /// <summary>The base game's stand-in impact, tinted.</summary>
-    static string Impact(Element element) => element switch
+    /// <summary>
+    /// The ward's effect at the wearer's pelvis (the original's device systems; nothing without them).
+    /// </summary>
+    void Device(CharacterId wearer, Element ward)
+    {
+        string system = ward switch
+        {
+            Element.Fire => "EE_AuraPreview",
+            Element.Lightning => "EE_DeviceStorm",
+            _ => $"EE_Device{ward}",
+        };
+        if (context.HasEffect(system)) context.PlayEffect(system, wearer, Pelvis, DeviceSeconds);
+    }
+
+    /// <summary>The base game's stand-in impact.</summary>
+    static string StandIn(Element element) => element switch
     {
         Element.Fire => TorchFlame,
         Element.Lightning => Sparks,
         Element.Wind => DustKick,
         Element.Water => Splash,
         _ => SmallSmoke,
-    };
-
-    static Vector3 Tint(Element element) => element switch
-    {
-        Element.Fire => new Vector3(1.8f, 0.7f, 0.2f),
-        Element.Lightning => new Vector3(0.7f, 0.9f, 2.0f),
-        Element.Wind => new Vector3(1.3f, 1.4f, 1.2f),
-        Element.Water => new Vector3(0.3f, 0.7f, 1.6f),
-        _ => new Vector3(1.1f, 1.6f, 2.0f),
     };
 }
