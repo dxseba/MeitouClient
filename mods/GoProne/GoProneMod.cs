@@ -5,16 +5,22 @@ using Meitou.Simulation.Player;
 namespace Meitou.GoProne;
 
 /// <summary>
-/// Port of Go Prone (Genpretz, Nexus 1830), rebuilt from its description: a "Toggle prone" key action (unbound by default, as the original's)
-/// lays the selected sneaking characters down into the engine's staying-low posture (stealth x2, sight x0.5, crawl speed), or gets them up.
+/// Port of Go Prone (Genpretz, Nexus 1830), rebuilt from its description: Ctrl with the "Toggle prone" key (unbound by default, as the original's,
+/// which suggests Ctrl+Z) lays the selected sneaking characters down into the engine's staying-low posture (stealth x2, sight x0.5, crawl speed),
+/// or gets them up. The key without Ctrl does nothing.
 /// </summary>
 public sealed class GoProneMod : IMod
 {
     public void Initialize(ModContext context)
     {
         context.AddSystem("prone", _ => new ProneSystem(context.Enqueue), SystemAnchor.End);
-        context.AddKeyAction("toggle", "Toggle prone", key => key.Enqueue(new ToggleProneOrder(key.Selected) { Tick = key.Tick }));
+        context.AddKeyAction("toggle", "Toggle prone (Ctrl)", Pressed);
         context.Log("Go Prone initialized");
+    }
+
+    static void Pressed(Game.Host.Input.ModKeyContext key)
+    {
+        if (key.Ctrl) key.Enqueue(new ToggleProneOrder(key.Selected) { Tick = key.Tick });
     }
 }
 
