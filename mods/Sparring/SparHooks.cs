@@ -6,9 +6,10 @@ using Meitou.Simulation.Combat;
 namespace Meitou.Sparring;
 
 /// <summary>
-/// Keeps a spar one on one: a Harmony prefix on the private <c>CombatSystem.Engage</c> (every fight start: a defence, a protect goal, a squad's
-/// join, an attack job, and the player's queued pick) refuses a fight on a sparring character by one of its own faction other than its partner,
-/// unless the player picked it. The engine's join finders already pass over a target of the joiner's faction; this holds should one of them not.
+/// Keeps a spar one on one, as the original's <c>isEnemy</c> / <c>isAlly</c> hooks do (a sparring character is nobody's enemy but its partner's,
+/// and takes nobody else for one): a Harmony prefix on the private <c>CombatSystem.Engage</c> (every fight start: a defence, a protect goal, a
+/// squad's join, an attack job, and the player's queued pick) refuses a fight between a sparring character and anyone but its partner, unless the
+/// player picked it.
 /// </summary>
 static class SparHooks
 {
@@ -25,16 +26,20 @@ static class SparHooks
     #pragma warning restore IDE1006
     {
         if (!SparringMod.Settings.Enabled || order.Picked || SystemOf(world) is not { } spars) return true;
-        if (!spars.TryPartner(order.Target, out var partner) || partner == attacker || !SameFaction(world, attacker, order.Target)) return true;
+        if (!Outside(spars, attacker, order.Target)) return true;
 
         __result = false;
         return false;
     }
 
-    static bool SameFaction(World world, CharacterId a, CharacterId b)
+    /// <summary>
+    /// Whether a fight of <paramref name="attacker"/> on <paramref name="target"/> involves a sparring character and is not the spar itself.
+    /// </summary>
+    static bool Outside(SparSystem spars, CharacterId attacker, CharacterId target)
     {
-        var table = world.Characters;
-        return table.TryResolveNext(a, out int x) && table.TryResolveNext(b, out int y) && table.Cold(x)?.Faction == table.Cold(y)?.Faction;
+        if (spars.TryPartner(target, out var partner) && partner != attacker) return true;
+
+        return spars.TryPartner(attacker, out var own) && own != target;
     }
 
     static SparSystem? SystemOf(World world)

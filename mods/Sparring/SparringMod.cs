@@ -1,12 +1,13 @@
 using Meitou.Game.Ui;
+using Meitou.Localisation;
 using Meitou.Modding;
 using Meitou.Simulation;
 
 namespace Meitou.Sparring;
 
 /// <summary>
-/// Port of Sparring 切磋 (workshop 3776308916): a "Spar" row on the right-click menu of a squad mate makes the first selected character and that
-/// mate fight one on one until one of them is down; other characters of their faction stay out, and blows on a downed partner are cancelled.
+/// Port of Sparring 切磋 (workshop 3776308916): a "Sparring" row on the right-click menu of a squad mate makes the first selected character and
+/// that mate fight one on one at half damage until one of them is down; nobody else joins in.
 /// </summary>
 public sealed class SparringMod : IMod
 {
@@ -15,24 +16,35 @@ public sealed class SparringMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        context.AddSystem("sparring", _ => new SparSystem(Settings), SystemAnchor.End);
+        context.AddSystem("sparring", _ => new SparSystem(Settings, context.Population), SystemAnchor.End);
         context.AddUi(new SparMenu());
         SparHooks.Install(context.Harmony);
         context.Log("Sparring initialized");
     }
 }
 
-/// <summary>The original's options, under Mod settings (it had none; the cut-to-blunt switch is this port's).</summary>
+/// <summary>
+/// The mod's switches (the original has none; both are this port's).
+/// </summary>
 public sealed class SparringSettings
 {
-    [Setting("Enable Sparring", Hint = "Right-click a squad mate: Spar, a one-on-one fight until one is down.")]
+    /// <summary>
+    /// Whether the Sparring row shows.
+    /// </summary>
+    [Setting("Enable Sparring", Hint = "Right-click a squad mate: Sparring, a one-on-one fight until one is down.")]
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// Whether a sparring blow's cut is dealt as blunt (off: the original's halved blow as it is).
+    /// </summary>
     [Setting("Blunt blows while sparring", Hint = "A sparring blow's cut damage becomes blunt, so a spar knocks out instead of bleeding out.")]
-    public bool CutToBlunt { get; set; } = true;
+    public bool CutToBlunt { get; set; }
 }
 
-/// <summary>The "Spar" row: on a conscious squad mate of the player that is not the first selected character.</summary>
+/// <summary>
+/// The "Sparring" row (the original's button caption; 切磋 when the game runs in Chinese): on a conscious player character that is not the first
+/// selected one.
+/// </summary>
 sealed class SparMenu : IUiExtension
 {
     public string Id => "dxseba.sparring.ui";
@@ -47,8 +59,13 @@ sealed class SparMenu : IUiExtension
         if (challenger == menu.Target.Id) return [];
 
         var partner = menu.Target.Id;
-        return [new UiMenuVerb("Spar", () => menu.Enqueue(new SparOrder(challenger, partner) { Tick = menu.Tick }))];
+        return [new UiMenuVerb(Caption, () => menu.Enqueue(new SparOrder(challenger, partner) { Tick = menu.Tick }))];
     }
+
+    /// <summary>
+    /// The original's caption: 切磋 when the game's language is Chinese (its settings.cfg language names chinese, china or zh), else Sparring.
+    /// </summary>
+    static string Caption => Loc.Language.Code.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "切磋" : "Sparring";
 
     /// <summary>A player character, awake and alive, not carried.</summary>
     static bool Offered(CharacterSnapshot target) =>
