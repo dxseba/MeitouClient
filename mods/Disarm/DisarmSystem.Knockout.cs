@@ -2,14 +2,17 @@ using Meitou.Simulation;
 
 namespace Meitou.Disarm;
 
-/// <summary>Knockout weapon drop: a character newly unconscious may drop the weapon it was wielding (<see cref="DisarmRules.KnockoutDropChance"/>).</summary>
+/// <summary>
+/// Knockout weapon drop: a character newly down (knocked out, crippled on the ground or playing dead: the original's prone states KO, CRIPPLED
+/// and PLAYING_DEAD) may drop the weapon it was wielding (<see cref="DisarmRules.KnockoutDropChance"/>).
+/// </summary>
 sealed partial class DisarmSystem
 {
     HashSet<CharacterId> _down = [];
     bool _primed;
 
     /// <summary>
-    /// Compares this slow tick's unconscious characters with the last; each new one rolls once. The first pass only records, so a loaded game's
+    /// Compares this slow tick's downed characters with the last; each new one rolls once. The first pass only records, so a loaded game's
     /// downed characters do not roll.
     /// </summary>
     void WatchKnockouts(World world)
@@ -18,7 +21,7 @@ sealed partial class DisarmSystem
         var now = new HashSet<CharacterId>();
         for (int slot = 0; slot < table.HighWater; slot++)
         {
-            if (!table.Next[slot].Alive || table.Cold(slot) is not { Medical: { Unconscious: true, Dead: false } }) continue;
+            if (!table.Next[slot].Alive || table.Cold(slot) is not { Medical.Dead: false } cold || !DisarmRules.Down(cold)) continue;
 
             var id = table.IdOf(slot);
             now.Add(id);

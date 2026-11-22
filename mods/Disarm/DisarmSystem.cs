@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Numerics;
 using System.Reflection;
 using HarmonyLib;
+using Meitou.Data.Gameplay.Ai;
 using Meitou.Simulation;
 using Meitou.Simulation.Crime;
 using Meitou.Simulation.Items;
@@ -11,16 +12,26 @@ namespace Meitou.Disarm;
 
 /// <summary>
 /// Runs Disarm in the tick: a <see cref="DisarmOrder"/> waits until its actor has walked within <see cref="Reach"/> of the target, then rolls the
-/// <see cref="DisarmRules.Chance"/> once. Success drops (or destroys) the target's hip and back weapons and trains Stealth; failure is the engine's
+/// <see cref="DisarmRules.Chance"/> once. Success drops (or destroys) the target's hip and back weapons and trains Stealth (also on a downed target); failure is the engine's
 /// own "caught stealing" (the target wakes, a pending Theft, the stole-from-me memory). Also the knockout drop, Kick and AI rearm (partial files).
 /// </summary>
 sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refresh, RngPurpose purpose, Action<SimCommand> enqueue) : ITickSystem
 {
-    /// <summary>World units an actor may stand from its target (the original's hard maximum).</summary>
-    public const float Reach = 30;
+    /// <summary>
+    /// The original's approach distances: the attempt at <see cref="Reach"/>; at <see cref="FallbackReach"/> once the actor is already caught
+    /// (chance 0) or has made no progress for <see cref="StuckSeconds"/>; at <see cref="HardReach"/> after <see cref="HardSeconds"/>.
+    /// </summary>
+    public const float Reach = 18, FallbackReach = 28, HardReach = 30;
 
-    /// <summary>Seconds an actor has to reach its target.</summary>
-    const float ApproachSeconds = 20;
+    /// <summary>
+    /// The original's timings: 10 cycles of 300 ms without coming 0.5 nearer is stuck, 50 such cycles gives up, and the 5 s hard timeout.
+    /// </summary>
+    const float StuckSeconds = 3, GiveUpSeconds = 15, HardSeconds = 5, Progress = 0.5f;
+
+    /// <summary>
+    /// World units the target may move before the actor's walk is aimed at it again (the original's re-order).
+    /// </summary>
+    const float Repath = 5;
 
     /// <summary>World units round a player character within which targets get a published chance.</summary>
     const float ChanceRadius = 80;
@@ -31,7 +42,20 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
     static readonly string[] WeaponSections = ["hip", "back"];
     static readonly MethodInfo? CaughtRoll = AccessTools.Method(typeof(CrimeSystem), "Roll");
 
-    readonly List<(CharacterId Actor, CharacterId Target, long Tick)> _approaches = [];
+    /// <summary>
+    /// One actor walking to its target: when it started, the nearest it came, since when it made no progress, where its walk was aimed.
+    /// </summary>
+    sealed class Approaching(CharacterId actor, CharacterId target, long tick)
+    {
+        public CharacterId Actor { get; } = actor;
+        public CharacterId Target { get; } = target;
+        public long Tick { get; } = tick;
+        public float Best { get; set; } = float.MaxValue;
+        public long StuckSince { get; set; } = tick;
+        public Vector3? Aim { get; set; }
+    }
+
+    readonly List<Approaching> _approaches = [];
     volatile FrozenDictionary<(CharacterId Actor, CharacterId Target), int> _chances = FrozenDictionary<(CharacterId, CharacterId), int>.Empty;
 
     /// <summary>The chance of each player character on each nearby target, rebuilt in the slow phase; safe to read from the interface thread.</summary>
@@ -69,7 +93,7 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
     void Queue(DisarmOrder order)
     {
         _approaches.RemoveAll(a => a.Actor == order.Actor);
-        _approaches.Add((order.Actor, order.Target, order.Tick));
+        _approaches.Add(new(order.Actor, order.Target, order.Tick));
     }
 
     void Approach(World world)
@@ -80,8 +104,10 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
         }
     }
 
-    /// <summary>One approach's check: true once it is done (attempted, impossible or out of time).</summary>
-    bool Step(World world, (CharacterId Actor, CharacterId Target, long Tick) approach)
+    /// <summary>
+    /// One approach's check: true once it is done (attempted, impossible, cancelled by another order, or stuck too long).
+    /// </summary>
+    bool Step(World world, Approaching approach)
     {
         var table = world.Characters;
         if (!table.TryResolveNext(approach.Actor, out int actor) || !table.TryResolveNext(approach.Target, out int target)) return true;
@@ -91,16 +117,71 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
             return true;
         }
 
-        if (Distance(table.Next[actor].Position, table.Next[target].Position) <= Reach)
+        float distance = Distance(table.Next[actor].Position, table.Next[target].Position);
+        if (InReach(world, approach, distance, chance))
         {
             Attempt(world, actor, target, chance);
             return true;
         }
 
-        if (world.Tick - approach.Tick <= ApproachSeconds / world.TickSeconds) return false;
+        if (Cancelled(table.Cold(actor)!, approach)) return true;
+        if (Stuck(world, approach, distance))
+        {
+            world.Post($"{table.Cold(actor)?.Name} could not reach {table.Cold(target)?.Name}.");
+            return true;
+        }
 
-        world.Post($"{table.Cold(actor)?.Name} could not reach {table.Cold(target)?.Name}.");
-        return true;
+        Aim(world, approach, table.Next[target].Position);
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the actor is near enough to try: <see cref="Reach"/>; <see cref="FallbackReach"/> once caught or stuck; <see cref="HardReach"/>
+    /// after <see cref="HardSeconds"/>.
+    /// </summary>
+    static bool InReach(World world, Approaching approach, float distance, int chance)
+    {
+        float stuck = (world.Tick - approach.StuckSince) * world.TickSeconds;
+        float elapsed = (world.Tick - approach.Tick) * world.TickSeconds;
+        return distance <= Reach || distance <= FallbackReach && (chance == 0 || stuck >= StuckSeconds) || elapsed > HardSeconds && distance <= HardReach;
+    }
+
+    /// <summary>
+    /// The original drops the attempt when the player gives the actor another order: its order in hand is something other than a move, or a
+    /// move to somewhere else than the walk's aim.
+    /// </summary>
+    static bool Cancelled(CharacterCold actor, Approaching approach) =>
+        actor.OrderQueue.Front is { } front
+        && (front.Row != TaskType.MoveCusOrdered || approach.Aim is { } aim && Distance(front.Point, aim) > Repath);
+
+    /// <summary>
+    /// Notes progress; true once the actor has come no nearer for <see cref="GiveUpSeconds"/>.
+    /// </summary>
+    static bool Stuck(World world, Approaching approach, float distance)
+    {
+        if (distance < approach.Best - Progress)
+        {
+            approach.Best = distance;
+            approach.StuckSince = world.Tick;
+        }
+
+        return (world.Tick - approach.StuckSince) * world.TickSeconds >= GiveUpSeconds;
+    }
+
+    /// <summary>
+    /// Aims the actor's walk at the target again once its move order ran out or the target moved more than <see cref="Repath"/> from the aim.
+    /// </summary>
+    static void Aim(World world, Approaching approach, Vector3 at)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(approach.Actor, out int actor)) return;
+
+        var front = table.Cold(actor)!.OrderQueue.Front;
+        approach.Aim ??= front?.Point ?? at;
+        if (front is not null && Distance(approach.Aim.Value, at) <= Repath) return;
+
+        world.GiveOrder(approach.Actor, TaskType.MoveCusOrdered, point: at);
+        approach.Aim = at;
     }
 
     void Attempt(World world, int actor, int target, int chance)
@@ -126,7 +207,7 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
 
         foreach (var item in weapons) Remove(world, target, item);
         Rearmed(cold);
-        if (chance < 100) TrainStealth(world, table.Cold(actor)!);
+        TrainStealth(world, table.Cold(actor)!);
         if (settings.Rearm) Track(table.IdOf(target), world.Tick);
         world.Post($"{cold.Name} has been disarmed.");
     }

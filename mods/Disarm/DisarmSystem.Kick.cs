@@ -42,6 +42,7 @@ sealed partial class DisarmSystem
     bool KickStepDone(World world, (CharacterId Actor, int Item, long Tick) kick)
     {
         if (!world.Characters.TryResolveNext(kick.Actor, out int actor) || world.GroundItems.Find(kick.Item) is not { } item) return true;
+        if (world.Characters.Cold(actor) is not { Animal: null }) return true;   // the original lets no animal kick
 
         var from = world.Characters.Next[actor].Position;
         if (Distance(from, item.Position) <= KickReach)

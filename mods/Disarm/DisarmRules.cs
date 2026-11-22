@@ -20,13 +20,15 @@ static class DisarmRules
 
     /// <summary>
     /// The chance (0..100) that <paramref name="actor"/> disarms <paramref name="target"/>: 100 on a downed target, a skill roll on a sleeping
-    /// one, a skill roll against Perception (0 once the actor is detected) on an awake one while the actor sneaks; null when it cannot try.
+    /// one, a skill roll against Perception (0 once the actor is detected) on an awake one while the actor sneaks; null when it cannot try (an
+    /// animal actor, a carried target, one with no weapon equipped: the original offers no row then).
     /// </summary>
     public static int? Chance(World world, int actor, int target, DisarmSettings settings)
     {
         var table = world.Characters;
-        if (table.Cold(actor) is not { } a || table.Cold(target) is not { Medical.Dead: false } t || !Targetable(t, settings)) return null;
-        if (t.Medical!.Unconscious) return 100;
+        if (table.Cold(actor) is not { Animal: null } a || table.Cold(target) is not { Medical.Dead: false } t || !Targetable(t, settings)) return null;
+        if (!t.CarriedBy.IsNone || !Armed(t)) return null;
+        if (Down(t)) return 100;
         if (CarrySystem.Asleep(table, target)) return Scaled(10 + (int)(Skill(a) * 0.9f), 100, settings.ChanceMultiplier);
         if ((a.Orders & CharacterOrders.Sneak) == 0) return null;
         if (Detected(world, a)) return 0;
@@ -43,6 +45,22 @@ static class DisarmRules
         int chance = 55 - (int)(s[StatsEnumerated.Strength] * 0.4f) - (int)(s[StatsEnumerated.Athletics] * 0.2f);
         return Math.Clamp((int)(chance * multiplier), 5, 90);
     }
+
+    /// <summary>
+    /// The original's <c>isDown</c>: knocked out, crippled on the ground (both incapacitated) or playing dead.
+    /// </summary>
+    public static bool Down(CharacterCold c) => c.Medical is { Incapacitated: true } or { PlayingDead: true };
+
+    /// <summary>
+    /// Whether the character has a weapon equipped (its hip or back slot), the original's <c>getEquippedWeapons</c>.
+    /// </summary>
+    public static bool Armed(CharacterCold c) => c.Inventory?.Items.Exists(i => !i.LockedOn && i.Section is "hip" or "back") == true;
+
+    /// <summary>
+    /// The original's rearm skip: a character at least as good with fists (Martial Arts) as with a blade (Melee Attack) is not sent for a weapon.
+    /// </summary>
+    public static bool BetterArmed(CharacterCold c) =>
+        c.Stats is not { } s || s.Stored(StatsEnumerated.MeleeAttack) > s.Stored(StatsEnumerated.MartialArts);
 
     /// <summary>Not an animal, and not the player's unless "Allow on own squad" is on.</summary>
     public static bool Targetable(CharacterCold target, DisarmSettings settings) => target.Animal is null && (!target.IsPlayer || settings.OwnSquad);
