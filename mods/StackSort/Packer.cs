@@ -12,9 +12,6 @@ public enum Goal { Height, Width }
 /// </summary>
 static class Packer
 {
-    /// <summary>How many layouts are offered (the original's five best).</summary>
-    public const int Offered = 5;
-
     static readonly Func<ItemInstance, long>[] GroupKeys =
     [
         i => i.Width * (long)i.Height,
@@ -26,10 +23,10 @@ static class Packer
     public readonly record struct ItemState(Grid Grid, ItemInstance[] Kept, (ItemInstance Item, int X, int Y, int Quantity, float Charges)[] Values);
 
     /// <summary>The best layout for <paramref name="goal"/> applied (true), or the inventory unchanged (false) when nothing fits.</summary>
-    public static bool Pack(Inventory root, bool? bag = null, Goal goal = Goal.Height)
+    public static bool Pack(Inventory root, bool? bag = null, Goal goal = Goal.Height, bool merge = true)
     {
         var grids = Grids(root, bag);
-        var layouts = Layouts(grids, goal);
+        var layouts = Layouts(grids, goal, 1, merge);
         if (layouts.Count == 0) return false;
 
         Restore(layouts[0]);
@@ -45,8 +42,11 @@ static class Packer
         return grids;
     }
 
-    /// <summary>Up to <see cref="Offered"/> distinct layouts, best first for <paramref name="goal"/>; the grids are left as they were.</summary>
-    public static List<ItemState[]> Layouts(List<Grid> grids, Goal goal)
+    /// <summary>
+    /// Up to <paramref name="offered"/> distinct layouts (the original's <c>top_targets</c>), best first for <paramref name="goal"/>; partial
+    /// stacks merged with <paramref name="merge"/> (<c>consolidate_stacks</c>). The grids are left as they were.
+    /// </summary>
+    public static List<ItemState[]> Layouts(List<Grid> grids, Goal goal, int offered, bool merge)
     {
         var original = Snapshot(grids);
         var found = new List<(long Score, ItemState[] State, string Key)>();
@@ -54,12 +54,12 @@ static class Packer
         {
             foreach (bool columns in new[] { false, true })
             {
-                if (TryLayout(grids, key, columns)) found.Add((Score(grids, goal), Snapshot(grids), Signature(grids)));
+                if (TryLayout(grids, key, columns, merge)) found.Add((Score(grids, goal), Snapshot(grids), Signature(grids)));
                 Restore(original);
             }
         }
 
-        return [.. found.DistinctBy(f => f.Key).OrderBy(f => f.Score).Take(Offered).Select(f => f.State)];
+        return [.. found.DistinctBy(f => f.Key).OrderBy(f => f.Score).Take(offered).Select(f => f.State)];
     }
 
     public static ItemState[] Snapshot(List<Grid> grids) =>
@@ -80,7 +80,7 @@ static class Packer
         string.Join(";", grids.SelectMany(g => g.Inventory.Items.Where(i => i.Section == g.Section).Select(i => $"{i.Record}@{i.X},{i.Y}x{i.Quantity}")));
 
     /// <summary>Groups by record; the groups by the largest key of their items, then record id; items in a group by the key, then quantity.</summary>
-    static bool TryLayout(List<Grid> grids, Func<ItemInstance, long> key, bool columns)
+    static bool TryLayout(List<Grid> grids, Func<ItemInstance, long> key, bool columns, bool merge)
     {
         foreach (var grid in grids)
         {
@@ -93,12 +93,35 @@ static class Packer
             grid.Inventory.Items.RemoveAll(i => i.Section == grid.Section);
             foreach (var item in items)
             {
-                if (item.Width <= 0 || item.Height <= 0 || !grid.Inventory.AddTo(grid.Section, item)) return false;
+                if (item.Width <= 0 || item.Height <= 0 || !Add(grid, item, merge)) return false;
             }
 
             if (columns && !ByColumns(grid)) return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Adds an item: through the auto-add (topping up partial stacks) with <paramref name="merge"/>, else on the first free cell by rows.
+    /// </summary>
+    static bool Add(Grid grid, ItemInstance item, bool merge)
+    {
+        if (merge) return grid.Inventory.AddTo(grid.Section, item);
+
+        var inventory = grid.Inventory;
+        for (int y = 0; y + item.Height <= inventory.Height; y++)
+        {
+            for (int x = 0; x + item.Width <= inventory.Width; x++)
+            {
+                if (!inventory.IsFree(grid.Section, x, y, item.Width, item.Height)) continue;
+
+                (item.X, item.Y, item.Section) = (x, y, grid.Section);
+                inventory.Items.Add(item);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Lays the merged items out again column by column, left first, in their row-filled order.</summary>

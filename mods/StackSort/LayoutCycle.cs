@@ -60,7 +60,7 @@ static class LayoutCycle
 
         Packer.Restore(cycle.Layouts[cycle.Index]);
         cycle.After = Packer.Signature(Packer.Grids(inventory, bag));
-        world.Post($"StackSort {cycle.Index + 1}/{cycle.Layouts.Count} ({(cycle.Goal == Goal.Height ? "H" : "W")})");
+        world.Post(StackSortMod.Original.Caption(cycle.Index + 1, cycle.Goal));
     }
 
     /// <summary>A new cycle from the layout before any sort (an earlier cycle's undo state), or null when no layout fits (vanilla arrange then).</summary>
@@ -70,7 +70,8 @@ static class LayoutCycle
 
         var grids = Packer.Grids(inventory, bag);
         var undo = earlier?.Undo ?? Packer.Snapshot(grids);
-        var layouts = Packer.Layouts(grids, CurrentGoal);
+        var settings = StackSortMod.Settings;
+        var layouts = Packer.Layouts(grids, CurrentGoal, settings.TopTargets, settings.Consolidate);
         if (layouts.Count == 0)
         {
             Cycles.Remove(key);

@@ -14,11 +14,20 @@ public sealed class StackSortMod : IMod
 {
     internal static readonly StackSortSettings Settings = new();
 
+    /// <summary>
+    /// The installed original's cfg and captions.
+    /// </summary>
+    internal static OriginalFiles Original { get; private set; } = null!;
+
     /// <summary>The window ARRANGE commands said with a modifier held, read on the tick thread.</summary>
     static readonly ConditionalWeakTable<ArrangeInventory, StrongBox<ArrangeMode>> Modes = new();
 
     public void Initialize(ModContext context)
     {
+        Original = OriginalFiles.Load(context.Folder);
+        Settings.WidthGoal = Original.WidthGoal;
+        Settings.Consolidate = Original.Consolidate;
+        Settings.TopTargets = Original.TopTargets;
         context.AddSettings(Settings);
         context.Harmony.Patch(ArrangeMethod(), prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeArrange)));
         PatchWindowButton(context);
@@ -45,7 +54,7 @@ public sealed class StackSortMod : IMod
     /// <summary>Other callers of the whole-inventory arrange (a machine's storage, putting a held item back): the best layout for the setting's goal.</summary>
     static bool BeforeArrange(Inventory root, ref bool __result)
     {
-        if (!Settings.Enabled || !Packer.Pack(root, null, Settings.WidthGoal ? Goal.Width : Goal.Height)) return true;
+        if (!Settings.Enabled || !Packer.Pack(root, null, Settings.WidthGoal ? Goal.Width : Goal.Height, Settings.Consolidate)) return true;
 
         __result = true;
         return false;
@@ -75,11 +84,32 @@ public sealed class StackSortMod : IMod
 
 public enum ArrangeMode { Next, SwitchGoal, Undo }
 
+/// <summary>
+/// The mod's settings; the last three take their defaults from the installed original's StackSort.cfg.
+/// </summary>
 public sealed class StackSortSettings
 {
-    [Setting("StackSort on Arrange", Hint = "Click: best layout, again to cycle the five best. Shift+click: Height/Width goal. Ctrl+click: undo. Off: vanilla.")]
+    /// <summary>
+    /// Whether ARRANGE runs StackSort.
+    /// </summary>
+    [Setting("StackSort on Arrange", Hint = "Click: best layout, again to cycle the best ones. Shift+click: Height/Width goal. Ctrl+click: undo. Off: vanilla.")]
     public bool Enabled { get; set; } = true;
 
-    [Setting("Width goal", Hint = "Start with the Width goal (columns packed to the left) instead of Height (rows packed to the top).")]
+    /// <summary>
+    /// <c>default_dim</c> (H).
+    /// </summary>
+    [Setting("Width goal", Hint = "default_dim: start with the Width goal (columns packed to the left) instead of Height (rows packed to the top).")]
     public bool WidthGoal { get; set; }
+
+    /// <summary>
+    /// <c>consolidate_stacks</c> (true).
+    /// </summary>
+    [Setting("Merge stacks", Hint = "consolidate_stacks: merge stackable items into full stacks before the first sort.")]
+    public bool Consolidate { get; set; } = true;
+
+    /// <summary>
+    /// <c>top_targets</c> (5).
+    /// </summary>
+    [Setting("Layouts in the cycle", Hint = "top_targets: how many layouts a click cycles through.", Min = 1, Max = 10)]
+    public int TopTargets { get; set; } = 5;
 }
