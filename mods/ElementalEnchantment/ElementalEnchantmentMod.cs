@@ -41,6 +41,9 @@ public sealed class EnchantSettings
     [Setting("Element effects", Hint = "Enchanted hits show their element's impact and weapon sparks.")]
     public bool Effects { get; set; } = true;
 
+    [Setting("Blade tint", Hint = "Also tints the blade in the element's colour (the original shows particles only).")]
+    public bool BladeTint { get; set; }
+
     [Setting("All aptitudes at 100%", Hint = "Every character trains every element at the same rate.")]
     public bool FlatAptitude { get; set; }
 

@@ -38,11 +38,17 @@ sealed class ElementEffects(ModContext context, EnchantSettings settings)
             if (hit.Source == CombatHitSource.Execution || !view.TryGetValue(hit.Attacker, out var active)) continue;
             if (active.Element == Element.None) continue;
 
-            context.PlayEffect(Impact(active.Element), hit.Victim, seconds: ImpactSeconds, tint: Tint(active.Element));
+            string original = OriginalImpact(active.Element);
+            if (context.HasEffect(original)) context.PlayEffect(original, hit.Victim, seconds: ImpactSeconds);
+            else context.PlayEffect(Impact(active.Element), hit.Victim, seconds: ImpactSeconds, tint: Tint(active.Element));
             context.PlayEffect(Sparks, hit.Attacker, WeaponBone, TrailSeconds, Tint(active.Element));
         }
     }
 
+    /// <summary>The original mod's own impact system for <paramref name="element"/>, used when its particles are installed and enabled.</summary>
+    static string OriginalImpact(Element element) => $"EE_Impact_{element}";
+
+    /// <summary>The base game's stand-in impact, tinted.</summary>
     static string Impact(Element element) => element switch
     {
         Element.Fire => TorchFlame,

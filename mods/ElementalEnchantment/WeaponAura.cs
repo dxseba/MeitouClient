@@ -7,9 +7,10 @@ using Meitou.Simulation;
 namespace Meitou.ElementalEnchantment;
 
 /// <summary>
-/// The element on the blade, as the original shows it: while a character has an element active its held weapon glows in the element's colour
-/// along the blade and gives off the element's particles (<see cref="ModContext.GlowWeapon"/>), at rest as in combat. Kept up once a second from
-/// a hidden overlay node (the host's frame); a character whose element was cleared has its glow stopped.
+/// The element on the blade, as the original shows it: while a character has an element active its held blade gives off the element's particles
+/// (<see cref="ModContext.GlowWeapon"/>), at rest as in combat: the original mod's own blade system when its particles are installed and enabled
+/// (in its own colours), else a base-game stand-in tinted in the element's colour. The <c>Blade tint</c> setting also tints the blade. Kept up
+/// once a second from a hidden overlay node (the host's frame); a character whose element was cleared has its glow stopped.
 /// </summary>
 sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExtension
 {
@@ -20,8 +21,11 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     /// </summary>
     const float GlowSeconds = 10f, RenewSeconds = 1f;
 
-    /// <summary>The flame of a torch (fire), the parry sparks (lightning) and a small smoke (the cold and airy elements).</summary>
-    const string Flame = "kenshi_fire1_small", Sparks = "kenshi_sparks", Smoke = "kenshi_smoke3_small";
+    /// <summary>The base game's stand-ins: a small fire, the parry sparks, a small smoke (ice), light dust (wind and water).</summary>
+    const string Flame = "kenshi_fire1_small", Sparks = "kenshi_sparks", Smoke = "kenshi_smoke3_small", Dust = "kenshi_light_dust_particles1";
+
+    /// <summary>The blade tint's strength when the setting is on.</summary>
+    const float TintStrength = 0.5f;
 
     /// <summary>The characters given a glow at the last renewal.</summary>
     readonly HashSet<CharacterId> _glowing = [];
@@ -50,12 +54,27 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
             foreach (var (id, active) in view!)
             {
                 if (active.Element == Element.None) continue;
-                if (context.GlowWeapon(id, Colour(active.Element), GlowSeconds, Strength(active.Level), Particles(active.Element))) glowingNow.Add(id);
+                if (Glow(id, active.Element, active.Level)) glowingNow.Add(id);
             }
         }
 
         Stop(glowingNow);
     }
+
+    /// <summary>
+    /// One character's renewal: the original's blade system in its own colours (white keeps them), else the stand-in in the element's colour.
+    /// </summary>
+    bool Glow(CharacterId id, Element element, int level)
+    {
+        string original = OriginalBlade(element);
+        float tint = settings.BladeTint ? TintStrength * Strength(level) : 0;
+        if (context.HasEffect(original)) return context.GlowWeapon(id, settings.BladeTint ? Colour(element) : Vector3.One, GlowSeconds, tint, original);
+
+        return context.GlowWeapon(id, Colour(element), GlowSeconds, tint, Particles(element));
+    }
+
+    /// <summary>The original mod's blade system for <paramref name="element"/> (fire's has no <c>Blade</c> suffix).</summary>
+    static string OriginalBlade(Element element) => element == Element.Fire ? "SB_Prototype_Fire" : $"SB_Prototype_{element}Blade";
 
     /// <summary>Stops the glows of the characters glowing before but not now.</summary>
     void Stop(HashSet<CharacterId> glowingNow)
@@ -76,7 +95,8 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     {
         Element.Fire => Flame,
         Element.Lightning => Sparks,
-        _ => Smoke,
+        Element.Ice => Smoke,
+        _ => Dust,
     };
 
     /// <summary>The blade's colour (the screenshots: orange fire, pale cyan ice).</summary>
