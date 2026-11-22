@@ -12,15 +12,18 @@ namespace Meitou.EquipmentDurability;
 readonly record struct GearView(float? Weapon, float? Armour);
 
 /// <summary>
-/// Wears the gear: landed hits are noted as they resolve (<see cref="ICombatHitObserver"/>) and worn in the serial slow step, the attacker's weapon
-/// per hit and the victim's armour pieces covering the part hit, by the damage they stopped. Worn weapons hit softer (<see cref="ICombatHitFilter"/>,
-/// a pure read of the attacker's weapon). Repairs with Tools run here too. The player characters' gear is published every 30th tick.
+/// Wears the gear: landed hits and parries are noted as they resolve (<see cref="ICombatHitObserver"/>, <see cref="ICombatDefenceObserver"/>) and
+/// worn in the serial slow step, the attacker's weapon per hit, the parrying weapon per parry and the victim's armour pieces covering the part hit,
+/// by the damage they stopped. Worn weapons hit softer (<see cref="ICombatHitFilter"/>) and worn armour stops less (<see cref="IArmourFilter"/>),
+/// both pure reads of the item's tag. Repairs with Tools run here too. The player characters' gear is published every 30th tick.
 /// </summary>
-sealed class DurabilitySystem(DurabilitySettings settings, PopulationData data) : ICombatHitObserver, ICombatHitFilter
+sealed class DurabilitySystem(DurabilitySettings settings, PopulationData data)
+    : ICombatHitObserver, ICombatHitFilter, IArmourFilter, ICombatDefenceObserver
 {
     readonly record struct Wear(CharacterId Attacker, CharacterId Victim, int Part, float Absorbed, bool Melee);
 
     readonly List<Wear> _hits = [];
+    readonly List<CharacterId> _parries = [];
     readonly List<RepairOrder> _repairs = [];
 
     /// <summary>The player characters' gear, for the menu.</summary>
@@ -47,6 +50,24 @@ sealed class DurabilitySystem(DurabilitySettings settings, PopulationData data) 
         hit.Packet = p with { Cut = p.Cut * factor, Blunt = p.Blunt * factor, Pierce = p.Pierce * factor };
     }
 
+    /// <summary>A worn armour piece below the threshold keeps its defences scaled by the same factor as a worn weapon's damage.</summary>
+    public ArmourPiece Piece(World world, in ArmourAsk ask)
+    {
+        if (!settings.Enabled || ask.Item is not { } item || !Condition.Tracked(item)) return ask.Piece;
+
+        float factor = Condition.Factor(Condition.Of(item), settings.Threshold, settings.BrokenPenalty);
+        if (factor >= 1) return ask.Piece;
+
+        var p = ask.Piece;
+        return p with { CutDefence = p.CutDefence * factor, BluntDefence = p.BluntDefence * factor, PierceDefence = p.PierceDefence * factor };
+    }
+
+    /// <summary>A parry (a block with a weapon) wears the defender's weapon in the slow step.</summary>
+    public void Defended(World world, in CombatDefence defence)
+    {
+        if (settings.Enabled && defence.Kind == CombatDefenceKind.Blocked && defence.Parry) _parries.Add(defence.Defender);
+    }
+
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         foreach (var command in commands)
@@ -60,6 +81,9 @@ sealed class DurabilitySystem(DurabilitySettings settings, PopulationData data) 
         foreach (var hit in _hits) Apply(world, hit);
         _hits.Clear();
 
+        foreach (var defender in _parries) WearWeapon(world, defender, settings.BlockWear);
+        _parries.Clear();
+
         foreach (var repair in _repairs) Repair(world, repair.Character);
         _repairs.Clear();
 
@@ -71,7 +95,7 @@ sealed class DurabilitySystem(DurabilitySettings settings, PopulationData data) 
     void Apply(World world, Wear hit)
     {
         var table = world.Characters;
-        if (hit.Melee) WearWeapon(world, hit.Attacker);
+        if (hit.Melee) WearWeapon(world, hit.Attacker, settings.WeaponWear);
 
         if (!table.TryResolveNext(hit.Victim, out int v) || table.Cold(v) is not { } victim) return;
         if (victim.Medical?.Parts is not { } parts || hit.Part < 0 || hit.Part >= parts.Count) return;
@@ -84,11 +108,11 @@ sealed class DurabilitySystem(DurabilitySettings settings, PopulationData data) 
         }
     }
 
-    void WearWeapon(World world, CharacterId id)
+    void WearWeapon(World world, CharacterId id, float amount)
     {
         var table = world.Characters;
-        if (table.TryResolveNext(id, out int a) && table.Cold(a) is { } attacker && Condition.Weapon(attacker.Inventory) is { } weapon)
-            Degrade(world, attacker, weapon, settings.WeaponWear);
+        if (table.TryResolveNext(id, out int a) && table.Cold(a) is { } owner && Condition.Weapon(owner.Inventory) is { } weapon)
+            Degrade(world, owner, weapon, amount);
     }
 
     void Degrade(World world, CharacterCold owner, ItemInstance item, float amount)

@@ -20,9 +20,12 @@ static class Condition
     public static bool Tracked(ItemInstance item) => item.Type is FcsRecordType.Weapon or FcsRecordType.Armour && ItemTag.Ours(item.ModTag);
 
     /// <summary>The condition of a tracked item (1 untagged).</summary>
-    public static float Of(ItemInstance item) =>
-        ItemTag.Get(item.ModTag, Key) is { } text && float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
-            ? Math.Clamp(value, 0, 1) : 1;
+    public static float Of(ItemInstance item) => InTag(item.ModTag) ?? 1;
+
+    /// <summary>The condition a tag records; null when it records none (untagged, never worn, or another mod's tag).</summary>
+    public static float? InTag(string tag) =>
+        ItemTag.Get(tag, Key) is { } text && float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
+            ? Math.Clamp(value, 0, 1) : null;
 
     public static void Set(ItemInstance item, float value) =>
         item.ModTag = ItemTag.Put(item.ModTag, Key, Math.Clamp(value, 0, 1).ToString("0.####", CultureInfo.InvariantCulture));

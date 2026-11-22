@@ -7,7 +7,8 @@ namespace Meitou.EquipmentDurability;
 
 /// <summary>
 /// Port of Equipment Durability (workshop 3834344700), rebuilt from its description: weapons and armour wear with use and lose damage below 39%,
-/// down to -70% when broken; a "Repair gear" row on your own character mends the gear with Tools by its smithing skills.
+/// down to -70% when broken (worn armour stops less the same way); the item tooltip shows the condition; a "Repair gear" row on your own character
+/// mends the gear with Tools by its smithing skills.
 /// </summary>
 public sealed class EquipmentDurabilityMod : IMod
 {
@@ -21,6 +22,7 @@ public sealed class EquipmentDurabilityMod : IMod
         context.AddSettings(Settings);
         context.AddSystem("durability", _ => Running = new DurabilitySystem(Settings, context.Population), SystemAnchor.End);
         context.AddUi(new RepairMenu());
+        context.AddUi(new ConditionTooltip());
         context.Log("Equipment Durability initialized");
     }
 }
@@ -33,14 +35,17 @@ public sealed class DurabilitySettings
     [Setting("Weapon wear per hit", Hint = "Condition a weapon loses per landed melee hit (1 = new).", Min = 0, Max = 0.05, Step = 0.0005)]
     public float WeaponWear { get; set; } = 0.002f;
 
+    [Setting("Weapon wear per parry", Hint = "Condition a weapon loses per blow it parries.", Min = 0, Max = 0.05, Step = 0.0005)]
+    public float BlockWear { get; set; } = 0.002f;
+
     [Setting("Armour wear per hit", Hint = "Condition an armour piece covering the part hit loses, more for more damage stopped.", Min = 0, Max = 0.05,
         Step = 0.0005)]
     public float ArmourWear { get; set; } = 0.002f;
 
-    [Setting("Worn below", Hint = "Gear below this condition starts losing damage.", Min = 0.05, Max = 1, Step = 0.01)]
+    [Setting("Worn below", Hint = "Gear below this condition starts losing damage (weapons) or protection (armour).", Min = 0.05, Max = 1, Step = 0.01)]
     public float Threshold { get; set; } = 0.39f;
 
-    [Setting("Broken penalty", Hint = "The damage a broken weapon loses (0.7 = -70%).", Min = 0, Max = 1, Step = 0.05)]
+    [Setting("Broken penalty", Hint = "The damage a broken weapon, or the protection a broken armour piece, loses (0.7 = -70%).", Min = 0, Max = 1, Step = 0.05)]
     public float BrokenPenalty { get; set; } = 0.7f;
 
     [Setting("Delete broken gear", Hint = "On: gear that reaches 0 is destroyed instead of staying broken.")]
@@ -79,7 +84,28 @@ sealed class RepairMenu : IUiExtension
         return weapon + ", " + armour;
     }
 
-    static string Percent(float value) => ((int)MathF.Round(value * 100)).ToString(CultureInfo.InvariantCulture) + "%";
+    internal static string Percent(float value) => ((int)MathF.Round(value * 100)).ToString(CultureInfo.InvariantCulture) + "%";
+}
+
+/// <summary>The item tooltip's "Condition" line on gear this mod has worn: the condition, and the penalty below the threshold.</summary>
+sealed class ConditionTooltip : IUiExtension
+{
+    public string Id => "dxseba.equipmentdurability.tooltip";
+
+    public void Register(UiRegistration registration) => registration.AddItemTooltipLines(Lines);
+
+    static IEnumerable<UiItemTooltipLine> Lines(UiItemTooltipContext item)
+    {
+        var settings = EquipmentDurabilityMod.Settings;
+        if (!settings.Enabled || Condition.InTag(item.ModTag) is not { } condition) return [];
+
+        string value = RepairMenu.Percent(condition);
+        float factor = Condition.Factor(condition, settings.Threshold, settings.BrokenPenalty);
+        if (condition <= 0) value += " (broken)";
+        if (factor < 1) value += $" (effectiveness {RepairMenu.Percent(factor - 1)})";
+
+        return [new UiItemTooltipLine("Condition", value)];
+    }
 }
 
 /// <summary><paramref name="Character"/> repairs its gear with Tools.</summary>
