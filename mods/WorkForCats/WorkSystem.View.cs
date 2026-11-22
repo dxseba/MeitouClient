@@ -1,7 +1,5 @@
 using System.Globalization;
 using Meitou.Simulation;
-using Meitou.Simulation.Movement;
-using Meitou.Simulation.Player;
 using static Meitou.WorkForCats.WorkForCatsMod;
 
 namespace Meitou.WorkForCats;
@@ -33,12 +31,12 @@ internal sealed partial class WorkSystem
         string employer = place.Own ? "You" : _data.Relations.Contains(place.Owner) ? _data.Relations.Factions[place.Owner].Name : "Nobody";
         string skill = SkillName(place.Stat.ToString());
         if (Worker(world) is not { } worker)
-            return new EmploymentView(place.Key, place.Name, employer, refusal, CharacterId.None, null, skill, 0, 0, false, "Select a character.");
+            return new EmploymentView(place.Key, place.Name, employer, refusal, CharacterId.None, null, skill, 0, 0, false, "");
 
         var (id, slot, cold) = worker;
         bool here = JobSite(cold) == place.Key;
         int level = (int)(cold.Stats?[place.Stat] ?? 0);
-        string status = here ? StatusOf(world, slot, cold) : JobSite(cold) is null ? "Not employed." : "Employed elsewhere.";
+        string status = here ? StatusOf(world, slot, cold) : "";
         return new EmploymentView(place.Key, place.Name, employer, refusal, id, cold.Name, skill, level, RateOf(cold, place), here, status);
     }
 
@@ -56,18 +54,17 @@ internal sealed partial class WorkSystem
         return null;
     }
 
+    /// <summary>
+    /// The original's rate line suffix for the employed worker: <c> | m/60 min</c> worked of the hour, and <c> (waiting)</c> while not working.
+    /// </summary>
     string StatusOf(World world, int slot, CharacterCold cold)
     {
         var e = _employees.GetValueOrDefault(world.Characters.IdOf(slot));
-        string pay = e is null ? "" : $" Next pay in {Minutes(e.Hours)} min.";
-        if ((cold.Orders & CharacterOrders.Jobs) == 0) return "Paused: Jobs are off." + pay;
-        if (e is not null && Working(world, slot, cold, e) is not null) return "Working." + pay;
-        if (cold.Running is { Row: JobType, Task: CharacterTask.GoTo }) return "On the way." + pay;
-
-        return "Paused." + pay;
+        int minutes = e is null ? 0 : (int)(e.Hours * 60);
+        bool working = e is not null && Working(world, slot, cold, e) is not null;
+        string text = string.Create(CultureInfo.InvariantCulture, $" | {minutes}/60 min");
+        return working ? text : text + " (waiting)";
     }
-
-    static string Minutes(double hours) => ((int)Math.Ceiling((1 - hours) * 60)).ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// "SmithingWeapon" as "Smithing weapon".

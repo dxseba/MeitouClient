@@ -4,18 +4,19 @@ using Meitou.Modding;
 namespace Meitou.WorkForCats;
 
 /// <summary>
-/// The original's <c>WorkForCats.ini</c>, under Mod settings; same names and defaults (workshop description "Configuration").
+/// The original's <c>WorkForCats.ini</c> <c>[Employment]</c> keys, under Mod settings; same defaults and limits (its <c>Config.h</c>; slider ends
+/// below the ini's 1000000 are Meitou's).
 /// </summary>
 public sealed class WorkSettings
 {
     [Setting("Show employment window", Hint = "A window with Get a job / Quit job while a workplace is selected.")]
     public bool ShowEmploymentWindow { get; set; } = true;
 
-    [Setting("Wage at skill 0", Hint = "Cats per in-game hour of work at skill 0 (and below).", Min = 0, Max = 1000, Step = 1)]
-    public float WageAtSkill0 { get; set; } = 20;
+    [Setting("Wage at skill 0", Hint = "Whole cats per in-game hour of work at skill 0 (and below).", Min = 0, Max = 10000, Step = 1)]
+    public int WageAtSkill0 { get; set; } = 20;
 
-    [Setting("Wage at skill 100", Hint = "Cats per in-game hour of work at skill 100 (and above).", Min = 0, Max = 2000, Step = 1)]
-    public float WageAtSkill100 { get; set; } = 200;
+    [Setting("Wage at skill 100", Hint = "Whole cats per in-game hour of work at skill 100 (and above).", Min = 0, Max = 10000, Step = 1)]
+    public int WageAtSkill100 { get; set; } = 200;
 
     [Setting("Allow own workplaces", Hint = "Also employ at your own workplaces: no relation progress and no relation bonus there.")]
     public bool AllowOwnWorkplaces { get; set; }
@@ -23,16 +24,16 @@ public sealed class WorkSettings
     [Setting("Relations enabled", Hint = "Work hours raise the employer's relation. Off keeps the progress made so far.")]
     public bool RelationsEnabled { get; set; } = true;
 
-    [Setting("Relation hours", Hint = "Combined work hours for one faction per relation gain.", Min = 0.5, Max = 100, Step = 0.5)]
+    [Setting("Relation hours", Hint = "Combined work hours for one faction per relation gain.", Min = 0.1, Max = 1000, Step = 0.1)]
     public float RelationHours { get; set; } = 8;
 
-    [Setting("Relation points", Hint = "Relation gained per interval, up to 100.", Min = 0, Max = 20, Step = 1)]
-    public int RelationPoints { get; set; } = 1;
+    [Setting("Relation points", Hint = "Relation gained per interval, up to 100.", Min = 0, Max = 100, Step = 0.5)]
+    public float RelationPoints { get; set; } = 1;
 
     [Setting("Relation bonus enabled", Hint = "Positive relations raise the wage.")]
     public bool RelationBonusEnabled { get; set; } = true;
 
-    [Setting("Bonus % at relation 100", Hint = "Wage bonus at relation 100, scaled smoothly from 0 at relation 0.", Min = 0, Max = 200, Step = 1)]
+    [Setting("Bonus % at relation 100", Hint = "Wage bonus at relation 100, scaled smoothly from 0 at relation 0.", Min = 0, Max = 1000, Step = 1)]
     public float BonusPercentAt100 { get; set; } = 20;
 
     /// <summary>
@@ -45,7 +46,7 @@ public sealed class WorkSettings
 /// <summary>
 /// A copy of <see cref="WorkSettings"/> for the tick.
 /// </summary>
-internal sealed record WorkRules(float WageAtSkill0, float WageAtSkill100, bool AllowOwn, bool Relations, float RelationHours, int RelationPoints,
+internal sealed record WorkRules(float WageAtSkill0, float WageAtSkill100, bool AllowOwn, bool Relations, float RelationHours, float RelationPoints,
     bool Bonus, float BonusPercent)
 {
     public static readonly WorkRules Defaults = new WorkSettings().Rules();

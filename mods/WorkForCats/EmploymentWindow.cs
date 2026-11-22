@@ -58,20 +58,18 @@ internal sealed class EmploymentWindow(ModContext context) : IUiExtension
         return root;
     }
 
+    /// <summary>
+    /// The original's window: the building's name (its caption) and the rate line, "N cats/hour" (whole cats, the relation bonus in) and, when
+    /// employed here, the minutes of the hour worked; nothing without a selected character.
+    /// </summary>
     static List<string> Lines(EmploymentView view)
     {
-        var lines = new List<string> { view.Building, "Employer: " + view.Employer };
+        var lines = new List<string> { view.Building };
         if (view.Refusal is { } refusal) lines.Add(refusal);
-        if (view.WorkerName is null)
-        {
-            lines.Add(view.Status);
-            return lines;
-        }
+        if (view.WorkerName is null) return lines;
 
-        string rate = view.Rate.ToString("0.#", CultureInfo.InvariantCulture);
-        lines.Add($"{view.WorkerName}: {view.Skill} {view.Level}");
-        lines.Add($"Pay: {rate} cats per hour");
-        lines.Add(view.Status);
+        string rate = view.Rate.ToString("0", CultureInfo.InvariantCulture);
+        lines.Add($"{rate} cats/hour{view.Status}");
         return lines;
     }
 

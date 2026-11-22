@@ -58,9 +58,20 @@ internal sealed class WorkplaceFinder(PopulationData data)
         return new Lookup(place, Refusal(machine, found, own, rules));
     }
 
+    /// <summary>
+    /// Workplaces the original refuses by record (its <c>UnsupportedWorkplace</c>): Brewing Booze Barrels, Grain Silo, Iron Refinery, Ore
+    /// Processor, Iron Resource, Copper Resource, Iron Rock.
+    /// </summary>
+    static readonly HashSet<string> Unsupported = new(StringComparer.Ordinal)
+    {
+        "5354-furniture_otto.mod", "1930-gamedata.base", "42167-gamedata.base", "1512-gamedata.base", "42248-gamedata.base", "42249-gamedata.base",
+        "14521-rebirth.mod",
+    };
+
     static string? Refusal(MachineData machine, Found found, bool own, WorkRules rules)
     {
         if (!found.Standing) return "This building is not standing.";
+        if (Unsupported.Contains(found.Record)) return "This workplace offers no employment.";
         if (machine.Function == MachineData.NaturalMineFunction) return "Natural deposits offer no employment.";
         if (machine.IsAutomatic) return "Fully automatic: it has no operator slots.";
         if (machine.Stat <= 0 || machine.Function == MachineData.TrainingFunction || machine.Stat == (int)StatsEnumerated.Turrets)

@@ -1,4 +1,3 @@
-using System.Reflection;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Modding;
 using Meitou.Simulation;
@@ -36,11 +35,6 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
     /// Ticks between work sweeps and view updates.
     /// </summary>
     const int Cadence = 10;
-
-    /// <summary>
-    /// The operating XP amount of a stat, Meitou's own production work's (<c>ProductionSystem.OperateXp</c>, by reflection; 0.5 without it).
-    /// </summary>
-    static readonly Func<int, float> OperateXp = ReflectedOperateXp() ?? (_ => 0.5f);
 
     readonly WorkSettings _settings;
     readonly PopulationData _data;
@@ -213,7 +207,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
 
         Train(world, cold, place.Stat, seconds);
         if (!place.Own) Befriend(world, place.Owner, hours);
-        if (employee.Hours >= 1) Pay(world, cold, employee, place);
+        if (employee.Hours >= 1) Pay(world, cold, employee, place, RateOf(cold, place));
     }
 
     /// <summary>
@@ -230,19 +224,22 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
     }
 
     /// <summary>
-    /// The full hour's cats go to the player's money; the fraction of a cat stays for the next hour.
+    /// The full hour's whole cats go to the player's money (the original's <c>WorkClock</c>): the cats earned less the overshoot past the hour at the
+    /// current rate, floored; the rest (the overshoot's cats and the fraction of a cat) stays for the next hour.
     /// </summary>
-    static void Pay(World world, CharacterCold cold, Employee employee, Workplace place)
+    static void Pay(World world, CharacterCold cold, Employee employee, Workplace place, float rate)
     {
-        long cats = (long)Math.Floor(employee.Cats);
+        double overshoot = employee.Hours - Math.Floor(employee.Hours);
+        long cats = Math.Max(0, (long)Math.Floor(employee.Cats - overshoot * rate + 1e-8));
         employee.Cats -= cats;
-        employee.Hours -= 1;
+        employee.Hours = overshoot;
         world.Player.Money += cats;
         world.Post($"{cold.Name} earned {cats} cats working at {place.Name}.");
     }
 
     /// <summary>
-    /// The station's skill trains as Meitou's own operators' does, through the continuous XP entry at multiplier 1.
+    /// The station's skill trains through the continuous XP entry at multiplier 1 (the original calls <c>CharStats::xpGeneral(dt, 1, stat)</c> in
+    /// place of the native operating XP).
     /// </summary>
     static void Train(World world, CharacterCold cold, StatsEnumerated stat, float seconds)
     {
@@ -250,13 +247,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
         if (world.Systems.OfType<CrimeSystem>().FirstOrDefault()?.Xp is not { } xp) return;
 
         cold.UseSkill(stat, world.Tick);
-        xp.Continuous(stats, race, stat, seconds, OperateXp((int)stat) * 1f);
-    }
-
-    static Func<int, float>? ReflectedOperateXp()
-    {
-        var method = typeof(ProductionSystem).GetMethod("OperateXp", BindingFlags.NonPublic | BindingFlags.Static, [typeof(int)]);
-        return method?.ReturnType == typeof(float) ? method.CreateDelegate<Func<int, float>>() : null;
+        xp.Continuous(stats, race, stat, seconds, 1f);
     }
 
     #endregion

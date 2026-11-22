@@ -5,7 +5,7 @@ using Meitou.Simulation;
 namespace Meitou.WorkForCats;
 
 /// <summary>
-/// Port of "Work for Cats - Get Hired at NPC Workbenches" (workshop 3802290991), rebuilt from its description: a player character takes a paid
+/// Port of "Work for Cats - Get Hired at NPC Workbenches" (workshop 3802290991; facts from its GPL source): a player character takes a paid
 /// job at another faction's workbench or production building, works it like a town worker, earns an hourly wage by skill and relation, trains the
 /// station's skill and slowly raises the employer's relation. The employment is a mod job (<see cref="JobType"/>) in the character's job list.
 /// </summary>
