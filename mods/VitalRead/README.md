@@ -1,23 +1,36 @@
 # Vital Read (port)
 
-Port of *Vital Read* (workshop 3813852230, the MCM fork). The rules come from its GPL-3.0 upstream source (`Vital-Read.cpp`,
-`TryResolveMemberStateSnapshot` / `TryResolvePortraitTextLabelState`). The fork's two bed states come from its description.
+Port of *Vital Read* (workshop 3813852230, the MCM fork): a state badge (icon and short text) on each squad-bar portrait. A Harmony postfix on the
+private `PortraitBar.AddSquadCells` adds a non-pickable `ImageBox` and `TextBox` in corners of each marked cell's portrait image, clipped to the page
+and following the bar's scroll. `VitalSystem`, a tick system, publishes each player character's dying, coma, limb and bed facts every 5 ticks.
 
-- **Badge** per squad-bar portrait, first match: dead none; playing dead `PD`; dying `DY`; recovery coma `RC`; unconscious `ZZ`; crippled leg
-  `CrL`; crippled arm `CrA`; starving `ST`; a robot in a repair bed `RP` (fork, a blue wrench there); in a bed `+` (fork, a blue plus).
-- **Rules**:
-  - Dying uses the game's health word (docs/game/ui-screens.md "Health word choice"): blood at or under 0 with wound severity 1, or
-    severity 3. The upstream used KenshiLib's `pointOfNoReturn` / `isProbablyDying` and required the character to be unconscious.
-  - Recovery coma: unconscious with the coma flag and no KO timer left (the upstream also needed no KO timer).
-  - Crippled leg: `MedicalState.Crawling || LegsMessedUp`, standing in for the upstream's `isCrippled && !canIkick`.
-  - Crippled arm: either `ArmWorks(left)` false.
-  - Starving: hunger under 1, the health word's Starving.
-  - Repair bed: the bed's functionality `function` is 25 (`BedKind.RepairBed`) and the race `IsRobot`.
-- **Hooks**: `VitalSystem`, a tick system, publishes each player character's wound severity, leg, arm, robot and repair-bed facts every 5 ticks as
-  a volatile `FrozenDictionary`. The rest comes from the snapshot (`CharacterSnapshot.Body`, `InBed`). A Harmony postfix on the private
-  `PortraitBar.AddSquadCells` adds a non-pickable `TextBox` in each marked cell's corner, clipped to the page and following the bar's scroll.
-- **Settings**: *Enable*, *Show text*, *Coloured text* (the colours stand in for the icons), *Text size* (18 px at 1080p), *Anchor* (top right),
-  *Margin*. The upstream's icon settings are left out: its PNG icons are not shipped.
-- Differences: text only, never icons. Wound severity is reimplemented (the game's own fold is internal to `HudPanels`).
-- **Observed** (2026-11-18): builds against the current engine (0 warnings). **Unknown**: everything in play (placement, scroll and clip, text
-  size, each state's trigger).
+## Facts
+
+- **Precedence**, first match: dead (none), repair bed `RP`, bed `BD`, playing dead `PD`, dying `DY`, recovery coma `RC`, unconscious `ZZ`,
+  crippled leg `CrL`, crippled arm `CrA`, starving `ST`; a crippled arm hides starving. **Verified** (original DLL (decompiled): the overlay
+  kind and its label table).
+- **Repair bed / bed**: lying in a bed whose building function is 25 (`BF_SKELETON_BED`) / 6 (`BF_BED`), any race. **Verified** (as above).
+- **Dying**: not dead or playing dead, and blood-loss trauma, `isProbablyDying`, or blood at or under the KO point (`pointOfNoReturn`); no
+  unconscious test. **Verified** (as above; fork README v2). Meitou: `MedicalState.BloodKo`, `MedicalState.KoPoint`, and the health word's Dying
+  standing in for `isProbablyDying`, whose rule is not known.
+- **Recovery coma**: the coma flag, `!canGetUpWakeUp`, no KO timer, no bleeding or extra blood loss, none of the dying terms; no unconscious
+  test. **Verified** (as above). Meitou: `canGetUpWakeUp` as unconscious and `WakesWithin(0)`; extra blood loss has no counterpart.
+- **Unconscious**: the medical unconscious flag (or its virtual, or state 4). **Verified** (as above).
+- **Crippled leg** `isCrippled && !canIkick` (Meitou: `Crawling || LegsMessedUp`); **crippled arm** `!isLeftArmOk || !isRightArmOk` (Meitou:
+  `BothArmsWork`); **starving** `isReallyHungry` (Meitou: hunger below 1). **Verified** (as above) for the tests; the Meitou stand-ins are
+  **Observed** equivalents only.
+- **Settings** and defaults (`mod-config.defaults.json`; labels from its en_GB catalog): Enabled on, Show icons on, Show text on, Icon size 20 (0
+  automatic), Text size 18, Icon corner bottom left, Text corner top right, Horizontal / Vertical margin 0 (shared by icon and text). **Verified**.
+  Ranges, the automatic icon size (0.3 of the portrait) and *Coloured text* (off) are Meitou's.
+- **Icons**: the defaults are `Kenshi_UI.png` crops (unconscious `45 122 32 32`, playing dead `80 126 38 27`, from the game) and the original's
+  own PNGs (`gui/gfx/heart_64px_opt.png`, `death_64px_opt.png`, `starving_64px_opt.png`, `broken-arm_64px_opt.png`, `broken-leg_64px_opt.png`,
+  `repair-wrench_64.png`, `bed-plus_64.png`). Looked up as the original does: the path under the mod folder, then the bare name in its `icons/`,
+  `gui/gfx/` and folder, then the game's resources. **Verified** (original config and README). The port does not ship those PNGs: a state
+  without its file shows text only.
+- **Observed** (2026-11-18): an earlier text-only build loaded. Everything here is unverified in play (placement, icon loading, each trigger).
+
+## Missing
+
+- The original's own icon art (not redistributable from here); drop its `gui/gfx` PNGs into this mod's `gui/gfx` to get them.
+- Per-state texture, size and crop overrides (`<state>IconTexture`, `IconSizePx`, `IconCoord*` in `mod-config.json`).
+- Debug logging and the probe hotkeys (Ctrl+Alt+F3..F12).
