@@ -21,6 +21,7 @@ public sealed class ElementalEnchantmentMod : IMod
         var skills = Elements.All.ToDictionary(e => e, e => context.AddSkill(Elements.Skill(e)));
         context.AddSystem("elements", _ => Running = new ElementSystem(Settings, skills), SystemAnchor.End);
         context.AddUi(new ElementMenu());
+        context.AddUi(new WeaponAura(context, Settings));
         context.AddCombatHitFeed(new ElementEffects(context, Settings).Feed);
         context.Log("Elemental Enchantment initialized");
     }
