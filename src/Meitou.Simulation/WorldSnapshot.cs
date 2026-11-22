@@ -527,10 +527,6 @@ public sealed class CharacterSnapshot
     /// </summary>
     public BodyBuild? Build { get; internal set; }
     /// <summary>
-    /// What a selected character carries, one line per item (empty for the others).
-    /// </summary>
-    public IReadOnlyList<string> Inventory { get; internal set; } = [];
-    /// <summary>
     /// A selected character's bounties, one line per faction that wants it (empty for the others and for one nobody wants).
     /// </summary>
     public IReadOnlyList<Crime.BountyLine> Bounties { get; internal set; } = [];
@@ -605,8 +601,9 @@ public sealed class CharacterSnapshot
     /// </summary>
     public IReadOnlyList<Bodies.StatusEffectView> Effects { get; internal set; } = [];
     /// <summary>
-    /// The inventory of a selected character, of the one whose loot window is open, or of a player character whose inventory is shown (null for
-    /// the others).
+    /// The inventory of a character a window can show (null for the others): of the selection, the first by slot, the lead and the selected
+    /// opener of the open loot or container window (every selected one with <see cref="Player.PlayerState.AllSelectedGrids"/>); the open loot's
+    /// body; a player character whose pinned inventory is shown.
     /// </summary>
     public InventoryView? ItemGrid { get; internal set; }
     /// <summary>
@@ -1136,6 +1133,11 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     /// The power of the building the HUD shows when it is a level building of a town that draws power; null for others.
     /// </summary>
     public Production.LevelPowerView? InspectedLevelPower { get; init; }
+    /// <summary>
+    /// The machine whose lines the HUD shows when the building is a town's generator, research bench or crafting bench (its <c>townwork:</c>
+    /// machine, or a view of one where none is made yet, <see cref="Production.ProductionSystem.TownMachineOf"/>); null for others.
+    /// </summary>
+    public Production.MachineSnapshot? InspectedTownMachine { get; init; }
     /// <summary>
     /// The gun numbers of the building the HUD shows when it is a turret (its Stats 1 gun lines); null for others.
     /// </summary>

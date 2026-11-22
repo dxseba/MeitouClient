@@ -273,6 +273,12 @@ sealed partial class PlayerInterface
         _uiHost.BuildingActions(new UiBuildingContext(building, snapshot, () => Session.World.Tick, Say));
 
     /// <summary>
+    /// The lines the interface extensions add to an item's tooltip (<see cref="UiHost.ItemTooltipLines"/>); none without an extension that adds any.
+    /// </summary>
+    internal IReadOnlyList<UiItemTooltipLine> ModItemTooltipLines(UiItemTooltipContext item) =>
+        _uiHost.ItemTips.Any ? _uiHost.ItemTooltipLines(item) : [];
+
+    /// <summary>
     /// Whether any UI extension adds lines to the town panel.
     /// </summary>
     internal bool HasModTownLines => _uiHost.HasTownLines;
@@ -283,6 +289,33 @@ sealed partial class PlayerInterface
     /// </summary>
     internal IReadOnlyList<UiTownLine> ModTownLines(Simulation.Production.OutpostSnapshot town, bool owned, WorldSnapshot snapshot) =>
         _uiHost.TownLines(new UiTownContext(town, owned, snapshot, () => Session.World.Tick, Say));
+
+    /// <summary>
+    /// Whether any UI extension adds lines to the character panel.
+    /// </summary>
+    internal bool HasModCharacterLines => _uiHost.HasCharacterPanelLines;
+
+    /// <summary>
+    /// The lines the interface extensions add to the character panel for <paramref name="character"/> (<see cref="UiHost.CharacterPanelLines"/>).
+    /// </summary>
+    internal IReadOnlyList<UiCharacterLine> ModCharacterLines(CharacterSnapshot character) =>
+        _uiHost.CharacterPanelLines(CharacterContext(character));
+
+    /// <summary>
+    /// Whether any UI extension adds buttons beside the jobs list.
+    /// </summary>
+    internal bool HasModJobButtons => _uiHost.HasJobPanelButtons;
+
+    /// <summary>
+    /// The buttons the interface extensions add beside the jobs list for <paramref name="character"/> (<see cref="UiHost.JobPanelButtons"/>).
+    /// </summary>
+    internal IReadOnlyList<UiJobButton> ModJobButtons(CharacterSnapshot character) => _uiHost.JobPanelButtons(CharacterContext(character));
+
+    /// <summary>
+    /// What a character panel's mod source gets for <paramref name="character"/>: the snapshot on screen, the tick and the command queue.
+    /// </summary>
+    UiCharacterContext CharacterContext(CharacterSnapshot character) =>
+        new(character, Session.CurrentSnapshot, () => Session.World.Tick, Say);
 
     /// <summary>
     /// Future code-mod loader entry point; disposal removes the extension's owned registrations.
@@ -594,6 +627,7 @@ sealed partial class PlayerInterface
         InventoryWindows.SyncClosedInventories();
         TradeWindows.SyncTradeScreens();
         Production.SyncMachineScreens();
+        Production.ShareShownMachines();
         TradeWindows.SyncLootScreen();
         InventoryWindows.SyncPinnedInventories();
         TradeWindows.SyncInventoryLayouts();
@@ -622,13 +656,16 @@ sealed partial class PlayerInterface
             [UiSlots.Selection] = FaithfulSlot("InformationPanel"),
             [UiSlots.Squad] = FaithfulSlot("SquadPanel"),
         };
-        controls.AddRange(RecordPortraits.Resolve(hud ? _uiHost.Arrange(UiMode, Width, Height, b, slots) : []));
+        var overlay = hud ? _uiHost.Arrange(UiMode, Width, Height, b, slots).ToList() : [];
+        FaithfulScreens.ArrangeOverlayEdits(overlay);
+        controls.AddRange(RecordPortraits.Resolve(overlay));
         PortraitBar.SquadBarRow = 0;
         if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel)
             PortraitBar.AddSquadPortraits(controls, squadPanel.Bounds);
         HudPanels.AddHudText(controls);
         if (hud) OrdersPanel.AddJobScrollBar(controls);
         OrdersPanel.AddJobRowParts(controls);
+        if (hud) OrdersPanel.ModButtons.AddContent(controls);
         if (hud) TutorialWindow.AddTutorialPanel(controls);
         AddScreens(controls);
         return controls;
@@ -806,9 +843,15 @@ sealed partial class PlayerInterface
             else ScrollBars.HudScrollAction(key, c.Action);
             return true;
         }
+        if (FaithfulScreens.PressOverlayEdit(c, p)) return true;
         _uiHost.Dispatch(c);
         return true;
     }
+
+    /// <summary>
+    /// A mod overlay text box's event (<see cref="UiHost.DispatchText"/>); false for a screen's.
+    /// </summary>
+    internal bool OverlayText(MyGuiEvent e) => _uiHost.DispatchText(e);
 
     /// <summary>
     /// The F1 key and the HLP button share one handler: toggle the Tutorials window (FUN_1406e1f20; ui-screens.md).
@@ -876,6 +919,8 @@ sealed partial class PlayerInterface
         else if (action == "rescue") Say(new Simulation.Carrying.RescueJobCommand(SelectedIds(), SlowModifier) { Tick = Session.World.Tick });
         else if (action == "prospect") Prospecting.ProspectAction();
         else if (action == BuildingModButtons.Action) BuildingSelection.ModButtons.Press(argument);
+        else if (action == CharacterModLines.Action) HudPanels.ModLines.Press(argument);
+        else if (action == JobModButtons.Action) OrdersPanel.ModButtons.Press(argument);
         else if (action.StartsWith("building-", StringComparison.Ordinal) || action.StartsWith("machine-", StringComparison.Ordinal))
             BuildingSelection.BuildingAction(action);
         else if (action == "tutorial") TutorialWindow.TutorialAction(argument);

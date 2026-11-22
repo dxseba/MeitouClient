@@ -422,11 +422,23 @@ shows the first failing message in this order (**Verified** unless marked):
   187..222 against Wall IV (x -59..27, z 0..305; both scale 0.85). At its wall's position and turn a ramp stands against the wall's -X side.
 - **Turrets** have no `snaps to`, and none refers to the `Node Turret` instances (node type 3, as `Node Defensive Position`) that wall parts
   such as `Wall Level 02` carry: they stand on a wall's walkway like on any surface (**Observed**, data only).
-- **Meitou** (engine choice, `GhostSnap`, `BuildMode.SnapToTarget`): a `snaps to` ghost takes the position and turn of the nearest building
-  of a target record (queued ghost, site or level building) that puts its footprint centre within 150 of the cursor; it is judged by its own
-  pitch like a wall piece, and neither its target nor, on a wall, any other wall blocks it. With no target in reach it places as usual (the
-  "blue nodes" refusal is not decided). Nodes inside other buildings (light mounts) and resources are not searched. A ghost over a raised
-  walkable surface outside the rooms (a wall top, `InteriorView.SurfaceMoveHit`) stands on it level, with that height as its ground, and
+- **Snap nodes and blue node markers** (**Verified**, `PreviewBuilding_Snapping` vtable `0x1416e1cb8`, `0x1404dd410`, `0x1404ddb43`, `0x1404d0ff0`,
+  `0x1404fe160`, `0x14038cdf0`, `0x140388e10`):
+  - A building's `is node` child instances (such as `Node Light Mount`, `node type` 5, or `Node Turret`, `node type` 3) are placed at
+    `parent.pos + parent.rot * instance.pos` (unscaled by `scale`) and `parent.rot * instance.rot` (`0x140388e10`).
+  - `PreviewBuilding_Snapping` searches both buildings and building nodes matching `snaps to` within squared 3D distance `32400` (`180` units,
+    `0x1404ddb43`). Slot 5 (`0x1404d0ff0`) refuses unsnapped placement with `NeedsSnapNode` ("Can only be placed on certain locations (marked by
+    blue nodes).") unless slot `+0x108` (`0x1404fe160`) finds a `gun turret` reference.
+  - `showBlueNodes` (`0x14038cdf0`) draws `unit_sphere.mesh` scaled `5.0` in cyan-blue `(0, 0.8, 1.0, 0.5)` at every matching node of player-owned
+    buildings (or all buildings in the level editor).
+- **Meitou** (`GhostSnap`, `BuildMode.SnapToTarget`, `MarkerRenderer.BlueNodes`): a `snaps to` ghost takes the position and turn of the nearest
+  building of a target record (within 150 X/Z) or the nearest matching `is node` instance of an owned building or player site (direct pointer ray
+  hover preferred, else nearest within 180 3D); it is judged by its own pitch like a wall piece, its host building does not block it, and an
+  exterior snap attachment records its parent while staying outside (`Outside` / `flags` bit 0) so it remains visible and lit outdoors when the
+  house's interior is closed. While a ghost that snaps to `is node` records is held, matching nodes on player sites and owned buildings (all
+  non-destroyed buildings in the level editor) show blue node spheres (`unit_sphere.mesh` scaled 5), and unsnapped placement fails with
+  `NeedsSnapNode` unless the building has a `gun turret`. Resources (`is foliage`, e.g. Ore Drill -> Iron Resource) are not searched. A ghost over
+  a raised walkable surface outside the rooms (a wall top, `InteriorView.SurfaceMoveHit`) stands on it level, with that height as its ground, and
   walls do not block it.
 
 ### Upgrades
@@ -740,9 +752,9 @@ field prefixes by MiningResource: `iron`, `stone`, `copper`, `carbon`, `water`, 
 
 Function 10, `CraftingBuilding` (**Observed** unless noted).
 - **Lists.** The functionality's `item crafts` (v0 = finished items the output holds), `armour crafts`, `weapon crafts`
-  (MATERIAL_SPECS_WEAPON models), `crossbow crafts`, `backpack crafts`, `robotics crafts`. A weapon bench crafts every
-  WEAPON in the `PLAYER_WEAPONS` manufacturer's `weapon types` in each listed model; the model's level is that
-  manufacturer's `weapon models` v0 (Rusted Junk 5 ... Edge Type 3 80). `tech level` does not cap what comes out: the
+  (MATERIAL_SPECS_WEAPON models), `crossbow crafts`, `backpack crafts`, `robotics crafts`. Meitou's weapon bench offers
+  every WEAPON in the `PLAYER_WEAPONS` manufacturer's `weapon types` in each listed model (the original's list is narrower,
+  below); the model's level is that manufacturer's `weapon models` v0 (Rusted Junk 5 ... Edge Type 3 80). `tech level` does not cap what comes out: the
   finish (`FUN_1402bcac0`) hands the factory only the record, the quality and the model (**Verified**, disassembly; #1069).
 - **Output section** (**Verified**, `FUN_1402b9aa0` code read): `out` is max `inventory footprint width` x max `inventory
   footprint height` (each taken on its own, at least 1) over the records of the item, armour, crossbow, backpack and robotics
@@ -786,6 +798,14 @@ Function 10, `CraftingBuilding` (**Observed** unless noted).
 - **Research** `enable item`, `enable armour`, `enable weapon type`, `enable weapon model`, `enable crossbow`,
   `enable backpack`, `enable robotics` unlock crafts, v0 = the repetition that does it; `repeats` and `repeat mult`
   ([Research](#research) repetitions).
+- **A weapon bench's list** (`FUN_1402bbd20`, **Verified** decompile): the research-unlocked MATERIAL_SPECS_WEAPON records (type 50, `FUN_14082f1b0`
+  over the research's unlocked map) the bench's `weapon crafts` holds, each with the research-unlocked WEAPON types (type 2). A weapon type or model
+  no research enables is never listed, so in the base data Edge Type 2 and 3 (enabled by no research; Edge Type 1 by rebirth.mod's) and the Iron
+  Stick (a PLAYER_WEAPONS type no research enables) are never made to order. Of the models it then keeps only the highest-scored one
+  (`FUN_1402b82a0`) and those whose `craft list fixed` is set (Refitted Blade, Catun No.3,
+  Mk III and Edge Type 3 in the base data) (**Observed**, decompile). Meitou: `ProductionSystem.CanCraft` needs the type and model both enabled
+  by a finished research, and `CraftOptions` leaves out a weapon option no research could enable (#1227); it lists every unlocked model, not the
+  original's narrower set (not modelled). Other kinds keep the engine reading that a record no research lists is craftable from the start.
 - **Save** (GAMESTATE_BUILDING, `vfunc_17`/`18` `FUN_1402b8440` / `FUN_1402b8ab0`): float `num crafts`, bool `repeat`,
   per queued k strings `current<k>` (item) and `currentExtraData<k>` (weapon model), float `current prog<k>`, int
   `crit<k>`; partly drawn items as strings `craft partial item sid <k>` (item id), floats `craft partial item val <k>` and int `craft partial item size`

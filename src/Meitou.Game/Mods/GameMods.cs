@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using Meitou.Game;
 using Meitou.Game.DevTools;
+using Meitou.Game.Effects;
 using Meitou.Game.Host;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
@@ -41,6 +42,14 @@ sealed class GameMods(GameHost host)
     /// This frame's hits handed to the mods' feeds, kept to avoid allocating.
     /// </summary>
     readonly List<CombatHit> _frameHits = [];
+    /// <summary>
+    /// The world the mods' effects were queued for; a new world drops them.
+    /// </summary>
+    World? _effectsFor;
+    /// <summary>
+    /// Plays the mods' effects; made with the first one.
+    /// </summary>
+    ModEffectPlayer? _effectPlayer;
 
     /// <summary>
     /// Starts the JIT warm-up now, or (with code mods enabled) once they are initialized.
@@ -174,6 +183,26 @@ sealed class GameMods(GameHost host)
     }
 
     /// <summary>
+    /// Once a frame, after the hits: the mods' queued effects start and the playing ones follow their characters (docs/modding.md "Visual
+    /// effects"). Nothing without code mods; a new world drops the old world's effects.
+    /// </summary>
+    internal void UpdateModEffects()
+    {
+        if (Mods is null) return;
+
+        var effects = Mods.Effects;
+        _effectPlayer ??= new ModEffectPlayer(host);
+        effects.Resolve ??= _effectPlayer.Resolve;
+        var world = host.Session?.World;
+        if (!ReferenceEquals(_effectsFor, world))
+        {
+            _effectsFor = world;
+            effects.Clear();
+        }
+        if (!effects.Idle) _effectPlayer.Advance(effects);
+    }
+
+    /// <summary>
     /// Once a frame: a notice for each mod system the world stopped after a fault (docs/modding.md "Tick systems") and one for each mod that
     /// failed anywhere as built for another version of the game (<see cref="Content.CodeModFaults.Tell"/>).
     /// </summary>
@@ -253,7 +282,8 @@ sealed class GameMods(GameHost host)
     /// The squads of the world just loaded that a code mod made autonomous or kept out of the faction size count, when that mod is not running now
     /// (not installed, refused or failed to start), go back to the player (<see cref="Simulation.Ai.SquadAutonomy.DropUnowned"/>) and count again
     /// (<see cref="Simulation.Factions.SquadManagement.DropUnownedUncounted"/>), and lose the shops, purses and sleep it gave them, each with a
-    /// notice; between ticks, before the first.
+    /// notice; the NPC platoons it held in its name move on their own again (<see cref="Simulation.Population.PopulationSystem.DropUnownedHolds"/>,
+    /// a log line only); between ticks, before the first.
     /// </summary>
     internal void DropUnownedAutonomy(World world)
     {
@@ -274,6 +304,11 @@ sealed class GameMods(GameHost host)
 
         int woken = Simulation.Factions.SquadManagement.DropUnownedDormant(world, running.Contains);
         if (woken > 0) Notice($"{woken} squad(s) a mod that is not loaded put to sleep are awake again.");
+
+        // NPC platoons a missing mod held go back to the population; the player sees no change, so the log only.
+        int released = Simulation.Population.PopulationSystem.DropUnownedHolds(world, running.Contains);
+        if (released > 0)
+            Console.WriteLine($"mods      {released} platoon(s) a mod that is not loaded held move on their own again.");
     }
 
     /// <summary>
@@ -314,10 +349,26 @@ sealed class GameMods(GameHost host)
             action.Held = playing && actions.Held(action.Action);
             if (!playing || !actions.Pressed(action.Action)) continue;
 
-            context ??= new Game.Host.Input.ModKeyContext(host.Session.CurrentSnapshot, host.Player.SelectedIds(), host.Session.World.Tick,
-                host.Session.World.Commands.Enqueue);
+            context ??= KeyContext();
             action.Press(context);
         }
+    }
+
+    /// <summary>
+    /// A key action press's context: the snapshot on screen, the selection, the tick, the command queue and the modifiers held now.
+    /// </summary>
+    Game.Host.Input.ModKeyContext KeyContext()
+    {
+        var input = host.Session.Input;
+        bool Held(Game.Host.Input.Key left, Game.Host.Input.Key right) => input.IsHeld(left) || input.IsHeld(right);
+
+        return new Game.Host.Input.ModKeyContext(host.Session.CurrentSnapshot, host.Player.SelectedIds(), host.Session.World.Tick,
+            host.Session.World.Commands.Enqueue)
+        {
+            Ctrl = Held(Game.Host.Input.Key.LeftControl, Game.Host.Input.Key.RightControl),
+            Shift = Held(Game.Host.Input.Key.LeftShift, Game.Host.Input.Key.RightShift),
+            Alt = Held(Game.Host.Input.Key.LeftAlt, Game.Host.Input.Key.RightAlt),
+        };
     }
 
     /// <summary>

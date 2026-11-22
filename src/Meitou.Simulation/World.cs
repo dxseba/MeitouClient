@@ -247,12 +247,17 @@ public sealed partial class World : IDisposable
             CombatHitFilters.Register(this._systems[k], k);
             TradePriceFilters.Register(this._systems[k], k);
             TradeObservers.Register(this._systems[k], k);
+            CombatSpeedFilters.Register(this._systems[k], k);
+            ArmourFilters.Register(this._systems[k], k);
+            CombatDefenceObservers.Register(this._systems[k], k);
             StorageFilters.Register(this._systems[k], k);
             ItemUseObservers.Register(this._systems[k], k);
             GoodsTakenObservers.Register(this._systems[k], k);
             TownSwitchObservers.Register(this._systems[k], k);
             RelationObservers.Register(this._systems[k], k);
             DeathObservers.Register(this._systems[k], k);
+            PlatoonObservers.Register(this._systems[k], k);
+            OffscreenFightRules.Register(this._systems[k], k);
             ExperienceFilters.Register(this._systems[k], k);
             CrimeObservers.Register(this._systems[k], k);
         }
@@ -264,6 +269,7 @@ public sealed partial class World : IDisposable
 
         Characters = characters ?? new CharacterTable();
         WatchCharacters();
+        Platoons.SetNoting(PlatoonObservers.Active);
         Grid = new SpatialGrid(settings.GridCellSize);
         _pool = new WorkerPool(settings.Threads);
         _buffers = new EffectBuffer[Math.Max(1, settings.Threads * settings.PartitionsPerThread)];
@@ -517,6 +523,18 @@ public sealed partial class World : IDisposable
     /// </summary>
     internal Trading.TradeObservers TradeObservers { get; } = new();
     /// <summary>
+    /// The systems asked about attack and block play rates (<see cref="Combat.ICombatSpeedFilter"/>).
+    /// </summary>
+    internal Combat.CombatSpeedFilters CombatSpeedFilters { get; } = new();
+    /// <summary>
+    /// The systems asked about worn armour pieces as a hit is about to go through them (<see cref="Combat.IArmourFilter"/>).
+    /// </summary>
+    internal Combat.ArmourFilters ArmourFilters { get; } = new();
+    /// <summary>
+    /// The systems hearing of blocked and dodged melee blows (<see cref="Combat.ICombatDefenceObserver"/>).
+    /// </summary>
+    internal Combat.CombatDefenceObservers CombatDefenceObservers { get; } = new();
+    /// <summary>
     /// The systems asked about a storage the game picks for a character (<see cref="Items.IStorageFilter"/>).
     /// </summary>
     internal Items.StorageFilters StorageFilters { get; } = new();
@@ -528,6 +546,14 @@ public sealed partial class World : IDisposable
     /// The systems told of deaths (<see cref="Bodies.ICharacterDeathObserver"/>).
     /// </summary>
     internal Bodies.DeathObservers DeathObservers { get; } = new();
+    /// <summary>
+    /// The systems told of the platoons' changes (<see cref="IPlatoonObserver"/>).
+    /// </summary>
+    internal PlatoonObservers PlatoonObservers { get; } = new();
+    /// <summary>
+    /// The systems asked whether two platoons fight off screen (<see cref="Population.IOffscreenFightRule"/>).
+    /// </summary>
+    internal Population.OffscreenFightRules OffscreenFightRules { get; } = new();
     /// <summary>
     /// The systems filtering experience gains (<see cref="Bodies.IExperienceFilter"/>).
     /// </summary>
@@ -740,6 +766,17 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
+    /// Whether a whole-system job that runs once in <paramref name="every"/> ticks runs this tick: on the ticks where Tick is
+    /// <paramref name="phase"/> mod every (<see cref="TickPhases"/>, so jobs of different systems do not all land on the same tick).
+    /// </summary>
+    public bool Beat(int every, int phase)
+    {
+        if (every <= 1) return true;
+
+        return Tick % every == phase % every;
+    }
+
+    /// <summary>
     /// The integer hour of day, 0 to 23 (the game's sky controller hour that the AI compares windows with).
     /// </summary>
     public int Hour => Math.Clamp((int)(((GameHours % 24) + 24) % 24), 0, 23);
@@ -777,12 +814,17 @@ public sealed partial class World : IDisposable
         CombatHitFilters.Register(system, _systems.Count - 1);
         TradePriceFilters.Register(system, _systems.Count - 1);
         TradeObservers.Register(system, _systems.Count - 1);
+        CombatSpeedFilters.Register(system, _systems.Count - 1);
+        ArmourFilters.Register(system, _systems.Count - 1);
+        CombatDefenceObservers.Register(system, _systems.Count - 1);
         StorageFilters.Register(system, _systems.Count - 1);
         ItemUseObservers.Register(system, _systems.Count - 1);
         GoodsTakenObservers.Register(system, _systems.Count - 1);
         TownSwitchObservers.Register(system, _systems.Count - 1);
         RelationObservers.Register(system, _systems.Count - 1);
         DeathObservers.Register(system, _systems.Count - 1);
+        PlatoonObservers.Register(system, _systems.Count - 1);
+        OffscreenFightRules.Register(system, _systems.Count - 1);
         ExperienceFilters.Register(system, _systems.Count - 1);
         CrimeObservers.Register(system, _systems.Count - 1);
         RegisterTasks(system, _systems.Count - 1);
@@ -790,6 +832,7 @@ public sealed partial class World : IDisposable
         Ai.ChooserRegistry.Collect(this, system, _systems.Count - 1, Extensions(), [], goalsOpen: false);
         if (DecidesAfter(system)) _decideAfter = _systems.Count - 1;
         WatchCharacters();
+        Platoons.SetNoting(PlatoonObservers.Active);
     }
 
     /// <summary>
@@ -916,6 +959,7 @@ public sealed partial class World : IDisposable
         // lose a tick (nothing without registered effects).
         RunSlowWorld(prof);
         DeathObservers.Sweep(this);
+        PlatoonObservers.Tell(this);
         Bodies.StatusEffects.Step(this);
         AfterPhase?.Invoke(this, "slow world");
 
@@ -1446,12 +1490,17 @@ public sealed partial class World : IDisposable
         CombatHitFilters.HashFaults(ref h);
         TradePriceFilters.HashFaults(ref h);
         TradeObservers.HashFaults(ref h);
+        CombatSpeedFilters.HashFaults(ref h);
+        ArmourFilters.HashFaults(ref h);
+        CombatDefenceObservers.HashFaults(ref h);
         StorageFilters.HashFaults(ref h);
         ItemUseObservers.HashFaults(ref h);
         GoodsTakenObservers.HashFaults(ref h);
         TownSwitchObservers.HashFaults(ref h);
         RelationObservers.HashFaults(ref h);
         DeathObservers.HashFaults(ref h);
+        PlatoonObservers.HashFaults(ref h);
+        OffscreenFightRules.HashFaults(ref h);
         ExperienceFilters.HashFaults(ref h);
         CrimeObservers.HashFaults(ref h);
         Decisions.HashFaults(ref h);

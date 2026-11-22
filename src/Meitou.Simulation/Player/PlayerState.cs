@@ -117,13 +117,18 @@ public sealed class PlayerState
     long _pointed = (long)CharacterId.None.Generation << 32 | (uint)CharacterId.None.Slot;
 
     /// <summary>
+    /// <see cref="ShownMachines"/>, replaced whole, read and written atomically.
+    /// </summary>
+    IReadOnlyList<string> _shownMachines = [];
+
+    /// <summary>
     /// The selected characters, in the order they were selected.
     /// </summary>
     public List<CharacterId> Selection { get; } = [];
 
     /// <summary>
-    /// The key the next Group speed order gives its characters' new speed group (<see cref="CharacterCold.SpeedGroup"/>). Runtime only, like the
-    /// groups: not saved and not hashed.
+    /// The key the next Group speed order, or move order that regroups, gives its characters' new speed group
+    /// (<see cref="CharacterCold.SpeedGroup"/>). Runtime only, like the groups: not saved and not hashed.
     /// </summary>
     public int NextSpeedGroup { get; set; }
 
@@ -156,6 +161,17 @@ public sealed class PlayerState
     }
 
     /// <summary>
+    /// The sites of the machines whose windows the host shows: only their snapshots carry <see cref="Production.MachineSnapshot.Storage"/>'s items
+    /// (docs/simulation.md "Snapshots"). Set by the host, a new list on each change, not by a command (any thread); a change while paused publishes
+    /// again. Display only: not hashed and not saved.
+    /// </summary>
+    public IReadOnlyList<string> ShownMachines
+    {
+        get => Volatile.Read(ref _shownMachines);
+        set => Volatile.Write(ref _shownMachines, value);
+    }
+
+    /// <summary>
     /// The instance id of the building the HUD shows (<see cref="InspectBuildingCommand"/>), or null. Display only: not hashed and not saved.
     /// </summary>
     public string? InspectedBuilding { get; set; }
@@ -164,6 +180,12 @@ public sealed class PlayerState
     /// The characters the pinned inventory windows show (<see cref="ShowInventoryCommand"/>). Display only: not hashed and not saved.
     /// </summary>
     public List<CharacterId> InventoryShown { get; } = [];
+
+    /// <summary>
+    /// Every selected character's inventory grid is published, not only the inventory window's (the dev console and the agent channel read the
+    /// whole selection's). Set by the host each frame (any thread). Display only: not hashed and not saved.
+    /// </summary>
+    public bool AllSelectedGrids { get; set; }
 
     /// <summary>
     /// Drops characters that are gone, and from the selection those of a squad the player does not lead (<see cref="Squad.Independent"/>; serial

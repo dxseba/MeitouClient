@@ -360,7 +360,7 @@ public sealed partial class PopulationSystem : ITickSystem, Bodies.ICharacterDea
         // changed), not at the look.
         RefreshStates(world);
         TickDiscover(world);
-        if (world.Tick % _settings.CheckEveryTicks != 0) { if (_wars is not null) StepWarManager(world); return; }
+        if (!world.Beat(_settings.CheckEveryTicks, TickPhases.PopulationCheck)) { if (_wars is not null) StepWarManager(world); return; }
         world.Uniques.SeedPrisoners(_data.Db);
         RefreshUniques(world);
         RefreshStates(world);
@@ -1345,7 +1345,7 @@ public sealed partial class PopulationSystem : ITickSystem, Bodies.ICharacterDea
             if (p is { Unmade: true, Guest: false, State: PlatoonState.Unloaded } && p.Origin == site)
             {
                 if (p.Saved is { } sp) sp.PlatoonId = -1;
-                world.Platoons.Remove(p.Id);
+                world.Platoons.Remove(p.Id, PlatoonGone.Dropped);
             }
         }
     }

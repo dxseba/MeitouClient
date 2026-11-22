@@ -1609,6 +1609,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         Config.BuildingOutline = true;
         Player.BuildingSelection.DeselectBuildings = Config.DeselectBuildings = true;
         Config.LuckyrenMode = false;
+        Rendering.Characters.GearBlood.KeptStains = Config.KeptStains = true;
         Config.CameraLeash = true;
         GamePages.ResetOptional();
         Config.GroundItemLimit = Simulation.Items.GroundItems.DefaultLimit;
@@ -1621,7 +1622,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         Player.InterfaceScale = Config.InterfaceScale = 1;
         Player.ShowNames = Config.ShowNames = true;
         Player.FeedbackButtonInPlay = Config.FeedbackButton = true;
-        Config.TickAhead = TickAheadMode.Dynamic;
+        Config.TickAhead = TickAheadMode.Always;
         Bindings.ResetToDefaults();
         Config.LookPreset = null;
         Config.FaithfulLook = false;

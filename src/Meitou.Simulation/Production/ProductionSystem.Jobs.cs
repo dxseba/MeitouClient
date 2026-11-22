@@ -30,16 +30,41 @@ public sealed partial class ProductionSystem
     public const int JobCheckTicks = 10;
 
     /// <summary>
-    /// Gives each player character named a job of the order's type on its site (when the site exists).
+    /// Gives each player character named a job of the order's type on its site (when the site exists); a type a code mod offers on buildings goes
+    /// by its offer (<see cref="GiveOffered"/>).
     /// </summary>
     void AddJobs(World world, AddJob add)
     {
+        if (world.SystemOf<PlayerSystem>()?.Extensions?.JobOffers.Find(o => o.Type == add.Type) is { } offer)
+        {
+            GiveOffered(world, add, offer);
+            return;
+        }
+
         if ((Site(world, add.Site) ?? TownMachineSite(world, add.Site)) is null) return;
         var table = world.Characters;
         foreach (var id in Who(world, add.Characters))
         {
             if (table.TryResolveNext(id, out int slot) && table.Cold(slot) is { } cold)
                 PermaJobs.Give(cold, add.Type, new PermaJob(add.Type, add.Site));
+        }
+    }
+
+    /// <summary>
+    /// A code mod's offered job (docs/modding.md "Mod jobs"): when the site is a finished building of the player's faction and of one of the offer's
+    /// records, each living player character named that the offer is for takes the job there (<see cref="PermaJobs.GiveOffered"/>).
+    /// </summary>
+    void GiveOffered(World world, AddJob add, ModJobOffer offer)
+    {
+        if (world.Buildings.Find(add.Site) is not { Complete: true } site) return;
+        if (site.Owner != world.Player.Faction || !offer.On(site.Record)) return;
+
+        var table = world.Characters;
+        foreach (var id in Who(world, add.Characters))
+        {
+            if (!table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { } cold) continue;
+            if (cold is { IsPlayer: true, DiedTick: < 0 } && offer.Takes(CharacterFacts.Animal(cold)))
+                PermaJobs.GiveOffered(cold, offer.Type, site.Id);
         }
     }
 
@@ -370,7 +395,8 @@ public sealed partial class ProductionSystem
                 && Ditchable(held).Any(item => Stores(keptStore, item)) && world.StorageAllows(cold, keep, StorageUse.Put, DitchRecord(world, held)))
                 return (TaskType.DitchAllResources, keep);
 
-            if (!PlayerOrders.Holds(world, slot) && cold.Inventory is not null && NearestSite(world, at, float.MaxValue, Ditches) is { } store)
+            bool ditching = !PlayerOrders.Holds(world, slot) && cold.Inventory is { } carried && Ditchable(carried).Any();
+            if (ditching && NearestSite(world, at, float.MaxValue, IsStore, Ditches) is { } store)
                 return (TaskType.DitchAllResources, store);
 
             bool Ditches(BuildSite s, Machine m) => InFinderRange(s.Position, at) && TakesDitched(m, cold.Inventory!)
@@ -394,7 +420,7 @@ public sealed partial class ProductionSystem
             if (on == TaskType.SitAround && cold.OperateSite is { } seat && Site(world, seat) is { } kept && Gap(kept.Position, at) <= SeatRange)
                 return (TaskType.SitAround, seat);
 
-            if (NearestSite(world, at, SeatRange, (s, m) => IsSeat(m) && Free(world, cold, s, m)) is { } free) return (TaskType.SitAround, free);
+            if (NearestSite(world, at, SeatRange, IsSeat, (s, m) => Free(world, cold, s, m)) is { } free) return (TaskType.SitAround, free);
         }
 
         return null;
@@ -536,15 +562,18 @@ public sealed partial class ProductionSystem
 
     /// <summary>
     /// The player's complete building nearest <paramref name="at"/> within <paramref name="range"/> whose machine passes <paramref name="ok"/> (ties:
-    /// the lower site id).
+    /// the lower site id). <paramref name="kind"/> is a test of the machine alone that <paramref name="ok"/> implies, asked first so the other
+    /// machines' sites are not looked up.
     /// </summary>
-    string? NearestSite(World world, Vector3 at, float range, Func<BuildSite, Machine, bool> ok)
+    string? NearestSite(World world, Vector3 at, float range, Func<Machine, bool> kind, Func<BuildSite, Machine, bool> ok)
     {
         string? best = null;
         float bestGap = float.MaxValue;
-        foreach (var m in world.Machines.All)
+        var all = world.Machines.All;
+        for (int k = 0; k < all.Count; k++)
         {
-            if (Site(world, m.Site) is not { Complete: true } site || site.Owner != world.Player.Faction) continue;
+            var m = all[k];
+            if (!kind(m) || Site(world, m.Site) is not { Complete: true } site || site.Owner != world.Player.Faction) continue;
             float gap = Gap(site.Position, at);
             if (gap > range || gap > bestGap || (gap == bestGap && string.CompareOrdinal(m.Site, best) > 0) || !ok(site, m)) continue;
             best = m.Site;
@@ -781,6 +810,16 @@ public sealed partial class ProductionSystem
     /// </summary>
     static string? DitchRecord(World world, Items.Inventory inv) =>
         world.StorageFilters.Active ? Meitou.Simulation.Items.StorageFilters.OneRecord(Ditchable(inv)) : null;
+
+    /// <summary>
+    /// A storage machine with its grid (what <see cref="TakesDitched"/> asks first).
+    /// </summary>
+    static bool IsStore(Machine m) => m.Data.IsStorage && m.Storage is not null;
+
+    /// <summary>
+    /// A machine that is not a storage.
+    /// </summary>
+    static bool IsMaker(Machine m) => !m.Data.IsStorage;
 
     /// <summary>
     /// A storage machine that takes something 242 Ditch all resources carries off from <paramref name="inv"/>.

@@ -41,6 +41,8 @@ publish) into a set none of `Snapshot`, `PreviousSnapshot` and the one before th
 paused publish and loading keep `PreviousSnapshot`'s set out of the ring with it. Contract: a published snapshot's characters stay as they are until
 two more snapshots are published; hold them across frames, not across ticks (the host's per-id index and the HUD's selection are rebuilt when the
 snapshot object changes). `WorldSnapshot` itself is new on each publish.
+Its outposts, speech bubbles and projectiles are the last publish's list (never changed once published) while unchanged (**engine choice**), so the
+host's reference checks hold (the foliage towns are given again only when an outpost moves or changes hands).
 A frame's second-to-last tick publishes a motion snapshot (**engine choice**, `World.MotionOf`): its characters and projectiles are the tick's, every
 other view the last snapshot's, as the host reads nothing else of `PreviousSnapshot` (its per-id index, the turrets' angles, the bolts, the splashes'
 tick). **Observed** (play bench, `bench-bases-2026-10-27`, ~270-290 characters, two interleaved pairs, 2026-11-19; with the 64-slot chunks of
@@ -48,8 +50,20 @@ tick). **Observed** (play bench, `bench-bases-2026-10-27`, ~270-290 characters, 
 1.1-1.5 -> 0.45-0.6).
 Machine views (**engine choice**, `MachineViewCache`): each publish compares every value a machine's `MachineSnapshot` shows (numbers by bits,
 strings and data records by reference, each stored item's fields); an unchanged machine keeps its snapshot and item views, and `Machines` and
-`MachinesVersion` change only when some view or the set of machines did. `Machines.Worked` counts the ticks the machines work, which the smiths and
+`MachinesVersion` change only when some view or the set of machines did. Only the machines whose windows the host shows
+(`PlayerState.ShownMachines`, set by `ProductionWindows`; a change while paused publishes again) get `Storage` with its items, compared item by
+item; every other machine's `Storage` is null and its storage is compared and shown by `StorageSize` and `StorageEmpty` alone, so its items are
+never walked. `Machines.Worked` counts the ticks the machines work, which the smiths and
 research views (they also read characters) refresh on.
+Smith and craft views (**engine choice**): `SmithViewCache` keeps a bench's `CraftSmithView` while its machine, smith, name, effective level (by bits),
+penalty and queued options are unchanged, and the map while every bench's is. `CraftOptionsCache` keeps one option list per bench record (shared by
+its benches) until research replaces `UnlockedCrafts`, and the site map until the crafting machines (compared by reference, in order) change.
+
+Item grids (**engine choice**, `World.GridShown`): `CharacterSnapshot.ItemGrid` is built only for a character a window can show: of the selection the
+first by slot (the inventory window's default), the lead and the selected opener of the open loot or container; the open loot's body; the pinned
+windows' characters (`ShowInventoryCommand`). All are derived from world state, so a newly shown one has its grid in the same publish, paused too.
+`PlayerState.AllSelectedGrids` (set each frame by the host while the control directory, `--exec` or the console is active) publishes every selected
+one's, as the agent's orders read the whole selection.
 
 ### Tick ahead
 
@@ -62,8 +76,8 @@ screen. Between `BeginTickAhead` and `EndTickAhead` nothing may touch the `World
 the session's snapshots, and the world reads the renderer only through the weather source (a reference and a float per region). Consequences
 (**engine choice**): a command lands a batch later (one tick, 33 ms, at 1x; about a frame's ticks at 5x); blood marks and sounds come out with the tick, up to a batch before it
 shows; a pause with ticks ahead takes them at once (the picture jumps, then the paused interface's republished snapshots show); a save takes them first
-(`SettleAhead`); `ReplaceWorld` drops them. Display → World tick alongside drawing (`TickAhead`): Faithful never (the world, then the draw); Meitou, the default, once
-a tick takes 4 ms (`WorldSession.TickMs`, smoothed over about ten ticks, times the game speed above 1x) until it is under 2 ms (a tick ahead is slower, sharing the cores); Always
+(`SettleAhead`); `ReplaceWorld` drops them. Display → World tick alongside drawing (`TickAhead`): Faithful never (the world, then the draw); Meitou (when busy) once
+a tick takes 4 ms (`WorldSession.TickMs`, smoothed over about ten ticks, times the game speed above 1x) until it is under 2 ms (a tick ahead is slower, sharing the cores); Always (the default)
 every frame. Off whatever the setting in stills, the duel, recorded flights and the play benchmark (their ticks stay in step with the frame).
 F12's `tick ahead` row is its wall time; `outside ticks` leaves it out.
 
@@ -91,7 +105,7 @@ integrates time (movement, animation, the ranged timers, the body's medical step
 far fighter acts on them at its next step. The serial per-character passes honour it too (the carry act-outs, the aggro chase bookkeeping, the pursuit schedule).
 A sweep with its own cadence tests `World.Turn(slot, every)` (the slot's turn fell within the ticks its step covers), not `slot % every == phase`: a cadence that
 shares a factor with the period starves slots (30 and 15 against 4: half the far slots never coincide), and the turn rule keeps a far character's sweep rate, so the
-spread sweeps (AI think, aggro look, first aid, crime, captive, town duty, kidnap, scavenge) cost the same, on the step tick. A tick's publish gives a character the
+spread sweeps (AI think, aggro look, first aid, crime, captive, town duty, kidnap, scavenge) cost the same, on the step tick. A whole-system periodic job of the slow world (population check, flee, trade, arrest spotting, errands, rescue look, carry and slaver restore, AI packages, smell, feed, lock rounds, bash check, roaming) runs on its own phase of its period (`World.Beat`, phases in `TickPhases`; engine choice), so the 15, 20, 30 and 60-tick jobs do not all land on every 60th tick (roaming runs inside the population check, so it takes its phase). A tick's publish gives a character the
 cadence skipped the last publish's snapshot object again (`WorldPublish.Fresh`: a buffer fills only an object no other buffer of the ring shows, as the render
 thread may be reading it; a paused or loading publish fills everyone). Contract: `NearRadius` must cover the renderer's reach, else a drawn character moves at
 7.5 Hz; the Metal host sets the period but leaves the 8000 default. Known edge: a near fighter against a far one has an
@@ -591,7 +605,8 @@ Seven Faithful/Meitou switches (the fifth, campaign inheritance, under Campaigns
   within 600 of the departed leader ([off-screen world](game/factions-squads-towns.md#off-screen-world)). **Observed** (headless, a reporter's
   save): with the leader sent 20000 away, his two knocked-out squad mates beside the player stay; before, both vanished.
 - **Fights far away** (`OffscreenFights`). Meitou: every 2 s, an unloaded travelling or wild stand-in (not a town's own, not the player's) met
-  by an enemy (`AggroSystem.IsEnemy` either way) within 300 fights the first such in id order; strength per member able to fight is 10 + the
+  by an enemy (`AggroSystem.IsEnemy` either way) within 300 fights the first such in id order that no code mod's rule skips
+  ([modding](modding.md) "Off-screen fight rules"; a rule may also name the winner); strength per member able to fight is 10 + the
   mean of melee attack, melee defence and toughness (25 for a squad never made); A wins with S_A² / (S_A² + S_B²); the loser is despawned and the
   winner loses its weakest members in the share min(1, (S_loser / S_winner)²) / 2. Faithful: none.
 - **Healing far away** (`OffscreenHealing`). Meitou: when a kept squad comes back, `MedicalState.Recover` steps the hours it was away in one go:
@@ -762,7 +777,7 @@ systems; the rules follow [combat](game/combat.md#fight-lifecycle-and-orders). A
 Loot order ends under a threat within 40) and against an attacker within √33000 ≈ 182; Passive does not stop that but keeps it
 from joining others' defence and from attack on sight. Hold adds attack on sight (goal 16, another decision-step goal; not Passive, sneaking outside a fight, or prone), and every target of a
 holder (sight, self-defence, re-pick) passes the post test (`Orders.HoldPost`); it walks to a target only within 80 (140 when the target is in a fight and heads for it) of
-its hold point (`CharacterCold.HoldPoint`: where Hold was turned on, then each ground move's destination and each follow step's aim at the followed character's height (`MovementSystem.CarryHoldPoint`, as `Task_Follow`, [standing orders](game/combat.md#fight-lifecycle-and-orders)); not saved: a loaded holder holds where it stands, as setStandingOrder 12 does; **Observed**: the loader replays the jobs switch through it, Verified; Hold assumed alike).
+its hold point (`CharacterCold.HoldPoint`: where Hold was turned on, then each ground move's destination and each follow step's aim at the followed character's height (`MovementSystem.CarryHoldPoint`, as `Task_Follow`, [standing orders](game/combat.md#fight-lifecycle-and-orders)); not saved: a loaded holder holds where it stands, as setStandingOrder 12 does; **Observed**: the loader replays the jobs switch through it, Verified; Hold assumed alike). The player's own attack target (orders 5 and 61) is the exception: a melee fighter on Hold walks to it wherever it is (engine reading of the original's chooser, which returns that focused target without the post test, and of its fight decision, whose only Hold test gates the path chase, [leaving a fight](game/combat.md#leaving-a-fight)); a crossbowman's closing in still reads Hold.
 A toggle (button or hotkey) sets every selected character to the opposite of the first one's state, so a mixed selection ends uniform (engine choice). Toggles and the run speed arrows also apply while paused ([time model](#time-model)).
 New player characters start with Jobs and Ranged enabled. Jobs gates the job list and automatic rescue (the medic, robotics, splint, attacking-enemies, Bodyguard and Staying close jobs run regardless, as the original, [perma-jobs](game/ai-tasks.md#perma-jobs)); Hold does not stop a bodyguard or follower from following (#838, [standing orders](game/combat.md#fight-lifecycle-and-orders)); direct orders still run. The saved `chase mode` is this switch. Saved toggles override
 defaults, including explicit false values. Jobs is GAMESTATE_AI `jobs` ([perma-jobs](game/ai-tasks.md#perma-jobs)); Meitou's older `meitou jobs enabled` is read, not written.
@@ -2050,7 +2065,8 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   operating one (job 152, or the quick order) does not work it: it only hauls as above, every round whatever `AutoHaul` says.
 - **Job lists** (`PermaJobs.cs`, `ProductionSystem.Jobs.cs`, `Saving/PermaJobSave`; facts in [perma-jobs](game/ai-tasks.md#perma-jobs)).
   `CharacterCold.Jobs` is the ordered list; `AddJob` (Shift + right click on a finished machine or storage) adds through the original's rules
-  (remap, duplicate refusal, companion, switch on); `RemoveJob` is the list's X. Every job runs through the [decision step](#decision-step) (step 5, 234 also step 3): the first job of the
+  (remap, duplicate refusal, companion, switch on), a code mod's offered job type by its offer ([modding](modding.md#registration-surface), Mod jobs);
+  `RemoveJob` is the list's X. Every job runs through the [decision step](#decision-step) (step 5, 234 also step 3): the first job of the
   list that can run starts, so a higher job takes over as soon as it can run and a blocked one passes to the next. The production pick's jobs below (`ProductionSystem.ListJobs`) run while
   `Runnable` holds: a job whose site (or the engineer finder's pick) is `JobRangeSq` 4.246733e7 (≈ 6517, 3D) or more from the character is skipped
   ([range](game/ai-tasks.md#perma-jobs); players are treated as ROAM_FAR and the home-town exception is left out), as is every job but Bodyguard / Staying close while the
