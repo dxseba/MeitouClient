@@ -1,0 +1,403 @@
+using System.Collections.Frozen;
+using System.Numerics;
+using System.Reflection;
+using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay.Ai;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Simulation;
+using Meitou.Simulation.Items;
+using Meitou.Simulation.Population;
+
+namespace Meitou.EquipmentDurability;
+
+/// <summary>
+/// <paramref name="Repairer"/> repairs <paramref name="Owner"/>'s weapon (or armour) with its own repair item and smithing.
+/// </summary>
+public sealed record RepairOrder(CharacterId Repairer, CharacterId Owner, bool Armour) : SimCommand;
+
+/// <summary>
+/// The original's timed repairs (<c>StartRepairJob</c>, <c>ProcessRepairJobs</c>): a repair of one's own gear stands still for <c>RepairSeconds</c>
+/// and is applied at the end; one of a squad member's gear first walks the repairer within <c>RepairReach</c> of the member, waits 0.4 s, then repairs
+/// the same way. Moving (0.75 units), being attacked or going down cancels it and nothing is used up. Times are game seconds.
+/// </summary>
+sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log)
+{
+    #region Jobs
+
+    /// <summary>
+    /// The phases: walking to the member, standing a moment on arrival, repairing.
+    /// </summary>
+    enum Phase { Walk, Settle, Work }
+
+    /// <summary>
+    /// A repair under way.
+    /// </summary>
+    sealed class Job
+    {
+        public required CharacterId Repairer { get; init; }
+
+        public required CharacterId Owner { get; init; }
+
+        public required bool Armour { get; init; }
+
+        public Phase Phase { get; set; }
+
+        /// <summary>
+        /// Seconds since the order, in the phase, standing still while walking, and repairing.
+        /// </summary>
+        public float Age { get; set; }
+
+        public float Walked { get; set; }
+
+        public float Stalled { get; set; }
+
+        public float Settled { get; set; }
+
+        public float Worked { get; set; }
+
+        /// <summary>
+        /// The nearest the walk came, where the repairer stood when the work began, and where the member was when the walk was last sent.
+        /// </summary>
+        public float Best { get; set; }
+
+        public Vector3 StandAt { get; set; }
+
+        public Vector3 Goal { get; set; }
+
+        public bool Cross => Repairer != Owner;
+    }
+
+    /// <summary>
+    /// The repairs under way, in order of their start.
+    /// </summary>
+    readonly List<Job> _jobs = [];
+
+    /// <summary>
+    /// The characters attacked since the last step (they cancel their repair).
+    /// </summary>
+    readonly List<CharacterId> _attacked = [];
+
+    /// <summary>
+    /// The engine's own equipment refresh (internal to the simulation), made on first use; null when it cannot be found.
+    /// </summary>
+    Action<CharacterCold>? _refresh;
+
+    /// <summary>
+    /// A melee blow reached the character (hit, blocked or dodged).
+    /// </summary>
+    public void Attacked(CharacterId id)
+    {
+        if (_jobs.Count > 0) _attacked.Add(id);
+    }
+
+    public void Hash(ref StateHasher hasher)
+    {
+        hasher.Add(_jobs.Count);
+        foreach (var job in _jobs)
+        {
+            hasher.Add(job.Repairer);
+            hasher.Add(job.Owner);
+            hasher.Add((int)job.Phase);
+            hasher.Add(job.Age);
+        }
+    }
+
+    /// <summary>
+    /// Starts a repair (the original's <c>StartRepairJob</c>): ignored while the repairer has one, or when there is nothing to repair.
+    /// </summary>
+    public void Start(World world, RepairOrder order, Condition rules)
+    {
+        if (!config.Enabled || !config.Repair || _jobs.Any(j => j.Repairer == order.Repairer)) return;
+        if (order.Repairer != order.Owner && !config.RepairOthers) return;
+        if (Cold(world, order.Repairer) is not { IsPlayer: true } repairer || Cold(world, order.Owner) is not { IsPlayer: true } owner) return;
+
+        var job = new Job { Repairer = order.Repairer, Owner = order.Owner, Armour = order.Armour, Best = float.MaxValue };
+        if (!Repair(world, repairer, owner, order.Armour, rules, commit: false))
+        {
+            log("repair: nothing to repair, or no repair item");
+            return;
+        }
+
+        if (job.Cross && Distance(world, job) is { } d && d > config.Reach)
+        {
+            (job.Phase, job.Best, job.Goal) = (Phase.Walk, d, Position(world, order.Owner));
+            world.GiveOrder(order.Repairer, TaskType.MoveCusOrdered, point: job.Goal);
+            _jobs.Add(job);
+            return;
+        }
+
+        if (config.RepairInstant) Repair(world, repairer, owner, order.Armour, rules, commit: true);
+        else Begin(world, job);
+    }
+
+    /// <summary>
+    /// Runs every repair once a tick.
+    /// </summary>
+    public void Step(World world, Condition rules)
+    {
+        float dt = world.TickSeconds;
+        for (int i = 0; i < _jobs.Count;)
+        {
+            var job = _jobs[i];
+            job.Age += dt;
+            string? why = Stepped(world, job, dt, rules, out bool finished);
+            if (why is null && !finished)
+            {
+                i++;
+                continue;
+            }
+
+            _jobs.RemoveAt(i);
+            if (why is not null) log("repair cancelled: " + why + " (nothing used up)");
+        }
+
+        _attacked.Clear();
+    }
+
+    /// <summary>
+    /// One tick of a job: a reason to cancel it, or null (finished true once it repaired).
+    /// </summary>
+    string? Stepped(World world, Job job, float dt, Condition rules, out bool finished)
+    {
+        finished = false;
+        if (job.Age > 60) return "stale";
+        if (Cold(world, job.Repairer) is not { } repairer || repairer.Medical is { Dead: true } or { Unconscious: true })
+            return "the character went down";
+        if (_attacked.Contains(job.Repairer)) return "the character was attacked";
+        if (Cold(world, job.Owner) is not { } owner || Distance(world, job) is not { } dist) return "the squad member to repair is gone";
+
+        return job.Phase switch
+        {
+            Phase.Walk => Walk(world, job, dist, dt),
+            Phase.Settle => Settle(world, job, repairer, owner, dist, dt, rules, out finished),
+            _ => Work(world, job, repairer, owner, dist, dt, rules, out finished),
+        };
+    }
+
+    /// <summary>
+    /// Walking to the member: arrived within reach (or within reach + 1 after half a second without getting nearer), else cancelled after 25 s, 4 s
+    /// without getting nearer, or 4 units farther than its best (another order); the walk follows a member that moved 3 units.
+    /// </summary>
+    string? Walk(World world, Job job, float dist, float dt)
+    {
+        job.Walked += dt;
+        if (dist < job.Best - 0.3f)
+        {
+            job.Best = dist;
+            job.Stalled = 0;
+        }
+        else job.Stalled += dt;
+
+        var here = Position(world, job.Repairer);
+        if (dist <= config.Reach || job.Stalled >= 0.5f && dist <= config.Reach + 1)
+        {
+            world.GiveOrder(job.Repairer, TaskType.MoveCusOrdered, point: here);
+            (job.Phase, job.Settled) = (Phase.Settle, 0);
+            return null;
+        }
+
+        if (job.Walked > 25)
+        {
+            world.GiveOrder(job.Repairer, TaskType.MoveCusOrdered, point: here);
+            return "the walk took too long";
+        }
+
+        if (dist > job.Best + 4) return "the character was given another order";
+        if (job.Stalled > 4) return "the character could not reach the squad member";
+
+        Follow(world, job);
+        return null;
+    }
+
+    void Follow(World world, Job job)
+    {
+        var there = Position(world, job.Owner);
+        if (Vector3.Distance(there, job.Goal) <= 3) return;
+
+        job.Goal = there;
+        world.GiveOrder(job.Repairer, TaskType.MoveCusOrdered, point: there);
+    }
+
+    /// <summary>
+    /// Standing 0.4 s on arrival, then repairing if the member is still within reach + 2 and something still needs it.
+    /// </summary>
+    string? Settle(World world, Job job, CharacterCold repairer, CharacterCold owner, float dist, float dt, Condition rules, out bool finished)
+    {
+        finished = false;
+        job.Settled += dt;
+        if (job.Settled < 0.4f) return null;
+        if (dist > config.Reach + 2) return "the squad member moved away";
+        if (!Repair(world, repairer, owner, job.Armour, rules, commit: false)) return "there is nothing left to repair";
+
+        if (!config.RepairInstant)
+        {
+            Begin(world, job);
+            return null;
+        }
+
+        Repair(world, repairer, owner, job.Armour, rules, commit: true);
+        finished = true;
+        return null;
+    }
+
+    /// <summary>
+    /// Repairing: cancelled when the repairer moved 0.75 units or the member is 4 units past reach; applied after <c>RepairSeconds</c>.
+    /// </summary>
+    string? Work(World world, Job job, CharacterCold repairer, CharacterCold owner, float dist, float dt, Condition rules, out bool finished)
+    {
+        finished = false;
+        job.Worked += dt;
+        if (Vector3.Distance(Position(world, job.Repairer), job.StandAt) > 0.75f) return "the character moved";
+        if (job.Cross && dist > config.Reach + 4) return "the squad member moved away";
+        if (job.Worked < config.RepairSeconds) return null;
+
+        Repair(world, repairer, owner, job.Armour, rules, commit: true);
+        finished = true;
+        return null;
+    }
+
+    void Begin(World world, Job job)
+    {
+        (job.Phase, job.Worked, job.StandAt) = (Phase.Work, 0, Position(world, job.Repairer));
+        if (!_jobs.Contains(job)) _jobs.Add(job);
+    }
+
+    static CharacterCold? Cold(World world, CharacterId id) =>
+        world.Characters.TryResolveNext(id, out int slot) ? world.Characters.Cold(slot) : null;
+
+    static Vector3 Position(World world, CharacterId id) =>
+        world.Characters.TryResolveNext(id, out int slot) ? world.Characters.Next[slot].Position : default;
+
+    static float? Distance(World world, Job job) =>
+        world.Characters.TryResolveNext(job.Owner, out int o) && world.Characters.TryResolveNext(job.Repairer, out int r)
+            ? Vector3.Distance(world.Characters.Next[o].Position, world.Characters.Next[r].Position)
+            : null;
+
+    #endregion
+
+    #region Repairing
+
+    /// <summary>
+    /// The original's <c>DoRepair</c> and <c>DoRepairArmour</c>: the repairer needs a repair item; the target is the first piece below its cap
+    /// (weapons: slot 1 then slot 2; armour: helmet, chest, shirt, legs, boots). Committed, one repair item is used up and the piece gains
+    /// <c>RepairAmount</c> + <c>SmithingBonusPerLevel</c> x the repairer's base smithing level (<c>RepairAmountAtZero</c> and no bonus when
+    /// broken), up to its cap. False when nothing can be repaired.
+    /// </summary>
+    bool Repair(World world, CharacterCold repairer, CharacterCold owner, bool armour, Condition rules, bool commit)
+    {
+        if (repairer.Inventory is not { } tools || FindTool(tools) is not { } tool || owner.Inventory is not { } inventory) return false;
+        if (Target(world, owner, inventory, armour, rules) is not { } target) return false;
+
+        if (!commit) return true;
+        if (!tools.RemoveOne(tool)) return false;
+
+        var (item, c, dur, cap) = target;
+        int bonus = dur > 0 && config.SmithPerLevel > 0 ? Bonus(repairer, armour ? StatsEnumerated.SmithingArmour : SmithOf(c)) : 0;
+        int repaired = Math.Min(cap, dur + (dur <= 0 ? config.RepairAtZero : config.RepairAmount) + bonus);
+        Condition.Set(item, repaired);
+        log($"repaired '{item.Name}': {dur} -> {repaired} / {cap}");
+        return true;
+    }
+
+    /// <summary>
+    /// Crossbows train Crossbow Smithing, other weapons Weapon Smithing.
+    /// </summary>
+    static StatsEnumerated SmithOf(GearClass c) => c == GearClass.Ranged ? StatsEnumerated.SmithingBow : StatsEnumerated.SmithingWeapon;
+
+    int Bonus(CharacterCold repairer, StatsEnumerated stat)
+    {
+        int level = (int)(repairer.Stats?.Stored(stat) ?? 0);
+        return level > 0 ? (int)(level * config.SmithPerLevel) : 0;
+    }
+
+    (ItemInstance Item, GearClass Class, int Dur, int Cap)? Target(World world, CharacterCold owner, Inventory inventory, bool armour, Condition rules)
+    {
+        string[] sections = armour ? Condition.ArmourSections : Condition.WeaponSections;
+        foreach (string section in sections)
+        {
+            if (Gear.In(inventory, section) is not { } item || !rules.Tracked(item, out var c) || Condition.IsArmour(c) != armour) continue;
+
+            int cap = rules.RangeOf(c).Cap;
+            int dur = rules.GetOrRoll(item, c, Rng.Hash(world.Seed, Rng.StableHash(item.Record) ^ (ulong)world.Tick << 20, purpose, (ulong)Array.IndexOf(sections, section)));
+            if (dur < cap) return (item, c, dur, cap);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The repair item in the character's own sections (not a bag): by its record id (the vanilla Tools, or <c>RepairItemID</c>), or by name
+    /// (<c>RepairItem</c> and the translated names the original knows).
+    /// </summary>
+    ItemInstance? FindTool(Inventory inventory) => inventory.Items.FirstOrDefault(IsTool);
+
+    bool IsTool(ItemInstance item)
+    {
+        if (item.Record == ToolsRecord || config.RepairItemId.Length > 0 && item.Record == config.RepairItemId) return true;
+
+        string? name = data.Db.Find(item.Record)?.Name;
+        return IsToolName(item.Name) || name is not null && IsToolName(name);
+    }
+
+    bool IsToolName(string name) => config.RepairItems.Contains(name) || TranslatedTools.Contains(name);
+
+    /// <summary>
+    /// The vanilla ITEM "Tools" (<c>43404-changes_otto.mod</c>), which the original matches in every language.
+    /// </summary>
+    const string ToolsRecord = "43404-changes_otto.mod";
+
+    /// <summary>
+    /// The translated names of Tools the original knows (Portuguese, German, French, Spanish, Russian).
+    /// </summary>
+    static readonly string[] TranslatedTools = ["Ferramentas", "Werkzeuge", "Outils", "Herramientas", "Инструменты"];
+
+    /// <summary>
+    /// The player characters carrying a repair item.
+    /// </summary>
+    public FrozenSet<CharacterId> Holders(World world)
+    {
+        var table = world.Characters;
+        var holders = new List<CharacterId>();
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (table.Next[slot].Alive && table.Cold(slot) is { IsPlayer: true, Inventory: { } inventory } && FindTool(inventory) is not null)
+                holders.Add(table.IdOf(slot));
+        }
+
+        return holders.ToFrozenSet();
+    }
+
+    #endregion
+
+    #region Breaking
+
+    /// <summary>
+    /// <c>BreakWeapons</c>: the piece is taken off and destroyed, and the owner's fighting gear made again from its inventory.
+    /// </summary>
+    public void Destroy(CharacterCold owner, ItemInstance item)
+    {
+        if (owner.Inventory?.Remove(item) != true) return;
+
+        log($"broke '{item.Name}'");
+        (_refresh ??= RefreshOf(data, log))?.Invoke(owner);
+    }
+
+    /// <summary>
+    /// The simulation's <c>CharacterAssembly.RefreshEquipment</c>, which every engine path that takes worn gear off calls; it is internal, so it is
+    /// found by reflection (null and logged when the engine no longer has it).
+    /// </summary>
+    static Action<CharacterCold>? RefreshOf(PopulationData data, Action<string> log)
+    {
+        var type = typeof(World).Assembly.GetType("Meitou.Simulation.Bodies.CharacterAssembly");
+        var refresh = type?.GetMethod("RefreshEquipment", BindingFlags.Public | BindingFlags.Instance, [typeof(CharacterCold)]);
+        if (type is null || refresh is null || Activator.CreateInstance(type, data) is not { } assembly)
+        {
+            log("the engine's equipment refresh was not found; a broken piece leaves the fighter's stats until its next change");
+            return null;
+        }
+
+        return cold => refresh.Invoke(assembly, [cold]);
+    }
+
+    #endregion
+}

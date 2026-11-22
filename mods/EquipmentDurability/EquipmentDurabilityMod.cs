@@ -1,67 +1,80 @@
 using System.Globalization;
 using Meitou.Game.Ui;
+using Meitou.Localisation;
 using Meitou.Modding;
 using Meitou.Simulation;
 
 namespace Meitou.EquipmentDurability;
 
 /// <summary>
-/// Port of Equipment Durability (workshop 3834344700), rebuilt from its description: weapons and armour wear with use and lose damage below 39%,
-/// down to -70% when broken (worn armour stops less the same way); the item tooltip shows the condition; a "Repair gear" row on your own character
-/// mends the gear with Tools by its smithing skills.
+/// Port of Equipment Durability (workshop 3834344700, "Durability" 1.2.0), from its shipped source's behaviour and README: every weapon, crossbow and
+/// covering armour piece rolls a durability in its class's range, player characters' use wears it (better grades slower), worn gear hits or protects
+/// less and gear in good condition more, the tooltip shows it, and Repair Weapon / Repair Armour rows repair it with Tools. Settings come from
+/// <c>Durability.cfg</c> in the mod folder, under the original's keys.
 /// </summary>
 public sealed class EquipmentDurabilityMod : IMod
 {
-    internal static readonly DurabilitySettings Settings = new();
+    /// <summary>
+    /// The settings, read at start.
+    /// </summary>
+    internal static DurabilityConfig Config { get; private set; } = new();
 
-    /// <summary>The running world's system, for the menu; null before a world starts.</summary>
+    /// <summary>
+    /// The running world's system, for the interface; null before a world starts.
+    /// </summary>
     internal static volatile DurabilitySystem? Running;
 
     public void Initialize(ModContext context)
     {
-        context.AddSettings(Settings);
-        context.AddSystem("durability", _ => Running = new DurabilitySystem(Settings, context.Population), SystemAnchor.End);
-        context.AddUi(new RepairMenu());
-        context.AddUi(new ConditionTooltip());
-        context.Log("Equipment Durability initialized");
+        Config = DurabilityConfig.Load(context.Folder, context.Log);
+        if (!Config.Enabled)
+        {
+            context.Log("Enabled = 0 in " + DurabilityConfig.FileName + ": doing nothing");
+            return;
+        }
+
+        context.AddSystem("durability", _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log),
+            SystemAnchor.End);
+        if (Config.Repair) context.AddUi(new RepairMenu());
+        if (Config.ShowTooltip) context.AddUi(new DurabilityTooltip());
     }
 }
 
-public sealed class DurabilitySettings
+/// <summary>
+/// The original's own texts in the game's language (its <c>UiText</c> table: English, Portuguese, German, French, Russian, Spanish).
+/// </summary>
+readonly record struct UiText(string Label, string Broken, string Damage, string Resist, string Reload, string RepairWeapon, string RepairArmour)
 {
-    [Setting("Enable Equipment Durability", Hint = "Weapons and armour wear with use.")]
-    public bool Enabled { get; set; } = true;
+    static readonly UiText English = new("Durability", "BROKEN", "dmg", "resist", "reload", "Repair Weapon", "Repair Armour");
 
-    [Setting("Weapon wear per hit", Hint = "Condition a weapon loses per landed melee hit (1 = new).", Min = 0, Max = 0.05, Step = 0.0005)]
-    public float WeaponWear { get; set; } = 0.002f;
+    static readonly Dictionary<string, UiText> ByLanguage = new()
+    {
+        ["pt"] = new("Durabilidade", "QUEBRADO", "dano", "resist.", "recarga", "Reparar Arma", "Reparar Armadura"),
+        ["de"] = new("Haltbarkeit", "DEFEKT", "Schaden", "Widerstand", "Nachladen", "Waffe reparieren", "Rüstung reparieren"),
+        ["fr"] = new("Durabilité", "CASSÉ", "dégâts", "résistance", "rechargement", "Réparer l'arme", "Réparer l'armure"),
+        ["ru"] = new("Прочность", "СЛОМАНО", "урон", "сопр.", "перезарядка", "Починить оружие", "Починить броню"),
+        ["es"] = new("Durabilidad", "ROTO", "daño", "resist.", "recarga", "Reparar arma", "Reparar armadura"),
+    };
 
-    [Setting("Weapon wear per parry", Hint = "Condition a weapon loses per blow it parries.", Min = 0, Max = 0.05, Step = 0.0005)]
-    public float BlockWear { get; set; } = 0.002f;
-
-    [Setting("Armour wear per hit", Hint = "Condition an armour piece covering the part hit loses, more for more damage stopped.", Min = 0, Max = 0.05,
-        Step = 0.0005)]
-    public float ArmourWear { get; set; } = 0.002f;
-
-    [Setting("Worn below", Hint = "Gear below this condition starts losing damage (weapons) or protection (armour).", Min = 0.05, Max = 1, Step = 0.01)]
-    public float Threshold { get; set; } = 0.39f;
-
-    [Setting("Broken penalty", Hint = "The damage a broken weapon, or the protection a broken armour piece, loses (0.7 = -70%).", Min = 0, Max = 1, Step = 0.05)]
-    public float BrokenPenalty { get; set; } = 0.7f;
-
-    [Setting("Delete broken gear", Hint = "On: gear that reaches 0 is destroyed instead of staying broken.")]
-    public bool DeleteBroken { get; set; }
-
-    [Setting("Repair base", Hint = "Condition a repair adds at smithing 0.", Min = 0, Max = 1, Step = 0.01)]
-    public float RepairBase { get; set; } = 0.15f;
-
-    [Setting("Repair per skill", Hint = "Extra condition a repair adds at smithing 100.", Min = 0, Max = 1, Step = 0.01)]
-    public float RepairSkill { get; set; } = 0.35f;
-
-    /// <summary>The ITEM name a repair needs in the inventory.</summary>
-    public string ToolName { get; set; } = "Tools";
+    /// <summary>
+    /// The texts of the game's language (English for any other).
+    /// </summary>
+    public static UiText Current
+    {
+        get
+        {
+            string code = Loc.Language.Code;
+            string language = code.Length >= 2 ? code[..2].ToLowerInvariant() : "";
+            return ByLanguage.GetValueOrDefault(language, English);
+        }
+    }
 }
 
-/// <summary>The "Repair gear" row on one of your own characters, its caption showing the weapon's and the most worn armour's condition.</summary>
+/// <summary>
+/// Repair Weapon and Repair Armour on a player character's menu, when there is a repairer (the original's <c>PickRepairer</c>): with
+/// <c>RepairOthers</c> and another character selected, that one if it is a player character carrying the repair item (else no rows); otherwise the
+/// clicked character itself if it carries one.
+/// </summary>
 sealed class RepairMenu : IUiExtension
 {
     public string Id => "dxseba.equipmentdurability.menu";
@@ -70,25 +83,35 @@ sealed class RepairMenu : IUiExtension
 
     static IEnumerable<UiMenuVerb> Verbs(UiMenuContext menu)
     {
-        var target = menu.Target;
-        if (!EquipmentDurabilityMod.Settings.Enabled || !target.IsPlayer || target.Body is not { Dead: false, Unconscious: false }) return [];
-        if (EquipmentDurabilityMod.Running?.Gear.TryGetValue(target.Id, out var gear) != true) return [];
+        var config = EquipmentDurabilityMod.Config;
+        if (EquipmentDurabilityMod.Running is not { } running || !menu.Target.IsPlayer) return [];
+        if (Repairer(menu, running.ToolHolders, config.RepairOthers) is not { } repairer) return [];
 
-        return [new UiMenuVerb($"Repair gear ({Describe(gear)})", () => menu.Enqueue(new RepairOrder(target.Id) { Tick = menu.Tick }))];
+        var owner = menu.Target.Id;
+        var texts = UiText.Current;
+        string weapon = config.RepairWeaponText == "Repair Weapon" ? texts.RepairWeapon : config.RepairWeaponText;
+        var rows = new List<UiMenuVerb> { new(weapon, () => menu.Enqueue(new RepairOrder(repairer, owner, false) { Tick = menu.Tick })) };
+        if (!config.Armour) return rows;
+
+        string armour = config.RepairArmourText == "Repair Armour" ? texts.RepairArmour : config.RepairArmourText;
+        rows.Add(new(armour, () => menu.Enqueue(new RepairOrder(repairer, owner, true) { Tick = menu.Tick })));
+        return rows;
     }
 
-    static string Describe(GearView gear)
+    static CharacterId? Repairer(UiMenuContext menu, IReadOnlySet<CharacterId> holders, bool others)
     {
-        string weapon = gear.Weapon is { } w ? "weapon " + Percent(w) : "no weapon";
-        string armour = gear.Armour is { } a ? "armour " + Percent(a) : "no armour";
-        return weapon + ", " + armour;
-    }
+        var target = menu.Target.Id;
+        if (others && menu.Selected.Count > 0 && menu.Selected[0] != target) return holders.Contains(menu.Selected[0]) ? menu.Selected[0] : null;
 
-    internal static string Percent(float value) => ((int)MathF.Round(value * 100)).ToString(CultureInfo.InvariantCulture) + "%";
+        return holders.Contains(target) ? target : null;
+    }
 }
 
-/// <summary>The item tooltip's "Condition" line on gear this mod has worn: the condition, and the penalty below the threshold.</summary>
-sealed class ConditionTooltip : IUiExtension
+/// <summary>
+/// The tooltip's Durability row (the original's <c>AddTooltipRow</c>): "N / max", or BROKEN at 0, then the effect: "(-NN% dmg)" or "(+NN% dmg)" for a
+/// melee weapon, "(-NN% resist)" for armour, "(+N.N s reload)" for a crossbow. Gear not rolled yet shows none.
+/// </summary>
+sealed class DurabilityTooltip : IUiExtension
 {
     public string Id => "dxseba.equipmentdurability.tooltip";
 
@@ -96,17 +119,41 @@ sealed class ConditionTooltip : IUiExtension
 
     static IEnumerable<UiItemTooltipLine> Lines(UiItemTooltipContext item)
     {
-        var settings = EquipmentDurabilityMod.Settings;
-        if (!settings.Enabled || Condition.InTag(item.ModTag) is not { } condition) return [];
+        var config = EquipmentDurabilityMod.Config;
+        if (EquipmentDurabilityMod.Running is not { } running || item.ModTag.Length == 0) return [];
 
-        string value = RepairMenu.Percent(condition);
-        float factor = Condition.Factor(condition, settings.Threshold, settings.BrokenPenalty);
-        if (condition <= 0) value += " (broken)";
-        if (factor < 1) value += $" (effectiveness {RepairMenu.Percent(factor - 1)})";
+        var rules = running.Rules;
+        if (running.Type(item.Record) is not { } type || rules.ClassOf(item.Record, type, locked: false) is not { } c) return [];
 
-        return [new UiItemTooltipLine("Condition", value)];
+        int cap = rules.RangeOf(c).Cap;
+        if (Condition.InTag(item.ModTag, cap) is not { } dur) return [];
+
+        var texts = UiText.Current;
+        string label = config.TooltipLabel == "Durability" ? texts.Label : config.TooltipLabel;
+        string shown = dur <= 0 ? texts.Broken : dur.ToString(CultureInfo.InvariantCulture) + " / " + cap.ToString(CultureInfo.InvariantCulture);
+        return [new UiItemTooltipLine(label, shown + Effect(rules, c, dur, cap, texts))];
     }
-}
 
-/// <summary><paramref name="Character"/> repairs its gear with Tools.</summary>
-public sealed record RepairOrder(CharacterId Character) : SimCommand;
+    /// <summary>
+    /// The effect after the value; empty when none applies.
+    /// </summary>
+    static string Effect(Condition rules, GearClass c, int dur, int cap, UiText texts)
+    {
+        if (c == GearClass.Ranged)
+        {
+            float delta = rules.ReloadDelta(dur, cap);
+            if (delta > 0.05f) return " (+" + delta.ToString("0.0", CultureInfo.InvariantCulture) + " s " + texts.Reload + ")";
+            if (delta < -0.05f) return " (" + delta.ToString("0.0", CultureInfo.InvariantCulture) + " s " + texts.Reload + ")";
+            return "";
+        }
+
+        bool armour = Condition.IsArmour(c);
+        float factor = armour ? rules.ResistFactor(dur, cap) : rules.DamageFactor(dur, cap);
+        string word = armour ? texts.Resist : texts.Damage;
+        if (factor < 0.999f) return " (-" + Percent(1 - factor) + "% " + word + ")";
+        if (factor > 1.001f) return " (+" + Percent(factor - 1) + "% " + word + ")";
+        return "";
+    }
+
+    static string Percent(float share) => ((int)(share * 100 + 0.5f)).ToString(CultureInfo.InvariantCulture);
+}

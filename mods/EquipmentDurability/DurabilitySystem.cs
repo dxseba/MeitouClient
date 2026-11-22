@@ -1,182 +1,288 @@
 using System.Collections.Frozen;
-using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Fcs;
 using Meitou.Simulation;
-using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Combat;
 using Meitou.Simulation.Items;
 using Meitou.Simulation.Population;
 
 namespace Meitou.EquipmentDurability;
 
-/// <summary>A player character's gear as the menu shows it: the weapon's condition (null: none) and the worn armour's lowest.</summary>
-readonly record struct GearView(float? Weapon, float? Armour);
-
 /// <summary>
-/// Wears the gear: landed hits and parries are noted as they resolve (<see cref="ICombatHitObserver"/>, <see cref="ICombatDefenceObserver"/>) and
-/// worn in the serial slow step, the attacker's weapon per hit, the parrying weapon per parry and the victim's armour pieces covering the part hit,
-/// by the damage they stopped. Worn weapons hit softer (<see cref="ICombatHitFilter"/>) and worn armour stops less (<see cref="IArmourFilter"/>),
-/// both pure reads of the item's tag. Repairs with Tools run here too. The player characters' gear is published every 30th tick.
+/// The original's wear and effects. Only player characters' gear wears (its hooks all test <c>isPlayerCharacter</c>): a landed melee hit wears the
+/// attacker's weapon in hand, a block the defender's, a crossbow bolt loaded the crossbow, and a melee hit on a player character each worn armour
+/// piece covering the part hit. Uses are noted as they happen and applied in the serial slow step. A player's weapon deals its damage factor in melee
+/// (<see cref="ICombatHitFilter"/>) and a player's armour gives its resistance factor to cut and blunt in melee (<see cref="IArmourFilter"/>), both
+/// pure reads of the item's tag. New gear rolls on first contact and in a sweep over every loaded character's inventory, so its tooltip has a value.
 /// </summary>
-sealed class DurabilitySystem(DurabilitySettings settings, PopulationData data)
-    : ICombatHitObserver, ICombatHitFilter, IArmourFilter, ICombatDefenceObserver
+sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log)
+    : ICombatHitObserver, ICombatHitFilter, IArmourFilter, ICombatDefenceObserver, IItemUseObserver, IStateHashed
 {
-    readonly record struct Wear(CharacterId Attacker, CharacterId Victim, int Part, float Absorbed, bool Melee);
+    #region Uses
 
-    readonly List<Wear> _hits = [];
-    readonly List<CharacterId> _parries = [];
-    readonly List<RepairOrder> _repairs = [];
+    /// <summary>
+    /// A use to apply: who, the part hit for an armour hit (-1 otherwise) and what kind.
+    /// </summary>
+    readonly record struct Use(CharacterId Who, int Part, UseKind Kind);
 
-    /// <summary>The player characters' gear, for the menu.</summary>
-    public volatile FrozenDictionary<CharacterId, GearView> Gear = FrozenDictionary<CharacterId, GearView>.Empty;
+    /// <summary>
+    /// The kinds of use.
+    /// </summary>
+    enum UseKind { Hit, Block, Shot, ArmourHit }
+
+    /// <summary>
+    /// The uses noted this tick, applied in the slow step.
+    /// </summary>
+    readonly List<Use> _uses = [];
+
+    /// <summary>
+    /// The gear rules.
+    /// </summary>
+    readonly Condition _condition = new(config, data);
+
+    /// <summary>
+    /// The repairs.
+    /// </summary>
+    readonly Repairs _repairs = new(config, data, purpose, log);
+
+    /// <summary>
+    /// Draws made in this slow step (keys the rolls, so they follow the step's fixed order).
+    /// </summary>
+    ulong _draws;
+
+    /// <summary>
+    /// The player characters carrying a repair item, for the menu (published every 10th tick).
+    /// </summary>
+    public volatile FrozenSet<CharacterId> ToolHolders = FrozenSet<CharacterId>.Empty;
+
+    /// <summary>
+    /// The gear rules, for the interface.
+    /// </summary>
+    public Condition Rules => _condition;
+
+    /// <summary>
+    /// A record's type (the merged data is read only after the load, so any thread may ask).
+    /// </summary>
+    public FcsRecordType? Type(string record) => data.Db.Find(record)?.Type;
 
     public void HitResolved(World world, in CombatHit hit)
     {
-        if (!settings.Enabled || hit.Source == CombatHitSource.Execution) return;
+        if (hit.Source != CombatHitSource.Melee) return;
 
-        float absorbed = hit.Absorbed.Cut + hit.Absorbed.Blunt + hit.Absorbed.Pierce;
-        _hits.Add(new(hit.Attacker, hit.Victim, hit.Part, absorbed, hit.Source == CombatHitSource.Melee));
+        _repairs.Attacked(hit.Victim);
+        if (IsPlayer(world, hit.Attacker)) _uses.Add(new(hit.Attacker, -1, UseKind.Hit));
+        if (config.Armour && IsPlayer(world, hit.Victim)) _uses.Add(new(hit.Victim, hit.Part, UseKind.ArmourHit));
     }
 
-    public void HitLanding(World world, ref PendingHit hit)
-    {
-        if (!settings.Enabled || hit.Source != CombatHitSource.Melee) return;
-        if (!world.Characters.TryResolveNext(hit.Attacker, out int a)) return;
-        if (Condition.Weapon(world.Characters.Cold(a)?.Inventory) is not { } weapon) return;
-
-        float factor = Condition.Factor(Condition.Of(weapon), settings.Threshold, settings.BrokenPenalty);
-        if (factor >= 1) return;
-
-        var p = hit.Packet;
-        hit.Packet = p with { Cut = p.Cut * factor, Blunt = p.Blunt * factor, Pierce = p.Pierce * factor };
-    }
-
-    /// <summary>A worn armour piece below the threshold keeps its defences scaled by the same factor as a worn weapon's damage.</summary>
-    public ArmourPiece Piece(World world, in ArmourAsk ask)
-    {
-        if (!settings.Enabled || ask.Item is not { } item || !Condition.Tracked(item)) return ask.Piece;
-
-        float factor = Condition.Factor(Condition.Of(item), settings.Threshold, settings.BrokenPenalty);
-        if (factor >= 1) return ask.Piece;
-
-        var p = ask.Piece;
-        return p with { CutDefence = p.CutDefence * factor, BluntDefence = p.BluntDefence * factor, PierceDefence = p.PierceDefence * factor };
-    }
-
-    /// <summary>A parry (a block with a weapon) wears the defender's weapon in the slow step.</summary>
     public void Defended(World world, in CombatDefence defence)
     {
-        if (settings.Enabled && defence.Kind == CombatDefenceKind.Blocked && defence.Parry) _parries.Add(defence.Defender);
+        _repairs.Attacked(defence.Defender);
+        if (defence.Kind == CombatDefenceKind.Blocked && IsPlayer(world, defence.Defender)) _uses.Add(new(defence.Defender, -1, UseKind.Block));
+    }
+
+    /// <summary>
+    /// A bolt loaded by a player character counts as its shot (the engine reports a bolt taken per reload, not each shot).
+    /// </summary>
+    public void ItemUsedUp(World world, in ItemUsed use)
+    {
+        if (use.Kind == ItemUseKind.Ammunition && IsPlayer(world, use.User)) _uses.Add(new(use.User, -1, UseKind.Shot));
     }
 
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         foreach (var command in commands)
-        {
-            if (command is RepairOrder repair) _repairs.Add(repair);
-        }
+            if (command is RepairOrder order) _repairs.Start(world, order, _condition);
     }
 
     public void SlowWorld(World world)
     {
-        foreach (var hit in _hits) Apply(world, hit);
-        _hits.Clear();
+        _draws = 0;
+        foreach (var use in _uses) Apply(world, use);
+        _uses.Clear();
 
-        foreach (var defender in _parries) WearWeapon(world, defender, settings.BlockWear);
-        _parries.Clear();
-
-        foreach (var repair in _repairs) Repair(world, repair.Character);
-        _repairs.Clear();
-
-        if (world.Tick % 30 == 0) Gear = Publish(world);
+        _repairs.Step(world, _condition);
+        if (world.Tick % 30 == 0) Sweep(world);
+        if (world.Tick % 10 == 0) ToolHolders = _repairs.Holders(world);
     }
+
+    public void Hash(ref StateHasher hasher)
+    {
+        hasher.Add(_uses.Count);
+        _repairs.Hash(ref hasher);
+    }
+
+    static bool IsPlayer(World world, CharacterId id) =>
+        world.Characters.TryResolveNext(id, out int slot) && world.Characters.Cold(slot) is { IsPlayer: true };
+
+    #endregion
+
+    #region Effects
+
+    /// <summary>
+    /// A player's melee blow deals its weapon's damage factor (bonus or debuff) on cut, blunt and pierce.
+    /// </summary>
+    public void HitLanding(World world, ref PendingHit hit)
+    {
+        if (hit.Source != CombatHitSource.Melee) return;
+        if (!world.Characters.TryResolveNext(hit.Attacker, out int slot) || world.Characters.Cold(slot) is not { IsPlayer: true } cold) return;
+        if (Gear.InHand(cold) is not { } weapon || !_condition.Tracked(weapon, out var c)) return;
+
+        int cap = _condition.RangeOf(c).Cap;
+        if (Condition.InTag(weapon.ModTag, cap) is not { } dur) return;
+
+        float factor = _condition.DamageFactor(dur, cap);
+        if (factor is > 0.999f and < 1.001f) return;
+
+        var p = hit.Packet;
+        hit.Packet = p with { Cut = p.Cut * factor, Blunt = p.Blunt * factor, Pierce = p.Pierce * factor };
+    }
+
+    /// <summary>
+    /// A player's worn armour piece meets a melee hit with its resistance factor on cut and blunt (held to the game's ranges).
+    /// </summary>
+    public ArmourPiece Piece(World world, in ArmourAsk ask)
+    {
+        if (ask.Source != CombatHitSource.Melee || ask.Item is not { } item || !IsPlayer(world, ask.Wearer)) return ask.Piece;
+        if (!_condition.Tracked(item, out var c)) return ask.Piece;
+
+        int cap = _condition.RangeOf(c).Cap;
+        if (Condition.InTag(item.ModTag, cap) is not { } dur) return ask.Piece;
+
+        float factor = _condition.ResistFactor(dur, cap);
+        if (factor is > 0.999f and < 1.001f) return ask.Piece;
+
+        var p = ask.Piece;
+        return p with { CutDefence = Math.Clamp(p.CutDefence * factor, 0, 0.9f), BluntDefence = Math.Clamp(p.BluntDefence * factor, 0, 0.8f) };
+    }
+
+    #endregion
 
     #region Wear
 
-    void Apply(World world, Wear hit)
+    void Apply(World world, Use use)
     {
         var table = world.Characters;
-        if (hit.Melee) WearWeapon(world, hit.Attacker, settings.WeaponWear);
+        if (!table.TryResolveNext(use.Who, out int slot) || table.Cold(slot) is not { Inventory: { } inventory } cold) return;
 
-        if (!table.TryResolveNext(hit.Victim, out int v) || table.Cold(v) is not { } victim) return;
-        if (victim.Medical?.Parts is not { } parts || hit.Part < 0 || hit.Part >= parts.Count) return;
-
-        string part = parts[hit.Part].Template.StringId;
-        float wear = settings.ArmourWear * (1 + hit.Absorbed / 20);
-        foreach (var armour in Condition.Worn(victim.Inventory).ToList())
+        switch (use.Kind)
         {
-            if (data.Combat.Armour(armour.Record)?.CoverageOf(part) > 0) Degrade(world, victim, armour, wear);
+            case UseKind.Hit:
+                Wear(world, use.Who, cold, Gear.InHand(cold), config.PerHit);
+                break;
+            case UseKind.Block:
+                Wear(world, use.Who, cold, Gear.InHand(cold), config.PerBlock);
+                break;
+            case UseKind.Shot:
+                Wear(world, use.Who, cold, Gear.Crossbow(inventory), config.PerShot);
+                break;
+            case UseKind.ArmourHit:
+                WearArmour(world, use.Who, cold, use.Part);
+                break;
         }
     }
 
-    void WearWeapon(World world, CharacterId id, float amount)
+    /// <summary>
+    /// Each worn armour piece covering the part hit loses a point (once per hit, as the original's per-hit list).
+    /// </summary>
+    void WearArmour(World world, CharacterId id, CharacterCold cold, int part)
     {
-        var table = world.Characters;
-        if (table.TryResolveNext(id, out int a) && table.Cold(a) is { } owner && Condition.Weapon(owner.Inventory) is { } weapon)
-            Degrade(world, owner, weapon, amount);
-    }
+        if (cold.Medical?.Parts is not { } parts || part < 0 || part >= parts.Count) return;
 
-    void Degrade(World world, CharacterCold owner, ItemInstance item, float amount)
-    {
-        float before = Condition.Of(item);
-        if (before <= 0) return;
-
-        float after = Math.Max(0, before - amount);
-        Condition.Set(item, after);
-        if (after > 0) return;
-
-        if (settings.DeleteBroken) owner.Inventory?.Items.Remove(item);
-        if (owner.IsPlayer) world.Post(settings.DeleteBroken ? $"{owner.Name}'s {item.Name} broke apart." : $"{owner.Name}'s {item.Name} is broken.");
-    }
-
-    #endregion
-
-    #region Repair
-
-    /// <summary>With an item named Tools in the character's inventory, its gear regains condition by its smithing skills.</summary>
-    void Repair(World world, CharacterId id)
-    {
-        var table = world.Characters;
-        if (!table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true, Inventory: { } inventory } cold) return;
-        if (!inventory.Items.Any(i => i.Name == settings.ToolName))
+        string partId = parts[part].Template.StringId;
+        foreach (var piece in Gear.Worn(cold.Inventory).ToList())
         {
-            world.Post($"{cold.Name} needs {settings.ToolName} to repair gear.");
-            return;
+            if (data.Combat.Armour(piece.Record)?.Coverage.Any(e => e.PartStringId == partId) == true)
+                Wear(world, id, cold, piece, config.PerArmourHit);
+        }
+    }
+
+    /// <summary>
+    /// The original's <c>OnPlayerWear</c>: rolls the item if new, takes <paramref name="amount"/> unless its grade spares this use, and destroys it at
+    /// 0 with <c>BreakWeapons</c>.
+    /// </summary>
+    void Wear(World world, CharacterId id, CharacterCold owner, ItemInstance? item, int amount)
+    {
+        if (item is null || !_condition.Tracked(item, out var c)) return;
+
+        int dur = _condition.GetOrRoll(item, c, Draw(world, id));
+        if (dur > 0 && !Spared(world, id, item, c))
+        {
+            dur = Math.Max(0, dur - amount);
+            Condition.Set(item, dur);
         }
 
-        int fixedCount = 0;
-        if (Condition.Weapon(inventory) is { } weapon) fixedCount += Mend(weapon, Skill(cold, StatsEnumerated.SmithingWeapon));
-        foreach (var armour in Condition.Worn(inventory)) fixedCount += Mend(armour, Skill(cold, StatsEnumerated.SmithingArmour));
-
-        world.Post(fixedCount == 0 ? $"{cold.Name}'s gear needs no repair." : $"{cold.Name} repaired {fixedCount} piece(s) of gear.");
+        if (dur <= 0 && config.Break) _repairs.Destroy(owner, item);
     }
 
-    static float Skill(CharacterCold cold, StatsEnumerated stat) => cold.Stats?[stat] ?? 0;
-
-    /// <summary>Adds <c>0.15 + 0.35 x skill/100</c> condition; 1 when it changed the item.</summary>
-    int Mend(ItemInstance item, float skill)
+    /// <summary>
+    /// Whether the item's grade spares this use (a roll of 0..99 at or above its wear chance).
+    /// </summary>
+    bool Spared(World world, CharacterId id, ItemInstance item, GearClass c)
     {
-        float before = Condition.Of(item);
-        if (before >= 1) return 0;
+        int chance = _condition.WearChance(item, c);
+        if (chance >= 100) return false;
+        if (chance <= 0) return true;
 
-        Condition.Set(item, before + settings.RepairBase + settings.RepairSkill * Math.Clamp(skill, 0, 100) / 100);
-        return 1;
+        return Rng.Int(Draw(world, id), 100) >= chance;
     }
 
-    #endregion
+    /// <summary>
+    /// The next roll of this step, keyed by the world seed, the tick, the character and the draw count.
+    /// </summary>
+    ulong Draw(World world, CharacterId id) => Rng.Hash(world.Seed, Rng.Key(id) ^ (ulong)world.Tick << 20, purpose, _draws++);
 
-    FrozenDictionary<CharacterId, GearView> Publish(World world)
+    /// <summary>
+    /// Rolls every new tracked item carried by a loaded character (the original rolls on the first tooltip; the interface cannot change items).
+    /// </summary>
+    void Sweep(World world)
     {
         var table = world.Characters;
-        var gear = new Dictionary<CharacterId, GearView>();
         for (int slot = 0; slot < table.HighWater; slot++)
         {
-            if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Inventory: { } inventory }) continue;
+            if (table.Cold(slot) is not { Inventory: { } inventory }) continue;
 
-            float? weapon = Condition.Weapon(inventory) is { } w ? Condition.Of(w) : null;
-            var worn = Condition.Worn(inventory).Select(Condition.Of).ToList();
-            gear[table.IdOf(slot)] = new(weapon, worn.Count > 0 ? worn.Min() : null);
+            var id = table.IdOf(slot);
+            foreach (var item in inventory.All())
+            {
+                if (item.Type is not (FcsRecordType.Weapon or FcsRecordType.Crossbow or FcsRecordType.Armour)) continue;
+                if (Condition.InTag(item.ModTag, int.MaxValue) is not null) continue;
+                if (_condition.Tracked(item, out var c)) _condition.GetOrRoll(item, c, Draw(world, id));
+            }
         }
-
-        return gear.ToFrozenDictionary();
     }
+
+    #endregion
+}
+
+/// <summary>
+/// Where a character's gear is.
+/// </summary>
+static class Gear
+{
+    /// <summary>
+    /// The weapon item in the character's hand: the back one when its fighter holds the back weapon, else the hip one; null for fists or an animal.
+    /// </summary>
+    public static ItemInstance? InHand(CharacterCold cold)
+    {
+        if (cold.Fighter is not { IsAnimal: false, Weapon: not null } fighter) return null;
+
+        string section = fighter.WeaponIsBack ? "back" : "hip";
+        return cold.Inventory?.Items.FirstOrDefault(i => i.Section == section && i.Type == FcsRecordType.Weapon);
+    }
+
+    /// <summary>
+    /// The crossbow in a weapon slot.
+    /// </summary>
+    public static ItemInstance? Crossbow(Inventory inventory) =>
+        inventory.Items.FirstOrDefault(i => i.Type == FcsRecordType.Crossbow && Condition.WeaponSections.Contains(i.Section));
+
+    /// <summary>
+    /// The item in a section, if any.
+    /// </summary>
+    public static ItemInstance? In(Inventory inventory, string section) => inventory.Items.FirstOrDefault(i => i.Section == section);
+
+    /// <summary>
+    /// The worn armour pieces.
+    /// </summary>
+    public static IEnumerable<ItemInstance> Worn(Inventory? inventory) =>
+        inventory?.Items.Where(i => i.Type == FcsRecordType.Armour && Condition.ArmourSections.Contains(i.Section)) ?? [];
 }
