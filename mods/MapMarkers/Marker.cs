@@ -55,6 +55,51 @@ static class MarkerKinds
         new(1, 1, 1, 1), new(.48f, 1, 1, 1), new(.78f, 1, .68f, 1), new(.82f, .52f, 1, 1), new(.78f, .78f, .78f, 1),
     ];
 
+    /// <summary>
+    /// The fork's Colour row in order (<b>Verified</b>, original DLL rdata table): "" is the "-" button that removes the tag, then white, red,
+    /// orange, yellow, green, cyan, blue, purple, pink, grey.
+    /// </summary>
+    public static readonly string[] Swatches =
+        ["", "#FFFFFF", "#FF5A4E", "#FF9F45", "#FFD84D", "#7BE07B", "#5CD6E8", "#6FA8FF", "#C38BFF", "#FF7FC8", "#A0A0A0"];
+
+    public static uint SwatchRgba(int i) => Convert.ToUInt32(Swatches[i][1..], 16) << 8 | 0xFF;
+
+    /// <summary>
+    /// A swatch press: the label's leading <c>#RRGGBB</c> tag (7 characters, not <c>##</c>) replaced by the swatch's, or dropped for "-"
+    /// (<b>Verified</b>, original DLL (decompiled)); MyGUI draws the label in that colour.
+    /// </summary>
+    public static string WithColour(string label, int swatch) => Swatches[swatch] + StripTag(label);
+
+    static string StripTag(string label) =>
+        label.Length > 6 && label[0] == '#' && label[1] != '#' && label.AsSpan(1, 6).IndexOfAnyExcept("0123456789abcdefABCDEF") < 0
+            ? label[7..]
+            : label;
+
+    /// <summary>The text without MyGUI colour tags, for measuring.</summary>
+    public static string WithoutTags(string text)
+    {
+        var plain = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '#' && i + 1 < text.Length && text[i + 1] == '#')
+            {
+                plain.Append('#');
+                i++;
+                continue;
+            }
+
+            if (text[i] == '#' && i + 6 < text.Length && text.AsSpan(i + 1, 6).IndexOfAnyExcept("0123456789abcdefABCDEF") < 0)
+            {
+                i += 6;
+                continue;
+            }
+
+            plain.Append(text[i]);
+        }
+
+        return plain.ToString();
+    }
+
     public static string Glyph(MarkerKind kind) => Glyphs[Index(kind)];
 
     public static string Name(MarkerKind kind) => Names[Index(kind)];

@@ -139,6 +139,7 @@ static class MapState
         else if (e.Widget == MapOverlay.TypeButton) Book?.Edit(marker, m => m.Kind = MarkerKinds.Next(m.Kind));
         else if (e.Widget == MapOverlay.DeleteButton) DeleteSelected();
         else if (e.Widget == MapOverlay.CloseButton) Close(screens);
+        else if (Swatch(e.Widget) is { } swatch) Colour(screens, marker, swatch);
         else if (e.Widget == MapOverlay.LabelBox) LabelEvent(screens, marker, e);
     }
 
@@ -146,6 +147,21 @@ static class MapState
     {
         Settings.MarkersVisible = !Settings.MarkersVisible;
         if (!Settings.MarkersVisible) Hidden(screens);
+    }
+
+    static int? Swatch(string widget) =>
+        widget.StartsWith(MapOverlay.SwatchPrefix, StringComparison.Ordinal)
+        && int.TryParse(widget.AsSpan(MapOverlay.SwatchPrefix.Length), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out int i) && i < MarkerKinds.Swatches.Length
+            ? i
+            : null;
+
+    /// <summary>A swatch: the label (as typed so far, when the box has the focus) gets the swatch's tag and is committed.</summary>
+    static void Colour(MyGuiScreenHost screens, Marker marker, int swatch)
+    {
+        string text = Typing(screens) ? screens.GetText(MapOverlay.Screen, MapOverlay.LabelBox) : marker.Label;
+        SetLabel(marker, MarkerKinds.WithColour(text, swatch), trimEnd: true);
+        screens.SetText(MapOverlay.Screen, MapOverlay.LabelBox, marker.Label);
     }
 
     static void Close(MyGuiScreenHost screens)
