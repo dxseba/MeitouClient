@@ -8,8 +8,9 @@ namespace Meitou.ElementalEnchantment;
 
 /// <summary>
 /// The element on the blade, as the original shows it: while a character has an element active its held blade gives off the element's particles
-/// (<see cref="ModContext.GlowWeapon"/>), at rest as in combat: the original mod's own blade system when its particles are installed and enabled
-/// (in its own colours), else a base-game stand-in tinted in the element's colour. The <c>Blade tint</c> setting also tints the blade. Kept up
+/// (<see cref="ModContext.KeepEffect"/> on <see cref="EffectAnchor.Weapon"/>), at rest as in combat: the original mod's own blade system when its particles are installed and enabled
+/// (in its own colours), else a base-game stand-in tinted in the element's colour. The <c>Blade tint</c> setting also tints the blade
+/// (<see cref="ModContext.Glow"/> on <see cref="GlowTarget.Weapon"/>). Kept up
 /// once a second from a hidden overlay node (the host's frame); a character whose element was cleared has its glow stopped.
 /// </summary>
 sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExtension
@@ -27,8 +28,11 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     /// <summary>The blade tint's strength when the setting is on.</summary>
     const float TintStrength = 0.5f;
 
-    /// <summary>The characters given a glow at the last renewal.</summary>
-    readonly HashSet<CharacterId> _glowing = [];
+    /// <summary>The characters given an aura at the last renewal, with the effect kept on their blade.</summary>
+    readonly Dictionary<CharacterId, string> _glowing = [];
+
+    /// <summary>The characters whose blade is tinted.</summary>
+    readonly HashSet<CharacterId> _tinted = [];
 
     long _lastRenew;
 
@@ -67,10 +71,28 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     bool Glow(CharacterId id, Element element, int level)
     {
         string original = OriginalBlade(element);
-        float tint = settings.BladeTint ? TintStrength * Strength(level) : 0;
-        if (context.HasEffect(original)) return context.GlowWeapon(id, settings.BladeTint ? Colour(element) : Vector3.One, GlowSeconds, tint, original);
+        bool own = context.HasEffect(original);
+        string effect = own ? original : Particles(element);
+        var anchor = EffectAnchor.Weapon(id);
+        if (_glowing.TryGetValue(id, out var before) && before != effect) context.StopEffect(before, anchor);
 
-        return context.GlowWeapon(id, Colour(element), GlowSeconds, tint, Particles(element));
+        bool kept = context.KeepEffect(effect, anchor, GlowSeconds, own ? null : Colour(element));
+        if (kept) _glowing[id] = effect;
+
+        Tint(id, element, level);
+        return kept;
+    }
+
+    /// <summary>Tints the blade while the setting is on; takes the tint off once it is turned off.</summary>
+    void Tint(CharacterId id, Element element, int level)
+    {
+        if (settings.BladeTint && context.Glow(GlowTarget.Weapon(id), Colour(element), GlowSeconds, TintStrength * Strength(level)))
+        {
+            _tinted.Add(id);
+            return;
+        }
+
+        if (_tinted.Remove(id)) context.StopGlow(GlowTarget.Weapon(id));
     }
 
     /// <summary>The original mod's blade system for <paramref name="element"/> (fire's has no <c>Blade</c> suffix).</summary>
@@ -79,13 +101,14 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     /// <summary>Stops the glows of the characters glowing before but not now.</summary>
     void Stop(HashSet<CharacterId> glowingNow)
     {
-        foreach (var id in _glowing)
+        foreach (var (id, effect) in _glowing.ToArray())
         {
-            if (!glowingNow.Contains(id)) context.StopWeaponGlow(id);
-        }
+            if (glowingNow.Contains(id)) continue;
 
-        _glowing.Clear();
-        _glowing.UnionWith(glowingNow);
+            context.StopEffect(effect, EffectAnchor.Weapon(id));
+            if (_tinted.Remove(id)) context.StopGlow(GlowTarget.Weapon(id));
+            _glowing.Remove(id);
+        }
     }
 
     /// <summary>The glow grows with the element's level: 0.6 at level 0 to 1.6 at 100.</summary>
