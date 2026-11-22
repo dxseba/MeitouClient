@@ -6,7 +6,8 @@ namespace Meitou.ElementalEnchantment;
 
 /// <summary>
 /// Port of Elemental Enchantment (workshop 3832978749), rebuilt from its description: each character picks an element (fire, lightning, wind,
-/// water, ice) that adds to its blows and grows with use as a skill of its own in the stats window; from level 50 a second element joins at a share.
+/// water, ice) that adds to its blows (Wind and Lightning to its speed), shows on its hits and grows with use as a skill of its own in the stats
+/// window; from level 50 a second element joins at a share.
 /// </summary>
 public sealed class ElementalEnchantmentMod : IMod
 {
@@ -20,6 +21,7 @@ public sealed class ElementalEnchantmentMod : IMod
         var skills = Elements.All.ToDictionary(e => e, e => context.AddSkill(Elements.Skill(e)));
         context.AddSystem("elements", _ => Running = new ElementSystem(Settings, skills), SystemAnchor.End);
         context.AddUi(new ElementMenu());
+        context.AddCombatHitFeed(new ElementEffects(context, Settings).Feed);
         context.Log("Elemental Enchantment initialized");
     }
 }
@@ -34,6 +36,9 @@ public sealed class EnchantSettings
 
     [Setting("Effect strength", Hint = "Scales what elements add (0: none).", Min = 0, Max = 5, Step = 0.1)]
     public float Strength { get; set; } = 1;
+
+    [Setting("Element effects", Hint = "Enchanted hits show their element's impact and weapon sparks.")]
+    public bool Effects { get; set; } = true;
 
     [Setting("All aptitudes at 100%", Hint = "Every character trains every element at the same rate.")]
     public bool FlatAptitude { get; set; }
