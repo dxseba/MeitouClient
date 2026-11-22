@@ -1,21 +1,14 @@
-using System.Globalization;
-using System.Numerics;
-using System.Reflection;
-using HarmonyLib;
-using Meitou.Data.Ui;
-using Meitou.Game.Host;
-using Meitou.Game.Ui;
 using Meitou.Modding;
 using Meitou.Simulation;
-using Meitou.Simulation.Combat;
 
 namespace Meitou.PoshDamageNumbers;
 
 /// <summary>
-/// Port of Posh Damage Numbers (workshop 3821781631), rebuilt from its description: floating numbers of the damage each landed hit dealt after
-/// armour, fast hits on one target added into one growing number, KNOCKOUT and KILLED when they happen; warm white to orange by size, red for
-/// your own. Fed by the display-only hit feed (<c>AddCombatHitFeed</c>), drawn as Level Up Notify's floating text; a big hit
-/// also flashes (<c>ModContext.PlayEffect</c>).
+/// Port of Posh Damage Numbers (workshop 3821781631; rules from its KenshiLua script <c>damage_numbers.lua</c> and settings <c>dn_settings.lua</c>):
+/// a "-N" number over a character hit near your people, coloured by the hit's share of the part's health (warm white, gold, orange; red for your
+/// own), popping in with a white flash, floating up in an arc and fading; hits within the merge window add up; KNOCKOUT, SEVERED and KILLED words.
+/// Hits come from a combat hit observer (<see cref="HitWatch"/>), numbers are animated on the host (<see cref="Floaters"/>) and drawn in the HUD
+/// overlay (<see cref="NumbersUi"/>).
 /// </summary>
 public sealed class PoshDamageNumbersMod : IMod
 {
@@ -24,191 +17,56 @@ public sealed class PoshDamageNumbersMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        context.AddCombatHitFeed(hits => Numbers.Feed(context, hits));
-        Numbers.Install(context);
+        context.AddSystem("hits", _ => new HitWatch(Settings), SystemAnchor.End);
+        Floaters.Install(context);
         context.AddUi(new NumbersUi());
         context.Log("Posh Damage Numbers initialized");
     }
 }
 
+/// <summary>The original's Mod Config Menu settings that apply to hits (<b>Verified</b>, <c>dn_settings.lua</c>: keys, ranges and defaults).</summary>
 public sealed class DamageSettings
 {
-    [Setting("Enable damage numbers", Hint = "Floating damage numbers over characters hit. Turn the game's own damage floaters off to see one set.")]
+    [Setting("Enabled", Hint = "Enabled: floating damage numbers. Turn the game's own damage floaters off to see one set.")]
     public bool Enabled { get; set; } = true;
 
-    [Setting("Merge window (seconds)", Hint = "Hits on one target within this time add into one number.", Min = 0, Max = 3, Step = 0.1)]
-    public float MergeSeconds { get; set; } = 0.6f;
+    [Setting("Own squad damage", Hint = "ShowOwnSquadDamage: numbers when your own people are hurt (red).")]
+    public bool ShowOwnSquadDamage { get; set; } = true;
 
-    [Setting("Seconds", Hint = "How long a number floats.", Min = 0.5, Max = 5, Step = 0.1)]
-    public float Seconds { get; set; } = 1.4f;
+    [Setting("Fight range (m)", Hint = "FightRange: hits farther than this from your people get no numbers, unless your people are in the fight.",
+        Min = 10, Max = 1000, Step = 10)]
+    public int FightRange { get; set; } = 100;
 
-    [Setting("Flash on big hits", Hint = "A hit of 40 or more throws a short burst of sparks at the victim.")]
+    [Setting("Show words", Hint = "ShowWords: KNOCKOUT / SEVERED / KILLED.")]
+    public bool ShowWords { get; set; } = true;
+
+    [Setting("Minimum damage", Hint = "MinDamage: smaller hits are ignored.", Min = 1, Max = 50)]
+    public int MinDamage { get; set; } = 1;
+
+    [Setting("Number size", Hint = "NumberSize: number height as a share of the character's height on screen.", Min = 0.1, Max = 0.6, Step = 0.05)]
+    public float NumberSize { get; set; } = 0.3f;
+
+    [Setting("Smallest number (px)", Hint = "MinNumberPx: at 1080p, scaled with the screen height.", Min = 10, Max = 80)]
+    public int MinNumberPx { get; set; } = 22;
+
+    [Setting("Largest number (px)", Hint = "MaxNumberPx: at 1080p, scaled with the screen height.", Min = 20, Max = 140)]
+    public int MaxNumberPx { get; set; } = 50;
+
+    [Setting("Duration", Hint = "Duration: how long numbers stay (1 = normal).", Min = 0.5, Max = 2.5, Step = 0.1)]
+    public float Duration { get; set; } = 1;
+
+    [Setting("Rise", Hint = "Rise: how high numbers float (0 = in place).", Min = 0, Max = 2.5, Step = 0.1)]
+    public float Rise { get; set; } = 1;
+
+    [Setting("Flash", Hint = "Flash: white flash when a number appears.")]
     public bool Flash { get; set; } = true;
 
-    [Setting("Show knockouts and kills", Hint = "KNOCKOUT and KILLED pop up after the number.")]
-    public bool Words { get; set; } = true;
-}
+    [Setting("Shake", Hint = "Shake: big hits shake for a moment.")]
+    public bool Shake { get; set; } = true;
 
-/// <summary>One floating number: the victim, its total, the tick it started and was last added to, its state before the first hit.</summary>
-sealed class Number(CharacterId victim, float damage, long tick, bool wasAlive, bool wasDown)
-{
-    public CharacterId Victim { get; } = victim;
-    public float Damage { get; set; } = damage;
-    public long Start { get; } = tick;
-    public long Last { get; set; } = tick;
-    public bool WasAlive { get; } = wasAlive;
-    public bool WasDown { get; } = wasDown;
-}
+    [Setting("Merge window (s)", Hint = "MergeWindow: hits closer than this on one target add up.", Min = 0, Max = 1, Step = 0.02)]
+    public float MergeWindow { get; set; } = 0.22f;
 
-/// <summary>The numbers: added from the hit feed and projected each frame by a postfix on <c>PlayerInterface.BindUi</c>.</summary>
-static class Numbers
-{
-    public const string Key = "posh.dmg.";
-    public const int Slots = 16;
-    const float Head = 20, Rise = 9;
-
-    /// <summary>The damage of one hit that flashes (the orange tone's threshold).</summary>
-    const float BigHit = 40;
-
-    /// <summary>EFFECT <c>small- sparks1</c> (system <c>kenshi_sparks</c>), the game's parry sparks.</summary>
-    const string FlashEffect = "5463-nodes_furniture1_otto.mod";
-
-    static readonly Vector3 FlashTint = new(2.0f, 1.7f, 1.1f);
-
-    static readonly Lock Gate = new();
-    static readonly List<Number> Shown = [];
-    static FieldInfo? s_sessionField;
-    static MethodInfo? s_project;
-
-    public static void Install(ModContext context)
-    {
-        var type = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
-        s_sessionField = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Single(f => f.FieldType == typeof(WorldSession));
-        s_project = AccessTools.Method(type, "Project", [typeof(Vector3)]) ?? throw new MissingMethodException(type.FullName, "Project");
-        var bind = AccessTools.Method(type, "BindUi") ?? throw new MissingMethodException(type.FullName, "BindUi");
-        context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(Numbers), nameof(Bound)));
-    }
-
-    /// <summary>
-    /// The hit feed (host thread, once a frame): each hit adds to its victim's open number or starts one, and a big one flashes on the victim.
-    /// </summary>
-    public static void Feed(ModContext context, IReadOnlyList<CombatHit> hits)
-    {
-        if (!PoshDamageNumbersMod.Settings.Enabled) return;
-
-        lock (Gate)
-        {
-            foreach (var hit in hits) Add(hit);
-        }
-
-        if (PoshDamageNumbersMod.Settings.Flash)
-        {
-            foreach (var hit in hits) Flash(context, hit);
-        }
-    }
-
-    /// <summary>A short burst of warm sparks on the victim's chest for a single hit of <see cref="BigHit"/> or more.</summary>
-    static void Flash(ModContext context, in CombatHit hit)
-    {
-        if (DamageOf(hit) >= BigHit && hit.VictimWasAlive) context.PlayEffect(FlashEffect, hit.Victim, seconds: 0.12f, tint: FlashTint);
-    }
-
-    static float DamageOf(in CombatHit hit) => (hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce) * hit.Damage.Scale;
-
-    static void Add(CombatHit hit)
-    {
-        float damage = DamageOf(hit);
-        if (damage <= 0) return;
-
-        long merge = (long)(PoshDamageNumbersMod.Settings.MergeSeconds * 30);
-        var victim = hit.Victim;
-        if (Shown.FindLast(n => n.Victim == victim && hit.Tick - n.Last <= merge) is { } open)
-        {
-            open.Damage += damage;
-            open.Last = hit.Tick;
-            return;
-        }
-
-        Shown.Add(new(victim, damage, hit.Tick, hit.VictimWasAlive, hit.VictimWasIncapacitated));
-        if (Shown.Count > 64) Shown.RemoveAt(0);
-    }
-
-    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    static void Bound(object __instance, UiBindings __result)
-    #pragma warning restore IDE1006
-    {
-        if (!PoshDamageNumbersMod.Settings.Enabled || s_sessionField?.GetValue(__instance) is not WorldSession session) return;
-
-        var world = session.World;
-        float life = PoshDamageNumbersMod.Settings.Seconds / world.TickSeconds;
-        var characters = session.CurrentSnapshot.Characters.ToDictionary(c => c.Id);
-        int slot = 0;
-        lock (Gate)
-        {
-            Shown.RemoveAll(n => (world.Tick - n.Last) / life > 1 || world.Tick < n.Start);
-            for (int i = Shown.Count - 1; i >= 0 && slot < Slots; i--)
-            {
-                var n = Shown[i];
-                if (!characters.TryGetValue(n.Victim, out var c)) continue;
-
-                float age = Math.Clamp((world.Tick - n.Last) / life, 0, 1);
-                if (s_project!.Invoke(__instance, [c.Position + new Vector3(0, Head + Rise * age, 0)]) is not Vector2 at) continue;
-
-                __result.Text[Key + slot++] = string.Create(CultureInfo.InvariantCulture, $"{at.X:0}|{at.Y:0}|{Tone(n, c)}|{Text(n, c)}");
-            }
-        }
-    }
-
-    /// <summary>0 warm white, 1 gold, 2 orange (by the total), 3 red for the player's own.</summary>
-    static int Tone(Number n, CharacterSnapshot c) => c.IsPlayer ? 3 : n.Damage < 15 ? 0 : n.Damage < 40 ? 1 : 2;
-
-    static string Text(Number n, CharacterSnapshot c)
-    {
-        string number = ((int)MathF.Round(n.Damage)).ToString(CultureInfo.InvariantCulture);
-        if (!PoshDamageNumbersMod.Settings.Words || c.Body is not { } body) return number;
-        if (n.WasAlive && body.Dead) return number + "  KILLED";
-        if (!n.WasDown && body.Unconscious && !body.Dead) return number + "  KNOCKOUT";
-        return number;
-    }
-}
-
-/// <summary>Draws the bound numbers centred on their points.</summary>
-public sealed class NumbersUi : IUiExtension
-{
-    const float Width = 200, Height = 24;
-
-    public string Id => "dxseba.poshdamagenumbers.ui";
-
-    public void Register(UiRegistration registration)
-    {
-        string[] tones =
-        [
-            registration.RegisterStyle("white", new() { Text = new(1f, .95f, .85f, 1), TextPadding = new(0, 0, 0, 0) }),
-            registration.RegisterStyle("gold", new() { Text = new(1f, .82f, .30f, 1), TextPadding = new(0, 0, 0, 0) }),
-            registration.RegisterStyle("orange", new() { Text = new(1f, .55f, .15f, 1), TextPadding = new(0, 0, 0, 0) }),
-            registration.RegisterStyle("red", new() { Text = new(.95f, .20f, .15f, 1), TextPadding = new(0, 0, 0, 0) }),
-        ];
-        registration.Contribute(UiSlots.Overlay, frame => Build(frame, tones), order: 40);
-    }
-
-    static UiNode Build(UiFrameContext frame, string[] tones)
-    {
-        var root = new UiNode("posh-dmg") { Placement = UiPlacement.Fill, Pickable = false };
-        for (int i = 0; i < Numbers.Slots; i++)
-        {
-            var parts = frame.Text(Numbers.Key + i).Split('|', 4);
-            if (parts.Length != 4 || !float.TryParse(parts[0], CultureInfo.InvariantCulture, out float x)) continue;
-            if (!float.TryParse(parts[1], CultureInfo.InvariantCulture, out float y)) continue;
-            if (!int.TryParse(parts[2], CultureInfo.InvariantCulture, out int tone)) continue;
-
-            var placement = new UiPlacement(Width, Height, Left: x - Width / 2, Top: y - Height / 2);
-            root.Children.Add(new("posh-dmg-" + i, UiNodeKind.Label)
-            {
-                Placement = placement, Text = parts[3], Style = tones[Math.Clamp(tone, 0, 3)], Pickable = false,
-            });
-        }
-
-        return root;
-    }
+    [Setting("Numbers on screen", Hint = "MaxActive: numbers on screen at once (the oldest is recycled).", Min = 10, Max = 150)]
+    public int MaxActive { get; set; } = 60;
 }
