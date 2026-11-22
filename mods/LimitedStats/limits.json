@@ -1,9 +1,0 @@
-// Limited Stats overrides. Races match the race's name or string id, characters their name (case ignored).
-// "cap": the highest level a stat trains to; "xp": a multiplier on its XP gains. Stats left out use the Mod settings cap and XP x1.
-// Example (remove the // to use it):
-// "races": { "Shek": { "cap": { "Strength": 110, "Dexterity": 85 }, "xp": { "Strength": 1.2, "Dexterity": 0.8 } } },
-// "characters": { "Beep": { "cap": { "Toughness": 120 } } }
-{
-  "races": {},
-  "characters": {}
-}
