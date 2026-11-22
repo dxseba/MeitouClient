@@ -16,8 +16,19 @@ public sealed class ItTicklesMeMod : IMod
     internal static readonly TicklesSettings Settings = new();
     [ThreadStatic] static bool s_skipNext;
 
+    /// <summary>
+    /// The original's config record: a LOCATIONAL_DAMAGE of this name whose <c>affects move speed</c> holds the ratio (clamped 0..1).
+    /// </summary>
+    const string ConfigRecord = "It Tickles Me - Light Stagger Ratio";
+
     public void Initialize(ModContext context)
     {
+        if (RecordRatio(context.Data) is { } ratio)
+        {
+            Settings.Ratio = ratio;
+            context.Log($"It. Tickles. Me: ratio {ratio} from the record '{ConfigRecord}'");
+        }
+
         context.AddSettings(Settings);
 
         var apply = AccessTools.Method(typeof(CombatSystem), "BlowReaction") ?? throw new MissingMethodException(nameof(CombatSystem), "BlowReaction");
@@ -25,6 +36,17 @@ public sealed class ItTicklesMeMod : IMod
         context.Harmony.Patch(apply, transpiler: new HarmonyMethod(typeof(ItTicklesMeMod), nameof(Transpile)));
         context.Harmony.Patch(stagger, prefix: new HarmonyMethod(typeof(ItTicklesMeMod), nameof(BeforeStagger)));
         context.Log("It. Tickles. Me initialized");
+    }
+
+    /// <summary>
+    /// The ratio the original's data mod stores (its first record of the name, as <c>getDataByName</c>), or null without one.
+    /// </summary>
+    static float? RecordRatio(Meitou.Data.GameDatabase data)
+    {
+        var record = data.OfType(Meitou.Data.Fcs.FcsRecordType.LocationalDamage).FirstOrDefault(r => r.Name == ConfigRecord);
+        if (record is null || !record.Floats.TryGetValue("affects move speed", out float value) || !float.IsFinite(value)) return null;
+
+        return Math.Clamp(value, 0, 1);
     }
 
     /// <summary>Replaces <c>damage &gt; StumbleThreshold(...)</c> in the melee hit with <see cref="Heavy"/>, which also notes a hit too weak to react to.</summary>
