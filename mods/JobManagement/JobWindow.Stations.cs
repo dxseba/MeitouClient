@@ -127,7 +127,8 @@ public sealed partial class JobWindow
 
         var row = UiKit.Row($"jm-worker.{key}", UiKit.LineHeight);
         row.Children.Add(Label($"wskill.{key}", skill, 40, _styles!.Dim));
-        row.Children.Add(Label($"wname.{key}", person.Name, Math.Max(60, width - 40 - 90 - 2 * UiKit.Gap)));
+        string jobs = person.Jobs.Count == 1 ? "1 total job" : $"{person.Jobs.Count} total jobs";
+        row.Children.Add(Label($"wname.{key}", $"{person.Name}  |  {jobs}", Math.Max(60, width - 40 - 90 - 2 * UiKit.Gap)));
         string site = station.Site;
         if (assigned)
             row.Children.Add(Button($"unassign.{key}", "Remove", 90, () => Edit(id, (c, t) => JobPlanner.RemoveSite(id, c.Jobs, site, t))));

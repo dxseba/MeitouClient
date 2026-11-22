@@ -1,6 +1,7 @@
 using System.Globalization;
 using Meitou.Game.Ui;
 using Meitou.Simulation;
+using Meitou.Simulation.Player;
 using Meitou.Simulation.Production;
 
 namespace Meitou.JobManagement;
@@ -12,6 +13,11 @@ public sealed partial class JobWindow
 {
     int _squad, _scroll;
     JobPick? _pick;
+
+    /// <summary>
+    /// The member whose Clear Queue waits for Yes or No, if any.
+    /// </summary>
+    CharacterId? _confirmClear;
 
     /// <summary>Starts on the active squad.</summary>
     void OpenSquads(WorldSnapshot snapshot)
@@ -100,8 +106,38 @@ public sealed partial class JobWindow
         }
 
         var id = member.Id;
-        row.Children.Add(Button($"clear.{Key(id)}", "Clear", 60, () => Edit(id, (c, t) => JobPlanner.Clear(id, c.Jobs, t)), member.Jobs.Count > 0));
+        bool on = (member.Orders & CharacterOrders.Jobs) != 0;
+        row.Children.Add(Button($"jobs.{Key(id)}", on ? "Jobs: ON" : "Jobs: OFF", 80, () => ToggleJobs(id, !on)));
+        AddClear(row, member);
         return row;
+    }
+
+    /// <summary>
+    /// The original's per-member Jobs switch (the orders panel's Jobs toggle for that one character).
+    /// </summary>
+    void ToggleJobs(CharacterId id, bool on) => Run(_ => [new OrdersCommand([id], CharacterOrders.Jobs, on) { Tick = Tick }]);
+
+    /// <summary>
+    /// Clear Queue, which asks first as the original's "Confirm Clear Queue" prompt: Yes removes every job, No keeps them.
+    /// </summary>
+    void AddClear(UiNode row, CharacterSnapshot member)
+    {
+        var id = member.Id;
+        if (_confirmClear != id)
+        {
+            row.Children.Add(Button($"clear.{Key(id)}", "Clear Queue", 90, () => _confirmClear = id, member.Jobs.Count > 0));
+            return;
+        }
+
+        row.Children.Add(Label($"clearask.{Key(id)}", $"Remove all {member.Jobs.Count} permanent jobs from {member.Name}?", 330, _styles!.Warn));
+        row.Children.Add(Button($"clearyes.{Key(id)}", "Yes", 44, () => ConfirmClear(id)));
+        row.Children.Add(Button($"clearno.{Key(id)}", "No", 44, () => _confirmClear = null));
+    }
+
+    void ConfirmClear(CharacterId id)
+    {
+        _confirmClear = null;
+        Edit(id, (c, t) => JobPlanner.Clear(id, c.Jobs, t));
     }
 
     UiNode JobLine(CharacterSnapshot member, JobUnit unit, Dictionary<string, string> sites, Dictionary<CharacterId, CharacterSnapshot> characters,

@@ -14,6 +14,7 @@ static class Hooks
 {
     static FieldInfo? s_sessionField;
     static FieldInfo? s_ctrlField;
+    static FieldInfo? s_altField;
     static FieldInfo? s_hotkeysPlayer;
 
     public static void Install(ModContext context)
@@ -21,6 +22,7 @@ static class Hooks
         var player = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
         s_sessionField = AccessTools.Field(player, "Session") ?? throw new MissingFieldException(player.FullName, "Session");
         s_ctrlField = AccessTools.Field(player, "CtrlHeld") ?? throw new MissingFieldException(player.FullName, "CtrlHeld");
+        s_altField = AccessTools.Field(player, "AltHeld") ?? throw new MissingFieldException(player.FullName, "AltHeld");
         var bind = AccessTools.Method(player, "BindUi") ?? throw new MissingMethodException(player.FullName, "BindUi");
         context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(Hooks), nameof(Bound)));
 
@@ -37,14 +39,20 @@ static class Hooks
         if (s_sessionField?.GetValue(__instance) is WorldSession session) JobManagementMod.Window.Frame(session);
     }
 
-    /// <summary>Ctrl+J toggles the window instead of reaching the game's bindings (J is the Rescue key's second binding).</summary>
+    /// <summary>The window key (Ctrl+J or Alt+J) toggles the window instead of reaching the game's bindings (J is the Rescue key's second binding).</summary>
     static bool BeforeKey(object __instance, Key key)
     {
         var settings = JobManagementMod.Settings;
-        if (key != Key.J || !settings.Enabled || !settings.OpenKey) return true;
+        if (key != Key.J || !settings.Enabled) return true;
 
+        var modifier = settings.Hotkey switch
+        {
+            "CTRL+J" => s_ctrlField,
+            "ALT+J" => s_altField,
+            _ => null,
+        };
         var player = s_hotkeysPlayer?.GetValue(__instance);
-        if (player is null || s_ctrlField?.GetValue(player) is not true) return true;
+        if (player is null || modifier?.GetValue(player) is not true) return true;
 
         JobManagementMod.Window.Toggle();
         return false;

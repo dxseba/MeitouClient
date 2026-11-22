@@ -11,8 +11,12 @@ public sealed class JobSettings
     [Setting("Enable Job Management", Hint = "Master switch: the window, the button and the key.")]
     public bool Enabled { get; set; } = true;
 
-    [Setting("Ctrl+J opens the window", Hint = "Ctrl+J toggles the Job Management window (it no longer runs the Rescue key's search).")]
-    public bool OpenKey { get; set; } = true;
+    /// <summary>
+    /// The fork's <c>Hotkey</c> (default <c>CTRL+J</c>; <c>NONE</c>: only the panel button), here the J key with Ctrl or Alt.
+    /// </summary>
+    [Setting("Window key", Hint = "The key that toggles the Job Management window (it no longer reaches the game's binding of J); NONE: the button only.",
+        Options = ["CTRL+J", "ALT+J", "NONE"])]
+    public string Hotkey { get; set; } = "CTRL+J";
 
     [Setting("Show JM button", Hint = "A JM button under the time panel opens the window.")]
     public bool ShowButton { get; set; } = true;
