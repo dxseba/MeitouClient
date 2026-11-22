@@ -230,6 +230,23 @@ holds refuses the second mod.
   never from a tick system. The simulation never reads the queue, so the state hash is untouched; without code mods the frame skips it; a
   new world drops all queued and playing effects, and a mod that fails its `Initialize` loses those it queued. **Verified** by
   `ModVisualEffectsTests` (order, tint, lifetime, caps, rejection logging, a dropped mod's effects) against a recording sink.
+- **Weapon glow:** `GlowWeapon(characterId, colour, seconds, strength = 1, effect = null)` on `ModContext` makes the blade of the melee
+  weapon the character holds drawn give off light of its own (display only), e.g. an enchanted blade. `colour` is rgb (1 the full channel,
+  up to 4), `seconds` in (0, 30] on the game clock (held while paused, faster at higher speeds), `strength` in (0, 4]. One glow a character:
+  a newer request replaces it, fading from where the old one stood; each fades in and out over 0.25 s; `StopWeaponGlow(characterId)` fades
+  out early the one this mod set (false: none). The blade is the gear blood's (docs/game/blood-decals.md "On weapons and gear": the far part
+  of the mesh's long axis), brighter at the silhouette; sheathed weapons, worn items, scabbards and ranged weapons never glow. The renderer
+  carries it per instance (the w of the matrix's last two rows, instance flag bit 31) and adds it to the lit colour before fog, so bloom
+  picks it up. `effect` (resolved as `PlayEffect`'s) is emitted, recoloured to `colour`, from 5 points on the blade line (0.35 to 0.97 of
+  the mesh from the hilt end, through the middle of its pick boxes), moved with the blade each frame through `PlayEffect`'s bursts and
+  counted against their 64 playing. The emitters start once the blade is drawn, stop while it is not and when the glow fades out; calling
+  again with the same effect and colour before the end renews them (no restart), so a mod keeps an aura up by re-calling within 30 s.
+  Requests are validated and logged as `PlayEffect`'s (bad character, colour, lifetime, strength or effect id, more than 256 characters,
+  off the host's thread); host thread only; the simulation never reads it; a new world clears all glows, a mod that fails its `Initialize`
+  loses its own. **Verified** by `ModWeaponGlowTests` (fade, replace, stop, expiry, rejection logging, drop, clear; the emitters' points,
+  tint, renewal, stop when sheathed, cap; the blade line) against a recording sink. The drawing is **Observed** in `--duel` through a
+  forced glow (not a mod's call): both drawn katanas lit orange or cyan, hilts and the back scabbard not; `kenshi_fire2_torch` flames rose
+  along the blades and followed them; `kenshi_smoke3_small` in cyan was not made out at that distance.
 - **Hits before they land:** a registered system implementing `ICombatHitFilter` receives `HitLanding(World, ref PendingHit)` for each melee
   blow about to hit (after the defender's block and dodge are decided), bolt about to strike a body and execution blow on a captive, before
   armour and toughness: the tick, the `CombatHitSource`, attacker and victim, the sequence and blow as in `CombatHit`, whether the victim
@@ -308,12 +325,13 @@ holds refuses the second mod.
   (a build order's materials) asks it between ticks on the host's thread, with the coming tick's number. One that throws is answered as allowing
   for the rest of that tick and is not asked from the next tick on; the fault enters the state hash. Without a filter nothing is asked. Engine
   API, not in the original.
-- **World ready:** a registered system implementing `IWorldReady` receives `Ready(World, bool fromSave)` once, between ticks before the
-  first: after a save has loaded (`IModSaveData.Read` done and settings of mods no longer running dropped; an import counts as a save) or a
-  new game has placed the player's characters (`fromSave` false). Systems are told in system order (mods in load order); one may change
-  the world as a serial phase does, so a mod sets its unsaved runtime settings (a held platoon, a sleeping town) back on here, also for a
-  save made without its own saved state. One that throws is logged and the others are still told; a mod's system is also stopped, with a
-  notice, as for a throw of one of its phases (Tick systems above). Engine API, not in the original.
+- **World ready:** a registered system implementing `IWorldReady` receives `Ready(World, bool fromSave)` once, between ticks before the first:
+  after a save has loaded (`IModSaveData.Read` done and settings of mods no longer running dropped; an import counts as a save) or a new game has
+  placed the player's characters (`fromSave` false), once that world is the running one, so the context's `Enqueue`, `Tick` and `PostSound` reach
+  it. Systems are told in system order (mods in load order); one may change the world as a serial phase does, so a mod sets its unsaved runtime
+  settings (a held platoon, a sleeping town) back on here, also for a save made without its own saved state. One that throws is logged and the
+  others are still told; a mod's system is also stopped, with a notice, as for a throw of one of its phases (Tick systems above). Engine API, not
+  in the original.
 - **Goods taken:** a registered system implementing `IGoodsTakenObserver` (`Meitou.Simulation.Crime`) receives
   `GoodsTaken(World, in GoodsTaken)` when one of the player's characters takes goods that are not its own by hand: a held item dragged or
   given out of an owned container or another character, a click take out of an owned container or a town machine, a right-click loot take off
