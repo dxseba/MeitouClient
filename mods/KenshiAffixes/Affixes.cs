@@ -6,8 +6,11 @@ using static Meitou.Data.Gameplay.Bodies.StatsEnumerated;
 
 namespace Meitou.KenshiAffixes;
 
-/// <summary>What an affix changes: a stat by points, a stat by a share of its trained value, or a weapon's damage term by a share.</summary>
-enum AffixEffect { StatPoints, StatPercent, Cut, Blunt, Bleed }
+/// <summary>
+/// What an affix changes: a stat by points, a stat by a share of its trained value, a weapon's damage term by a share, or an armour piece's cut or
+/// blunt resistance by a share of what it leaves through.
+/// </summary>
+enum AffixEffect { StatPoints, StatPercent, Cut, Blunt, Bleed, CutResist, BluntResist }
 
 /// <summary>One affix kind of the original's tables: its name, effect, the stat it reads, and its value range from item level 1 to 100.</summary>
 sealed record AffixKind(string Name, AffixEffect Effect, StatsEnumerated Stat, float Min, float Max, string Unit);
@@ -35,6 +38,8 @@ static class Affixes
         new("Fleet", AffixEffect.StatPercent, Athletics, 1, 15, "athletics"),
         new("Silent", AffixEffect.StatPercent, Stealth, 2, 30, "stealth"),
         new("Nimble", AffixEffect.StatPercent, Dexterity, 1, 15, "dexterity"),
+        new("Reinforced", AffixEffect.CutResist, None, 2, 25, "remaining cut resistance"),
+        new("Cushioned", AffixEffect.BluntResist, None, 2, 25, "remaining blunt resistance"),
     ];
 
     public static readonly AffixKind[] Weapon =
@@ -54,15 +59,21 @@ static class Affixes
 
     public static bool Rolled(ItemInstance item) => ItemTag.Get(item.ModTag, Key) is not null;
 
-    public static int LevelOf(ItemInstance item) =>
-        int.TryParse(ItemTag.Get(item.ModTag, LevelKey), CultureInfo.InvariantCulture, out int level) ? level : 0;
+    public static int LevelOf(ItemInstance item) => LevelIn(item.ModTag) ?? 0;
 
-    public static List<Affix> Of(ItemInstance item)
+    /// <summary>The level a tag records; null when it records no roll.</summary>
+    public static int? LevelIn(string tag) => int.TryParse(ItemTag.Get(tag, LevelKey), CultureInfo.InvariantCulture, out int level) ? level : null;
+
+    public static List<Affix> Of(ItemInstance item) => In(item.ModTag, item.Type == FcsRecordType.Weapon ? Weapon : Armour);
+
+    /// <summary>The affixes a tag records (no item type: both tables, whose names are distinct).</summary>
+    public static List<Affix> In(string tag) => In(tag, [.. Weapon, .. Armour]);
+
+    static List<Affix> In(string tag, AffixKind[] table)
     {
         var affixes = new List<Affix>();
-        if (ItemTag.Get(item.ModTag, Key) is not { } text || text == "none") return affixes;
+        if (ItemTag.Get(tag, Key) is not { } text || text == "none") return affixes;
 
-        var table = item.Type == FcsRecordType.Weapon ? Weapon : Armour;
         foreach (var entry in text.Split(','))
         {
             var pair = entry.Split(':');

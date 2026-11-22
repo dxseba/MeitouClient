@@ -8,10 +8,10 @@ namespace Meitou.KenshiAffixes;
 
 /// <summary>
 /// Rolls affixes on the weapons and armour the loaded characters carry (every 60th tick, once per item, kept in its tag), applies the stat affixes
-/// of each character's equipped gear as stat modifiers (every 30th tick; not saved, so set again after a load), and the weapon damage affixes as a
-/// hit filter (a pure read of the attacker's weapon).
+/// of each character's equipped gear as stat modifiers (every 30th tick; not saved, so set again after a load), the weapon damage affixes as a
+/// hit filter (a pure read of the attacker's weapon) and the armour resistance affixes as an armour filter (a pure read of the worn item's tag).
 /// </summary>
-sealed class AffixSystem(AffixSettings settings, RngPurpose purpose) : ICombatHitFilter
+sealed class AffixSystem(AffixSettings settings, RngPurpose purpose) : ICombatHitFilter, IArmourFilter
 {
     const string ModifierKey = "dxseba.kenshiaffixes";
 
@@ -56,6 +56,26 @@ sealed class AffixSystem(AffixSettings settings, RngPurpose purpose) : ICombatHi
         }
 
         hit.Packet = p;
+    }
+
+    /// <summary>Reinforced and Cushioned raise the piece's cut or blunt defence by their share of what it lets through, within the game's caps.</summary>
+    public ArmourPiece Piece(World world, in ArmourAsk ask)
+    {
+        if (!settings.Enabled || ask.Item is not { Type: FcsRecordType.Armour } item) return ask.Piece;
+
+        var p = ask.Piece;
+        foreach (var affix in Affixes.Of(item))
+        {
+            float share = affix.Value / 100;
+            p = affix.Kind.Effect switch
+            {
+                AffixEffect.CutResist => p with { CutDefence = Math.Min(0.9f, p.CutDefence + (1 - p.CutDefence) * share) },
+                AffixEffect.BluntResist => p with { BluntDefence = Math.Min(0.8f, p.BluntDefence + (1 - p.BluntDefence) * share) },
+                _ => p,
+            };
+        }
+
+        return p;
     }
 
     #region Rolling
