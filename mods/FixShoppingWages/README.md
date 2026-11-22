@@ -1,15 +1,18 @@
-# Fix Shopping Wages (partial port)
+# Fix Shopping Wages
 
-Port of *Fix Shopping Wages* (workshop 3775703318), rebuilt from its Workshop description.
+Port of *Fix Shopping Wages* (workshop 3775703318), rebuilt from its description and the behaviour of its DLL (decompiled; no code copied).
 
-- **Daily allowance**: when the game day changes (not on the first day seen after a load), every NPC squad whose members have no fixed
-  `wages` gets the sum of its members' daily pay added to its money (`Squad.Money`, the purse a shopper pays from,
-  [NPC purchases](../../docs/game/economy.md#npc-purchases)), up to *Savings cap (days)* (5) days of it.
-- **A member's pay** (the original's tiers): CHARACTER `wages` of 1 or more is left to the engine, which already sets the squad's money to it
-  every day (`SquadWages`), so such a squad is skipped; else a deterministic roll in `money min`..`money max` when `money max` is above 0; else
-  the Dried Meat ITEM's `value` (or *Fixed wage* with *Use a fixed wage* on); else *Fallback wage* (78).
-- **Skipped**: the poor by design (`wages` -1, or `wages` 0 with `money max` -1), the player's faction and player characters.
-- **Missing** (partial): the local (market) Dried Meat price (the record's base `value` is used); the original's JSON file (settings under Mod
-  settings instead); squads off screen are not paid (only the loaded world's squads). The original's savings cap default is not published.
-- **Verified** by `meitou-tools record "Dried Meat"`: vanilla ITEM `42334-changes_otto.mod` has `value` 150 (also logged at start).
-- **Unknown**: not checked in game.
+- **Daily wage**: when the game day changes (not on the first day seen after a load), every loaded, living non-player character's wage is added
+  to its money (its squad's purse, `Squad.Money`, which NPC shoppers pay from, [NPC purchases](../../docs/game/economy.md#npc-purchases)), but never
+  past *Max savings multiplier* (10) x that wage; members are paid one after another into the shared purse, each against its own cap.
+- **A character's wage** (the original's tiers): none without a CHARACTER `wages` field or with `wages` -1; a non-zero `wages` itself; with
+  `wages` 0, none when `money max` is missing or -1, else a deterministic roll in `money min`..`money max` when min is below max (a roll of 0
+  falls through), else the universal wage: *Override wage value* with *Override base wage* on, else Dried Meat's average price (its value at level 0
+  with the category rows), else *Base wage fallback* (78).
+- **Settings** (Mod settings; the original's `mod-config.json` keys and Mod Hub labels): defaults are the shipped `mod-config.json`'s, so *Override
+  base wage* is on with value 0, which leaves the Dried Meat and fallback tiers unused until changed (the DLL's own defaults are override off and
+  value 0). Maxima as the original clamps: 100000, 100000, 1000.
+- **Missing**: the original's debug hotkeys and verbose logs.
+- **Verified** against the original DLL (decompiled): the `dailyUpdates` hook, tiers, roll range, cap formula, defaults and maxima; against the
+  shipped `mod-config.json`: the defaults. **Observed** (by reading `SquadWages`): a squad with a waged member also gets the engine's daily
+  `wages` pay, which sets the purse first, so it ends a day at twice its wage. **Unknown**: not checked in game.
