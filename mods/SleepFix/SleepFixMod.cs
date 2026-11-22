@@ -1,18 +1,12 @@
-using Meitou.Data.Gameplay.Ai;
 using Meitou.Modding;
 using Meitou.Simulation;
-using Meitou.Simulation.Ai;
-using Meitou.Simulation.Bodies;
-using Meitou.Simulation.Locks;
-using Meitou.Simulation.Movement;
-using Meitou.Simulation.Population;
 
 namespace Meitou.SleepFix;
 
 /// <summary>
-/// Port of SleepFix (workshop 3787375792), rebuilt from its description: a wounded player character that is idle or working a job, out of combat
-/// and bandaged, gets the player's own bed order (<c>World.GiveOrder</c>, <c>TaskType.UseBed</c>) to the best free bed the engine's bed search
-/// finds; once healed it gets up (a move order to where it lies) and its jobs take it back.
+/// Port of SleepFix (workshop 3787375792): a player character that is not fully healed gets the player's own bed order (<c>World.GiveOrder</c>,
+/// <c>TaskType.UseBed</c>) to a free bed of its faction, a robot due for repair to a Skeleton Repair Bed; the order is released once it is healed,
+/// when it cannot reach the bed, or when it stops healing.
 /// </summary>
 public sealed class SleepFixMod : IMod
 {
@@ -25,83 +19,90 @@ public sealed class SleepFixMod : IMod
     }
 }
 
+/// <summary>
+/// The original's SleepFix.cfg keys and defaults (each hint names its key).
+/// </summary>
 public sealed class SleepSettings
 {
-    [Setting("Send wounded to bed", Hint = "The original's autoBedOrder.")]
-    public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// <c>autoBedOrder=1</c>.
+    /// </summary>
+    [Setting("Send wounded to bed", Hint = "autoBedOrder: send characters who are not fully healed to bed.")]
+    public bool AutoBedOrder { get; set; } = true;
 
-    [Setting("Healed at", Hint = "Every part at this share of its health counts as healed (1 = 100%).", Min = 0.5, Max = 1, Step = 0.01)]
+    /// <summary>
+    /// <c>healThreshold=1.0</c>: below it (less 0.0005) a character is wounded, at or above it healed.
+    /// </summary>
+    [Setting("Healed at", Hint = "healThreshold: every part at this share of its health counts as healed (1 = 100%).", Min = 0.5, Max = 1,
+        Step = 0.01)]
     public float HealThreshold { get; set; } = 1;
 
-    [Setting("Wounded below", Hint = "A part under this share of its health sends the character to bed.", Min = 0.1, Max = 1, Step = 0.01)]
-    public float WoundThreshold { get; set; } = 0.9f;
+    /// <summary>
+    /// <c>clearBedOrder=1</c>.
+    /// </summary>
+    [Setting("Release bed order when healed", Hint = "clearBedOrder: healed characters get up and go back to work.")]
+    public bool ClearBedOrder { get; set; } = true;
 
-    [Setting("Wait for treatment", Hint = "Bleeding characters are not sent until bandaged (unbandaged cuts do not heal in bed).")]
+    /// <summary>
+    /// <c>waitForTreatment=1</c>.
+    /// </summary>
+    [Setting("Wait for treatment", Hint = "waitForTreatment: no bed order while unbandaged cuts remain (they don't heal in bed).")]
     public bool WaitForTreatment { get; set; } = true;
 
-    [Setting("Get up when healed", Hint = "Off: they stay in bed until you move them (the original's stayInBed only keeps them in until healed).")]
-    public bool GetUp { get; set; } = true;
-}
+    /// <summary>
+    /// <c>ownBedsOnly=1</c>.
+    /// </summary>
+    [Setting("Own beds only", Hint = "ownBedsOnly: only beds your faction owns (no rented or town beds).")]
+    public bool OwnBedsOnly { get; set; } = true;
 
-/// <summary>
-/// Every 90th tick in the serial slow step: sends the wounded to bed and gets the healed ones this mod sent up. Which characters it sent is
-/// runtime state (not saved): after a load they are not got up for you.
-/// </summary>
-sealed class SleepSystem(SleepSettings settings, PopulationData population) : ITickSystem
-{
-    /// <summary>Ticks before a character the bed search failed for is tried again.</summary>
-    const long RetryTicks = 900;
+    /// <summary>
+    /// <c>bedReachTimeout=60</c> seconds.
+    /// </summary>
+    [Setting("Bed reach timeout", Hint = "bedReachTimeout: seconds to lie down before another bed is tried (0 off).", Min = 0, Max = 300)]
+    public int BedReachTimeout { get; set; } = 60;
 
-    readonly HashSet<CharacterId> _sent = [];
-    readonly Dictionary<CharacterId, long> _failed = [];
+    /// <summary>
+    /// <c>stuckRelease=300</c> seconds.
+    /// </summary>
+    [Setting("Stuck release", Hint = "stuckRelease: release the bed order when nothing heals for this many seconds (0 off).", Min = 0, Max = 1800)]
+    public int StuckRelease { get; set; } = 300;
 
-    public void SlowWorld(World world)
-    {
-        if (world.Tick % 90 != 0 || !settings.Enabled) return;
+    /// <summary>
+    /// <c>bedOrderCooldownMs=15000</c>.
+    /// </summary>
+    [Setting("Order cooldown", Hint = "bedOrderCooldownMs: how soon the same character can be ordered again, in ms.", Min = 1000, Max = 60000,
+        Step = 1000)]
+    public int BedOrderCooldownMs { get; set; } = 15000;
 
-        var table = world.Characters;
-        for (int slot = 0; slot < table.HighWater; slot++)
-        {
-            if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Medical: { Incapacitated: false } medical } cold) continue;
+    /// <summary>
+    /// <c>respectMoveOrder=1</c>.
+    /// </summary>
+    [Setting("Respect move orders", Hint = "respectMoveOrder: nobody is sent while a move order you gave is running.")]
+    public bool RespectMoveOrder { get; set; } = true;
 
-            var id = table.IdOf(slot);
-            if (cold.InSomething == HeldState.Bed) GetUp(world, table, slot, id, medical);
-            else if (Wounded(medical) && Free(table, slot, cold)) Send(world, slot, id, medical);
-        }
+    /// <summary>
+    /// <c>skipCombat=1</c>.
+    /// </summary>
+    [Setting("Skip combat", Hint = "skipCombat: nobody is sent to bed mid-fight.")]
+    public bool SkipCombat { get; set; } = true;
 
-        _sent.RemoveWhere(id => !table.IsAlive(id));
-    }
+    /// <summary>
+    /// <c>ignoreRobotParts=1</c>.
+    /// </summary>
+    [Setting("Ignore robot parts", Hint = "ignoreRobotParts: robot parts are left out of the healed check (normal beds don't fix them).")]
+    public bool IgnoreRobotParts { get; set; } = true;
 
-    bool Wounded(MedicalState medical) => medical.Parts.Any(p => p.Limb == LimbState.Original && p.MaxHp > 0 && p.Fraction < settings.WoundThreshold);
+    /// <summary>
+    /// <c>wearThreshold=5.0</c>.
+    /// </summary>
+    [Setting("Repair bed wear", Hint = "wearThreshold: wear on a robot part that sends it to a Skeleton Repair Bed (0 off).", Min = 0, Max = 50,
+        Step = 0.5)]
+    public float WearThreshold { get; set; } = 5;
 
-    bool Healed(MedicalState medical) => medical.Parts.All(p => p.Limb != LimbState.Original || p.MaxHp <= 0 || p.Fraction >= settings.HealThreshold);
-
-    /// <summary>Idle or on one of its jobs, not fighting, carrying or carried, not held in anything.</summary>
-    static bool Free(CharacterTable table, int slot, CharacterCold cold) =>
-        !cold.InCombat && cold.CarriedBy.IsNone && cold.Carrying.IsNone && cold.InSomething == HeldState.None
-        && (table.Next[slot].Task == (byte)CharacterTask.Idle || cold.Running is { Source: TaskSource.Job });
-
-    void Send(World world, int slot, CharacterId id, MedicalState medical)
-    {
-        if (settings.WaitForTreatment && medical.Bleeding > 0) return;
-        if (_failed.TryGetValue(id, out long at) && world.Tick - at < RetryTicks) return;
-
-        if (world.Fixtures.FindBed(world, slot, population.Relations) is not { } bed)
-        {
-            _failed[id] = world.Tick;
-            return;
-        }
-
-        world.GiveOrder(id, TaskType.UseBed, site: bed.Id);
-        _sent.Add(id);
-        _failed.Remove(id);
-    }
-
-    void GetUp(World world, CharacterTable table, int slot, CharacterId id, MedicalState medical)
-    {
-        if (!settings.GetUp || !_sent.Contains(id) || !Healed(medical)) return;
-
-        world.GiveOrder(id, TaskType.MoveCusOrdered, point: table.Next[slot].Position);
-        _sent.Remove(id);
-    }
+    /// <summary>
+    /// <c>repairRobotHp=0.90</c>.
+    /// </summary>
+    [Setting("Repair bed health", Hint = "repairRobotHp: also go when a robot part's health is below this share (0 off; needs the wear setting).",
+        Min = 0, Max = 1, Step = 0.01)]
+    public float RepairRobotHp { get; set; } = 0.9f;
 }
