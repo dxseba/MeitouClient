@@ -6,8 +6,9 @@ using Meitou.Modding;
 namespace Meitou.Mentors;
 
 /// <summary>
-/// The training window: teacher, field, the student's money, and one row per skill (the student's level, the teacher's, +1 and +5 with their
-/// prices). The offer comes from the running system (<see cref="MentorSystem.Offer"/>); a press queues a command.
+/// The training window, with the original's texts (<b>Verified</b>, original DLL strings): the teacher and trade, "Student: name    Money: N cats",
+/// and one row per skill: its label, "level -> limit  (teacher T)" and the "+N  P cats" buttons for 1 and 5 lessons. The offer comes from the
+/// running system (<see cref="MentorSystem.Offer"/>); a press queues a command.
 /// </summary>
 sealed class MentorWindow(ModContext context) : IUiExtension
 {
@@ -41,9 +42,8 @@ sealed class MentorWindow(ModContext context) : IUiExtension
     {
         if (MentorsMod.Running?.Offer is not { } offer) return new UiNode("mentors-hidden") { Visible = false };
 
-        var lines = new List<UiNode> { Header(offer), Text("mentors-sub", $"Student: {offer.StudentName}    Cats: {Cats(offer.Money)}", _styles.Dim) };
-        if (offer.Lessons.Count > 0) lines.Add(ColumnTitles());
-        lines.AddRange(offer.Lessons.Select(l => LessonRow(l, offer.Money)));
+        var lines = new List<UiNode> { Header(offer), Text("mentors-sub", $"Student: {offer.StudentName}    Money: {Cats(offer.Money)}", _styles.Dim) };
+        lines.AddRange(offer.Lessons.Select(l => LessonRow(l)));
         if (offer.Status != "") lines.Add(Text("mentors-status", offer.Status, _styles.Dim));
 
         float height = 12 + lines.Count * (Line + 2);
@@ -67,28 +67,16 @@ sealed class MentorWindow(ModContext context) : IUiExtension
         return row;
     }
 
-    UiNode ColumnTitles()
-    {
-        var row = Row("mentors-titles");
-        row.Children.Add(Label("mentors-t-skill", "Skill", 170, _styles.Dim));
-        row.Children.Add(Label("mentors-t-own", "You", 50, _styles.Dim));
-        row.Children.Add(Label("mentors-t-teacher", "Teacher", 70, _styles.Dim));
-        return row;
-    }
-
-    UiNode LessonRow(Lesson lesson, long money)
+    UiNode LessonRow(Lesson lesson)
     {
         string key = lesson.Stat.ToString();
         var row = Row("mentors-row-" + key);
-        row.Children.Add(Label($"mentors-{key}-name", lesson.Label, 170, _styles.Text));
-        row.Children.Add(Label($"mentors-{key}-own", Level(lesson.Student), 50, _styles.Text));
-        row.Children.Add(Label($"mentors-{key}-teacher", Level(lesson.Teacher), 70, _styles.Dim));
-        row.Children.Add(Button($"mentors-{key}-1", $"+1  {Cats(lesson.Cost1)}", 115, _buy, key + ":1", money >= lesson.Cost1));
-        if (lesson.Batch > 1)
-        {
-            string caption = $"+{lesson.Batch}  {Cats(lesson.CostBatch)}";
-            row.Children.Add(Button($"mentors-{key}-n", caption, 125, _buy, $"{key}:{lesson.Batch}", money >= lesson.CostBatch));
-        }
+        row.Children.Add(Label($"mentors-{key}-name", lesson.Label, 150, _styles.Text));
+        string levels = $"{Level(lesson.Student)} -> {Level(lesson.Limit)}  (teacher {Level(lesson.Teacher)})";
+        row.Children.Add(Label($"mentors-{key}-levels", levels, 150, _styles.Text));
+        row.Children.Add(Button($"mentors-{key}-1", $"+{lesson.Count1}  {Cats(lesson.Cost1)}", 105, _buy, $"{key}:1", true));
+        string caption = $"+{lesson.CountBatch}  {Cats(lesson.CostBatch)}";
+        row.Children.Add(Button($"mentors-{key}-n", caption, 115, _buy, $"{key}:{LessonMath.Batch}", true));
 
         return row;
     }
@@ -106,7 +94,7 @@ sealed class MentorWindow(ModContext context) : IUiExtension
 
     static string Level(int level) => level.ToString(CultureInfo.InvariantCulture);
 
-    static string Cats(long cats) => cats.ToString("N0", CultureInfo.InvariantCulture) + "c";
+    static string Cats(long cats) => cats.ToString(CultureInfo.InvariantCulture) + " cats";
 
     static UiNode Row(string id) =>
         new(id) { Placement = new(UiLength.Fill, Line), Flow = UiFlow.Row, Gap = 4, Pickable = false };
