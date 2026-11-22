@@ -19,77 +19,53 @@ public sealed class JobTabsMod : IMod
     {
         context.AddSettings(Settings);
         context.AddSystem("jobtabs", _ => Running = new JobTabsSystem(Settings), SystemAnchor.End);
-        context.AddUi(new TabButtons(context));
+        context.AddUi(new TabButtons());
         context.Log("Job Tabs initialized");
     }
 }
 
 public sealed class JobTabsSettings
 {
-    [Setting("Tabs", Hint = "How many job tabs each character has (restart to change).", Min = 2, Max = 9)]
+    /// <summary>The most tabs the jobs list has room for (the engine's limit of job panel buttons across all mods).</summary>
+    public const int Most = 4;
+
+    [Setting("Tabs", Hint = "How many job tabs each character has (restart to change).", Min = 2, Max = Most)]
     public int Count { get; set; } = 4;
-
-    [Setting("Buttons X", Hint = "Left of the tab buttons, in pixels.", Min = 0, Max = 3000)]
-    public int X { get; set; } = 16;
-
-    [Setting("Buttons from bottom", Hint = "Height of the tab buttons above the screen's bottom, in pixels.", Min = 0, Max = 2000)]
-    public int FromBottom { get; set; } = 210;
 }
 
 /// <summary>Switches the selected player characters to job tab <paramref name="Tab"/> (0 based).</summary>
 public sealed record SwitchTabOrder(int Tab) : SimCommand;
 
-/// <summary>"Jobs" and one button per tab while player characters are selected; the first selected one's active tab is lit.</summary>
-sealed class TabButtons(ModContext context) : IUiExtension
+/// <summary>
+/// One button per tab beside the jobs list (<see cref="UiRegistration.AddJobPanelButtons"/>) for a selected player character: the active tab's
+/// caption is bracketed, and each tooltip lists that tab's jobs.
+/// </summary>
+sealed class TabButtons : IUiExtension
 {
-    const float Size = 26, Gap = 3, LabelWidth = 46;
-
-    string _panel = "", _button = "", _lit = "", _click = "";
-
     public string Id => "dxseba.jobtabs.ui";
 
-    public void Register(UiRegistration registration)
+    public void Register(UiRegistration registration) => registration.AddJobPanelButtons(Buttons);
+
+    static IEnumerable<UiJobButton> Buttons(UiCharacterContext context)
     {
-        var ink = new System.Numerics.Vector4(.91f, .86f, .74f, 1);
-        _panel = registration.RegisterStyle("panel", new() { Background = new(.10f, .085f, .07f, .9f), Text = ink, TextPadding = new(6, 1, 6, 1) });
-        _button = registration.RegisterStyle("button", new()
-        {
-            Background = new(.20f, .15f, .11f, .95f), Hover = new(.32f, .22f, .16f, 1), Text = ink,
-        });
-        _lit = registration.RegisterStyle("lit", new() { Background = new(.45f, .32f, .14f, 1), Hover = new(.55f, .40f, .18f, 1), Text = ink });
-        _click = registration.RegisterAction("tab", c => Click(c.Argument));
-        registration.Contribute(UiSlots.Overlay, Build, order: 39);
+        if (JobTabsMod.Running?.View(context.Id) is not { } view) return [];
+
+        int count = Math.Min(JobTabsMod.Settings.Count, JobTabsSettings.Most);
+        return Enumerable.Range(0, count).Select(tab => Button(context, view, tab));
     }
 
-    UiNode Build(UiFrameContext frame)
+    static UiJobButton Button(UiCharacterContext context, TabView view, int tab)
     {
-        if (JobTabsMod.Running is not { Active: >= 0 and var active }) return new UiNode("jobtabs-hidden") { Visible = false };
-
-        int count = JobTabsMod.Settings.Count;
-        float width = LabelWidth + count * (Size + Gap) + 6;
-        var row = new UiNode("jobtabs")
-        {
-            Placement = new(width, Size + 6, Left: JobTabsMod.Settings.X, Top: frame.Viewport.Height - JobTabsMod.Settings.FromBottom),
-            Style = _panel, Flow = UiFlow.Row, Gap = Gap, Padding = 3,
-        };
-        row.Children.Add(new UiNode("jobtabs-label", UiNodeKind.Label) { Placement = new(LabelWidth, Size), Text = "Jobs", Style = _panel });
-        for (int i = 0; i < count; i++)
-        {
-            string n = (i + 1).ToString(CultureInfo.InvariantCulture);
-            row.Children.Add(new UiNode("jobtabs-" + n, UiNodeKind.Button)
-            {
-                Placement = new(Size, Size), Text = n, Style = i == active ? _lit : _button, Action = _click,
-                Argument = i.ToString(CultureInfo.InvariantCulture),
-            });
-        }
-
-        var root = new UiNode("jobtabs-root") { Placement = UiPlacement.Fill, Pickable = false };
-        root.Children.Add(row);
-        return root;
+        string n = (tab + 1).ToString(CultureInfo.InvariantCulture);
+        bool active = tab == view.Active;
+        string caption = active ? $"[ {n} ]" : n;
+        return new(caption, Tooltip(view, tab, n, active), () => context.Enqueue(new SwitchTabOrder(tab) { Tick = context.Tick }));
     }
 
-    void Click(string argument)
+    static string Tooltip(TabView view, int tab, string n, bool active)
     {
-        if (int.TryParse(argument, CultureInfo.InvariantCulture, out int tab)) context.Enqueue(new SwitchTabOrder(tab) { Tick = context.Tick });
+        var jobs = tab < view.Jobs.Length ? view.Jobs[tab] : [];
+        string head = active ? $"Job tab {n} (active)" : $"Job tab {n}: switch the selected characters to it";
+        return jobs.Length == 0 ? head + "\nNo jobs" : head + "\n" + string.Join("\n", jobs);
     }
 }

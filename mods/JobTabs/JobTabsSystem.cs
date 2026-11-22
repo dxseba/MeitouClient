@@ -15,10 +15,13 @@ sealed class Tabs(int count)
     public List<PermaJob>[] Lists { get; } = [.. Enumerable.Range(0, count).Select(_ => new List<PermaJob>())];
 }
 
+/// <summary>A selected player character's tabs for the buttons: the active one and each tab's job names.</summary>
+sealed record TabView(int Active, string[][] Jobs);
+
 /// <summary>
 /// Switches job lists in the serial slow step: the character's jobs (<c>CharacterCold.Jobs</c>) are kept in the active tab and the chosen tab's put
 /// in their place, then its next decision is asked for. Tabs are keyed by the lasting character id and saved with the world; the first selected
-/// character's active tab is published every 5th tick for the buttons.
+/// player characters' tabs are published every 5th tick (and after a switch) for the buttons.
 /// </summary>
 sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
 {
@@ -27,8 +30,10 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
     readonly Dictionary<ulong, Tabs> _tabs = [];
     readonly List<SwitchTabOrder> _orders = [];
 
-    /// <summary>The first selected player character's active tab; -1 while none is selected.</summary>
-    public volatile int Active = -1;
+    volatile IReadOnlyDictionary<CharacterId, TabView> _views = new Dictionary<CharacterId, TabView>();
+
+    /// <summary>A selected player character's tabs as last published; null for another character.</summary>
+    public TabView? View(CharacterId id) => _views.GetValueOrDefault(id);
 
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
@@ -47,7 +52,7 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
         }
 
         _orders.Clear();
-        if (changed || world.Tick % 5 == 0) Active = Publish(world);
+        if (changed || world.Tick % 5 == 0) _views = Publish(world);
     }
 
     void Switch(World world, CharacterId id, int tab)
@@ -69,17 +74,33 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
         DecisionSystem.Request(cold);
     }
 
-    int Publish(World world)
+    Dictionary<CharacterId, TabView> Publish(World world)
     {
+        var views = new Dictionary<CharacterId, TabView>();
         var table = world.Characters;
         foreach (var id in world.Player.Selection)
         {
             if (!table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true } cold) continue;
 
-            return !cold.LastingId.IsNone && _tabs.TryGetValue(cold.LastingId.Value, out var tabs) ? tabs.Active : 0;
+            views[id] = ViewOf(cold);
         }
 
-        return -1;
+        return views;
+    }
+
+    /// <summary>The character's tabs: the active tab holds its current jobs (a character never switched is on tab 0).</summary>
+    TabView ViewOf(CharacterCold cold)
+    {
+        var tabs = !cold.LastingId.IsNone && _tabs.TryGetValue(cold.LastingId.Value, out var kept) ? kept : null;
+        int active = tabs?.Active ?? 0;
+        var jobs = new string[settings.Count][];
+        for (int t = 0; t < jobs.Length; t++)
+        {
+            var list = t == active ? cold.Jobs : tabs is not null && t < tabs.Lists.Length ? tabs.Lists[t] : [];
+            jobs[t] = [.. list.Select(job => PermaJobs.Text(job.Type) ?? job.Type.ToString())];
+        }
+
+        return new(active, jobs);
     }
 
     public void Write(Stream stream)
