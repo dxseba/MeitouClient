@@ -42,6 +42,8 @@ public sealed record SwitchTabOrder(int Tab) : SimCommand;
 /// </summary>
 sealed class TabButtons : IUiExtension
 {
+    const int ShownJobs = 8;
+
     public string Id => "dxseba.jobtabs.ui";
 
     public void Register(UiRegistration registration) => registration.AddJobPanelButtons(Buttons);
@@ -59,13 +61,18 @@ sealed class TabButtons : IUiExtension
         string n = (tab + 1).ToString(CultureInfo.InvariantCulture);
         bool active = tab == view.Active;
         string caption = active ? $"[ {n} ]" : n;
-        return new(caption, Tooltip(view, tab, n, active), () => context.Enqueue(new SwitchTabOrder(tab) { Tick = context.Tick }));
+        return new(caption, Tooltip(view, tab, n), () => context.Enqueue(new SwitchTabOrder(tab) { Tick = context.Tick }));
     }
 
-    static string Tooltip(TabView view, int tab, string n, bool active)
+    /// <summary>The original's tooltip: "Tab 2: 3 jobs" and up to eight job names ("..." for more), or the hint for an empty tab.</summary>
+    static string Tooltip(TabView view, int tab, string n)
     {
         var jobs = tab < view.Jobs.Length ? view.Jobs[tab] : [];
-        string head = active ? $"Job tab {n} (active)" : $"Job tab {n}: switch the selected characters to it";
-        return jobs.Length == 0 ? head + "\nNo jobs" : head + "\n" + string.Join("\n", jobs);
+        if (jobs.Length == 0) return "Empty: hold Shift while giving an order to add jobs";
+
+        var text = new System.Text.StringBuilder($"Tab {n}: {jobs.Length} {(jobs.Length == 1 ? "job" : "jobs")}");
+        foreach (string job in jobs.Take(ShownJobs)) text.Append('\n').Append(job);
+        if (jobs.Length > ShownJobs) text.Append("\n...");
+        return text.ToString();
     }
 }

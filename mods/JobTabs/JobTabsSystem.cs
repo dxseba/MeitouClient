@@ -4,15 +4,19 @@ using Meitou.Data.Save;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Ai;
+using Meitou.Simulation.Player;
 using Meitou.Simulation.Production;
 
 namespace Meitou.JobTabs;
 
-/// <summary>A character's job tabs: the active one and each tab's jobs, kept as the job list's own entries.</summary>
+/// <summary>A kept job and, for a job per target (Bodyguard, Staying close), its target's lasting id (0: none), found again when restored.</summary>
+readonly record struct KeptJob(PermaJob Job, ulong Target);
+
+/// <summary>A character's job tabs: the active one and each other tab's jobs, kept as the job list's own entries.</summary>
 sealed class Tabs(int count)
 {
     public int Active { get; set; }
-    public List<PermaJob>[] Lists { get; } = [.. Enumerable.Range(0, count).Select(_ => new List<PermaJob>())];
+    public List<KeptJob>[] Lists { get; } = [.. Enumerable.Range(0, count).Select(_ => new List<KeptJob>())];
 }
 
 /// <summary>A selected player character's tabs for the buttons: the active one and each tab's job names.</summary>
@@ -25,7 +29,7 @@ sealed record TabView(int Active, string[][] Jobs);
 /// </summary>
 sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
 {
-    const int Version = 1;
+    const int Version = 2;
 
     readonly Dictionary<ulong, Tabs> _tabs = [];
     readonly List<SwitchTabOrder> _orders = [];
@@ -62,17 +66,27 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
 
         var lasting = world.LastingIds.GetOrGive(id).Value;
         if (!_tabs.TryGetValue(lasting, out var tabs)) _tabs[lasting] = tabs = new Tabs(settings.Count);
-        if (tabs.Active == tab) return;
+        if (tabs.Active == tab || tab >= tabs.Lists.Length) return;   // the count was raised since: it applies at the next start
 
         var keep = tabs.Lists[tabs.Active];
         keep.Clear();
-        keep.AddRange(cold.Jobs);
+        keep.AddRange(cold.Jobs.Select(job => Keep(world, job)));
 
         cold.Jobs.Clear();
-        cold.Jobs.AddRange(tabs.Lists[tab]);
+        cold.Jobs.AddRange(tabs.Lists[tab].Select(kept => Restore(world, kept)));
+        tabs.Lists[tab].Clear();
         tabs.Active = tab;
         DecisionSystem.Request(cold);
     }
+
+    static KeptJob Keep(World world, PermaJob job) =>
+        new(job, job.Character.IsNone || !PermaJobs.PerTarget(job.Type) ? 0 : world.LastingIds.GetOrGive(job.Character).Value);
+
+    /// <summary>
+    /// A kept job back in the list: a job per target names its target as it is in this world (character ids are new for every world).
+    /// </summary>
+    static PermaJob Restore(World world, KeptJob kept) =>
+        kept.Target == 0 ? kept.Job : kept.Job with { Character = world.LastingIds.Find(new LastingId(kept.Target)) };
 
     Dictionary<CharacterId, TabView> Publish(World world)
     {
@@ -82,26 +96,38 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
         {
             if (!table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true } cold) continue;
 
-            views[id] = ViewOf(cold);
+            views[id] = ViewOf(world, cold);
         }
 
         return views;
     }
 
     /// <summary>The character's tabs: the active tab holds its current jobs (a character never switched is on tab 0).</summary>
-    TabView ViewOf(CharacterCold cold)
+    TabView ViewOf(World world, CharacterCold cold)
     {
         var tabs = !cold.LastingId.IsNone && _tabs.TryGetValue(cold.LastingId.Value, out var kept) ? kept : null;
         int active = tabs?.Active ?? 0;
         var jobs = new string[settings.Count][];
         for (int t = 0; t < jobs.Length; t++)
         {
-            var list = t == active ? cold.Jobs : tabs is not null && t < tabs.Lists.Length ? tabs.Lists[t] : [];
-            jobs[t] = [.. list.Select(job => PermaJobs.Text(job.Type) ?? job.Type.ToString())];
+            var list = t == active ? cold.Jobs : tabs is not null && t < tabs.Lists.Length ? tabs.Lists[t].Select(k => Restore(world, k)) : [];
+            jobs[t] = [.. list.Select(job => JobName(world, job))];
         }
 
         return new(active, jobs);
     }
+
+    /// <summary>The original's tooltip line: the job's name, and for a job per target ": " and the target's name.</summary>
+    static string JobName(World world, PermaJob job)
+    {
+        string name = PermaJobs.Text(job.Type) ?? ModJobName(world, job.Type) ?? job.Type.ToString();
+        if (!PermaJobs.PerTarget(job.Type) || !world.Characters.TryResolveNext(job.Character, out int slot)) return name;
+
+        return world.Characters.Cold(slot) is { Name.Length: > 0 } target ? name + ": " + target.Name : name;
+    }
+
+    static string? ModJobName(World world, TaskType type) =>
+        world.Systems.OfType<PlayerSystem>().FirstOrDefault()?.Extensions?.JobTypes.GetValueOrDefault(type);
 
     public void Write(Stream stream)
     {
@@ -117,22 +143,24 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
         }
     }
 
-    /// <summary>Each job's type, site and saved handle (its five numbers).</summary>
-    static void WriteList(BinaryWriter writer, List<PermaJob> list)
+    /// <summary>Each job's type, site, saved handle (its five numbers) and target lasting id.</summary>
+    static void WriteList(BinaryWriter writer, List<KeptJob> list)
     {
         writer.Write(list.Count);
-        foreach (var job in list)
+        foreach (var (job, target) in list)
         {
             writer.Write((int)job.Type);
             writer.Write(job.Site ?? "");
             foreach (int n in (int[])[job.Saved.Type, job.Saved.C, job.Saved.Cs, job.Saved.I, job.Saved.S]) writer.Write(n);
+            writer.Write(target);
         }
     }
 
     public void Read(Stream stream)
     {
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
-        if (reader.ReadInt32() != Version) return;
+        int version = reader.ReadInt32();
+        if (version is not (1 or Version)) return;
 
         _tabs.Clear();
         for (int i = reader.ReadInt32(); i > 0; i--)
@@ -140,19 +168,20 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
             ulong id = reader.ReadUInt64();
             int active = reader.ReadInt32(), count = reader.ReadInt32();
             var tabs = new Tabs(Math.Max(count, settings.Count)) { Active = active };
-            for (int t = 0; t < count; t++) ReadList(reader, tabs.Lists[t]);
+            for (int t = 0; t < count; t++) ReadList(reader, tabs.Lists[t], version);
             _tabs[id] = tabs;
         }
     }
 
-    static void ReadList(BinaryReader reader, List<PermaJob> list)
+    static void ReadList(BinaryReader reader, List<KeptJob> list, int version)
     {
         for (int j = reader.ReadInt32(); j > 0; j--)
         {
             var type = (TaskType)reader.ReadInt32();
             string site = reader.ReadString();
             var hand = new Hand(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
-            list.Add(new PermaJob(type, site.Length == 0 ? null : site, hand));
+            ulong target = version >= 2 ? reader.ReadUInt64() : 0;
+            list.Add(new(new PermaJob(type, site.Length == 0 ? null : site, hand), target));
         }
     }
 }
