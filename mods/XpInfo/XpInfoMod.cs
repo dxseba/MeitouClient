@@ -22,10 +22,19 @@ public sealed class XpInfoMod : IMod
     {
         var settings = new XpSettings();
         context.AddSettings(settings);
-        context.AddSystem("xp", _ => new XpWatchSystem(settings), SystemAnchor.End);
+        var board = new XpBoard();
+        context.AddSystem("xp", _ => NewWatch(settings, board), SystemAnchor.End);
         XpFloat.Install(context, settings);
         context.AddUi(new XpFloatUi());
+        context.AddUi(new XpPanelLines(settings, board));
         context.Log("XP Info initialized");
+    }
+
+    /// <summary>A watch for a new world; the last world's progress is forgotten.</summary>
+    static XpWatchSystem NewWatch(XpSettings settings, XpBoard board)
+    {
+        board.Clear();
+        return new XpWatchSystem(settings, board);
     }
 
     internal static string Label(StatsEnumerated stat) => stat switch
@@ -68,6 +77,10 @@ public sealed class XpSettings
 
     [Setting("Seconds", Hint = "How long a label stays.", Min = 1, Max = 10, Step = 0.5)]
     public float Seconds { get; set; } = 2.5f;
+
+    [Setting("Panel XP bars", Hint = "How many skills show an XP bar in the character panel: those that gained XP most recently.", Min = 0, Max = 2,
+        Step = 1)]
+    public int PanelLines { get; set; } = 2;
 }
 
 /// <summary>A label for the floating text: who, the text, the tick.</summary>
@@ -76,15 +89,17 @@ public readonly record struct XpLabel(CharacterId Character, string Text, long T
 /// <summary>
 /// Polls the player characters' stored stats every 10th tick in the serial slow phase: a rise is summed per stat until it reaches
 /// <see cref="XpSettings.MinPercent"/> of a level, then shown merged with the character's other gains of that poll; a new whole level shows on its
-/// own. A first sighting only records. Presentation only: not saved, not hashed.
+/// own. A first sighting only records. Each poll also publishes the levels and last gains to the <see cref="XpBoard"/>. Presentation only: not
+/// saved, not hashed.
 /// </summary>
-sealed class XpWatchSystem(XpSettings settings) : ITickSystem
+sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
 {
-    static readonly StatsEnumerated[] Watched = [.. StatsInfo.RecordStats];
+    static readonly StatsEnumerated[] Watched = XpBoard.Watched;
     const int Kept = 24;
 
     readonly Dictionary<CharacterId, float[]> _seen = [];
     readonly Dictionary<CharacterId, float[]> _pending = [];
+    readonly Dictionary<CharacterId, long[]> _lastGain = [];
     volatile XpLabel[] _recent = [];
 
     public XpLabel[] Recent => _recent;
@@ -94,14 +109,19 @@ sealed class XpWatchSystem(XpSettings settings) : ITickSystem
         if (world.Tick % 10 != 0 || !settings.Enabled) return;
 
         var labels = new List<XpLabel>();
+        var shown = new Dictionary<CharacterId, XpProgress>();
         var table = world.Characters;
         for (int slot = 0; slot < table.HighWater; slot++)
         {
             if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Stats: { } stats }) continue;
-            Check(world, table.IdOf(slot), stats, labels);
+
+            var id = table.IdOf(slot);
+            Check(world, id, stats, labels);
+            shown[id] = new([.. _seen[id]], [.. _lastGain[id]]);
         }
 
         if (labels.Count > 0) _recent = [.. _recent.Concat(labels).TakeLast(Kept)];
+        board.Publish(shown);
     }
 
     void Check(World world, CharacterId id, Simulation.Bodies.CharacterStats stats, List<XpLabel> labels)
@@ -111,16 +131,19 @@ sealed class XpWatchSystem(XpSettings settings) : ITickSystem
         {
             _seen[id] = now;
             _pending[id] = new float[now.Length];
+            _lastGain[id] = new long[now.Length];
             return;
         }
 
         var pending = _pending[id];
+        var lastGain = _lastGain[id];
         var gains = new List<string>();
         for (int i = 0; i < now.Length; i++)
         {
             float delta = now[i] - before[i];
             if (delta <= 0) continue;
 
+            lastGain[i] = world.Tick;
             string label = XpInfoMod.Label(Watched[i]);
             if (settings.Levels && (int)now[i] > (int)before[i])
                 labels.Add(new(id, string.Create(CultureInfo.InvariantCulture, $"{label} {(int)now[i]}"), world.Tick, true));
@@ -135,6 +158,25 @@ sealed class XpWatchSystem(XpSettings settings) : ITickSystem
         _seen[id] = now;
         if (settings.Gains && gains.Count > 0) labels.Add(new(id, string.Join("  ", gains), world.Tick, false));
     }
+}
+
+/// <summary>A player character's stored stats and the tick each last gained XP (0: not since first seen), by <see cref="XpBoard.Watched"/>.</summary>
+sealed record XpProgress(float[] Levels, long[] LastGain);
+
+/// <summary>
+/// The watch system's last poll, published in the serial phase and read on the host thread by the panel lines.
+/// </summary>
+sealed class XpBoard
+{
+    public static readonly StatsEnumerated[] Watched = [.. StatsInfo.RecordStats];
+
+    volatile IReadOnlyDictionary<CharacterId, XpProgress> _progress = new Dictionary<CharacterId, XpProgress>();
+
+    public void Publish(IReadOnlyDictionary<CharacterId, XpProgress> progress) => _progress = progress;
+
+    public void Clear() => _progress = new Dictionary<CharacterId, XpProgress>();
+
+    public XpProgress? Of(CharacterId id) => _progress.GetValueOrDefault(id);
 }
 
 /// <summary>
@@ -220,5 +262,36 @@ public sealed class XpFloatUi : IUiExtension
         }
 
         return root;
+    }
+}
+
+/// <summary>
+/// XP bars in the HUD's character panel (<see cref="UiRegistration.AddCharacterPanelLines"/>): for a player character, the
+/// <see cref="XpSettings.PanelLines"/> skills that gained XP most recently, each its level and its progress to the next.
+/// </summary>
+sealed class XpPanelLines(XpSettings settings, XpBoard board) : IUiExtension
+{
+    public string Id => "dxseba.xpinfo.panel";
+
+    public void Register(UiRegistration registration) => registration.AddCharacterPanelLines(Lines);
+
+    IEnumerable<UiCharacterLine> Lines(UiCharacterContext context)
+    {
+        if (!settings.Enabled || settings.PanelLines <= 0 || board.Of(context.Id) is not { } progress) return [];
+
+        return Enumerable.Range(0, progress.Levels.Length)
+            .Where(i => progress.LastGain[i] > 0)
+            .OrderByDescending(i => progress.LastGain[i])
+            .Take(settings.PanelLines)
+            .Select(i => Line(XpBoard.Watched[i], progress.Levels[i]));
+    }
+
+    static UiCharacterLine Line(StatsEnumerated stat, float level)
+    {
+        float part = level - MathF.Floor(level);
+        string label = XpInfoMod.Label(stat);
+        string value = string.Create(CultureInfo.InvariantCulture, $"{(int)level}  {part * 100:0}%");
+        string tooltip = string.Create(CultureInfo.InvariantCulture, $"{label}: level {(int)level}, {part * 100:0.#}% of the way to the next");
+        return new(label, value, part, tooltip);
     }
 }
