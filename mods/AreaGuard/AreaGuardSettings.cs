@@ -25,7 +25,7 @@ public enum ReactionMode
     HitReaction,
 }
 
-/// <summary>The original's <c>AreaGuard.ini</c>, under Mod settings; same names and defaults (<c>DebugLogging</c> is left out).</summary>
+/// <summary>The original's <c>AreaGuard.ini</c>, under Mod settings; same names and defaults.</summary>
 public sealed class AreaGuardSettings
 {
     [Setting("Enable Area Guard", Hint = "A blow one character blocks does not land on the others its sweep reaches afterwards.")]
@@ -39,4 +39,7 @@ public sealed class AreaGuardSettings
 
     [Setting("Factor in disguises", Hint = "Friendly and NonEnemy read a disguised victim's uniform faction while the disguise holds.")]
     public bool FactorInDisguises { get; set; } = true;
+
+    [Setting("Debug logging", Hint = "Writes a log line for every blow Area Guard spares.")]
+    public bool DebugLogging { get; set; }
 }
