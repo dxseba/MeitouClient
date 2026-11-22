@@ -29,9 +29,19 @@ static class ItemTag
     {
         if (!Ours(tag)) return tag;
 
-        var parts = tag.Split(';', StringSplitOptions.RemoveEmptyEntries).Skip(1).Where(p => !p.StartsWith(key + "=", StringComparison.Ordinal)).ToList();
+        var parts = tag.Split(';', StringSplitOptions.RemoveEmptyEntries).Skip(1)
+            .Where(p => !p.StartsWith(key + "=", StringComparison.Ordinal)).ToList();
         parts.Add(key + "=" + value);
         parts.Sort(StringComparer.Ordinal);
+        return Head + ";" + string.Join(';', parts);
+    }
+
+    /// <summary>The tag without <paramref name="key"/>; the tag unchanged when it is another mod's or has no such key.</summary>
+    public static string Remove(string tag, string key)
+    {
+        if (!Ours(tag) || Get(tag, key) is null) return tag;
+
+        var parts = tag.Split(';', StringSplitOptions.RemoveEmptyEntries).Skip(1).Where(p => !p.StartsWith(key + "=", StringComparison.Ordinal));
         return Head + ";" + string.Join(';', parts);
     }
 }

@@ -6,9 +6,9 @@ using Meitou.Simulation;
 namespace Meitou.KenshiAffixes;
 
 /// <summary>
-/// Port of Kenshi Affixes (workshop 3821983877, GPL-3.0-or-later; rebuilt from its description): persistent random affixes on melee weapons and
-/// armour, by item level; stat affixes work while the gear is equipped, weapon affixes raise its damage, armour resistance affixes its protection;
-/// the item tooltip lists an item's affixes and "Show affixes" a character's.
+/// Port of Kenshi Affixes (workshop 3821983877, GPL-3.0-or-later): persistent random affixes on melee weapons and armour by item level (NPC gear,
+/// shop stock), authored ones on unique NPCs and Meitou weapons; stat affixes work while the gear is equipped, weapon affixes raise its damage,
+/// rare ones give critical hits and stun leech, armour resistance affixes raise its protection; the item tooltip lists an item's affixes.
 /// </summary>
 public sealed class KenshiAffixesMod : IMod
 {
@@ -17,21 +17,31 @@ public sealed class KenshiAffixesMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        context.AddSystem("affixes", _ => new AffixSystem(Settings, context.RngPurpose), SystemAnchor.End);
+        var profiles = Profiles.Load(context);
+        context.AddSystem("affixes", build => new AffixSystem(Settings, context.RngPurpose, build.Data.Combat, profiles), SystemAnchor.End);
         context.AddUi(new AffixMenu());
         context.AddUi(new AffixTooltip());
         context.Log("Kenshi Affixes initialized");
     }
 }
 
+/// <summary>The original's KenshiAffixes.ini keys that apply here, with its defaults.</summary>
 public sealed class AffixSettings
 {
     [Setting("Enable Kenshi Affixes", Hint = "Roll and apply affixes on weapons and armour.")]
     public bool Enabled { get; set; } = true;
 
-    [Setting("Affix chance", Hint = "Scales how often gear rolls affixes (at item level 100 the first one rolls with this chance).", Min = 0, Max = 1.5,
-        Step = 0.05)]
-    public float AffixChance { get; set; } = 0.9f;
+    [Setting("NPC gear", Hint = "Roll affixes on the gear NPCs wear (AutoNPC).")]
+    public bool AutoNpc { get; set; } = true;
+
+    [Setting("Shop stock", Hint = "Roll affixes on the gear shops sell (AutoShops).")]
+    public bool AutoShops { get; set; } = true;
+
+    [Setting("Shop base level", Hint = "Item level of the lowest quality band's shop stock (ShopBaseLevel).", Min = 1, Max = 100)]
+    public int ShopBaseLevel { get; set; } = 12;
+
+    [Setting("Shop level per band", Hint = "Item levels added per quality band (ShopLevelPerBand).", Min = 0, Max = 20)]
+    public int ShopLevelPerBand { get; set; } = 16;
 }
 
 /// <summary>The "Show affixes" row on any living character the player can see.</summary>
@@ -50,7 +60,10 @@ sealed class AffixMenu : IUiExtension
     }
 }
 
-/// <summary>The item tooltip's lines on rolled gear: its item level, then one line per affix.</summary>
+/// <summary>
+/// The original's tooltip block on rolled gear: "Affixes [FIXED] iLvl 50 / T3" (the tier (iLvl - 1) / 20 + 1), "No affixes (rolled once)" for an
+/// empty roll, then each affix with its effect.
+/// </summary>
 sealed class AffixTooltip : IUiExtension
 {
     public string Id => "dxseba.kenshiaffixes.tooltip";
@@ -59,12 +72,15 @@ sealed class AffixTooltip : IUiExtension
 
     static IEnumerable<UiItemTooltipLine> Lines(UiItemTooltipContext item)
     {
-        if (!KenshiAffixesMod.Settings.Enabled || Affixes.LevelIn(item.ModTag) is not { } level) return [];
+        if (!KenshiAffixesMod.Settings.Enabled || AffixTag.Level(item.ModTag) is not { } level) return [];
 
-        var affixes = Affixes.In(item.ModTag);
-        var lines = new List<UiItemTooltipLine> { new("Item level", level.ToString(CultureInfo.InvariantCulture)) };
-        if (affixes.Count == 0) lines.Add(new("No affixes"));
-        lines.AddRange(affixes.Select(a => new UiItemTooltipLine(a.Text)));
+        string flag = AffixTag.Profile(item.ModTag) is null ? "" : "[FIXED] ";
+        string tier = string.Create(CultureInfo.InvariantCulture, $"iLvl {level} / T{(level - 1) / 20 + 1}");
+        var lines = new List<UiItemTooltipLine> { new("Affixes " + flag + tier) };
+
+        var affixes = AffixTag.Read(item.ModTag);
+        if (affixes.Count == 0) lines.Add(new("No affixes (rolled once)"));
+        lines.AddRange(affixes.Select(a => new UiItemTooltipLine(a.Text, a.Kind.Effect)));
         return lines;
     }
 }
