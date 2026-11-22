@@ -1,38 +1,92 @@
 using Meitou.Data.Ui;
 using Meitou.Game.Ui;
 using Meitou.Modding;
-using Meitou.Simulation;
-using Meitou.Simulation.Ai;
 
 namespace Meitou.SquadAutonomy;
 
 /// <summary>
-/// The Squad Autonomy window (AUT): one player squad at a time; its autonomy switch, home, work and rest packages and work hours, and a paged
-/// package picker. The view comes from the running system; every change goes out as a command.
+/// The Squad Autonomy window (AUT): one player squad at a time, with the original's options: Enable Autonomy, the home building, the AI packages
+/// with priorities (Add AI Package, Clear AI Packages, a searchable picker) and the work hours; this port's off-work package. The view comes
+/// from the running system; every change goes out as a command.
 /// </summary>
 sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExtension
 {
-    enum Pick { None, Work, Rest }
+    /// <summary>
+    /// What the picker is choosing for.
+    /// </summary>
+    enum Pick { None, Add, Rest }
 
+    /// <summary>
+    /// The window's width and a line's height.
+    /// </summary>
     const float Width = 640, Line = 22;
+
+    /// <summary>
+    /// Packages per picker page.
+    /// </summary>
     const int PageSize = 14;
 
-    readonly record struct Styles(string Panel, string Text, string Dim, string Button, string Selected);
+    /// <summary>
+    /// The original's priority slider's range.
+    /// </summary>
+    const int MaxPriority = 5;
 
+    /// <summary>
+    /// The registered style keys.
+    /// </summary>
+    readonly record struct Styles(string Panel, string Text, string Dim, string Button, string Selected, string Box);
+
+    /// <summary>
+    /// The click handlers of this frame's buttons, by argument.
+    /// </summary>
     readonly Dictionary<string, Action> _clicks = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The styles.
+    /// </summary>
     Styles _styles;
-    string _click = "";
+
+    /// <summary>
+    /// The click and search actions.
+    /// </summary>
+    string _click = "", _searchAction = "";
+
+    /// <summary>
+    /// Whether the window is open.
+    /// </summary>
     bool _open;
+
+    /// <summary>
+    /// The shown squad's index and the picker's page.
+    /// </summary>
     int _squad, _page;
+
+    /// <summary>
+    /// The priority the next added package takes (the original's slider).
+    /// </summary>
+    int _priority;
+
+    /// <summary>
+    /// What the picker chooses for.
+    /// </summary>
     Pick _pick;
+
+    /// <summary>
+    /// Whether the picker lists every package (this port's) rather than the listed ones.
+    /// </summary>
     bool _all;
+
+    /// <summary>
+    /// The picker's search text.
+    /// </summary>
+    string _search = "";
 
     public string Id => "dxseba.squadautonomy.ui";
 
     public void Register(UiRegistration registration)
     {
         var ink = new System.Numerics.Vector4(.91f, .86f, .74f, 1);
-        var pad = new Meitou.Data.Ui.UiInsets(6, 1, 6, 1);
+        var pad = new UiInsets(6, 1, 6, 1);
         _styles = new(
             registration.RegisterStyle("panel", new() { Background = new(.10f, .085f, .07f, .95f), Text = ink }),
             registration.RegisterStyle("text", new() { Text = ink, TextPadding = pad }),
@@ -41,16 +95,26 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
             {
                 Background = new(.20f, .15f, .11f, .95f), Hover = new(.32f, .22f, .16f, 1), Disabled = new(.14f, .12f, .10f, .8f), TextPadding = pad,
             }),
-            registration.RegisterStyle("selected", new() { Background = new(.45f, .32f, .14f, 1), Hover = new(.55f, .40f, .18f, 1), TextPadding = pad }));
-        _click = registration.RegisterAction("click", c =>
-        {
-            if (_clicks.TryGetValue(c.Argument, out var action)) action();
-        });
+            registration.RegisterStyle("selected", new() { Background = new(.45f, .32f, .14f, 1), Hover = new(.55f, .40f, .18f, 1), TextPadding = pad }),
+            registration.RegisterStyle("box", new() { Background = new(.06f, .05f, .04f, 1), Text = ink, TextPadding = pad }));
+        _click = registration.RegisterAction("click", OnClick);
+        _searchAction = registration.RegisterAction("search", c => (_search, _page) = (c.Text, 0));
         registration.Contribute(UiSlots.Overlay, Build, order: 59);
+    }
+
+    /// <summary>
+    /// Runs the clicked button's handler.
+    /// </summary>
+    void OnClick(UiActionContext c)
+    {
+        if (_clicks.TryGetValue(c.Argument, out var action)) action();
     }
 
     #region Layout
 
+    /// <summary>
+    /// The AUT button and, while open, the window.
+    /// </summary>
     UiNode Build(UiFrameContext frame)
     {
         _clicks.Clear();
@@ -69,10 +133,13 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         return root;
     }
 
+    /// <summary>
+    /// The window: the header, then the options or the picker.
+    /// </summary>
     UiNode Window(UiRect viewport, AutonomyView view)
     {
         var lines = new List<UiNode>();
-        if (view.Squads.Count == 0) lines.Add(Text("aut-none", "No squads.", _styles.Dim));
+        if (view.Squads.Count == 0) lines.Add(Text("aut-none", "No squad selected/invalid squad", _styles.Dim));
         else
         {
             _squad = (_squad % view.Squads.Count + view.Squads.Count) % view.Squads.Count;
@@ -90,6 +157,9 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         return window;
     }
 
+    /// <summary>
+    /// The title, the squad pager and Close.
+    /// </summary>
     UiNode Header(SquadRow squad, int count)
     {
         var row = Row("aut-header");
@@ -101,55 +171,104 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         return row;
     }
 
+    /// <summary>
+    /// The squad's options.
+    /// </summary>
     List<UiNode> Details(SquadRow squad, AutonomyView view)
     {
-        var plan = squad.Plan ?? new(squad.Name, null, null, 8, 20);
-        var lines = new List<UiNode>();
+        var plan = squad.Plan ?? Plan.Default(squad.Name);
+        var lines = new List<UiNode> { EnableLine(squad), HomeLine(squad, view) };
+        lines.AddRange(PackageLines(plan));
+        lines.Add(PriorityLine(squad, plan));
+        lines.Add(HourLine(squad, plan, "start", "Start Work Time", plan.StartHour, h => plan with { StartHour = h }, $"Now {view.Hour:00}:00"));
+        lines.Add(HourLine(squad, plan, "end", "End Work Time", plan.EndHour, h => plan with { EndHour = h }, ""));
+        lines.Add(RestLine(plan));
 
-        var on = Row("aut-on");
-        on.Children.Add(Label("aut-on-l", "Autonomy", 120, _styles.Dim));
-        on.Children.Add(Button("switch", squad.Autonomous ? "On" : "Off", 60, () => Switch(squad), selected: squad.Autonomous));
-        on.Children.Add(Label("aut-pkg", "Running: " + packages.NameOf(squad.Package), Width - 12 - 120 - 60 - 8, _styles.Text));
-        lines.Add(on);
-
-        var home = Row("aut-home");
-        home.Children.Add(Label("aut-home-l", "Home", 120, _styles.Dim));
-        home.Children.Add(Label("aut-home-v", squad.Home, 220, _styles.Text));
-        home.Children.Add(Button("home.set", view.Inspected is { } b ? "Set: " + b : "Select a building", 200,
-            () => Home(squad, false), view.Inspected is not null));
-        home.Children.Add(Button("home.clear", "Clear", 70, () => Home(squad, true), squad.Home != "None"));
-        lines.Add(home);
-
-        lines.Add(PackageLine("work", "Work package", plan.Work, Pick.Work));
-        lines.Add(PackageLine("rest", "Rest package", plan.Rest, Pick.Rest));
-        lines.Add(HoursLine(squad, plan, view.Hour));
-
-        string hint = !squad.Autonomous ? "Switch autonomy on to let the AI run this squad." : plan.Work is null ? "Pick a work package." : "";
+        string hint = !squad.Autonomous ? "Enable Autonomy to let the AI run this squad." : plan.Packages.Count == 0 ? "Add an AI package." : "";
         if (hint != "") lines.Add(Text("aut-hint", hint, _styles.Dim));
         return lines;
     }
 
-    UiNode PackageLine(string key, string title, string? id, Pick pick)
+    /// <summary>
+    /// Enable Autonomy and the running package.
+    /// </summary>
+    UiNode EnableLine(SquadRow squad)
     {
-        var row = Row("aut-" + key);
-        row.Children.Add(Label($"aut-{key}-l", title, 120, _styles.Dim));
-        row.Children.Add(Label($"aut-{key}-v", packages.NameOf(id), 380, _styles.Text));
-        row.Children.Add(Button(key + ".pick", "Choose", 90, () => (_pick, _page) = (pick, 0)));
+        var row = Row("aut-on");
+        row.Children.Add(Label("aut-on-l", "Enable Autonomy", 140, _styles.Dim));
+        row.Children.Add(Button("switch", squad.Autonomous ? "On" : "Off", 60, () => Switch(squad), selected: squad.Autonomous));
+        row.Children.Add(Label("aut-pkg", "Running: " + packages.NameOf(squad.Package), Width - 12 - 140 - 60 - 8, _styles.Text));
         return row;
     }
 
-    UiNode HoursLine(SquadRow squad, Plan plan, int hour)
+    /// <summary>
+    /// Home:, Set Squad Home Building and Clear Buildings.
+    /// </summary>
+    UiNode HomeLine(SquadRow squad, AutonomyView view)
     {
-        var row = Row("aut-hours");
-        row.Children.Add(Label("aut-hours-l", "Work hours", 120, _styles.Dim));
-        row.Children.Add(Button("start.down", "-", 24, () => Save(squad, plan with { StartHour = (plan.StartHour + 23) % 24 })));
-        row.Children.Add(Label("aut-start", $"{plan.StartHour:00}:00", 60, _styles.Text));
-        row.Children.Add(Button("start.up", "+", 24, () => Save(squad, plan with { StartHour = (plan.StartHour + 1) % 24 })));
-        row.Children.Add(Label("aut-to", "to", 30, _styles.Dim));
-        row.Children.Add(Button("end.down", "-", 24, () => Save(squad, plan with { EndHour = (plan.EndHour + 23) % 24 })));
-        row.Children.Add(Label("aut-end", $"{plan.EndHour:00}:00", 60, _styles.Text));
-        row.Children.Add(Button("end.up", "+", 24, () => Save(squad, plan with { EndHour = (plan.EndHour + 1) % 24 })));
-        row.Children.Add(Label("aut-now", $"Now {hour:00}:00", 100, _styles.Dim));
+        var row = Row("aut-home");
+        row.Children.Add(Label("aut-home-l", "Home:", 60, _styles.Dim));
+        row.Children.Add(Label("aut-home-v", squad.Home, 210, _styles.Text));
+        string set = view.Inspected is { } b ? "Set Squad Home Building: " + b : "Set Squad Home Building";
+        row.Children.Add(Button("home.set", set, 230, () => Home(squad, false)));
+        row.Children.Add(Button("home.clear", "Clear Buildings", 110, () => Home(squad, true), squad.Home != "None"));
+        return row;
+    }
+
+    /// <summary>
+    /// The plan's packages, highest priority first.
+    /// </summary>
+    IEnumerable<UiNode> PackageLines(Plan plan)
+    {
+        if (plan.Packages.Count == 0)
+        {
+            yield return Text("aut-pk-none", "AI package: None", _styles.Text);
+            yield break;
+        }
+
+        int i = 0;
+        foreach (var p in plan.Packages.OrderByDescending(p => p.Priority))
+            yield return Text($"aut-pk-{i++}", $"AI package: {packages.NameOf(p.Id)} (priority {p.Priority})", _styles.Text);
+    }
+
+    /// <summary>
+    /// Priority, Add AI Package and Clear AI Packages.
+    /// </summary>
+    UiNode PriorityLine(SquadRow squad, Plan plan)
+    {
+        var row = Row("aut-priority");
+        row.Children.Add(Label("aut-priority-l", "Priority", 140, _styles.Dim));
+        row.Children.Add(Button("priority.down", "-", 24, () => _priority = Math.Max(0, _priority - 1), _priority > 0));
+        row.Children.Add(Label("aut-priority-v", _priority.ToString(System.Globalization.CultureInfo.InvariantCulture), 30, _styles.Text));
+        row.Children.Add(Button("priority.up", "+", 24, () => _priority = Math.Min(MaxPriority, _priority + 1), _priority < MaxPriority));
+        row.Children.Add(Button("add", "Add AI Package", 140, () => (_pick, _page, _search) = (Pick.Add, 0, "")));
+        row.Children.Add(Button("clear", "Clear AI Packages", 150, () => Save(squad, plan with { Packages = [] }), plan.Packages.Count > 0));
+        return row;
+    }
+
+    /// <summary>
+    /// A work-hours slider (0-24) as - and + buttons.
+    /// </summary>
+    UiNode HourLine(SquadRow squad, Plan plan, string key, string title, int value, Func<int, Plan> with, string note)
+    {
+        var row = Row("aut-" + key);
+        row.Children.Add(Label($"aut-{key}-l", title, 140, _styles.Dim));
+        row.Children.Add(Button(key + ".down", "-", 24, () => Save(squad, with(value - 1)), value > 0));
+        row.Children.Add(Label($"aut-{key}-v", $"{value:00}:00", 60, _styles.Text));
+        row.Children.Add(Button(key + ".up", "+", 24, () => Save(squad, with(value + 1)), value < 24));
+        row.Children.Add(Label($"aut-{key}-n", note, 120, _styles.Dim));
+        return row;
+    }
+
+    /// <summary>
+    /// This port's off-work package.
+    /// </summary>
+    UiNode RestLine(Plan plan)
+    {
+        var row = Row("aut-rest");
+        row.Children.Add(Label("aut-rest-l", "Off-work package", 140, _styles.Dim));
+        row.Children.Add(Label("aut-rest-v", packages.NameOf(plan.Rest), 360, _styles.Text));
+        row.Children.Add(Button("rest.pick", "Choose", 90, () => (_pick, _page, _search) = (Pick.Rest, 0, "")));
         return row;
     }
 
@@ -157,23 +276,17 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
 
     #region Picker
 
+    /// <summary>
+    /// The package picker: Listed or All, a search box, pages of packages.
+    /// </summary>
     List<UiNode> Picker(SquadRow squad)
     {
-        var list = _all || packages.Featured.Count == 0 ? packages.All : packages.Featured;
+        var source = _all || packages.Featured.Count == 0 ? packages.All : packages.Featured;
+        var list = source.Where(p => _search == "" || p.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
         _page = Math.Clamp(_page, 0, Math.Max(0, (list.Count - 1) / PageSize));
-        var plan = squad.Plan ?? new(squad.Name, null, null, 8, 20);
+        var plan = squad.Plan ?? Plan.Default(squad.Name);
 
-        var bar = Row("aut-pickbar");
-        bar.Children.Add(Label("aut-pick-l", _pick == Pick.Work ? "Work package" : "Rest package", 120, _styles.Dim));
-        bar.Children.Add(Button("list.featured", "Listed", 70, () => (_all, _page) = (false, 0), packages.Featured.Count > 0, !_all));
-        bar.Children.Add(Button("list.all", "All", 50, () => (_all, _page) = (true, 0), selected: _all));
-        bar.Children.Add(Button("page.prev", "<", 28, () => _page--, _page > 0));
-        bar.Children.Add(Label("aut-page", $"{_page + 1}/{(list.Count + PageSize - 1) / PageSize}", 60, _styles.Text));
-        bar.Children.Add(Button("page.next", ">", 28, () => _page++, (_page + 1) * PageSize < list.Count));
-        bar.Children.Add(Button("pick.none", "None", 60, () => Choose(squad, plan, null)));
-        bar.Children.Add(Button("pick.back", "Back", 60, () => _pick = Pick.None));
-
-        var lines = new List<UiNode> { bar };
+        var lines = new List<UiNode> { PickerBar(squad, plan, list.Count), SearchLine() };
         foreach (var (entry, i) in list.Skip(_page * PageSize).Take(PageSize).Select((e, i) => (e, i)))
         {
             var row = Row($"aut-p{i}");
@@ -184,9 +297,46 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         return lines;
     }
 
+    /// <summary>
+    /// The picker's title, list switch, pager, None (off-work only) and Back.
+    /// </summary>
+    UiNode PickerBar(SquadRow squad, Plan plan, int count)
+    {
+        var bar = Row("aut-pickbar");
+        string title = _pick == Pick.Add ? $"AI package (priority {_priority})" : "Off-work package";
+        bar.Children.Add(Label("aut-pick-l", title, 170, _styles.Dim));
+        bar.Children.Add(Button("list.featured", "Listed", 70, () => (_all, _page) = (false, 0), packages.Featured.Count > 0, !_all));
+        bar.Children.Add(Button("list.all", "All", 50, () => (_all, _page) = (true, 0), selected: _all));
+        bar.Children.Add(Button("page.prev", "<", 28, () => _page--, _page > 0));
+        bar.Children.Add(Label("aut-page", $"{_page + 1}/{Math.Max(1, (count + PageSize - 1) / PageSize)}", 60, _styles.Text));
+        bar.Children.Add(Button("page.next", ">", 28, () => _page++, (_page + 1) * PageSize < count));
+        if (_pick == Pick.Rest) bar.Children.Add(Button("pick.none", "None", 60, () => Choose(squad, plan, null)));
+        bar.Children.Add(Button("pick.back", "Back", 60, () => _pick = Pick.None));
+        return bar;
+    }
+
+    /// <summary>
+    /// The original's Search box.
+    /// </summary>
+    UiNode SearchLine()
+    {
+        var row = Row("aut-search");
+        row.Children.Add(Label("aut-search-l", "Search", 70, _styles.Dim));
+        row.Children.Add(new("aut-search-box", UiNodeKind.TextBox)
+        {
+            Placement = new(300, Line), Text = _search, Action = _searchAction, Style = _styles.Box, MaxLength = 64,
+        });
+        return row;
+    }
+
+    /// <summary>
+    /// Adds the package at the chosen priority, or sets the off-work package.
+    /// </summary>
     void Choose(SquadRow squad, Plan plan, string? id)
     {
-        Save(squad, _pick == Pick.Work ? plan with { Work = id } : plan with { Rest = id });
+        if (_pick == Pick.Add && id is not null) Save(squad, plan with { Packages = [.. plan.Packages, new PlannedPackage(id, _priority)] });
+        else if (_pick == Pick.Rest) Save(squad, plan with { Rest = id });
+
         _pick = Pick.None;
     }
 
@@ -194,25 +344,46 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
 
     #region Commands
 
-    void Switch(SquadRow squad) => context.Enqueue(new SetSquadAutonomy(squad.Id, !squad.Autonomous, Owner: context.Id) { Tick = context.Tick });
+    /// <summary>
+    /// Enable Autonomy's switch.
+    /// </summary>
+    void Switch(SquadRow squad) => context.Enqueue(new AutonomySwitchOrder(squad.Id, !squad.Autonomous) { Tick = context.Tick });
 
+    /// <summary>
+    /// Sends the squad's plan.
+    /// </summary>
     void Save(SquadRow squad, Plan plan) =>
-        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Work, plan.Rest, plan.StartHour, plan.EndHour) { Tick = context.Tick });
+        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Packages, plan.Rest, plan.StartHour, plan.EndHour) { Tick = context.Tick });
 
+    /// <summary>
+    /// Sets or clears the home.
+    /// </summary>
     void Home(SquadRow squad, bool clear) => context.Enqueue(new SquadHomeOrder(squad.Id, clear) { Tick = context.Tick });
 
     #endregion
 
     #region Nodes
 
+    /// <summary>
+    /// A row of nodes.
+    /// </summary>
     static UiNode Row(string id) => new(id) { Placement = new(UiLength.Fill, Line), Flow = UiFlow.Row, Gap = 4, Pickable = false };
 
+    /// <summary>
+    /// A label of a width.
+    /// </summary>
     static UiNode Label(string id, string text, float width, string style) =>
         new(id, UiNodeKind.Label) { Placement = new(width, Line), Text = text, Style = style };
 
+    /// <summary>
+    /// A full-width label.
+    /// </summary>
     static UiNode Text(string id, string text, string style) =>
         new(id, UiNodeKind.Label) { Placement = new(UiLength.Fill, Line), Text = text, Style = style };
 
+    /// <summary>
+    /// A button whose click runs <paramref name="onClick"/>.
+    /// </summary>
     UiNode Button(string key, string text, float width, Action onClick, bool enabled = true, bool selected = false)
     {
         _clicks[key] = onClick;
