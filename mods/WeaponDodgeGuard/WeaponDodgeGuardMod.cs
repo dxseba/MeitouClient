@@ -1,18 +1,12 @@
-using System.Reflection;
-using HarmonyLib;
-using Meitou.Data.Gameplay.Bodies;
-using Meitou.Data.Gameplay.Combat;
 using Meitou.Modding;
 using Meitou.Simulation;
-using Meitou.Simulation.Bodies;
-using Meitou.Simulation.Combat;
 
 namespace Meitou.WeaponDodgeGuard;
 
 /// <summary>
-/// Port of Weapon Dodge &amp; Guard (Tata-Gari, workshop 3767056805, GPLv3; rebuilt from its description): a fighter holding a weapon that blocks may
-/// dodge first, with the unarmed dodge chance (the game's own formula), then guard as usual. A postfix on the engine's defence choice
-/// (<c>CombatSystem.ChooseDefence</c>) replaces its pick with a dodge technique of the weapon's category, else the unarmed dodge back.
+/// Port of Weapon Dodge &amp; Guard (Tata-Gari, workshop 3767056805, GPLv3): a fighter holding a weapon that blocks may dodge first, with the
+/// unarmed dodge chance (the game's own formula) scaled and clamped, then guard as usual. A postfix on the engine's defence choice
+/// (<c>CombatSystem.ChooseDefence</c>, the original's <c>CharStats::chooseBlock</c> hook) replaces its standing block with a dodge technique.
 /// </summary>
 public sealed class WeaponDodgeGuardMod : IMod
 {
@@ -23,86 +17,120 @@ public sealed class WeaponDodgeGuardMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
+        ReadLists(Path.Combine(context.Folder, "WeaponDodgeGuard.ini"));
         Purpose = context.RngPurpose;
         DodgeHook.Install(context);
         context.Log("Weapon Dodge & Guard initialized");
     }
+
+    /// <summary>
+    /// The <c>[Animations]</c> lists of an ini in the original's format, when the user puts one in the mod's folder.
+    /// </summary>
+    static void ReadLists(string path)
+    {
+        if (!File.Exists(path)) return;
+
+        string section = "";
+        foreach (var raw in File.ReadLines(path))
+        {
+            string line = raw.Trim();
+            if (line.StartsWith('[') && line.EndsWith(']')) section = line[1..^1];
+            if (section != "Animations" || line.Split('=', 2) is not [var key, var value]) continue;
+
+            if (key.Trim() == "AllowedAnimations") Settings.Allowed = value.Trim();
+            if (key.Trim() == "BlockedAnimations") Settings.Blocked = value.Trim();
+        }
+    }
 }
 
+/// <summary>
+/// The original's <c>[Animations] AnimationMode</c>.
+/// </summary>
+public enum AnimationMode
+{
+    /// <summary>
+    /// 0: only the vanilla dodge back.
+    /// </summary>
+    VanillaOnly,
+
+    /// <summary>
+    /// 1: every standing dodge technique (the allow and block lists apply), else the dodge back.
+    /// </summary>
+    Compatible,
+
+    /// <summary>
+    /// 2: only the standing dodges named in Allowed animations.
+    /// </summary>
+    CustomAllowList,
+}
+
+/// <summary>
+/// The original's <c>WeaponDodgeGuard.ini</c> (v1.2.0-rc1) keys and shipped defaults.
+/// </summary>
 public sealed class DodgeSettings
 {
-    [Setting("Enable weapon dodge", Hint = "Armed fighters may dodge before they guard.")]
+    /// <summary>
+    /// <c>[General] Mode</c> 1 (0 observes only).
+    /// </summary>
+    [Setting("Enable weapon dodge", Hint = "Armed fighters may dodge before they guard (Mode=1).")]
     public bool Enabled { get; set; } = true;
 
-    [Setting("Adaptive priority", Hint = "On: a fighter dodges first only while its dodge chance is at least its guard chance (AdaptivePriority=1).")]
+    /// <summary>
+    /// <c>[Dodge] ChanceScale</c>, 1.0.
+    /// </summary>
+    [Setting("Chance scale", Hint = "Times the vanilla dodge chance (ChanceScale).", Min = 0, Max = 5, Step = 0.05)]
+    public float ChanceScale { get; set; } = 1;
+
+    /// <summary>
+    /// <c>[Dodge] MinimumChance</c>, 0.
+    /// </summary>
+    [Setting("Minimum chance", Hint = "The scaled dodge chance is at least this, in per cent (MinimumChance).", Min = 0, Max = 100, Step = 1)]
+    public float MinimumChance { get; set; }
+
+    /// <summary>
+    /// <c>[Dodge] MaximumChance</c>, 95.
+    /// </summary>
+    [Setting("Maximum chance", Hint = "The scaled dodge chance is at most this, in per cent (MaximumChance).", Min = 0, Max = 100, Step = 1)]
+    public float MaximumChance { get; set; } = 95;
+
+    /// <summary>
+    /// <c>[Priority] AdaptivePriority</c>, 0.
+    /// </summary>
+    [Setting("Adaptive priority", Hint = "On: a fighter dodges first only while its effective dodge is at least its effective melee defence.")]
     public bool Adaptive { get; set; }
 
-    [Setting("Dodge back fallback", Hint = "A weapon category with no dodge techniques of its own uses the unarmed dodges.")]
-    public bool Fallback { get; set; } = true;
-}
+    /// <summary>
+    /// <c>[Restrictions] AllowInDefensiveMode</c>, 1.
+    /// </summary>
+    [Setting("Allow in defensive mode", Hint = "Off: a fighter in defensive (Block) mode only guards.")]
+    public bool AllowInDefensiveMode { get; set; } = true;
 
-static class DodgeHook
-{
-    static AccessTools.FieldRef<CombatSystem, CombatConstants>? s_constants;
-    static PropertyInfo? s_attacker;
+    /// <summary>
+    /// <c>[Restrictions] RequireNormalProneState</c>, 1.
+    /// </summary>
+    [Setting("Require standing", Hint = "On: only a fighter standing normally (not staying low or crawling) dodges.")]
+    public bool RequireStanding { get; set; } = true;
 
-    public static void Install(ModContext context)
-    {
-        var choose = AccessTools.Method(typeof(CombatSystem), "ChooseDefence")
-            ?? throw new MissingMethodException(nameof(CombatSystem), "ChooseDefence");
-        s_constants = AccessTools.FieldRefAccess<CombatSystem, CombatConstants>("_combat");
-        var blow = AccessTools.Inner(typeof(CombatSystem), "IncomingBlow") ?? throw new TypeLoadException("CombatSystem.IncomingBlow");
-        s_attacker = AccessTools.Property(blow, "Attacker") ?? throw new MissingMemberException(blow.FullName, "Attacker");
-        context.Harmony.Patch(choose, postfix: new HarmonyMethod(typeof(DodgeHook), nameof(AfterChoose)));
-    }
+    /// <summary>
+    /// <c>[Restrictions] DodgeCooldownMs</c>, 0; in game time here.
+    /// </summary>
+    [Setting("Dodge cooldown (ms)", Hint = "Game milliseconds after a weapon dodge before the next may come (0: none).", Min = 0, Max = 10000, Step = 50)]
+    public int CooldownMs { get; set; }
 
-    #pragma warning disable IDE1006 // Harmony binds __instance / __args / __result by name
-    static void AfterChoose(
-        CombatSystem __instance, World world, CharacterCold cold, ulong key, int now, bool stumbling, object[] __args, ref int __result)
-    #pragma warning restore IDE1006
-    {
-        if (!WeaponDodgeGuardMod.Settings.Enabled || stumbling) return;
-        if (cold.Fighter is not { CanBlock: true } fighter || cold.Medical is not { } medical) return;
-        if (s_attacker?.GetValue(__args[5]) is not int attackerSlot || world.Characters.Cold(attackerSlot) is not { } attacker) return;
+    /// <summary>
+    /// <c>[Animations] AnimationMode</c>, 1 (Compatible).
+    /// </summary>
+    [Setting("Animation mode", Hint = "VanillaOnly: the dodge back; Compatible: any standing dodge technique; CustomAllowList: only the allowed ones.")]
+    public AnimationMode Animations { get; set; } = AnimationMode.Compatible;
 
-        float chance = DodgeChance(__instance, cold, fighter, medical, attacker);
-        if (WeaponDodgeGuardMod.Settings.Adaptive && chance < GuardChance(__instance, cold, fighter, attacker)) return;
+    /// <summary>
+    /// <c>[Animations] AllowedAnimations</c>: comma-separated technique names, read from <c>WeaponDodgeGuard.ini</c> in the mod's folder (text is not
+    /// a mod setting).
+    /// </summary>
+    public string Allowed { get; set; } = "";
 
-        ulong roll = Rng.Hash(world.Seed, key, WeaponDodgeGuardMod.Purpose, (ulong)(uint)now);
-        if (Rng.Float(roll) * 100 >= chance) return;
-
-        if (Dodge(__instance, fighter, medical.Prone, Rng.Float(Rng.Mix(roll))) is { } pick) __result = pick;
-    }
-
-    /// <summary>The unarmed dodge chance against the attacker's skill (the engine's, with the defender's martial arts).</summary>
-    static float DodgeChance(CombatSystem combat, CharacterCold cold, Fighter fighter, MedicalState medical, CharacterCold attacker)
-    {
-        float martialArts = Stat(cold, StatsEnumerated.MartialArts);
-        float effective = DefenceFormulas.EffectiveDefence(martialArts, fighter.EncumbranceFactor, Speed.LegFactor(medical), fighter.DefenceBonus,
-            fighter.Guarding);
-        return DefenceFormulas.BlockChance(effective, AttackSkill(attacker), s_constants!(combat), 0, 95);
-    }
-
-    static float GuardChance(CombatSystem combat, CharacterCold cold, Fighter fighter, CharacterCold attacker)
-    {
-        float defence = DefenceFormulas.Defence(cold.Stats?[StatsEnumerated.MeleeDefence] ?? 0, fighter.Weapon!.Stats.DefenceMod, true,
-            fighter.DefenceBonus, fighter.Guarding);
-        return DefenceFormulas.BlockChance(defence, AttackSkill(attacker), s_constants!(combat));
-    }
-
-    static float AttackSkill(CharacterCold attacker) => attacker.Fighter is { } f ? Stat(attacker, f.WeaponSkill) : 0;
-
-    static float Stat(CharacterCold c, StatsEnumerated stat) =>
-        c.Stats is { } s && c.Medical is { } m ? s[stat] * s.Scale * m.StatMultiplier(stat) : 0;
-
-    /// <summary>A dodge technique of the weapon's category, else (with the fallback) an unarmed one; null when there is none.</summary>
-    static int? Dodge(CombatSystem combat, Fighter fighter, bool prone, float pick)
-    {
-        int own = TechniqueChooser.ChooseReaction(combat.Techniques, fighter.TechniqueCategory, prone, false, 0, 0, 100, 0, pick);
-        if (own >= 0) return own;
-        if (!WeaponDodgeGuardMod.Settings.Fallback) return null;
-
-        int unarmed = TechniqueChooser.ChooseReaction(combat.Techniques, (int)WeaponCategory.Unarmed, prone, false, 0, 0, 100, 0, pick);
-        return unarmed >= 0 ? unarmed : null;
-    }
+    /// <summary>
+    /// <c>[Animations] BlockedAnimations</c>, read as <see cref="Allowed"/>.
+    /// </summary>
+    public string Blocked { get; set; } = "";
 }
