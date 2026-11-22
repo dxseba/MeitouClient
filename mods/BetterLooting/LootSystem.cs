@@ -6,8 +6,11 @@ using Meitou.Simulation.Trading;
 
 namespace Meitou.BetterLooting;
 
-/// <summary>An Insert press: the character whose inventory window was open, and Alt (store instead of loot).</summary>
-public sealed record LootRequest(CharacterId Lead, bool Deposit);
+/// <summary>
+/// A loot key press: the character whose inventory window was open, Alt (store instead of loot) and the "Always take these items" list read
+/// from <c>BetterLooting.ini</c> at the press.
+/// </summary>
+public sealed record LootRequest(CharacterId Lead, bool Deposit, RequiredItems Required);
 
 /// <summary>An item that passed the rules: where it is, its value per unit and weight per unit.</summary>
 readonly record struct LootCandidate(ItemInstance Item, Inventory Owner, int Value, float Weight);
@@ -22,12 +25,18 @@ sealed partial class LootSystem(PopulationData data) : ITickSystem
 
     static LootSettings Settings => BetterLootingMod.Settings;
 
+    /// <summary>
+    /// The list of the request being run.
+    /// </summary>
+    RequiredItems _required = RequiredItems.None;
+
     public void Run(World world, LootRequest request)
     {
         var table = world.Characters;
         if (!Settings.Enabled || !table.TryResolveNext(request.Lead, out int lead)) return;
         if (table.Cold(lead) is not { IsPlayer: true, Inventory: not null, Medical: not { Unconscious: true } and not { Dead: true } } cold) return;
 
+        _required = request.Required;
         if (request.Deposit) Deposit(world, lead, cold);
         else Collect(world, lead, cold);
     }
@@ -41,8 +50,11 @@ sealed partial class LootSystem(PopulationData data) : ITickSystem
 
     bool Passes(World world, ItemInstance item, bool stolen) => Passes(item, stolen, ValueOf(world, item));
 
-    bool Passes(ItemInstance item, bool stolen, int value) =>
-        LootRules.Decide(Settings, LootRules.CategoryOf(item, data.Db), stolen, value, item.UnitWeight) == LootDecision.Loot;
+    bool Passes(ItemInstance item, bool stolen, int value)
+    {
+        bool required = _required.Matches(item, data.Db);
+        return LootRules.Decide(Settings, LootRules.CategoryOf(item, data.Db), stolen, value, item.UnitWeight, required) == LootDecision.Loot;
+    }
 
     /// <summary>The item's base value per unit at its level (<c>Market.BaseValue</c>, the inventory tooltip's Value), 0 without a market.</summary>
     static int ValueOf(World world, ItemInstance item) => world.Systems.OfType<TradeSystem>().FirstOrDefault()?.Market(world).BaseValue(item) ?? 0;

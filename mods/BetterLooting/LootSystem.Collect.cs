@@ -32,7 +32,10 @@ sealed partial class LootSystem
         return queued > 0 ? $"{taken}; {Plural(queued, "ground item")} queued to pick up." : taken + ".";
     }
 
-    /// <summary>Downed or dead non-player characters with items, and with the protection off the player's storage, within the radius.</summary>
+    /// <summary>
+    /// Downed or dead non-player characters with items that no player character carries, and with the protection off the player's storage,
+    /// within the radius.
+    /// </summary>
     List<LootSource> Sources(World world, int lead)
     {
         var table = world.Characters;
@@ -41,8 +44,8 @@ sealed partial class LootSystem
         for (int slot = 0; slot < table.HighWater; slot++)
         {
             if (slot == lead || !table.Next[slot].Alive) continue;
-            if (table.Cold(slot) is not { IsPlayer: false, Inventory: { Items.Count: > 0 } inventory, Medical: { } med }) continue;
-            if (!med.Dead && !med.Unconscious) continue;
+            if (table.Cold(slot) is not { IsPlayer: false, Inventory: { Items.Count: > 0 } inventory, Medical: { } med } cold) continue;
+            if (!med.Dead && !med.Unconscious || CarriedByPlayer(table, cold)) continue;
 
             float distance = Vector3.Distance(table.Next[slot].Position, at);
             if (distance <= Settings.RadiusUnits) list.Add(new(inventory, slot, distance));
@@ -52,6 +55,12 @@ sealed partial class LootSystem
         list.Sort((a, b) => a.Distance.CompareTo(b.Distance));
         return list;
     }
+
+    /// <summary>
+    /// The fork's carried protection: a body (dead or alive) that one of the player's characters carries is never looted.
+    /// </summary>
+    static bool CarriedByPlayer(CharacterTable table, CharacterCold body) =>
+        !body.CarriedBy.IsNone && table.TryResolveNext(body.CarriedBy, out int carrier) && table.Cold(carrier) is { IsPlayer: true };
 
     static void AddStorage(World world, Vector3 at, List<LootSource> list)
     {

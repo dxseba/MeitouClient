@@ -59,11 +59,15 @@ static class LootRules
         _ => LootCategory.Other,
     };
 
-    /// <summary>The rules in the original's order: category, stolen, value per unit, value per kilogram (only above 0.001 kg).</summary>
-    public static LootDecision Decide(LootSettings settings, LootCategory category, bool stolen, int value, float weight)
+    /// <summary>
+    /// The rules in the original's order: category, stolen, value per unit, value per kilogram (only above 0.001 kg). A
+    /// <paramref name="required"/> item (<see cref="RequiredItems"/>) is judged by the stolen rule alone.
+    /// </summary>
+    public static LootDecision Decide(LootSettings settings, LootCategory category, bool stolen, int value, float weight, bool required = false)
     {
-        if (!settings.Allows(category)) return LootDecision.SkipCategory;
+        if (!required && !settings.Allows(category)) return LootDecision.SkipCategory;
         if (stolen && !settings.AllowStolen) return LootDecision.SkipStolen;
+        if (required) return LootDecision.Loot;
         if (value < settings.MinValue) return LootDecision.SkipMinValue;
         if (weight > 0.001f && value / weight < settings.MinValuePerKg) return LootDecision.SkipValuePerKg;
 

@@ -25,8 +25,20 @@ public sealed class BetterLootingMod : IMod
     static FieldInfo? s_sessionField;
     static bool s_insertDown;
 
+    /// <summary>
+    /// The mod's folder, where the original's <c>BetterLooting.ini</c> (the "Always take these items" list) is read at each press.
+    /// </summary>
+    static string s_folder = "";
+
+    /// <summary>
+    /// The mod's log.
+    /// </summary>
+    static Action<string> s_log = _ => { };
+
     public void Initialize(ModContext context)
     {
+        s_folder = context.Folder;
+        s_log = context.Log;
         context.AddSettings(Settings);
         context.AddSystem("looting", build => new LootSystem(build.Data), SystemAnchor.End);
         PatchKeyPoll(context);
@@ -57,12 +69,33 @@ public sealed class BetterLootingMod : IMod
     {
         if (s_sessionField?.GetValue(__instance) is not WorldSession session) return;
 
-        bool down = session.Input.IsHeld(Key.Insert);
+        bool down = session.Input.IsHeld(LootKey);
         bool pressed = down && !s_insertDown;
         s_insertDown = down;
         if (!pressed || !Settings.Enabled) return;
 
-        if (InventoryLead(__instance) is { } lead) Send(session, new LootRequest(lead, AltDown(session, __instance)));
+        if (InventoryLead(__instance) is { } lead) Send(session, new LootRequest(lead, AltDown(session, __instance), Required()));
+    }
+
+    /// <summary>
+    /// The key the Looting key setting names (Insert by default, the original's <c>ActivationVirtualKey</c> 0x2D).
+    /// </summary>
+    static Key LootKey => Enum.TryParse<Key>(Settings.LootingKey, out var key) ? key : Key.Insert;
+
+    /// <summary>
+    /// The "Always take these items" list from <c>BetterLooting.ini</c>, read again at each press as the original applies changes at once.
+    /// </summary>
+    static RequiredItems Required()
+    {
+        try
+        {
+            return RequiredItems.Parse(RequiredItems.ReadIni(s_folder), s_log);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            s_log($"BetterLooting.ini unreadable: {e.Message}");
+            return RequiredItems.None;
+        }
     }
 
     static bool BeforeView(World world, SimCommand command, ref bool __result)

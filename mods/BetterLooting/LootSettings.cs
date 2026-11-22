@@ -8,6 +8,13 @@ public sealed class LootSettings
     [Setting("Better Looting", Hint = "Insert with the inventory open: loot nearby bodies. Alt+Insert: store your items in nearby storage.")]
     public bool Enabled { get; set; } = true;
 
+    [Setting("Looting key", Hint = "Key that collects loot around the selected character; with Alt it deposits.",
+        Options = ["Insert", "Delete", "Home", "End", "PageUp", "PageDown"])]
+    public string LootingKey { get; set; } = "Insert";
+
+    [Setting("Deposit only by looting rules", Hint = "Off: every item that is not worn is put away. On: only items that pass the looting rules.")]
+    public bool DepositByRules { get; set; }
+
     [Setting("Loot radius (m)", Hint = "Metres round the character (10 world units each).", Min = 1, Max = 100, Step = 1)]
     public float LootRadius { get; set; } = 20;
 
