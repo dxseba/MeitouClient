@@ -46,7 +46,7 @@ sealed class VitalSystem(FactionRelations relations, GameConstants? constants) :
     {
         int bounty = Math.Max(cold.Bounties?.Total ?? 0, 0);
         var state = cold.Medical is { } med ? VitalRule.Of(med, KoPoint(cold)) : VitalState.None;
-        return state != VitalState.None || bounty > 0 ? new Vital(state, bounty) : null;
+        return state != VitalState.None || bounty > 0 ? new Vital(state, bounty, cold.Medical?.Dead ?? false) : null;
     }
 
     float? KoPoint(CharacterCold cold) =>
