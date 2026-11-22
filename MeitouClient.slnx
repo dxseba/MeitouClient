@@ -37,6 +37,7 @@
     <Project Path="mods/LimbToughness/Meitou.LimbToughness.csproj" />
     <Project Path="mods/SleepFix/Meitou.SleepFix.csproj" />
     <Project Path="mods/JobTabs/Meitou.JobTabs.csproj" />
+    <Project Path="mods/ElementalEnchantment/Meitou.ElementalEnchantment.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
   </Folder>

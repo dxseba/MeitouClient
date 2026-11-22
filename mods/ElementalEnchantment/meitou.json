@@ -1,0 +1,6 @@
+{
+  "id": "dxseba.elementalenchantment",
+  "apiVersion": 1,
+  "assemblies": ["ElementalEnchantment.dll"],
+  "entry": "Meitou.ElementalEnchantment.ElementalEnchantmentMod"
+}
