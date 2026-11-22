@@ -1,9 +1,28 @@
 # Kill Counter (port)
 
-Port of Rokeshi's RE_Kenshi *Kill Counter* (workshop 3779464387). The selected player character's kills, knockouts and limbs removed show under the toolbar.
+Port of Rokeshi's RE_Kenshi *Kill Counter* (workshop 3779464387). Kills, knockouts and limbs removed per character, shown as "Kills", "KO's"
+and "Limbs Removed" lines under the stats of the HUD's character panel (`AddCharacterPanelLines`), for whichever character the panel shows.
 
-- A hit by a player character that leaves an alive, conscious victim dead counts as a kill; unconscious counts as a knockout (`ICombatHitObserver`).
-- Saved in the mod's sidecar; tallies are keyed by character name (two namesakes share one).
-- Limbs removed: a hit's victim's stumps (`LimbState.Stump`) against the count refreshed every tick; the rise goes to the hit's attacker.
-  Saved (sidecar version 2; version 1 loads with 0 limbs). **Observed** (2026-11-18, windowed `--sandbox 4 --sandbox-races` on origin/master f7ad84a35, user play): works.
-- The victim's state is read in the slow phase within 30 ticks of the hit, as on master the knockout lands after the hit callback. **Observed** (2026-11-17, live Windows sandbox on origin/master f7ad84a35, driven by input): Knockouts went 0 to 1 when Mu downed Stone. A downed victim who later dies (further blows or bleeding out) is a kill for its last attacker; before this, killing a downed Stone left Kills at 0. **Observed** after the fix (2026-11-17, same sandbox, user play): killing a downed Stone took Kills 0 to 1.
+Rules, **Verified** from the original's shipped source (`KillCounter.cpp`, matching the DLL's strings):
+- Any attacker is counted (not only the player's); a hit on oneself is not. Hooks: `Character::hitByMeleeAttack`, `Character::iShotYou`
+  (bolts and turret harpoons), `Character::getStealthKOChance` + `MedicalSystem::knockout` (stealth knock-outs), the game loop, and
+  `Character::serialise`/`loadFromSerialise`.
+- Kill: the victim's last attacker when it dies, however long after (bleeding out counts), while it stays loaded; an unloaded victim is dropped.
+- Knockout: a hit that takes the victim from standing to unconscious, credited to that hit's attacker; a successful stealth knock-out credits
+  the sneaker and makes it the last attacker. If the same character downed and then killed the victim while it was still down, that knockout
+  is taken back (the kill replaces it).
+- Limbs: arms and legs newly cut off or crushed by the hit.
+- The original saves the three numbers as floats `kills`, `kos`, `limbs` in each character's STATS record of the save, and shows them in the
+  character stats window's attributes panel (text colour RGB 100,95,90).
+
+Port specifics:
+- Hits come from `ICombatHitObserver`, deaths from `ICharacterDeathObserver`. The knockout is read in the slow phase within 30 ticks of the
+  hit, as the medical step that downs the victim can run after the hit callback. A stealth knock-out is seen as a sneaker in its
+  `StealthKo` task whose target goes down. **Observed** (2026-11-17, live sandbox, earlier version): a melee knockout and a kill of a
+  downed victim counted.
+- Saved in the mod's sidecar (version 3: by lasting id). Versions 1 and 2 (by name) go to the player's characters of that name at load.
+  Tallies of characters the game no longer keeps are dropped after a load and every ten game minutes.
+
+Missing:
+- The stats window itself has no mod lines; the character panel shows them instead (panel lines are **Unknown** in a running game).
+- Not in the vanilla save's STATS record (`kills`/`kos`/`limbs`): a save moved to the original game loses the counts.
