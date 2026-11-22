@@ -13,8 +13,8 @@ using Meitou.Simulation;
 namespace Meitou.XpInfo;
 
 /// <summary>
-/// Port of XP Info (workshop 3795213616, GPLv3; rebuilt from its description): rising text over a player character as it gains experience
-/// ("+3% Athletics", several skills merged into one label) and when a skill levels ("Athletics 24").
+/// Port of XP Info (workshop 3795213616, GPLv3): rising text over a player character as it gains experience ("+3% Athletics", several skills
+/// merged into one label) and when a skill levels ("Athletics 24"), and XP bars of the skills it is training in the character panel.
 /// </summary>
 public sealed class XpInfoMod : IMod
 {
@@ -61,26 +61,61 @@ public sealed class XpInfoMod : IMod
     }
 }
 
+/// <summary>
+/// The original's <c>xp_info.ini</c> keys, labels (its settings window) and shipped defaults; <see cref="Seconds"/> is Meitou's.
+/// </summary>
 public sealed class XpSettings
 {
-    [Setting("Enable XP Info", Hint = "Rising text over your characters as they gain experience.")]
+    [Setting("Enable XP Info", Hint = "Rising text over your characters as they gain experience, and XP bars in the character panel.")]
     public bool Enabled { get; set; } = true;
 
-    [Setting("Show gains", Hint = "Show '+N% Skill' as experience comes in.")]
+    /// <summary>
+    /// <c>floatingLabels</c>, 1.
+    /// </summary>
+    [Setting("XP gain text", Hint = "Show '+N% Skill' as experience comes in.")]
     public bool Gains { get; set; } = true;
 
-    [Setting("Show levels", Hint = "Show 'Skill N' when a skill levels.")]
+    /// <summary>
+    /// <c>levelUpLabels</c>, 1.
+    /// </summary>
+    [Setting("Level-up text", Hint = "Show 'Skill N' when a skill levels.")]
     public bool Levels { get; set; } = true;
 
-    [Setting("Smallest gain (%)", Hint = "Gains below this share of a level are summed until they reach it.", Min = 0.1, Max = 20, Step = 0.1)]
-    public float MinPercent { get; set; } = 1;
+    /// <summary>
+    /// <c>minPercent</c>, 2.00.
+    /// </summary>
+    [Setting("Announce gains over %", Hint = "Gains below this share of a level are summed until they reach it.", Min = 0.1, Max = 20, Step = 0.1)]
+    public float MinPercent { get; set; } = 2;
 
+    /// <summary>
+    /// <c>announceEverySeconds</c>, 1.0 (game seconds here).
+    /// </summary>
+    [Setting("Announce at most every (s)", Hint = "A skill's gain is announced at most this often.", Min = 0, Max = 30, Step = 0.5)]
+    public float AnnounceSeconds { get; set; } = 1;
+
+    /// <summary>
+    /// Meitou's: how long a label rises.
+    /// </summary>
     [Setting("Seconds", Hint = "How long a label stays.", Min = 1, Max = 10, Step = 0.5)]
     public float Seconds { get; set; } = 2.5f;
 
-    [Setting("Panel XP bars", Hint = "How many skills show an XP bar in the character panel: those that gained XP most recently.", Min = 0, Max = 2,
-        Step = 1)]
+    /// <summary>
+    /// <c>panelBars</c>, 1.
+    /// </summary>
+    [Setting("XP bars in panel", Hint = "The character panel lists the skills the character is training, with a bar of each level's progress.")]
+    public bool PanelBars { get; set; } = true;
+
+    /// <summary>
+    /// <c>maxRows</c>, 2.
+    /// </summary>
+    [Setting("Most bars at once", Hint = "At most this many skills, those that gained XP most recently.", Min = 1, Max = 4, Step = 1)]
     public int PanelLines { get; set; } = 2;
+
+    /// <summary>
+    /// <c>recentSeconds</c>, 120 (game seconds here).
+    /// </summary>
+    [Setting("Keep a bar for (s)", Hint = "A skill's bar stays this long after its last XP gain.", Min = 5, Max = 3600, Step = 5)]
+    public int RecentSeconds { get; set; } = 120;
 }
 
 /// <summary>A label for the floating text: who, the text, the tick.</summary>
@@ -100,6 +135,7 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
     readonly Dictionary<CharacterId, float[]> _seen = [];
     readonly Dictionary<CharacterId, float[]> _pending = [];
     readonly Dictionary<CharacterId, long[]> _lastGain = [];
+    readonly Dictionary<CharacterId, long[]> _lastShown = [];
     volatile XpLabel[] _recent = [];
 
     public XpLabel[] Recent => _recent;
@@ -117,7 +153,7 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
 
             var id = table.IdOf(slot);
             Check(world, id, stats, labels);
-            shown[id] = new([.. _seen[id]], [.. _lastGain[id]]);
+            shown[id] = new([.. _seen[id]], [.. _lastGain[id]], world.Tick, world.TickSeconds);
         }
 
         if (labels.Count > 0) _recent = [.. _recent.Concat(labels).TakeLast(Kept)];
@@ -132,11 +168,14 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
             _seen[id] = now;
             _pending[id] = new float[now.Length];
             _lastGain[id] = new long[now.Length];
+            _lastShown[id] = new long[now.Length];
             return;
         }
 
         var pending = _pending[id];
         var lastGain = _lastGain[id];
+        var lastShown = _lastShown[id];
+        long every = (long)(settings.AnnounceSeconds / world.TickSeconds);
         var gains = new List<string>();
         for (int i = 0; i < now.Length; i++)
         {
@@ -144,15 +183,21 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
             if (delta <= 0) continue;
 
             lastGain[i] = world.Tick;
-            string label = XpInfoMod.Label(Watched[i]);
-            if (settings.Levels && (int)now[i] > (int)before[i])
-                labels.Add(new(id, string.Create(CultureInfo.InvariantCulture, $"{label} {(int)now[i]}"), world.Tick, true));
-
             pending[i] += delta * 100;
-            if (pending[i] < settings.MinPercent) continue;
+            string label = XpInfoMod.Label(Watched[i]);
 
-            gains.Add(string.Create(CultureInfo.InvariantCulture, $"+{pending[i]:0.#}% {label}"));
-            pending[i] = 0;
+            // A level is announced at once, in place of the skill's gain (the original's per-skill entry).
+            if ((int)now[i] > (int)before[i])
+            {
+                if (settings.Levels) labels.Add(new(id, string.Create(CultureInfo.InvariantCulture, $"{label} {(int)now[i]}"), world.Tick, true));
+                (pending[i], lastShown[i]) = (0, world.Tick);
+                continue;
+            }
+
+            if (pending[i] < settings.MinPercent || world.Tick - lastShown[i] < every) continue;
+
+            gains.Add(string.Create(CultureInfo.InvariantCulture, $"+{pending[i]:0}% {label}"));
+            (pending[i], lastShown[i]) = (0, world.Tick);
         }
 
         _seen[id] = now;
@@ -161,7 +206,7 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
 }
 
 /// <summary>A player character's stored stats and the tick each last gained XP (0: not since first seen), by <see cref="XpBoard.Watched"/>.</summary>
-sealed record XpProgress(float[] Levels, long[] LastGain);
+sealed record XpProgress(float[] Levels, long[] LastGain, long Tick, float TickSeconds);
 
 /// <summary>
 /// The watch system's last poll, published in the serial phase and read on the host thread by the panel lines.
@@ -277,10 +322,11 @@ sealed class XpPanelLines(XpSettings settings, XpBoard board) : IUiExtension
 
     IEnumerable<UiCharacterLine> Lines(UiCharacterContext context)
     {
-        if (!settings.Enabled || settings.PanelLines <= 0 || board.Of(context.Id) is not { } progress) return [];
+        if (!settings.Enabled || !settings.PanelBars || board.Of(context.Id) is not { } progress) return [];
 
+        long since = progress.Tick - (long)(settings.RecentSeconds / progress.TickSeconds);
         return Enumerable.Range(0, progress.Levels.Length)
-            .Where(i => progress.LastGain[i] > 0)
+            .Where(i => progress.LastGain[i] > 0 && progress.LastGain[i] >= since)
             .OrderByDescending(i => progress.LastGain[i])
             .Take(settings.PanelLines)
             .Select(i => Line(XpBoard.Watched[i], progress.Levels[i]));
