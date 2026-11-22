@@ -19,9 +19,14 @@ static class BuildAccess
     public static readonly Type PlayerType = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("PlayerInterface");
 
     /// <summary>
-    /// <c>PlayerInterface.Build</c> and <c>PlayerInterface.FaithfulScreens</c>.
+    /// <c>PlayerInterface.Build</c>.
     /// </summary>
-    static PropertyInfo s_build = null!, s_screens = null!;
+    static PropertyInfo s_build = null!;
+
+    /// <summary>
+    /// <c>PlayerInterface.FaithfulScreens</c> (a field).
+    /// </summary>
+    static FieldInfo s_screens = null!;
 
     /// <summary>
     /// <c>BuildMode.Unlocked</c>, <c>BuildCategories</c>, <c>FollowChoiceInLists</c> and the screens' <c>IsOpen</c>.
@@ -39,7 +44,7 @@ static class BuildAccess
     public static void Bind()
     {
         s_build = Need(AccessTools.Property(PlayerType, "Build"), "Build");
-        s_screens = Need(AccessTools.Property(PlayerType, "FaithfulScreens"), "FaithfulScreens");
+        s_screens = Need(AccessTools.Field(PlayerType, "FaithfulScreens"), "FaithfulScreens");
         var mode = s_build.PropertyType;
         s_unlocked = Need(AccessTools.Method(mode, "Unlocked"), "Unlocked");
         s_categories = Need(AccessTools.Method(mode, "BuildCategories"), "BuildCategories");
@@ -49,7 +54,7 @@ static class BuildAccess
         s_group = Need(AccessTools.Field(mode, "_buildGroup"), "_buildGroup");
         s_member = Need(AccessTools.Field(mode, "BuildMember"), "BuildMember");
         s_discarded = Need(AccessTools.Field(mode, "BuildDiscarded"), "BuildDiscarded");
-        s_isOpen = Need(AccessTools.Method(s_screens.PropertyType, "IsOpen", [typeof(string)]), "IsOpen");
+        s_isOpen = Need(AccessTools.Method(s_screens.FieldType, "IsOpen", [typeof(string)]), "IsOpen");
     }
 
     /// <summary>
