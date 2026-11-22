@@ -14,7 +14,8 @@ namespace Meitou.PoshDamageNumbers;
 /// <summary>
 /// Port of Posh Damage Numbers (workshop 3821781631), rebuilt from its description: floating numbers of the damage each landed hit dealt after
 /// armour, fast hits on one target added into one growing number, KNOCKOUT and KILLED when they happen; warm white to orange by size, red for
-/// your own. Fed by the display-only hit feed (<c>AddCombatHitFeed</c>), drawn as Level Up Notify's floating text.
+/// your own. Fed by the display-only hit feed (<c>AddCombatHitFeed</c>), drawn as Level Up Notify's floating text; a big hit
+/// also flashes (<c>ModContext.PlayEffect</c>).
 /// </summary>
 public sealed class PoshDamageNumbersMod : IMod
 {
@@ -23,7 +24,7 @@ public sealed class PoshDamageNumbersMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        context.AddCombatHitFeed(Numbers.Feed);
+        context.AddCombatHitFeed(hits => Numbers.Feed(context, hits));
         Numbers.Install(context);
         context.AddUi(new NumbersUi());
         context.Log("Posh Damage Numbers initialized");
@@ -40,6 +41,9 @@ public sealed class DamageSettings
 
     [Setting("Seconds", Hint = "How long a number floats.", Min = 0.5, Max = 5, Step = 0.1)]
     public float Seconds { get; set; } = 1.4f;
+
+    [Setting("Flash on big hits", Hint = "A hit of 40 or more throws a short burst of sparks at the victim.")]
+    public bool Flash { get; set; } = true;
 
     [Setting("Show knockouts and kills", Hint = "KNOCKOUT and KILLED pop up after the number.")]
     public bool Words { get; set; } = true;
@@ -63,6 +67,14 @@ static class Numbers
     public const int Slots = 16;
     const float Head = 20, Rise = 9;
 
+    /// <summary>The damage of one hit that flashes (the orange tone's threshold).</summary>
+    const float BigHit = 40;
+
+    /// <summary>EFFECT <c>small- sparks1</c> (system <c>kenshi_sparks</c>), the game's parry sparks.</summary>
+    const string FlashEffect = "5463-nodes_furniture1_otto.mod";
+
+    static readonly Vector3 FlashTint = new(2.0f, 1.7f, 1.1f);
+
     static readonly Lock Gate = new();
     static readonly List<Number> Shown = [];
     static FieldInfo? s_sessionField;
@@ -78,8 +90,10 @@ static class Numbers
         context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(Numbers), nameof(Bound)));
     }
 
-    /// <summary>The hit feed (host thread, once a frame): each hit adds to its victim's open number or starts one.</summary>
-    public static void Feed(IReadOnlyList<CombatHit> hits)
+    /// <summary>
+    /// The hit feed (host thread, once a frame): each hit adds to its victim's open number or starts one, and a big one flashes on the victim.
+    /// </summary>
+    public static void Feed(ModContext context, IReadOnlyList<CombatHit> hits)
     {
         if (!PoshDamageNumbersMod.Settings.Enabled) return;
 
@@ -87,11 +101,24 @@ static class Numbers
         {
             foreach (var hit in hits) Add(hit);
         }
+
+        if (PoshDamageNumbersMod.Settings.Flash)
+        {
+            foreach (var hit in hits) Flash(context, hit);
+        }
     }
+
+    /// <summary>A short burst of warm sparks on the victim's chest for a single hit of <see cref="BigHit"/> or more.</summary>
+    static void Flash(ModContext context, in CombatHit hit)
+    {
+        if (DamageOf(hit) >= BigHit && hit.VictimWasAlive) context.PlayEffect(FlashEffect, hit.Victim, seconds: 0.12f, tint: FlashTint);
+    }
+
+    static float DamageOf(in CombatHit hit) => (hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce) * hit.Damage.Scale;
 
     static void Add(CombatHit hit)
     {
-        float damage = (hit.Damage.Cut + hit.Damage.Blunt + hit.Damage.Pierce) * hit.Damage.Scale;
+        float damage = DamageOf(hit);
         if (damage <= 0) return;
 
         long merge = (long)(PoshDamageNumbersMod.Settings.MergeSeconds * 30);
