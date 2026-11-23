@@ -3,7 +3,8 @@
 Port of *Wanted Map (QoL)* (workshop 3813761812): select a character carrying wanted posters (inventory or backpack) and the world map
 (`UiRegistration.AddMapMarkers`) marks their targets: red on the spot, orange at a far squad's position ("approx."), yellow at the home town of a
 target not seen yet ("lives here"), blue as a prisoner, grey where it died ("dead") for *DeadMarkerHours*. `PosterIndex` links posters to
-targets once at start; `WantedSystem` (every 60th tick) finds the targets and remembers deaths and seen targets in the save.
+targets once at start; `WantedSystem` (every 60th tick) finds the targets and remembers deaths and seen targets in the save; `PosterBadge` marks
+poster item cells (`UiScreens.ItemCells` screen controls).
 
 ## Facts
 
@@ -16,7 +17,13 @@ targets once at start; `WantedSystem` (every 60th tick) finds the targets and re
 - **Homes**: TOWN reference lists whose names hold `squad`, `resident` or `spawn` name its squads; SQUAD_TEMPLATE lists `leader`, `squad`,
   `squad2`, `slaves` its members. **Verified** (original DLL strings and the lists it compares).
 - **Settings** (`WantedMap.defaults.ini`): Enabled 1, AllInventories 0, ShowLabels 1, TownFallback 1, RememberSeen 1, DeadMarkerHours 24 (0
-  none), StopWords `the,of,and,wanted,king,boss,leader,из,банды,и,король,лидер,лидеры,глава` (read at start from a `WantedMap.ini` in the mod folder, as text is not a mod setting). **Verified**.
+  none), StopWords `the,of,and,wanted,king,boss,leader,из,банды,и,король,лидер,лидеры,глава` (a text setting here, used when the posters are
+  matched at start). **Verified**.
+- **Badge** on a poster's item cell (inventory, bag, loot): none until a target is dead or captive; `done/total` (colour 1, 0.42, 0.36; box
+  3 px in, 18 high, top 20 above the cell's bottom) while some are left; when all are, `wantedmap_captive.png` (any captive) or
+  `wantedmap_done.png`, 2/5 of the cell's smaller side held to 14 to 28 px, 2 px from its lower left; no picture, no badge. **Verified**
+  (original DLL (decompiled), the colour from its constants). Meitou: counts only posters a player character carries; "dead" is a death seen
+  or a target seen before and now gone (RememberSeen); the count's text alignment and font are Meitou's (**Unknown** in the original).
 - A target seen before (RememberSeen) and now nowhere counts as dead and gets no marker. **Observed** (original README).
 - **Unknown**: not run in game; how many vanilla posters the rules match.
 
@@ -24,5 +31,5 @@ targets once at start; `WantedSystem` (every 60th tick) finds the targets and re
 
 - The original's `WantedMap_overrides.txt` (its data, not shipped): put one in this mod's folder to use it.
 - World states (`WORLD_EVENT_STATE` `NPC is`) as a source of dead / alive / imprisoned.
-- The poster badge in the inventory (green tick, lock, `2/3`): needs an item-cell overlay hook and the original's art.
+- The badge pictures (`wantedmap_done.png`, `wantedmap_captive.png`, the original's art): put them in this mod's `gui/gfx`.
 - ScanSeconds / WorldScanSeconds (the port scans every 60 ticks), Debug and the runtime table, `WantedMap_GetMarkers` for other plugins.

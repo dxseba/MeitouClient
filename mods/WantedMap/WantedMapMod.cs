@@ -18,31 +18,14 @@ public sealed class WantedMapMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        ReadStopWords(Path.Combine(context.Folder, "WantedMap.ini"));
 
         var stopWords = Settings.StopWords.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(w => w.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
         var posters = PosterIndex.Build(context.Data, context.Folder, stopWords);
         var towns = new TownPlaces(context.Population);
         context.AddSystem("wanted", _ => Running = new WantedSystem(posters, towns, Settings), SystemAnchor.End);
-        context.AddUi(new WantedMarkers());
+        context.AddUi(new WantedMarkers(new PosterBadge(context.Folder)));
         context.Log($"Wanted Map initialized: {posters.Count} posters matched");
-    }
-
-    /// <summary>
-    /// <c>[Match] StopWords=</c> of an ini in the original's format.
-    /// </summary>
-    static void ReadStopWords(string path)
-    {
-        if (!File.Exists(path)) return;
-
-        string section = "";
-        foreach (var raw in File.ReadLines(path))
-        {
-            string line = raw.Trim();
-            if (line.StartsWith('[') && line.EndsWith(']')) section = line[1..^1];
-            if (section == "Match" && line.Split('=', 2) is ["StopWords", var value]) Settings.StopWords = value.Trim();
-        }
     }
 }
 
@@ -92,15 +75,17 @@ public sealed class WantedSettings
     public int DeadMarkerHours { get; set; } = 24;
 
     /// <summary>
-    /// <c>[Match] StopWords</c>: read at start from a <c>WantedMap.ini</c> in the mod's folder when there is one (text is not a mod setting).
+    /// <c>[Match] StopWords</c>: words that do not link a reward to a name. Read when the posters are matched, at start.
     /// </summary>
+    [Setting("Stop words", Hint = "Comma-separated words that do not count when a poster's reward is matched to a name. Applies at the next start.",
+        MaxLength = 1024)]
     public string StopWords { get; set; } = "the,of,and,wanted,king,boss,leader,из,банды,и,король,лидер,лидеры,глава";
 }
 
 /// <summary>
 /// The map markers, filtered to the posters the selected characters carry.
 /// </summary>
-sealed class WantedMarkers : IUiExtension
+sealed class WantedMarkers(PosterBadge badge) : IUiExtension
 {
     static readonly Vector4 Red = new(.90f, .20f, .15f, 1), Orange = new(.95f, .55f, .15f, 1), Yellow = new(.95f, .85f, .20f, 1),
         Blue = new(.30f, .55f, .95f, 1), Grey = new(.60f, .60f, .60f, 1);
@@ -112,7 +97,16 @@ sealed class WantedMarkers : IUiExtension
 
     public string Id => "dxseba.wantedmap.ui";
 
-    public void Register(UiRegistration registration) => registration.AddMapMarkers(Markers);
+    public void Register(UiRegistration registration)
+    {
+        registration.AddMapMarkers(Markers);
+        foreach (var screen in ItemScreens) registration.AddScreenControls(screen, UiScreens.ItemCells, UiAnchorPlacement.Inside, badge.Build);
+    }
+
+    /// <summary>
+    /// The character windows with item cells (the original badges every inventory icon).
+    /// </summary>
+    static readonly string[] ItemScreens = ["inventory", "bag", "loot", "loot-bag"];
 
     static IEnumerable<UiMapMarker> Markers(UiMapContext map)
     {

@@ -19,6 +19,11 @@ enum TargetState { Exact, Away, Home, Prisoner, Dead }
 sealed record TargetMarker(CharacterId Carrier, string Target, string Name, TargetState State, Vector2 At);
 
 /// <summary>
+/// A poster's progress for its inventory badge: its targets, those dead or captive, and the captive among them.
+/// </summary>
+readonly record struct PosterProgress(int Total, int Done, int Captive);
+
+/// <summary>
 /// Matches the posters the player's characters carry (their inventory and backpack) to their targets (<see cref="PosterIndex"/>) and publishes
 /// their markers every 60th tick: loaded targets where they stand, off-screen ones at their platoon, never-seen ones at their home town, the
 /// recently dead where they died. Deaths and the targets seen so far are remembered per playthrough (saved with the world).
@@ -41,6 +46,11 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
     /// The markers; refreshed while the world runs.
     /// </summary>
     public volatile IReadOnlyList<TargetMarker> Markers = [];
+
+    /// <summary>
+    /// The progress of each poster a player character carries, by ITEM id; refreshed with <see cref="Markers"/>.
+    /// </summary>
+    public volatile IReadOnlyDictionary<string, PosterProgress> Progress = new Dictionary<string, PosterProgress>();
 
     public void Died(World world, in CharacterDeath death)
     {
@@ -69,10 +79,12 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
 
         double hours = settings.DeadMarkerHours;
         foreach (var id in _deaths.Where(d => world.GameHours - d.Value.Hours > hours).Select(d => d.Key).ToList()) _deaths.Remove(id);
-        Markers = settings.Enabled ? Publish(world) : [];
+        var progress = new Dictionary<string, PosterProgress>(StringComparer.Ordinal);
+        Markers = settings.Enabled ? Publish(world, progress) : [];
+        Progress = progress;
     }
 
-    List<TargetMarker> Publish(World world)
+    List<TargetMarker> Publish(World world, Dictionary<string, PosterProgress> progress)
     {
         var markers = new List<TargetMarker>();
         var table = world.Characters;
@@ -83,20 +95,32 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
 
             var carrier = table.IdOf(slot);
             var held = inventory.Searched(carriedBags: false).Select(i => i.Record).Distinct(StringComparer.Ordinal);
-            foreach (var poster in held.Select(posters.Of).OfType<PosterTargets>())
-                AddPoster(markers, carrier, poster, finder);
+            foreach (var record in held)
+            {
+                if (posters.Of(record) is { } poster) progress[record] = AddPoster(markers, carrier, poster, finder);
+            }
         }
 
         return markers;
     }
 
-    void AddPoster(List<TargetMarker> markers, CharacterId carrier, PosterTargets poster, TargetFinder finder)
+    /// <summary>
+    /// Adds the markers of <paramref name="poster"/>'s targets and answers its progress.
+    /// </summary>
+    PosterProgress AddPoster(List<TargetMarker> markers, CharacterId carrier, PosterTargets poster, TargetFinder finder)
     {
-        foreach (var id in poster.Characters)
-            if (Locate(id, finder.Character(id)) is { } m) markers.Add(new(carrier, id, m.Name ?? posters.NameOf(id), m.State, m.At));
+        int done = 0, captive = 0;
+        foreach (var (id, squad) in poster.Characters.Select(c => (c, false)).Concat(poster.Squads.Select(q => (q, true))))
+        {
+            var found = squad ? finder.Squad(id) : finder.Character(id);
+            bool gone = found is null && (_deaths.ContainsKey(id) || settings.RememberSeen && _seen.Contains(id));
+            if (Locate(id, found) is { } m) markers.Add(new(carrier, id, (squad ? null : m.Name) ?? posters.NameOf(id), m.State, m.At));
 
-        foreach (var id in poster.Squads)
-            if (Locate(id, finder.Squad(id)) is { } m) markers.Add(new(carrier, id, posters.NameOf(id), m.State, m.At));
+            if (found?.State == TargetState.Prisoner) captive++;
+            if (gone || found?.State == TargetState.Prisoner) done++;
+        }
+
+        return new(poster.Characters.Count + poster.Squads.Count, done, captive);
     }
 
     /// <summary>
