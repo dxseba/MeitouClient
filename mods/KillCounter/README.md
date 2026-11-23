@@ -1,7 +1,8 @@
 # Kill Counter (port)
 
 Port of Rokeshi's RE_Kenshi *Kill Counter* (workshop 3779464387). Kills, knockouts and limbs removed per character, shown as "Kills", "KO's"
-and "Limbs Removed" lines under the stats of the HUD's character panel (`AddCharacterPanelLines`), for whichever character the panel shows.
+and "Limbs Removed" lines in the character stats window's attributes panel after the four attributes (`AddScreenControls("stats",
+"AttributesPanel")`), in the original's colour, for the window's character.
 
 Rules, **Verified** from the original's shipped source (`KillCounter.cpp`, matching the DLL's strings):
 - Any attacker is counted (not only the player's); a hit on oneself is not. Hooks: `Character::hitByMeleeAttack`, `Character::iShotYou`
@@ -24,5 +25,5 @@ Port specifics:
   Tallies of characters the game no longer keeps are dropped after a load and every ten game minutes.
 
 Missing:
-- The stats window itself has no mod lines; the character panel shows them instead (panel lines are **Unknown** in a running game).
+- **Unknown**: the lines in a running stats window (font and size are the attribute rows' painted font at the UI scale, a guess).
 - Not in the vanilla save's STATS record (`kills`/`kos`/`limbs`): a save moved to the original game loses the counts.
