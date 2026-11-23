@@ -7,8 +7,8 @@ Port of *Sparring 切磋* (workshop 3776308916, an RE_Kenshi plugin; its `.mod` 
   carrying or caged; ends any spar either is in; turns both characters' Hold and Passive off; and gives each an `AttackOrder` on the other as the
   player's pick, so normal combat XP applies.
 - **During**: melee blows between the pair do half damage (cut, blunt, pierce, stun); when either is probably dying both are healed completely
-  (`MedicalState.Heal`). A Harmony prefix on the private `CombatSystem.Engage` refuses any fight between a sparring character and anyone but its
-  partner, unless the player picked it.
+  (`MedicalState.Heal`). An `ICombatEngageFilter` refuses any fight start (`Start`) or target choice (`Choice`) between a sparring
+  character and anyone but its partner, unless the player picked the target (`EngageAsk.Picked`).
 - **End**: when either is down (unconscious, dead, gone) or carried; when either has been out of the fight for 1 s (after 2 s); when the
   selected one moves faster than 0.5 u/s with another target for 1.5 s (after 4 s). Both get a `StopCommand` and their Hold and Passive back. For
   5 s after, blows between the pair are cancelled (this port's). No messages, as the original.

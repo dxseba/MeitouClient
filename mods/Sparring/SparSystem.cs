@@ -48,9 +48,10 @@ sealed record Spar(CharacterId A, CharacterId B, long Started, CharacterOrders O
 /// Runs the spars (the original's rules, Sparring.dll decompiled): a <see cref="SparOrder"/> clears both characters' Hold and Passive toggles and
 /// gives each an attack order (as the player's pick) on the other; their blows on each other do half damage, and both are healed completely when
 /// either is probably dying. The spar ends, both stopped and their toggles restored, when either is down or carried, out of the fight for a
-/// while, or when the first walks off at another target.
+/// while, or when the first walks off at another target. As the original's <c>isEnemy</c> / <c>isAlly</c> hooks, a sparring character is nobody's
+/// enemy but its partner's and takes nobody else for one (<see cref="ICombatEngageFilter"/>), unless the player picked the target.
 /// </summary>
-sealed class SparSystem(SparringSettings settings, PopulationData population) : ICombatHitFilter, IStateHashed
+sealed class SparSystem(SparringSettings settings, PopulationData population) : ICombatHitFilter, ICombatEngageFilter, IStateHashed
 {
     /// <summary>
     /// The original's damage multiplier on a blow between the pair.
@@ -131,6 +132,17 @@ sealed class SparSystem(SparringSettings settings, PopulationData population) : 
         p = p with { Stun = p.Stun * DamageMultiplier };
         if (settings.CutToBlunt) p = p with { Blunt = p.Blunt + p.Cut, Cut = 0 };
         hit.Packet = p;
+    }
+
+    /// <summary>
+    /// Refuses a fight start or a target choice between a sparring character and anyone but its partner, unless the player picked the target.
+    /// Any thread: reads the spars only, which change in serial phases.
+    /// </summary>
+    public bool Allows(World world, in EngageAsk ask)
+    {
+        if (!settings.Enabled || ask.Picked) return true;
+
+        return !Outside(ask.Attacker, ask.Target);
     }
 
     public void Hash(ref StateHasher hasher)
@@ -324,6 +336,16 @@ sealed class SparSystem(SparringSettings settings, PopulationData population) : 
     }
 
     #endregion
+
+    /// <summary>
+    /// Whether a fight of <paramref name="attacker"/> on <paramref name="target"/> involves a sparring character and is not the spar itself.
+    /// </summary>
+    bool Outside(CharacterId attacker, CharacterId target)
+    {
+        if (TryPartner(target, out var partner) && partner != attacker) return true;
+
+        return TryPartner(attacker, out var own) && own != target;
+    }
 
     /// <summary>
     /// The spar of the pair <paramref name="x"/> and <paramref name="y"/>, running or ended.

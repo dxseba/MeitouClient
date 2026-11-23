@@ -18,7 +18,6 @@ public sealed class SparringMod : IMod
         context.AddSettings(Settings);
         context.AddSystem("sparring", _ => new SparSystem(Settings, context.Population), SystemAnchor.End);
         context.AddUi(new SparMenu());
-        SparHooks.Install(context.Harmony);
         context.Log("Sparring initialized");
     }
 }
