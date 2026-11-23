@@ -1,10 +1,10 @@
 using System.Collections.Frozen;
 using System.Numerics;
-using System.Reflection;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation;
+using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Items;
 using Meitou.Simulation.Population;
 
@@ -18,9 +18,10 @@ public sealed record RepairOrder(CharacterId Repairer, CharacterId Owner, bool A
 /// <summary>
 /// The original's timed repairs (<c>StartRepairJob</c>, <c>ProcessRepairJobs</c>): a repair of one's own gear stands still for <c>RepairSeconds</c>
 /// and is applied at the end; one of a squad member's gear first walks the repairer within <c>RepairReach</c> of the member, waits 0.4 s, then repairs
-/// the same way. Moving (0.75 units), being attacked or going down cancels it and nothing is used up. Times are game seconds.
+/// the same way. Moving (0.75 units), being attacked or going down cancels it and nothing is used up. Times are game seconds. While repairing the
+/// repairer plays the repair animation (<see cref="Move"/>), and the repair sound plays as the work begins or as it is applied.
 /// </summary>
-sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log)
+sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Action<string> sound)
 {
     #region Jobs
 
@@ -64,6 +65,13 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
 
         public Vector3 Goal { get; set; }
 
+        /// <summary>
+        /// The tick the work began, and whether its sound already played (at the start).
+        /// </summary>
+        public long WorkStart { get; set; }
+
+        public bool Sounded { get; set; }
+
         public bool Cross => Repairer != Owner;
     }
 
@@ -76,11 +84,6 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
     /// The characters attacked since the last step (they cancel their repair).
     /// </summary>
     readonly List<CharacterId> _attacked = [];
-
-    /// <summary>
-    /// The engine's own equipment refresh (internal to the simulation), made on first use; null when it cannot be found.
-    /// </summary>
-    Action<CharacterCold>? _refresh;
 
     /// <summary>
     /// A melee blow reached the character (hit, blocked or dodged).
@@ -99,6 +102,7 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
             hasher.Add(job.Owner);
             hasher.Add((int)job.Phase);
             hasher.Add(job.Age);
+            hasher.Add(job.WorkStart);
         }
     }
 
@@ -126,7 +130,7 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
             return;
         }
 
-        if (config.RepairInstant) Repair(world, repairer, owner, order.Armour, rules, commit: true);
+        if (config.RepairInstant) Commit(world, job, repairer, owner, rules);
         else Begin(world, job);
     }
 
@@ -235,7 +239,7 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
             return null;
         }
 
-        Repair(world, repairer, owner, job.Armour, rules, commit: true);
+        Commit(world, job, repairer, owner, rules);
         finished = true;
         return null;
     }
@@ -251,15 +255,56 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
         if (job.Cross && dist > config.Reach + 4) return "the squad member moved away";
         if (job.Worked < config.RepairSeconds) return null;
 
-        Repair(world, repairer, owner, job.Armour, rules, commit: true);
+        Commit(world, job, repairer, owner, rules);
         finished = true;
         return null;
     }
 
     void Begin(World world, Job job)
     {
-        (job.Phase, job.Worked, job.StandAt) = (Phase.Work, 0, Position(world, job.Repairer));
+        (job.Phase, job.Worked, job.StandAt, job.WorkStart) = (Phase.Work, 0, Position(world, job.Repairer), world.Tick);
         if (!_jobs.Contains(job)) _jobs.Add(job);
+        if (config.SoundAtStart) job.Sounded = Play();
+    }
+
+    /// <summary>
+    /// Applies the repair; its sound plays now unless it played as the work began.
+    /// </summary>
+    void Commit(World world, Job job, CharacterCold repairer, CharacterCold owner, Condition rules)
+    {
+        if (Repair(world, repairer, owner, job.Armour, rules, commit: true) && !job.Sounded) Play();
+    }
+
+    /// <summary>
+    /// Posts the repair sound (the original's <c>RepairSound</c> file in the mod folder, on the interface); false when there is none.
+    /// </summary>
+    bool Play()
+    {
+        if (config.RepairSound.Length == 0) return false;
+
+        sound(config.RepairSound);
+        return true;
+    }
+
+    /// <summary>
+    /// The repair animation of a character repairing (the original's first-aid action, <c>RepairAnimation = auto</c> its <c>medic</c>, else the
+    /// named one) at its share of <c>RepairSeconds</c>; null for anyone else. Read in the animation's parallel step: the jobs change only in the
+    /// serial step.
+    /// </summary>
+    public CombatMove? Move(World world, CharacterId id, long tick)
+    {
+        if (config.RepairInstant || config.RepairAnimation == "none") return null;
+
+        foreach (var job in _jobs)
+        {
+            if (job.Repairer != id || job.Phase != Phase.Work) continue;
+
+            float progress = (tick - job.WorkStart) * world.TickSeconds / config.RepairSeconds;
+            string clip = config.RepairAnimation is "auto" or "" ? "medic" : config.RepairAnimation;
+            return CombatMove.Clip(clip, Math.Clamp(progress, 0, 0.999f));
+        }
+
+        return null;
     }
 
     static CharacterCold? Cold(World world, CharacterId id) =>
@@ -372,31 +417,15 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
     #region Breaking
 
     /// <summary>
-    /// <c>BreakWeapons</c>: the piece is taken off and destroyed, and the owner's fighting gear made again from its inventory.
+    /// <c>BreakWeapons</c>: the piece is taken off and destroyed, and the owner's fighting gear and look made again from its inventory
+    /// (<see cref="CharacterRefresh"/>).
     /// </summary>
     public void Destroy(CharacterCold owner, ItemInstance item)
     {
         if (owner.Inventory?.Remove(item) != true) return;
 
         log($"broke '{item.Name}'");
-        (_refresh ??= RefreshOf(data, log))?.Invoke(owner);
-    }
-
-    /// <summary>
-    /// The simulation's <c>CharacterAssembly.RefreshEquipment</c>, which every engine path that takes worn gear off calls; it is internal, so it is
-    /// found by reflection (null and logged when the engine no longer has it).
-    /// </summary>
-    static Action<CharacterCold>? RefreshOf(PopulationData data, Action<string> log)
-    {
-        var type = typeof(World).Assembly.GetType("Meitou.Simulation.Bodies.CharacterAssembly");
-        var refresh = type?.GetMethod("RefreshEquipment", BindingFlags.Public | BindingFlags.Instance, [typeof(CharacterCold)]);
-        if (type is null || refresh is null || Activator.CreateInstance(type, data) is not { } assembly)
-        {
-            log("the engine's equipment refresh was not found; a broken piece leaves the fighter's stats until its next change");
-            return null;
-        }
-
-        return cold => refresh.Invoke(assembly, [cold]);
+        CharacterRefresh.Refresh(data, owner, CharacterRefreshKind.Equipment);
     }
 
     #endregion

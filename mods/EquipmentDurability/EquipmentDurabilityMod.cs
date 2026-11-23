@@ -33,12 +33,34 @@ public sealed class EquipmentDurabilityMod : IMod
             return;
         }
 
-        context.AddSystem("durability", _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log),
+        context.AddSystem("durability",
+            _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log, s => context.PostInterfaceSound(s)),
             SystemAnchor.End);
+        if (Config.Repair) context.AddCombatMove(RepairMove);
         if (Config.Repair) context.AddUi(new RepairMenu());
         if (Config.ShowTooltip) context.AddUi(new DurabilityTooltip());
     }
+
+    /// <summary>
+    /// The repair animation of a character repairing in <paramref name="world"/> (its own durability system's jobs).
+    /// </summary>
+    static CombatMove? RepairMove(World world, CharacterId id, long tick)
+    {
+        var systems = world.Systems;
+        for (int i = 0; i < systems.Count; i++)
+        {
+            if (systems[i] is DurabilitySystem system) return system.RepairMove(world, id, tick);
+        }
+
+        return null;
+    }
 }
+
+/// <summary>
+/// The item at <paramref name="Index"/> of <paramref name="Owner"/>'s items, of <paramref name="Record"/>, rolls its durability if it has none: its first
+/// tooltip (the original rolls there).
+/// </summary>
+public sealed record RollOrder(Simulation.Items.ItemOwner Owner, int Index, string Record) : SimCommand;
 
 /// <summary>
 /// The original's own texts in the game's language (its <c>UiText</c> table: English, Portuguese, German, French, Russian, Spanish).
@@ -109,7 +131,8 @@ sealed class RepairMenu : IUiExtension
 
 /// <summary>
 /// The tooltip's Durability row (the original's <c>AddTooltipRow</c>): "N / max", or BROKEN at 0, then the effect: "(-NN% dmg)" or "(+NN% dmg)" for a
-/// melee weapon, "(-NN% resist)" for armour, "(+N.N s reload)" for a crossbow. Gear not rolled yet shows none.
+/// melee weapon, "(-NN% resist)" for armour, "(+N.N s reload)" for a crossbow, in <c>PenaltyColor</c> while a penalty applies (or at a quarter of
+/// the cap or less) and <c>BonusColor</c> while the bonus does. Gear not rolled yet shows none; its first tooltip asks the world to roll it.
 /// </summary>
 sealed class DurabilityTooltip : IUiExtension
 {
@@ -120,39 +143,64 @@ sealed class DurabilityTooltip : IUiExtension
     static IEnumerable<UiItemTooltipLine> Lines(UiItemTooltipContext item)
     {
         var config = EquipmentDurabilityMod.Config;
-        if (EquipmentDurabilityMod.Running is not { } running || item.ModTag.Length == 0) return [];
+        if (EquipmentDurabilityMod.Running is not { } running) return [];
 
         var rules = running.Rules;
         if (running.Type(item.Record) is not { } type || rules.ClassOf(item.Record, type, locked: false) is not { } c) return [];
 
         int cap = rules.RangeOf(c).Cap;
-        if (Condition.InTag(item.ModTag, cap) is not { } dur) return [];
+        if (Condition.InTag(item.ModTag, cap) is not { } dur)
+        {
+            AskRoll(item);
+            return [];
+        }
 
         var texts = UiText.Current;
         string label = config.TooltipLabel == "Durability" ? texts.Label : config.TooltipLabel;
         string shown = dur <= 0 ? texts.Broken : dur.ToString(CultureInfo.InvariantCulture) + " / " + cap.ToString(CultureInfo.InvariantCulture);
-        return [new UiItemTooltipLine(label, shown + Effect(rules, c, dur, cap, texts))];
+        var (effect, tone) = Effect(rules, c, dur, cap, texts);
+        return [new UiItemTooltipLine(label, shown + effect) { Style = Tone(config, tone, dur, cap) }];
     }
 
     /// <summary>
-    /// The effect after the value; empty when none applies.
+    /// The row's value colour: the bonus colour with a bonus; the penalty colour with a penalty, broken or at a quarter of the cap or less; else
+    /// the tooltip's own.
     /// </summary>
-    static string Effect(Condition rules, GearClass c, int dur, int cap, UiText texts)
+    static UiLineStyle? Tone(DurabilityConfig config, int tone, int dur, int cap)
+    {
+        if (tone > 0) return new UiLineStyle(Value: config.BonusColour);
+        if (tone < 0 || dur <= 0 || dur * 4 <= cap) return new UiLineStyle(Value: config.PenaltyColour);
+        return null;
+    }
+
+    /// <summary>
+    /// An item without a value asks the world to roll it on its tooltip's first build (only an item a command can name).
+    /// </summary>
+    static void AskRoll(UiItemTooltipContext item)
+    {
+        if (item.First && item.Owner is { } owner && item.Index >= 0 && Condition.InTag(item.ModTag, int.MaxValue) is null)
+            item.Enqueue(new RollOrder(owner, item.Index, item.Record) { Tick = item.Tick });
+    }
+
+    /// <summary>
+    /// The effect after the value (empty when none applies) and its tone: -1 a penalty, 1 a bonus, 0 none.
+    /// </summary>
+    static (string Text, int Tone) Effect(Condition rules, GearClass c, int dur, int cap, UiText texts)
     {
         if (c == GearClass.Ranged)
         {
             float delta = rules.ReloadDelta(dur, cap);
-            if (delta > 0.05f) return " (+" + delta.ToString("0.0", CultureInfo.InvariantCulture) + " s " + texts.Reload + ")";
-            if (delta < -0.05f) return " (" + delta.ToString("0.0", CultureInfo.InvariantCulture) + " s " + texts.Reload + ")";
-            return "";
+            if (delta > 0.05f) return (" (+" + delta.ToString("0.0", CultureInfo.InvariantCulture) + " s " + texts.Reload + ")", -1);
+            if (delta < -0.05f) return (" (" + delta.ToString("0.0", CultureInfo.InvariantCulture) + " s " + texts.Reload + ")", 1);
+            return ("", 0);
         }
 
         bool armour = Condition.IsArmour(c);
         float factor = armour ? rules.ResistFactor(dur, cap) : rules.DamageFactor(dur, cap);
         string word = armour ? texts.Resist : texts.Damage;
-        if (factor < 0.999f) return " (-" + Percent(1 - factor) + "% " + word + ")";
-        if (factor > 1.001f) return " (+" + Percent(factor - 1) + "% " + word + ")";
-        return "";
+        if (factor < 0.999f) return (" (-" + Percent(1 - factor) + "% " + word + ")", -1);
+        if (factor > 1.001f) return (" (+" + Percent(factor - 1) + "% " + word + ")", 1);
+        return ("", 0);
     }
 
     static string Percent(float share) => ((int)(share * 100 + 0.5f)).ToString(CultureInfo.InvariantCulture);

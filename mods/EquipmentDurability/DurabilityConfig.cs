@@ -178,6 +178,28 @@ sealed class DurabilityConfig
     public string RepairAnimation { get; private set; } = "auto";
 
     /// <summary>
+    /// The repair's sound (<c>RepairSound</c>, a file in the mod folder; "" none) and when it plays (<c>RepairSoundTiming</c>: <c>start</c>, the
+    /// default, as the work begins; <c>end</c> as the repair is applied).
+    /// </summary>
+    public string RepairSound { get; private set; } = "repair.wav";
+
+    /// <summary>
+    /// See the property above.
+    /// </summary>
+    public bool SoundAtStart { get; private set; } = true;
+
+    /// <summary>
+    /// The tooltip row's colours (<c>PenaltyColor</c>, <c>BonusColor</c>, six hex digits RRGGBB): the penalty one while a penalty applies or at a
+    /// quarter of the cap or less, the bonus one while the bonus applies.
+    /// </summary>
+    public System.Numerics.Vector4 PenaltyColour { get; private set; } = Rgb(0x59231a);
+
+    /// <summary>
+    /// See the property above.
+    /// </summary>
+    public System.Numerics.Vector4 BonusColour { get; private set; } = Rgb(0xa8b774);
+
+    /// <summary>
     /// The menu rows' texts (<c>RepairMenuText</c>, <c>RepairArmourText</c>; the defaults are translated).
     /// </summary>
     public string RepairWeaponText { get; private set; } = "Repair Weapon";
@@ -369,6 +391,10 @@ sealed class DurabilityConfig
             case "RepairAnimation": RepairAnimation = value; break;
             case "RepairMenuText": RepairWeaponText = value; break;
             case "RepairArmourText": RepairArmourText = value; break;
+            case "RepairSound": RepairSound = value; break;
+            case "RepairSoundTiming": SoundAtStart = value is not ("end" or "End" or "END"); break;
+            case "PenaltyColor": PenaltyColour = Hex(value) ?? PenaltyColour; break;
+            case "BonusColor": BonusColour = Hex(value) ?? BonusColour; break;
             default: return false;
         }
 
@@ -419,6 +445,17 @@ sealed class DurabilityConfig
         string[] parts = value.Split(',');
         for (int i = 0; i < into.Length && i < parts.Length; i++) into[i] = Math.Clamp(Int(parts[i]), 0, 100);
     }
+
+    /// <summary>
+    /// Six hex digits (an optional leading <c>#</c>) as a colour; null when malformed (the setting keeps its default, as the original).
+    /// </summary>
+    static System.Numerics.Vector4? Hex(string value)
+    {
+        string digits = value.TrimStart('#');
+        return digits.Length == 6 && int.TryParse(digits, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int rgb) ? Rgb(rgb) : null;
+    }
+
+    static System.Numerics.Vector4 Rgb(int rgb) => new((rgb >> 16 & 0xff) / 255f, (rgb >> 8 & 0xff) / 255f, (rgb & 0xff) / 255f, 1);
 
     static string[] Words(string value) =>
         [.. value.Split(',').Select(w => w.Trim().ToLowerInvariant()).Where(w => w.Length > 0)];
@@ -503,6 +540,8 @@ sealed class DurabilityConfig
 
         ShowTooltip = 1
         TooltipLabel = Durability
+        PenaltyColor = 59231a
+        BonusColor = a8b774
 
         # Repairs from the right-click menu with a Tools item.
         RepairEnabled = 1
@@ -515,6 +554,8 @@ sealed class DurabilityConfig
         RepairItemID =
         RepairAnimation = auto
         RepairSeconds = 1.2
+        RepairSound = repair.wav
+        RepairSoundTiming = start
         RepairMenuText = Repair Weapon
         RepairArmourText = Repair Armour
         """;

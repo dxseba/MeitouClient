@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
 using Meitou.Simulation.Items;
@@ -12,10 +13,13 @@ namespace Meitou.EquipmentDurability;
 /// attacker's weapon in hand, a block the defender's, a crossbow bolt loaded the crossbow, and a melee hit on a player character each worn armour
 /// piece covering the part hit. Uses are noted as they happen and applied in the serial slow step. A player's weapon deals its damage factor in melee
 /// (<see cref="ICombatHitFilter"/>) and a player's armour gives its resistance factor to cut and blunt in melee (<see cref="IArmourFilter"/>), both
-/// pure reads of the item's tag. New gear rolls on first contact and in a sweep over every loaded character's inventory, so its tooltip has a value.
+/// pure reads of the item's tag; a player's worn crossbow reloads its reload change slower or faster (<see cref="ICombatSpeedFilter"/>). Gear rolls on
+/// its first use, on its first tooltip (<see cref="RollOrder"/>, as the original) and when the world makes it (<see cref="IItemCreatedObserver"/>: loot,
+/// crafted, shop stock and spawn kit, so a trader's stock, which no tooltip command can name, shows a value).
 /// </summary>
-sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log)
-    : ICombatHitObserver, ICombatHitFilter, IArmourFilter, ICombatDefenceObserver, IItemUseObserver, IStateHashed
+sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Action<string> sound)
+    : ICombatHitObserver, ICombatHitFilter, IArmourFilter, ICombatDefenceObserver, IItemUseObserver, IItemCreatedObserver, ICombatSpeedFilter,
+        IStateHashed
 {
     #region Uses
 
@@ -42,7 +46,7 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     /// <summary>
     /// The repairs.
     /// </summary>
-    readonly Repairs _repairs = new(config, data, purpose, log);
+    readonly Repairs _repairs = new(config, data, purpose, log, sound);
 
     /// <summary>
     /// Draws made in this slow step (keys the rolls, so they follow the step's fixed order).
@@ -50,9 +54,19 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     ulong _draws;
 
     /// <summary>
+    /// Rolls made outside the slow step (items made, tooltip rolls), in their serial order; never reset.
+    /// </summary>
+    ulong _otherDraws;
+
+    /// <summary>
     /// The player characters carrying a repair item, for the menu (published every 10th tick).
     /// </summary>
     public volatile FrozenSet<CharacterId> ToolHolders = FrozenSet<CharacterId>.Empty;
+
+    /// <summary>
+    /// The repair animation of a character repairing; null for anyone else (a pure read for the animation's parallel step).
+    /// </summary>
+    public CombatMove? RepairMove(World world, CharacterId id, long tick) => _repairs.Move(world, id, tick);
 
     /// <summary>
     /// The gear rules, for the interface.
@@ -90,7 +104,10 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         foreach (var command in commands)
+        {
             if (command is RepairOrder order) _repairs.Start(world, order, _condition);
+            else if (command is RollOrder roll) Roll(world, roll);
+        }
     }
 
     public void SlowWorld(World world)
@@ -100,13 +117,13 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         _uses.Clear();
 
         _repairs.Step(world, _condition);
-        if (world.Tick % 30 == 0) Sweep(world);
         if (world.Tick % 10 == 0) ToolHolders = _repairs.Holders(world);
     }
 
     public void Hash(ref StateHasher hasher)
     {
         hasher.Add(_uses.Count);
+        hasher.Add((long)_otherDraws);
         _repairs.Hash(ref hasher);
     }
 
@@ -152,6 +169,42 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
 
         var p = ask.Piece;
         return p with { CutDefence = Math.Clamp(p.CutDefence * factor, 0, 0.9f), BluntDefence = Math.Clamp(p.BluntDefence * factor, 0, 0.8f) };
+    }
+
+    /// <summary>
+    /// A player's crossbow reload takes its reload change (the original's reload hook: the game's time plus the change, never under a quarter of
+    /// it when faster nor under 0.1 s). The game's time is rebuilt from the same formula and stats the reload uses, so the answer is the ratio.
+    /// </summary>
+    public float Rate(World world, in CombatSpeedAsk ask)
+    {
+        if (ask.Kind != CombatSpeedKind.Reload) return ask.Rate;
+        if (!world.Characters.TryResolveNext(ask.Character, out int slot)) return ask.Rate;
+        if (world.Characters.Cold(slot) is not { IsPlayer: true, Inventory: { } inventory } cold) return ask.Rate;
+        if (Gear.Crossbow(inventory) is not { } item || !_condition.Tracked(item, out var c)) return ask.Rate;
+
+        int cap = _condition.RangeOf(c).Cap;
+        if (Condition.InTag(item.ModTag, cap) is not { } dur || GameReload(cold) is not { } time || time <= 0) return ask.Rate;
+
+        float delta = _condition.ReloadDelta(dur, cap);
+        if (delta == 0) return ask.Rate;
+
+        float changed = time + delta;
+        if (delta < 0 && changed < time * 0.25f) changed = time * 0.25f;
+        changed = MathF.Max(changed, 0.1f);
+        return ask.Rate * time / changed;
+    }
+
+    /// <summary>
+    /// The game's reload seconds for the character's crossbow: its reload range at the blend of its effective crossbows and dexterity, as the
+    /// reload (<c>RangedFormulas.ReloadTime</c>, <c>SkillBlend</c>) takes them; null without a crossbow.
+    /// </summary>
+    static float? GameReload(CharacterCold cold)
+    {
+        if (cold is not { Fighter: { Crossbow: { } x } fighter, Stats: { } stats, Medical: { } medical }) return null;
+
+        float skill = stats[StatsEnumerated.Crossbows] * stats.Scale * medical.StatMultiplier(StatsEnumerated.Crossbows) * fighter.Factors.Ranged;
+        float dexterity = stats[StatsEnumerated.Dexterity] * stats.Scale * medical.StatMultiplier(StatsEnumerated.Dexterity);
+        return RangedFormulas.ReloadTime(RangedFormulas.SkillBlend(skill, dexterity, fighter.DexterityMult), x.Stats.ReloadMin, x.Stats.ReloadMax);
     }
 
     #endregion
@@ -231,24 +284,40 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     ulong Draw(World world, CharacterId id) => Rng.Hash(world.Seed, Rng.Key(id) ^ (ulong)world.Tick << 20, purpose, _draws++);
 
     /// <summary>
-    /// Rolls every new tracked item carried by a loaded character (the original rolls on the first tooltip; the interface cannot change items).
+    /// A new item the world made rolls at once (<see cref="IItemCreatedObserver"/>); a crafted one starts at its cap.
     /// </summary>
-    void Sweep(World world)
+    public void Created(World world, in ItemCreated made)
     {
-        var table = world.Characters;
-        for (int slot = 0; slot < table.HighWater; slot++)
-        {
-            if (table.Cold(slot) is not { Inventory: { } inventory }) continue;
-
-            var id = table.IdOf(slot);
-            foreach (var item in inventory.All())
-            {
-                if (item.Type is not (FcsRecordType.Weapon or FcsRecordType.Crossbow or FcsRecordType.Armour)) continue;
-                if (Condition.InTag(item.ModTag, int.MaxValue) is not null) continue;
-                if (_condition.Tracked(item, out var c)) _condition.GetOrRoll(item, c, Draw(world, id));
-            }
-        }
+        var item = made.Item;
+        if (Condition.InTag(item.ModTag, int.MaxValue) is null && _condition.Tracked(item, out var c)) _condition.GetOrRoll(item, c, OtherDraw(world, item));
     }
+
+    /// <summary>
+    /// The first tooltip of an item rolls it (the original's tooltip roll): only while the item there is still the record shown, without a value.
+    /// </summary>
+    void Roll(World world, RollOrder order)
+    {
+        if (Holding(world, order.Owner) is not { } inventory || inventory.All().ElementAtOrDefault(order.Index) is not { } item) return;
+        if (item.Record != order.Record || Condition.InTag(item.ModTag, int.MaxValue) is not null || !_condition.Tracked(item, out var c)) return;
+
+        _condition.GetOrRoll(item, c, OtherDraw(world, item));
+    }
+
+    /// <summary>
+    /// The inventory a tooltip's owner names: a character's, or a container's at a site.
+    /// </summary>
+    static Inventory? Holding(World world, ItemOwner owner) => owner.Holder switch
+    {
+        ItemHolder.Character => world.Characters.TryResolveNext(owner.Character, out int slot) ? world.Characters.Cold(slot)?.Inventory : null,
+        ItemHolder.Site => world.Fixtures.Find(owner.Site)?.Contents,
+        _ => null,
+    };
+
+    /// <summary>
+    /// A roll outside the slow step, keyed by the world seed, the tick, the item's record and the running count.
+    /// </summary>
+    ulong OtherDraw(World world, ItemInstance item) =>
+        Rng.Hash(world.Seed, Rng.StableHash(item.Record) ^ (ulong)world.Tick << 20, purpose, _otherDraws++);
 
     #endregion
 }
