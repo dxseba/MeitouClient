@@ -1,8 +1,8 @@
 # Taunt Expansion (port)
 
 Port of *Taunt Expansion* (workshop 3771499164). A postfix on `TargetScore.Score` changes only a taunting candidate's score: the vanilla +2
-Taunt term becomes +2 x *Taunt multiplier*, and x *Re-target multiplier* again while the choosing fighter already has a target (set by a
-prefix on `CombatSystem.ChooseTarget`). Target choice, AI and pathing stay vanilla.
+Taunt term becomes +2 x *Taunt multiplier*, and x *Re-target multiplier* again while the choosing fighter already has a target (the
+engine's `TargetCandidate.ChooserHasTarget`). Target choice, AI and pathing stay vanilla.
 
 ## Facts
 
@@ -12,8 +12,8 @@ prefix on `CombatSystem.ChooseTarget`). Target choice, AI and pathing stay vanil
   `hand` is valid (and RetargetMultiplier is not 1) sets it to 2 x Multiplier x RetargetMultiplier for that call. **Verified** (original DLL
   (decompiled): patch install and the `chooseBestAttackTarget` hook).
 - The second factor applies to every taunting candidate of such a call, the current target too. **Verified** (as above: one constant per call).
-- In Meitou the calls with an old target are the fighter's own choice (`ChooseTarget`); attacker lookups and the aggro and assault finders
-  have none. **Observed** (Meitou source).
+- In Meitou the calls with an old target are the fighter's own choice while it fights someone, which `TargetCandidate.ChooserHasTarget`
+  reports; the attacker of a protectee, the aggro look and an assault have none. **Observed** (docs/modding.md "Target choice").
 - **Observed** (2026-11-18, windowed sandbox, user play, older formula): enemies favoured the taunting character.
 
 ## Missing

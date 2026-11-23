@@ -26,12 +26,6 @@ public sealed class TauntExpansionMod : IMod
     /// </summary>
     static float s_multiplier = 5, s_retarget = 2;
 
-    /// <summary>
-    /// Whether the fighter choosing on this thread has a current target (set for the length of <c>CombatSystem.ChooseTarget</c>).
-    /// </summary>
-    [ThreadStatic]
-    static bool s_chooserHasTarget;
-
     public void Initialize(ModContext context)
     {
         var settings = new TauntSettings();
@@ -39,33 +33,18 @@ public sealed class TauntExpansionMod : IMod
         context.AddSystem("settings", _ => new SettingsCopy(settings), SystemAnchor.Before(StandardParts.Combat));
 
         PatchScore(context.Harmony);
-        PatchChooser(context.Harmony);
         context.Log("Taunt Expansion initialized");
     }
 
+    /// <summary>
+    /// <see cref="TargetScore.Score"/> is public and has no filter hook; the documented route is a Harmony postfix on it.
+    /// </summary>
     static void PatchScore(Harmony harmony)
     {
         var score = AccessTools.Method(typeof(TargetScore), nameof(TargetScore.Score))
             ?? throw new MissingMethodException(nameof(TargetScore), nameof(TargetScore.Score));
         harmony.Patch(score, postfix: new HarmonyMethod(typeof(TauntExpansionMod), nameof(Scored)));
     }
-
-    /// <summary>
-    /// The original raises the bonus a second time only inside <c>AI::chooseBestAttackTarget</c> calls given a valid old target; in Meitou that is
-    /// the fighter's own target choice, whose slot names its current target.
-    /// </summary>
-    static void PatchChooser(Harmony harmony)
-    {
-        var choose = AccessTools.Method(typeof(CombatSystem), "ChooseTarget")
-            ?? throw new MissingMethodException(nameof(CombatSystem), "ChooseTarget");
-        var prefix = new HarmonyMethod(typeof(TauntExpansionMod), nameof(Choosing));
-        var finalizer = new HarmonyMethod(typeof(TauntExpansionMod), nameof(Chosen));
-        harmony.Patch(choose, prefix: prefix, finalizer: finalizer);
-    }
-
-    static void Choosing(in CombatSlot s) => s_chooserHasTarget = s.TargetSlot >= 0;
-
-    static void Chosen() => s_chooserHasTarget = false;
 
     #pragma warning disable IDE1006 // Harmony binds __result by name
     static void Scored(in TargetCandidate c, ref float? __result)
@@ -74,8 +53,10 @@ public sealed class TauntExpansionMod : IMod
         if (!s_enabled || !c.Taunt || __result is not { } s) return;
 
         // Effective bonus: 2 x Multiplier, or 2 x Multiplier x RetargetMultiplier while the chooser already has a target (the original ini).
+        // The original raises it the second time only in AI::chooseBestAttackTarget calls given a valid old target: the engine's
+        // ChooserHasTarget (a fighter's own choice while it fights someone).
         float bonus = VanillaBonus * s_multiplier;
-        if (s_chooserHasTarget) bonus *= s_retarget;
+        if (c.ChooserHasTarget) bonus *= s_retarget;
 
         __result = s + bonus - VanillaBonus;
     }
