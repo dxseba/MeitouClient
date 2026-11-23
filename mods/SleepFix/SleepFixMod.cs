@@ -105,4 +105,29 @@ public sealed class SleepSettings
     [Setting("Repair bed health", Hint = "repairRobotHp: also go when a robot part's health is below this share (0 off; needs the wear setting).",
         Min = 0, Max = 1, Step = 0.01)]
     public float RepairRobotHp { get; set; } = 0.9f;
+
+    /// <summary>
+    /// <c>stayInBed=1</c>: a character in bed that is not healed does not get up on its own.
+    /// </summary>
+    [Setting("Stay in bed", Hint = "stayInBed: wounded characters in bed stay there until healed.")]
+    public bool StayInBed { get; set; } = true;
+
+    /// <summary>
+    /// <c>bedMult=15</c>: the AI's wish to go to bed while wounded, multiplied.
+    /// </summary>
+    [Setting("Bed wish multiplier", Hint = "bedMult: how much more a wounded character wants to go to bed.", Min = 0, Max = 50, Step = 0.5)]
+    public float BedMult { get; set; } = 15;
+
+    /// <summary>
+    /// <c>forceBed=30</c>: the least wish to go to bed while wounded, with a free bed of its own and no unbandaged cut (0 off).
+    /// </summary>
+    [Setting("Bed wish floor", Hint = "forceBed: the least wish to go to bed while wounded, with an own free bed and no open cut (0 off).",
+        Min = 0, Max = 100, Step = 1)]
+    public float ForceBed { get; set; } = 30;
+
+    /// <summary>
+    /// <c>getUpMult=1</c>: the AI's wish to get out of bed once healed, multiplied.
+    /// </summary>
+    [Setting("Get-up multiplier", Hint = "getUpMult: how much a healed character wants to get out of bed.", Min = 0, Max = 10, Step = 0.1)]
+    public float GetUpMult { get; set; } = 1;
 }

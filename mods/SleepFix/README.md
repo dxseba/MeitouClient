@@ -17,8 +17,14 @@ Port of *SleepFix* (workshop 3787375792). Every second, for each living player c
   `getUpMult=1`; wounded = the lowest part health (clamped 0-1; 1 if any reads above 1.05) under `healThreshold - 0.0005`; robot parts count only
   by wear (from `wearThreshold`, 1 - wear/max) or health under `repairRobotHp`, and only when the faction has a repair bed; an unbandaged cut is
   flesh + bandage more than 1 under the part's maximum; selected characters are never sent; the order is Kenshi's 258 (Sleep) to the bed.
-- **Engine gaps**: the original also rescales the AI's own goal scores (`AI::scoreGoToBed` x15, floored to *forceBed* 30 when an own free bed
-  exists and no cut is unbandaged; `scoreGetOutOfBedOnceFullyHealed` x1, 0 while not healed with *stayInBed*). Needs a desire filter on the
-  engine's bed and get-up goals. *stayInBed* holds anyway for a bed order (it lasts until replaced). Not ported: the cfg file (settings page
-  instead), `debug`/`logLimit` and the diagnostic probes.
+- **Desire filter** (`IGoalDesireFilter`, registered through `IChooserOwner`; the original's `AI::scoreGoToBed` and
+  `AI::scoreGetOutOfBedOnceFullyHealed` hooks), for a living player character that is not carried and (*skipCombat*) not fighting: a bed goal
+  (`GoHomeAndGoToBed`, `GoHomeAndGoToBedSecure`) while not healed weighs x *bedMult* (15); under *forceBed* (30) it is raised to *forceBed* when
+  no cut waits for a bandage (*waitForTreatment*; else the game's desire) and a free bed of its faction is about (*ownBedsOnly*; off: any bed).
+  The plan step *get out of bed once healed* weighs 0 while it lies in bed not healed (*stayInBed*), else x *getUpMult* (1). The filter reads a
+  table the slow step publishes every pass (and when the world is ready), so all threads of a tick see the same values. **Verified** (original
+  DLL decompiled): those branches and defaults. **Observed** (by reading the engine): it asks a bed goal only when its own bed search found a
+  bed, so the original's "no bed" branch (the multiplied desire) never comes up. **Unknown**: which task types the original's `scoreGoToBed`
+  scores; the two bed goals are taken.
+- **Not ported**: the cfg file (settings page instead), `debug`/`logLimit`, `pauseJobs`/`skipJobs` and the diagnostic probes.
 - **Observed**: not checked in game. Timers count game seconds (the original's count real milliseconds).

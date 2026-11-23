@@ -1,7 +1,9 @@
+using System.Collections.Frozen;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.World;
 using Meitou.Modding;
 using Meitou.Simulation;
+using Meitou.Simulation.Ai;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Locks;
 using Meitou.Simulation.Population;
@@ -12,9 +14,10 @@ namespace Meitou.SleepFix;
 /// Once a second in the serial slow step, for each living player character in slot order, the original's per-frame rules (SleepFix.dll's
 /// <c>AI::update4Frame</c> hook): release a bed order that has done its work (healed, never reached, no healing), then send a wounded character
 /// to bed. Its timers count game seconds where the original counts real milliseconds. The tracking is runtime state, not saved: after a load the
-/// rules pick each character up again from what it is doing.
+/// rules pick each character up again from what it is doing. Each pass (and when the world is ready) also publishes what the bed desire filter
+/// (<see cref="BedDesire"/>, registered with the chooser) reads.
 /// </summary>
-sealed class SleepSystem(SleepSettings settings, PopulationData population) : ITickSystem
+sealed class SleepSystem(SleepSettings settings, PopulationData population) : IChooserOwner, IWorldReady
 {
     /// <summary>
     /// Ticks between passes.
@@ -30,6 +33,15 @@ sealed class SleepSystem(SleepSettings settings, PopulationData population) : IT
     /// What the rules remember per character.
     /// </summary>
     readonly Dictionary<CharacterId, Watch> _watches = [];
+
+    /// <summary>
+    /// What the desire filter reads; null before the first pass.
+    /// </summary>
+    volatile BedTable? _table;
+
+    public void Register(ChooserRegistry chooser) => chooser.DesireFilter(new BedDesire(() => _table));
+
+    public void Ready(World world, bool fromSave) => Publish(world, RepairBeds(world));
 
     public void SlowWorld(World world)
     {
@@ -48,7 +60,46 @@ sealed class SleepSystem(SleepSettings settings, PopulationData population) : IT
         }
 
         Forget(table);
+        Publish(world, repairBeds);
     }
+
+    #region Desire table
+
+    /// <summary>
+    /// Publishes the settings and each living player character's state for <see cref="BedDesire"/>.
+    /// </summary>
+    void Publish(World world, IReadOnlyList<Fixture> repairBeds)
+    {
+        var rules = new BedRules(settings.BedMult, settings.ForceBed, settings.GetUpMult, settings.StayInBed, settings.OwnBedsOnly);
+        var states = new Dictionary<CharacterId, BedState>();
+        var table = world.Characters;
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Medical: { Dead: false } } cold) continue;
+
+            states[table.IdOf(slot)] = StateOf(world, slot, cold, repairBeds, rules);
+        }
+
+        _table = new(rules, states.ToFrozenDictionary());
+    }
+
+    /// <summary>
+    /// One character's state: eligible as the original's hooks test it (not carried; not in combat with <c>skipCombat</c>), healed, an
+    /// unbandaged cut (<c>waitForTreatment</c>), a free bed of its faction about (searched only when the bed goal's floor can apply), in a bed.
+    /// </summary>
+    BedState StateOf(World world, int slot, CharacterCold cold, IReadOnlyList<Fixture> repairBeds, BedRules rules)
+    {
+        var medical = cold.Medical!;
+        bool hasRepairBed = repairBeds.Any(f => f.Owner == cold.Faction);
+        bool healed = !BodyRating.Wounded(BodyRating.Rating(medical, cold.Race, settings, hasRepairBed), settings);
+        bool eligible = cold.CarriedBy.IsNone && !(settings.SkipCombat && cold.InCombat);
+        bool unbandaged = settings.WaitForTreatment && BodyRating.UnbandagedCuts(medical, cold.Race);
+        bool searched = eligible && !healed && !unbandaged && rules.OwnBedsOnly && rules.ForceBed > 0;
+        bool ownBed = searched && world.Fixtures.FindBed(world, slot, population.Relations, f => f.Owner != cold.Faction) is not null;
+        return new(eligible, healed, unbandaged, ownBed, cold.InSomething == HeldState.Bed);
+    }
+
+    #endregion
 
     /// <summary>
     /// One character's pass: the releases, then the send.
