@@ -1,7 +1,6 @@
 using Meitou.Data;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay.Bodies;
-using Meitou.Game.Ui;
 using Meitou.Modding;
 using Meitou.Simulation;
 
@@ -39,7 +38,9 @@ public sealed class QueenBirthingMod : IMod
 
         var kinds = Kinds(context);
         context.AddSystem("birthing", _ => new BirthSystem(Settings, kinds), SystemAnchor.End);
-        context.AddUi(new BirthMenu(kinds));
+        var button = new BirthButton(kinds);
+        context.AddUi(button);
+        context.AddFrame(button.Frame);
         EditorOpener.Install(context);
         context.Log("Queen Birthing initialized");
     }
@@ -124,9 +125,9 @@ sealed record BirthKind(int Index, string Label, string? Template, float Cost)
 public sealed class BirthSettings
 {
     /// <summary>
-    /// Whether the birth rows show at all (this port's switch).
+    /// Whether the GIVE BIRTH button shows at all (this port's switch).
     /// </summary>
-    [Setting("Enable Give Birth", Hint = "Shows the birth rows on your Hive Queens.")]
+    [Setting("Enable Give Birth", Hint = "Shows the GIVE BIRTH button in your Hive Queens' inventory windows.")]
     public bool Enabled { get; set; } = true;
 
     /// <summary>
@@ -134,43 +135,6 @@ public sealed class BirthSettings
     /// </summary>
     [Setting("Open editor on birth", Hint = "Opens the character editor on each newborn.")]
     public bool OpenEditorOnBirth { get; set; } = true;
-}
-
-/// <summary>
-/// The birth rows on a living player queen: one per affordable kind, or a "too hungry" row when she can afford none (the original button's
-/// TOO HUNGRY caption).
-/// </summary>
-sealed class BirthMenu(IReadOnlyList<BirthKind> kinds) : IUiExtension
-{
-    public string Id => "dxseba.queenbirthing.menu";
-
-    public void Register(UiRegistration registration) => registration.AddCharacterMenuVerbs(Verbs);
-
-    /// <summary>
-    /// The rows for the right-clicked character.
-    /// </summary>
-    IEnumerable<UiMenuVerb> Verbs(UiMenuContext menu)
-    {
-        var target = menu.Target;
-        if (kinds.Count == 0 || !QueenBirthingMod.Settings.Enabled || !target.IsPlayer || target.Body is not { Dead: false }) return [];
-        if (BirthSystem.Queens is not { } queens || !queens.TryGetValue(target.Id, out float hunger)) return [];
-
-        var rows = kinds
-            .Where(k => hunger >= k.Cost)
-            .Select(k => Row(menu, target.Id, k))
-            .ToList();
-        if (rows.Count == 0) rows.Add(new UiMenuVerb("Give Birth: too hungry", static () => { }));
-        return rows;
-    }
-
-    /// <summary>
-    /// The row giving birth to <paramref name="kind"/>, captioned with its cost.
-    /// </summary>
-    static UiMenuVerb Row(UiMenuContext menu, CharacterId queen, BirthKind kind)
-    {
-        string caption = $"Give Birth: {kind.Label} ({kind.ShownCost})";
-        return new UiMenuVerb(caption, () => menu.Enqueue(new GiveBirthOrder(queen, kind.Index) { Tick = menu.Tick }));
-    }
 }
 
 /// <summary>
