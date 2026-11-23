@@ -3,10 +3,10 @@
 Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0.5). Lesson rules from the original DLL (decompiled) and its
 `Mentors.ini`; no source is published. Trades are the port's own.
 
-- **Opening**: the original adds the player reply "Could you teach me something? [training]" to conversations (`Dialogue::listPlayerReplies`
-  hook; `OnlyPlayerStartedTalk`, `CloseDialogue`), and Ctrl+Shift+T opens training with the selected NPC or the nearest one within `Radius`
-  (500) who can teach. Port: a **Learn from** row on the right-click menu (the first selected character walks over and the window opens), and
-  the *Mentors window* key with Ctrl+Shift (unbound by default: the game's T is Toggle research) on the nearest teacher within *Hotkey radius*.
+- **Opening** (**Verified**, DLL strings and `Mentors.ini`): the player reply "Could you teach me something? [training]" in a conversation with
+  a character who can teach the player's character (`AddDialogueReplies`) opens training; with *Close dialogue* (`CloseDialogue`, on) the
+  conversation ends. Ctrl+Shift with the *Mentors window* key (unbound by default: the game's T is Toggle research) opens it on the inspected
+  NPC (the HUD's shown character) when it can teach, else on the nearest teacher within *Hotkey radius* (`Radius`, 500), or closes it.
 - **Who can teach** (**Verified**): a player character learns from a living non-player character that is not a slave (state 1) and not hostile;
   port also: conscious, not imprisoned or carried (an unconscious check in the original is **Observed** only, an unnamed virtual call).
 - **Trades**: the original maps the teacher's English CHARACTER record name to one of 21 trades with a curated table (whole names, then an
@@ -33,6 +33,5 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
 ## Missing
 
 - The original's exact trade per NPC (its authored table; supply a `trades.json` to change the port's).
-- The dialogue reply (needs an engine hook that adds a player reply to any conversation: text, a condition on speaker/target, and an action;
-  the data-side `AddDialogueCondition`/`AddDialogueEffect` only work in lines a data file places), hence `OnlyPlayerStartedTalk` and
-  `CloseDialogue`; the hotkey on an inspected (selected) NPC; Russian texts.
+- `OnlyPlayerStartedTalk`: the reply shows in every conversation with a teacher; the dialogue context does not say who started the talk.
+- Russian texts.

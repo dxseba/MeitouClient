@@ -5,7 +5,7 @@ namespace Meitou.Mentors;
 /// <summary>The original's <c>Mentors.ini</c> options under Mod settings, with its defaults (<b>Verified</b>, original <c>Mentors.ini</c>).</summary>
 public sealed class MentorsSettings
 {
-    [Setting("Enable Mentors", Hint = "Port option: shows the Learn from row on characters who can teach.")]
+    [Setting("Enable Mentors", Hint = "Port option: offers the training reply and the hotkey.")]
     public bool Enabled { get; set; } = true;
 
     [Setting("Require profession", Hint = "RequireProfession. On: an NPC teaches only the skills of their trade. Off: anyone teaches anything they are good at.")]
@@ -27,6 +27,9 @@ public sealed class MentorsSettings
     [Setting("Attribute price multiplier", Hint = "AttributePriceMult: price multiplier for strength, dexterity, toughness and perception.", Min = 1,
         Max = 5, Step = 0.1)]
     public float AttributeMultiplier { get; set; } = 1.5f;
+
+    [Setting("Close dialogue", Hint = "CloseDialogue: close the conversation when the training window opens.")]
+    public bool CloseDialogue { get; set; } = true;
 
     [Setting("Hotkey radius", Hint = "Radius: the Mentors window key opens training with the nearest teacher this close (game units).", Min = 20,
         Max = 2000, Step = 10)]

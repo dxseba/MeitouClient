@@ -8,9 +8,9 @@ using Meitou.Simulation;
 namespace Meitou.Mentors;
 
 /// <summary>
-/// Port of KENSHI: MENTORS (workshop 3834394158), lesson rules from its DLL, trades the port's own: a "Learn from" row on a friendly NPC's right-click menu (in place of the
-/// original's dialogue reply) opens a training window with the skills the teacher's trade covers, bought 1 or 5 lessons at a time; Ctrl+Shift with the "Mentors
-/// window" key opens it on the nearest teacher, or closes it.
+/// Port of KENSHI: MENTORS (workshop 3834394158), lesson rules from its DLL, trades the port's own: the player reply "Could you teach me something?
+/// [training]" opens a training window with the skills the teacher's trade covers, bought 1 or 5 lessons at a time; Ctrl+Shift with the "Mentors
+/// window" key opens it on the inspected or nearest teacher, or closes it.
 /// </summary>
 public sealed class MentorsMod : IMod
 {
@@ -28,35 +28,41 @@ public sealed class MentorsMod : IMod
         Professions.Load(context.Folder, context.Log);
         context.AddSettings(Settings);
         context.AddSystem("mentors", _ => Running = new MentorSystem(Settings, context.Data), SystemAnchor.End);
-        context.AddUi(new LearnMenu());
+        context.AddUi(new TeachReply());
         context.AddUi(new MentorWindow(context));
         context.AddKeyAction("window", "Mentors window (Ctrl+Shift)", LessonShortcut.Pressed);
         context.Log("Mentors initialized");
     }
 }
 
-/// <summary>The "Learn from" row: the first selected character walks to the target and the window opens on what it can learn there.</summary>
-sealed class LearnMenu : IUiExtension
+/// <summary>
+/// The original's player reply "Could you teach me something? [training]" (<b>Verified</b>, DLL strings) in a conversation with a character who can
+/// teach the player's character: it opens the training window and, with Close dialogue, ends the conversation.
+/// </summary>
+sealed class TeachReply : IUiExtension
 {
-    public string Id => "dxseba.mentors.menu";
+    const string Text = "Could you teach me something? [training]";
 
-    public void Register(UiRegistration registration) => registration.AddCharacterMenuVerbs(Verbs);
+    public string Id => "dxseba.mentors.reply";
 
-    static IEnumerable<UiMenuVerb> Verbs(UiMenuContext menu)
+    public void Register(UiRegistration registration) => registration.AddDialogueReplies(Replies);
+
+    static IEnumerable<UiDialogueReply> Replies(UiDialogueContext talk)
     {
-        var target = menu.Target;
-        var student = menu.Selected.Where(id => id != target.Id).DefaultIfEmpty(CharacterId.None).First();
-        if (!MentorsMod.Settings.Enabled || student == CharacterId.None) return [];
+        if (!MentorsMod.Settings.Enabled || talk.Player is not { IsPlayer: true } student || talk.Npc is not { } teacher) return [];
+        if (!Teachers.CanTeach(teacher, student)) return [];
 
-        if (!CanTeach(target)) return [];
-
-        return [new UiMenuVerb("Learn from", () =>
+        return [new UiDialogueReply(Text, () =>
         {
-            menu.Enqueue(new MoveOrder([student], target.Position) { Tick = menu.Tick });
-            menu.Enqueue(new OpenLessonsOrder(student, target.Id) { Tick = menu.Tick });
+            talk.Enqueue(new OpenLessonsOrder(student.Id, teacher.Id) { Tick = talk.Tick });
+            if (MentorsMod.Settings.CloseDialogue) talk.Leave();
         })];
     }
+}
 
+/// <summary>Who can teach (the original's checks, the port's trades).</summary>
+static class Teachers
+{
     /// <summary>
     /// A living, conscious, non-hostile non-player character that is not a slave (the original's checks), not imprisoned or carried (port), with
     /// a skill to teach the student when its stats are known.
@@ -67,8 +73,7 @@ sealed class LearnMenu : IUiExtension
 
     /// <summary>
     /// Whether <paramref name="teacher"/> can teach the student any skill. The interface knows the record name but not the shop or NPC class, so
-    /// the menu (no student snapshot) offers the row on anyone eligible and the window says "Nothing left to teach."; the hotkey needs a trade
-    /// found by name.
+    /// without a student snapshot anyone eligible counts and the window says "Nothing left to teach."; with one a trade found by name is needed.
     /// </summary>
     static bool Teaches(CharacterSnapshot teacher, CharacterSnapshot? student)
     {
@@ -86,8 +91,9 @@ sealed class LearnMenu : IUiExtension
 
 /// <summary>
 /// Ctrl+Shift with the "Mentors window" key (the original's Ctrl+Shift+T; unbound by default, as the game holds T): closes the open window, or
-/// opens it for the first selected character on the nearest character within <see cref="MentorsSettings.Radius"/> who can teach it something (the
-/// original's "nearest one who can teach"). Without both modifiers the key does nothing.
+/// opens it for the first selected character on the inspected character (the HUD's shown one) when it can teach, else on the nearest character
+/// within <see cref="MentorsSettings.Radius"/> who can teach it something (the original's "selected NPC, or the nearest one who can teach").
+/// Without both modifiers the key does nothing.
 /// </summary>
 static class LessonShortcut
 {
@@ -101,9 +107,19 @@ static class LessonShortcut
             return;
         }
 
-        if (key.Selected.Count == 0 || Nearest(key.Snapshot, key.Selected[0]) is not { } teacher) return;
+        if (key.Selected.Count == 0 || (Inspected(key) ?? Nearest(key.Snapshot, key.Selected[0])) is not { } teacher) return;
 
         key.Enqueue(new OpenLessonsOrder(key.Selected[0], teacher) { Tick = key.Tick });
+    }
+
+    /// <summary>The character the HUD shows (an inspected NPC) when it can teach the first selected one.</summary>
+    static CharacterId? Inspected(ModKeyContext key)
+    {
+        if (key.Frame?.Shown is not { } shown) return null;
+
+        var student = key.Snapshot.Characters.FirstOrDefault(c => c.Id == key.Selected[0]);
+        var teacher = key.Snapshot.Characters.FirstOrDefault(c => c.Id == shown);
+        return student is not null && teacher is not null && Teachers.CanTeach(teacher, student) ? shown : null;
     }
 
     /// <summary>The closest character within the radius of <paramref name="student"/> who can teach it, or null.</summary>
@@ -113,7 +129,7 @@ static class LessonShortcut
 
         float reach = MentorsMod.Settings.Radius;
         var near = snapshot.Characters
-            .Where(c => c.Id != student && LearnMenu.CanTeach(c, from))
+            .Where(c => c.Id != student && Teachers.CanTeach(c, from))
             .Select(c => (c.Id, Distance: Vector3.Distance(c.Position, from.Position)))
             .Where(c => c.Distance <= reach)
             .OrderBy(c => c.Distance)
