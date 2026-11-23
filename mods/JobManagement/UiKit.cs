@@ -10,9 +10,9 @@ static class UiKit
 {
     public const float LineHeight = 22, RowHeight = 26, Gap = 4;
 
-    /// <summary>A transparent row that places its children side by side.</summary>
-    public static UiNode Row(string id, float height = RowHeight) =>
-        new(id) { Placement = new(UiLength.Fill, height), Flow = UiFlow.Row, Gap = Gap, Pickable = false };
+    /// <summary>A transparent row that places its children side by side (<paramref name="pickable"/>: it is a drop target for the pointer).</summary>
+    public static UiNode Row(string id, float height = RowHeight, bool pickable = false) =>
+        new(id) { Placement = new(UiLength.Fill, height), Flow = UiFlow.Row, Gap = Gap, Pickable = pickable };
 
     /// <summary>A transparent column of <paramref name="width"/> x <paramref name="height"/>.</summary>
     public static UiNode Column(string id, UiLength width, UiLength height, float gap = 2) =>
@@ -21,7 +21,8 @@ static class UiKit
     public static UiNode Label(string id, string text, float width, string style) =>
         new(id, UiNodeKind.Label) { Placement = new(width, LineHeight), Text = text, Style = style };
 
-    public static UiNode Button(string id, string text, float width, string style, string action, string argument, bool enabled = true) =>
+    public static UiNode Button(string id, string text, float width, string style, string action, string argument, bool enabled = true,
+        UiPointerEvents pointer = UiPointerEvents.None) =>
         new(id, UiNodeKind.Button)
         {
             Placement = new(width, LineHeight),
@@ -30,6 +31,14 @@ static class UiKit
             Action = enabled ? action : "",
             Argument = argument,
             Enabled = enabled,
+            Pointer = enabled ? pointer : UiPointerEvents.None,
+        };
+
+    /// <summary>A list's column: transparent but taking the pointer, so the wheel over it or its gaps runs <paramref name="wheel"/>.</summary>
+    public static UiNode List(string id, UiLength width, UiLength height, string wheel, string argument) =>
+        new(id)
+        {
+            Placement = new(width, height), Flow = UiFlow.Column, Gap = 2, Pointer = UiPointerEvents.Wheel, Action = wheel, Argument = argument,
         };
 
     /// <summary>The lines from <paramref name="scroll"/> that fit, the scroll clamped to the list.</summary>

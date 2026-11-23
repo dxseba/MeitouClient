@@ -52,7 +52,7 @@ public sealed partial class JobWindow
         if (lines.Count == 0) lines.Add(Label("nostations", "No stations in the shown groups.", width));
         float listHeight = height - UiKit.RowHeight - UiKit.Gap;
         int visible = UiKit.Fit(listHeight);
-        var list = UiKit.Column("jm-stationlist", width, listHeight);
+        var list = UiKit.List("jm-stationlist", width, listHeight, _wheelAction, "stations");
         list.Children.AddRange(UiKit.Page(lines, ref _stationScroll, visible));
         column.Children.Add(list);
         column.Children.Add(ScrollBar("stations", lines.Count, visible, _stationScroll, s => _stationScroll = s, width));
@@ -82,7 +82,7 @@ public sealed partial class JobWindow
         var lines = DetailLines(snapshot, station, width);
         float listHeight = height - UiKit.RowHeight - UiKit.Gap;
         int visible = UiKit.Fit(listHeight);
-        var list = UiKit.Column("jm-workerlist", width, listHeight);
+        var list = UiKit.List("jm-workerlist", width, listHeight, _wheelAction, "workers");
         list.Children.AddRange(UiKit.Page(lines, ref _workerScroll, visible));
         column.Children.Add(list);
         column.Children.Add(ScrollBar("workers", lines.Count, visible, _workerScroll, s => _workerScroll = s, width));

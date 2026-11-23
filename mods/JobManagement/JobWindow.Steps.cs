@@ -28,9 +28,8 @@ public sealed partial class JobWindow
     /// <summary>Runs the steps that are due: after the snapshot moved on from the last commands (or a second has passed).</summary>
     void Pump()
     {
-        if (_session is null) return;
+        if (_snapshot is not { } snapshot) return;
 
-        var snapshot = _session.CurrentSnapshot;
         if (_waitFor is not null)
         {
             if (ReferenceEquals(snapshot, _waitFor) && ++_waitFrames < MaxWaitFrames) return;
@@ -89,6 +88,7 @@ public sealed partial class JobWindow
     UiNode Build(UiFrameContext frame)
     {
         _clicks.Clear();
+        _dragJobs.Clear();
         if (!settings.Enabled)
         {
             if (_open) Close();
@@ -106,7 +106,7 @@ public sealed partial class JobWindow
             });
         }
 
-        if (_open && _session is { } session) root.Children.Add(Window(frame.Viewport, session.CurrentSnapshot));
+        if (_open && _snapshot is { } snapshot) root.Children.Add(Window(frame.Viewport, snapshot));
         return root;
     }
 

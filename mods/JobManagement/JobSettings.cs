@@ -12,10 +12,11 @@ public sealed class JobSettings
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// The fork's <c>Hotkey</c> (default <c>CTRL+J</c>; <c>NONE</c>: only the panel button), here the J key with Ctrl or Alt.
+    /// The fork's <c>Hotkey</c> (default <c>CTRL+J</c>; <c>NONE</c>: only the panel button): a key name with optional <c>CTRL+</c>, <c>ALT+</c>,
+    /// <c>SHIFT+</c> (<see cref="WindowKey"/>).
     /// </summary>
-    [Setting("Window key", Hint = "The key that toggles the Job Management window (it no longer reaches the game's binding of J); NONE: the button only.",
-        Options = ["CTRL+J", "ALT+J", "NONE"])]
+    [Setting("Window key", Hint = "The key that toggles the window, with optional CTRL+, ALT+ or SHIFT+ (CTRL+J, ALT+J, F6...); it no longer reaches the "
+        + "game's binding of that key. NONE: the button only.", MaxLength = 32)]
     public string Hotkey { get; set; } = "CTRL+J";
 
     [Setting("Show JM button", Hint = "A JM button under the time panel opens the window.")]

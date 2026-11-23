@@ -22,10 +22,11 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     readonly Dictionary<string, Action> _clicks = new(StringComparer.Ordinal);
     readonly Queue<Func<WorldSnapshot, IReadOnlyList<SimCommand>?>> _steps = new();
     Styles? _styles;
-    string _clickAction = "";
+    string _clickAction = "", _dragAction = "", _wheelAction = "";
 
     WorldSession? _session;
     World? _world;
+    WorldSnapshot? _snapshot;
     SimulationClock.SpeedState? _speeds;
     bool _open;
     Tab _tab;
@@ -57,12 +58,19 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
                 Background = new(.45f, .32f, .14f, 1), Hover = new(.55f, .40f, .18f, 1), TextPadding = pad,
             }));
         _clickAction = registration.RegisterAction("click", c => Click(c.Argument));
+        _dragAction = registration.RegisterAction("drag", Drag);
+        _wheelAction = registration.RegisterAction("wheel", Wheel);
         registration.Contribute(UiSlots.Overlay, Build, order: 60);
     }
 
-    /// <summary>Once per frame on the interface's thread (the BindUi hook): follows the session and runs the next due step.</summary>
-    public void Frame(WorldSession session)
+    /// <summary>
+    /// Once per frame on the host's thread (<c>AddFrame</c>), with the snapshot on screen: follows the session and runs the next due step.
+    /// </summary>
+    public void Frame(WorldSnapshot snapshot)
     {
+        _snapshot = snapshot;
+        if (Hooks.Session is not { } session) return;
+
         if (!ReferenceEquals(session, _session) || _open && !ReferenceEquals(session.World, _world)) Reset(session);
         Pump();
     }
@@ -75,14 +83,14 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
 
     void Open()
     {
-        if (_session is null || !settings.Enabled) return;
+        if (_session is null || _snapshot is not { } snapshot || !settings.Enabled) return;
 
         _open = true;
         _world = _session.World;
         _speeds = _session.Simulation.SaveSpeeds();
         _session.Simulation.Pause();
         _status = "";
-        OpenSquads(_session.CurrentSnapshot);
+        OpenSquads(snapshot);
     }
 
     /// <summary>Closes the window; the speed comes back unless the player changed it while the window was open.</summary>
@@ -90,6 +98,7 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     {
         _open = false;
         _pick = null;
+        _drag = null;
         if (_session is { } s && _speeds is { } speeds && s.Simulation.Speed == 0) s.Simulation.RestoreSpeeds(speeds);
         _speeds = null;
     }
@@ -99,6 +108,7 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     {
         _open = false;
         _pick = null;
+        _drag = null;
         _speeds = null;
         _steps.Clear();
         _waitFor = null;

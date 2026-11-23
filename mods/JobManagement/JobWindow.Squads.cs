@@ -30,6 +30,7 @@ public sealed partial class JobWindow
     UiNode SquadTab(WorldSnapshot snapshot, float width, float height)
     {
         var tab = UiKit.Column("jm-squads", width, height, UiKit.Gap);
+        _drops.Clear();
         var squads = snapshot.PlayerSquads;
         if (squads.Count == 0)
         {
@@ -46,7 +47,7 @@ public sealed partial class JobWindow
         float listHeight = height - 2 * (UiKit.RowHeight + UiKit.Gap);
         var lines = JobLines(members, BuildingNames(snapshot), characters, width);
         int visible = UiKit.Fit(listHeight);
-        var list = UiKit.Column("jm-joblist", width, listHeight);
+        var list = UiKit.List("jm-joblist", width, listHeight, _wheelAction, "jobs");
         list.Children.AddRange(UiKit.Page(lines, ref _scroll, visible));
         tab.Children.Add(list);
         tab.Children.Add(ScrollBar("jobs", lines.Count, visible, _scroll, s => _scroll = s, width));
@@ -66,8 +67,15 @@ public sealed partial class JobWindow
         row.Children.Add(Button("heal.order", "Prioritize Healing", 140, () => PrioritizeHealing(ids)));
         row.Children.Add(Button("invalid", "Remove Invalid Jobs", 160, () => RemoveInvalid(ids)));
 
-        string pick = _pick is { } p ? $"Picked {JobRules.Name(p.Job.Type)}: Move here or Copy here" : "Click a job to pick it.";
-        row.Children.Add(Label("pick", pick, Math.Max(40, width - 716 - 6 * UiKit.Gap), _styles!.Dim));
+        float rest = Math.Max(40, width - 716 - 6 * UiKit.Gap);
+        if (_drag is not null)
+        {
+            row.Children.Add(DropToRemove(rest));
+            return row;
+        }
+
+        string pick = _pick is { } p ? $"Picked {JobRules.Name(p.Job.Type)}: Move here or Copy here" : "Click a job to pick it, or drag it.";
+        row.Children.Add(Label("pick", pick, rest, _styles!.Dim));
         return row;
     }
 
@@ -79,6 +87,7 @@ public sealed partial class JobWindow
         var lines = new List<UiNode>();
         foreach (var member in members)
         {
+            int first = lines.Count;
             lines.Add(MemberLine(member, width));
             foreach (var unit in JobRules.Units(member.Jobs))
             {
@@ -89,6 +98,8 @@ public sealed partial class JobWindow
                     lines.Add(Label($"row.{Key(member.Id)}.{row}", text, width - 40, _styles!.Dim));
                 }
             }
+
+            for (int i = first; i < lines.Count; i++) DropOn(lines[i], member.Id);
         }
 
         return lines;
@@ -96,7 +107,7 @@ public sealed partial class JobWindow
 
     UiNode MemberLine(CharacterSnapshot member, float width)
     {
-        var row = UiKit.Row($"jm-member.{Key(member.Id)}", UiKit.LineHeight);
+        var row = UiKit.Row($"jm-member.{Key(member.Id)}", UiKit.LineHeight, pickable: true);
         string animal = JobRules.IsAnimal(member) ? " (animal)" : "";
         row.Children.Add(Label($"name.{Key(member.Id)}", $"{member.Name}{animal} - {member.Jobs.Count} jobs", 300));
         if (_pick is { } pick && pick.Owner != member.Id)
@@ -149,10 +160,10 @@ public sealed partial class JobWindow
         string key = $"{Key(id)}.{at}.{(int)job.Type}";
         bool picked = _pick is { } p && p.Owner == id && p.Row == at;
 
-        var row = UiKit.Row($"jm-job.{key}", UiKit.LineHeight);
+        var row = UiKit.Row($"jm-job.{key}", UiKit.LineHeight, pickable: true);
         row.Children.Add(Label($"num.{key}", (at + 1).ToString(CultureInfo.InvariantCulture) + ".", 40, _styles!.Dim));
-        row.Children.Add(Button($"pick.{key}", JobText(job, sites, characters), 440, () => _pick = picked ? null : new JobPick(id, at, job),
-            selected: picked));
+        row.Children.Add(DragButton($"pick.{key}", JobText(job, sites, characters), 440, new JobPick(id, at, job),
+            () => _pick = picked ? null : new JobPick(id, at, job), picked));
         row.Children.Add(Button($"up.{key}", "Up", 44, () => EditRow(id, at, job, (c, t) => JobPlanner.Shift(id, c.Jobs, at, -1, t))));
         row.Children.Add(Button($"down.{key}", "Down", 54, () => EditRow(id, at, job, (c, t) => JobPlanner.Shift(id, c.Jobs, at, 1, t))));
         row.Children.Add(Button($"remove.{key}", "X", 30, () => EditRow(id, at, job, (c, t) => JobPlanner.Remove(id, c.Jobs, at, t))));
