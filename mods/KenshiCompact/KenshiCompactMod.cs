@@ -1,50 +1,36 @@
-using HarmonyLib;
 using Meitou.Game.Host.Input;
 using Meitou.Modding;
 using Meitou.Simulation;
-using Meitou.Simulation.Editing;
 
 namespace Meitou.KenshiCompact;
 
 /// <summary>
-/// Port of farghul's Kenshi Compact (GPL-3.0): Shift+/ opens the character editor, in its in-play (recruit) mode, on the main selected character,
-/// unless it is in combat mode (melee or ranged). A Harmony prefix on the interface's <c>GameHotkeys.Key</c>, which every game key passes through;
-/// the key is not swallowed.
+/// Port of farghul's Kenshi Compact (GPL-3.0): Shift+/ opens the character editor, in its in-play (recruit) mode, on the character the HUD shows,
+/// unless it is in combat mode (melee or ranged). A key action (default /, rebindable on the Controls page) that acts only with Shift held, as the
+/// script's handler; it opens the editor through <see cref="ModContext.Interface"/>.
 /// </summary>
 public sealed class KenshiCompactMod : IMod
 {
     internal static readonly CompactSettings Settings = new();
 
-    static Type s_player = null!;
-    static System.Reflection.FieldInfo s_owner = null!;
+    ModInterface _interface = null!;
 
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-
-        var hotkeys = AccessTools.TypeByName("Meitou.Game.Ui.GameHotkeys") ?? throw new TypeLoadException("Meitou.Game.Ui.GameHotkeys");
-        s_player = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
-        s_owner = AccessTools.GetDeclaredFields(hotkeys).FirstOrDefault(f => f.FieldType == s_player)
-            ?? throw new MissingFieldException(hotkeys.FullName, "player");
-
-        var key = AccessTools.Method(hotkeys, "Key", [typeof(Key), typeof(bool)]) ?? throw new MissingMethodException(hotkeys.FullName, "Key");
-        context.Harmony.Patch(key, prefix: new HarmonyMethod(typeof(KenshiCompactMod), nameof(BeforeKey)));
+        _interface = context.Interface;
+        context.AddKeyAction("editor", "Character editor (with Shift)", Pressed, Key.Slash);
         context.Log("Kenshi Compact initialized");
     }
 
-    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    static bool BeforeKey(object __instance, Key key, bool shift)
-    #pragma warning restore IDE1006
+    void Pressed(ModKeyContext key)
     {
-        if (!Settings.Enabled || key != Key.Slash || !shift) return true;
+        if (!Settings.Enabled || !key.Shift || key.Frame?.Shown is not { } shown) return;
 
-        var player = s_owner.GetValue(__instance)!;
-        if (Traverse.Create(player).Method("Lead").GetValue() is not CharacterSnapshot { CombatMode: false } lead) return true;
+        var lead = key.Snapshot.Characters.FirstOrDefault(c => c.Id == shown);
+        if (lead is null || lead.CombatMode) return;
 
-        var editor = Traverse.Create(player).Property("CharacterEditor").GetValue()!;
-        Traverse.Create(editor).Method("OpenEditor", [typeof(EditKind), typeof(IReadOnlyList<CharacterId>), typeof(CharacterId), typeof(bool)])
-            .GetValue(EditKind.Recruit, (IReadOnlyList<CharacterId>)[lead.Id], default(CharacterId), false);
-        return true;   // the original's key handler only listens: the key goes on to the game as well
+        _interface.OpenScreen(ModScreen.CharacterEditor, ScreenTarget.Of(lead.Id));
     }
 }
 
