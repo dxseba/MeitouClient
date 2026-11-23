@@ -8,11 +8,12 @@ Port of *Metabolic Traversal* (workshop 3709852838, RE_Kenshi plugin, discontinu
 - **Config** (**Verified**): `config.json` from `./mods/Metabolic Traversal/` or `../../workshop/content/233860/3709852838/`; per line, the
   number after the first colon of the line holding the key (the shipped file has a trailing comma, so it is not strict JSON). Port: this mod's
   folder, else the original's Workshop folder beside it; the values become the Mod settings' defaults.
-- **Port**: every 15th tick in the serial slow phase the empty-stomach hunger drop since the last pass is scaled by the factor (the game's factor
-  only drives that drain, docs/game/character-stats.md "Drain and digestion"); effort from the horizontal velocity over `MaxSpeed`. Options:
+- **Port**: an `INeedRateFilter` multiplies every body update's hunger rate (`NeedKind.Hunger`: race rate x the game's situation factor, which
+  only drives the empty-stomach drain, docs/game/character-stats.md "Drain and digestion"; the HUD's figure too) by the factor, as the
+  original's hook multiplies `calculateHungerMult`. Effort: the last finished tick's horizontal velocity over `MaxSpeed`. Options:
   *Metabolic hunger* (on), *Player characters only* (off).
-- **Unknown**: not run in game. The port samples effort once per pass instead of every hunger update.
+- **Unknown**: not run in game; whether the original's speed is horizontal or full 3D.
 
 ## Missing
 
-- Nothing known; a hook on the game's hunger factor (`MedicalState.HungerSituationFactor`) would make it exact per update.
+- Nothing known.

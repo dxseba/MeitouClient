@@ -86,57 +86,28 @@ public sealed class MetabolicSettings
 }
 
 /// <summary>
-/// Every 15th tick in the serial slow phase: for each character with an empty stomach whose hunger fell since the last pass (the game's drain), adds
-/// the drain times (factor - 1), or gives part of it back when the factor is below 1. A fed stomach (hunger rising) is left alone, as the original's
-/// factor only scales the empty-stomach drain.
+/// The original's <c>calculateHungerMult</c> hook as a need rate filter (<see cref="INeedRateFilter"/>): every body update's hunger rate (the race's
+/// rate times the game's situation factor, the HUD's figure too) times the factor for the character's effort. A pure read of the ask and of the
+/// character's last finished tick (velocity, top speed), so it may run on any thread.
 /// </summary>
-sealed class MetabolismSystem(MetabolicSettings settings) : ITickSystem
+sealed class MetabolismSystem(MetabolicSettings settings) : INeedRateFilter
 {
-    const int Interval = 15;
     const float MinTopSpeed = 0.1f;
-    readonly Dictionary<CharacterId, float> _last = [];
 
-    public void SlowWorld(World world)
+    public float Rate(World world, in NeedRateAsk ask)
     {
-        if (world.Tick % Interval != 0) return;
-        if (!settings.Enabled)
-        {
-            _last.Clear();
-            return;
-        }
+        if (ask.Kind != NeedKind.Hunger || !settings.Enabled || !world.Characters.IsAlive(ask.Character)) return ask.Rate;
 
-        var table = world.Characters;
-        var seen = new HashSet<CharacterId>();
-        for (int slot = 0; slot < table.HighWater; slot++)
-        {
-            if (!table.Next[slot].Alive || table.Cold(slot) is not { Medical: { Dead: false } medical } cold) continue;
-            if (settings.PlayerOnly && !cold.IsPlayer) continue;
+        int slot = ask.Character.Slot;
+        if (settings.PlayerOnly && world.Characters.Cold(slot) is not { IsPlayer: true }) return ask.Rate;
 
-            var id = table.IdOf(slot);
-            seen.Add(id);
-            Scale(id, medical, Effort(table, slot));
-        }
-
-        foreach (var gone in _last.Keys.Where(k => !seen.Contains(k)).ToList()) _last.Remove(gone);
+        return ask.Rate * settings.Factor(Effort(world.Characters.Previous[slot]));
     }
 
     /// <summary>Horizontal speed over top speed: 0 at a top speed of 0.1 or less, at most 1.</summary>
-    static float Effort(CharacterTable table, int slot)
+    static float Effort(in CharacterHot hot)
     {
-        ref var next = ref table.Next[slot];
-        float speed = MathF.Sqrt(next.Velocity.X * next.Velocity.X + next.Velocity.Z * next.Velocity.Z);
-        return next.MaxSpeed > MinTopSpeed ? MathF.Min(speed / next.MaxSpeed, 1) : 0;
-    }
-
-    void Scale(CharacterId id, MedicalState medical, float effort)
-    {
-        float hunger = medical.Hunger;
-        if (_last.TryGetValue(id, out float before) && medical.Fed <= 0 && hunger < before)
-        {
-            hunger = MathF.Min(hunger - (before - hunger) * (settings.Factor(effort) - 1), MedicalState.MaxHunger);
-            medical.Hunger = hunger;
-        }
-
-        _last[id] = hunger;
+        float speed = MathF.Sqrt(hot.Velocity.X * hot.Velocity.X + hot.Velocity.Z * hot.Velocity.Z);
+        return hot.MaxSpeed > MinTopSpeed ? MathF.Min(speed / hot.MaxSpeed, 1) : 0;
     }
 }
