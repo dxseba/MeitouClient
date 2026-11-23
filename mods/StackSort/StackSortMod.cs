@@ -1,4 +1,3 @@
-using HarmonyLib;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Items;
@@ -27,28 +26,8 @@ public sealed class StackSortMod : IMod
         Settings.TopTargets = Original.TopTargets;
         context.AddSettings(Settings);
         context.AddSystem("stacksort", _ => new StackSortSystem(), SystemAnchor.End);
-        context.Harmony.Patch(ArrangeMethod(), prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeArrange)));
         context.AddUi(new StackSortUi(Original.Strip));
         context.Log("StackSort initialized");
-    }
-
-    /// <summary>
-    /// The public whole-inventory arrange other callers use (a machine's or fixture's storage, a shop or trade window, putting a held item back);
-    /// no hook covers it.
-    /// </summary>
-    static System.Reflection.MethodInfo ArrangeMethod() =>
-        AccessTools.Method(typeof(InventoryCommands), nameof(InventoryCommands.Arrange), [typeof(Inventory)])
-            ?? throw new MissingMethodException(nameof(InventoryCommands), "Arrange");
-
-    #pragma warning disable IDE1006 // Harmony binds __result by name
-    /// <summary>Other callers of the whole-inventory arrange: the best layout for the setting's goal.</summary>
-    static bool BeforeArrange(Inventory root, ref bool __result)
-    #pragma warning restore IDE1006
-    {
-        if (!Settings.Enabled || !Packer.Pack(root, null, Settings.WidthGoal ? Goal.Width : Goal.Height, Settings.Consolidate)) return true;
-
-        __result = true;
-        return false;
     }
 }
 
@@ -59,10 +38,28 @@ public sealed class StackSortMod : IMod
 public sealed record StackSortArrange(CharacterId Character, bool Bag, ArrangeMode Mode) : SimCommand, IPausedCommand;
 
 /// <summary>
-/// Applies <see cref="StackSortArrange"/> in the input step, and while paused in the paused interface step.
+/// Applies <see cref="StackSortArrange"/> in the input step, and while paused in the paused interface step; as the arrange filter, answers every
+/// other arrange (a machine's, container's or the trade stock's ARRANGE, making room for a held item, the stock grid being built) with the best
+/// layout for the <c>Width goal</c> setting.
 /// </summary>
-sealed class StackSortSystem : IPausedCommandHandler
+sealed class StackSortSystem : IPausedCommandHandler, IInventoryArrangeFilter
 {
+    /// <summary>
+    /// The best layout for the setting's goal; null (the game's arrange) when off, when nothing fits, and for a character window's ARRANGE, which
+    /// the strip covers. With <c>Merge stacks</c> the engine merges the partial stacks first.
+    /// </summary>
+    public InventoryArrangement? Arrange(World world, in InventoryArrangeAsk ask)
+    {
+        var settings = StackSortMod.Settings;
+        if (!settings.Enabled) return null;
+        if (ask.Owner.Holder == ItemHolder.Character && ask.Reason == InventoryArrangeReason.Button) return null;
+        if (settings.Consolidate && !ask.Merged) return InventoryArrangement.MergeFirst;
+
+        var grids = ask.Grids.Select(g => new Packer.Grid(g.Grid, g.Section, [.. g.Grid.Items])).ToList();
+        var layouts = Packer.Layouts(grids, settings.WidthGoal ? Goal.Width : Goal.Height, 1, merge: false);
+        return layouts.Count == 0 ? null : new InventoryArrangement(Packer.Placements(layouts[0]));
+    }
+
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         if (!StackSortMod.Settings.Enabled) return;

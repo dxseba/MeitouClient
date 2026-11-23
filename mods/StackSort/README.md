@@ -9,8 +9,9 @@ filled by rows or by columns) offered, ranked for the goal: Height (used rows, t
 - **Strip**: *StackSort [n]* applies the best layout and further presses cycle forward (`n` the shown layout); `<` and `>` step back and forward;
   *H/W* switches the goal and sorts again; a right click on *StackSort [n]* (`UiPointerEvents.Buttons`) restores the layout before the first press, as
   the original's. The strip's root takes the pointer, so a press between its buttons does not reach the covered ARRANGE (**Unknown** in game). A notice shows `StackSort [N] H`. A cycle ends when the grid changes by other means. No fit: vanilla
-  arrange. Other callers of `InventoryCommands.Arrange(Inventory)` (a Harmony prefix: machine, fixture, shop and trade windows, a held item put
-  back; no hook covers them) get the best layout for the *Width goal* setting.
+  arrange. Every other arrange (`IInventoryArrangeFilter` on `StackSortSystem`: a machine's, container's or trade stock's ARRANGE,
+  making room for a held item, the stock grid being built) gets the best layout for the *Width goal* setting, with *Merge stacks* through
+  the engine's merge first (`InventoryArrangement.MergeFirst`); a character window's ARRANGE is left to the strip. No Harmony or reflection.
 - **The original's files** (a required item, read from its installed folder beside this one): `StackSort.cfg`'s `default_dim` (H),
   `consolidate_stacks` (true) and `top_targets` (5) are the settings' defaults; `arrow_button_width` (30), `dim_button_width` (40),
   `sort_button_width` (180), `button_gap` (2) and `body_x_offset` (-40) lay out the strip; `lang\<code>.txt` gives `SORT_BUTTON` / `DIM_H` /

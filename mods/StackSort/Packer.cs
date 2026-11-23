@@ -75,6 +75,10 @@ static class Packer
         }
     }
 
+    /// <summary>A layout as an arrange filter's answer: each grid section's items at their cells in the layout.</summary>
+    public static List<ItemPlacement> Placements(ItemState[] layout) =>
+        [.. layout.SelectMany(s => s.Values.Where(v => v.Item.Section == s.Grid.Section).Select(v => new ItemPlacement(v.Item, v.X, v.Y)))];
+
     /// <summary>A layout's place in the grids, to tell layouts apart and to notice an inventory changed since.</summary>
     public static string Signature(List<Grid> grids) =>
         string.Join(";", grids.SelectMany(g => g.Inventory.Items.Where(i => i.Section == g.Section).Select(i => $"{i.Record}@{i.X},{i.Y}x{i.Quantity}")));
