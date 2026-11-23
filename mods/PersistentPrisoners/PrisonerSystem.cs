@@ -16,7 +16,7 @@ sealed record PrisonerRow(string Name, string Faction, string Cage, int Nu, stri
 
 /// <summary>
 /// Learns the player's cages while they are loaded (fixture ids, saved with the world, as a cage's fixture may be gone while its zone is out),
-/// answers the keep test for any thread, keeps a caged corpse whose zone unloads (<see cref="IRemovalVeto"/>), sets the hunger floor the original's
+/// keeps a platoon holding a caged prisoner and a caged corpse whose zone unloads (<see cref="IRemovalVeto"/>, any thread), sets the hunger floor the original's
 /// <c>getMagicHungerSetting</c> hook gives, and publishes the overview every 30th tick.
 /// </summary>
 sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population, GameDatabase data) : IRemovalVeto, IModSaveData
@@ -30,14 +30,12 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
     readonly Dictionary<string, string> _cageNames = new(StringComparer.Ordinal);
     readonly Dictionary<CharacterId, float> _fed = [];
     volatile FrozenSet<string> _frozen = FrozenSet<string>.Empty;
-    World? _world;
 
     /// <summary>The overview rows; refreshed while the world runs.</summary>
     public volatile IReadOnlyList<PrisonerRow> Rows = [];
 
     public void SlowWorld(World world)
     {
-        _world = world;
         if (world.Tick % 30 != 0) return;
 
         LearnCages(world);
@@ -65,10 +63,10 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
     bool InPlayerCage(CharacterCold cold) => cold.IsImprisoned && cold.InWhat is { } cage && _frozen.Contains(cage);
 
     /// <summary>Whether the platoon holds a prisoner of a player cage, loaded or stored (read-only: safe on the population's worker threads).</summary>
-    public bool Protects(Platoon p)
+    bool Protects(World world, Platoon p)
     {
         if (p.Stored?.Members.Any(m => InPlayerCage(m.Cold)) == true) return true;
-        if (_world is not { } world || world.Squads.Find(p.SquadId) is not { } squad) return false;
+        if (world.Squads.Find(p.SquadId) is not { } squad) return false;
 
         var table = world.Characters;
         foreach (var id in squad.Members)
@@ -80,12 +78,23 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
     }
 
     /// <summary>
-    /// A corpse in a player cage stays when its zone unloads (the original keeps "caged corpses ... when you leave the area"); its decay is the
-    /// game's.
+    /// A platoon holding a prisoner of a player cage is neither despawned nor counted towards the orphan despawn (any thread); a corpse in a player
+    /// cage stays when its zone unloads (the original keeps "caged corpses ... when you leave the area"); its decay is the game's.
     /// </summary>
-    public bool Keep(World world, in RemovalAsk ask) =>
-        ask.Kind == RemovalKind.CorpseUnloaded && settings.Protect && world.Characters.TryResolveNext(ask.Character, out int slot)
-        && world.Characters.Cold(slot) is { } cold && InPlayerCage(cold);
+    public bool Keep(World world, in RemovalAsk ask)
+    {
+        if (!settings.Protect) return false;
+
+        return ask.Kind switch
+        {
+            RemovalKind.PlatoonDespawned or RemovalKind.PlatoonOrphaned => world.Platoons.Find(ask.Platoon) is { } p && Protects(world, p),
+            RemovalKind.CorpseUnloaded => CagedCorpse(world, ask.Character),
+            _ => false,
+        };
+    }
+
+    bool CagedCorpse(World world, CharacterId id) =>
+        world.Characters.TryResolveNext(id, out int slot) && world.Characters.Cold(slot) is { } cold && InPlayerCage(cold);
 
     #endregion
 

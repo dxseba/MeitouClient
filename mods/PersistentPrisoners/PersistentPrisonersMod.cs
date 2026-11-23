@@ -1,8 +1,6 @@
-using HarmonyLib;
 using Meitou.Game.Host.Input;
 using Meitou.Modding;
 using Meitou.Simulation;
-using Meitou.Simulation.Factions;
 
 namespace Meitou.PersistentPrisoners;
 
@@ -32,7 +30,6 @@ public sealed class PersistentPrisonersMod : IMod
         {
             if (key.Ctrl && key.Shift) Window.Toggle();
         }, Key.P);
-        KeepHook.Install(context);
         context.Log("PersistentPrisoners initialized");
     }
 }
@@ -48,25 +45,4 @@ public sealed class PrisonerSettings
 
     [Setting("Minimum Nu", Hint = "MinimumNu (1 - 300): with starvation off, the game feeds caged NPCs towards this.", Min = 1, Max = 300)]
     public int MinimumNutrition { get; set; } = 100;
-}
-
-/// <summary>
-/// A postfix on the population's keep test (<c>PopulationSystem.Kept</c>) keeps a platoon with a prisoner in a player cage. Harmony: the removal
-/// vetoes (<see cref="Simulation.Bodies.IRemovalVeto"/>) cover corpses only, not a platoon's despawn or the off-screen orphan timer.
-/// </summary>
-static class KeepHook
-{
-    public static void Install(ModContext context)
-    {
-        var kept = AccessTools.Method(typeof(Simulation.Population.PopulationSystem), "Kept", [typeof(Platoon)])
-            ?? throw new MissingMethodException("PopulationSystem", "Kept");
-        context.Harmony.Patch(kept, postfix: new HarmonyMethod(typeof(KeepHook), nameof(AfterKept)));
-    }
-
-    #pragma warning disable IDE1006 // Harmony binds __result by name
-    static void AfterKept(Platoon p, ref bool __result)
-    #pragma warning restore IDE1006
-    {
-        if (!__result && PersistentPrisonersMod.Settings.Protect && PersistentPrisonersMod.Running?.Protects(p) == true) __result = true;
-    }
 }

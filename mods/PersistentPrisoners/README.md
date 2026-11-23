@@ -3,8 +3,8 @@
 Port of *PersistentPrisoners* 0.2.8 (workshop 3798215878, GPL-3.0-or-later, RE_Kenshi plugin). Rules from its README, `languages.ini` and DLL
 (decompiled); its source zip is not in the Workshop item.
 
-- **Keeping**: a Harmony postfix on the population's keep test (`PopulationSystem.Kept`) keeps a platoon that holds a prisoner in a
-  player-owned cage (loaded squad or stored members), so it is neither despawned when it unloads nor by the off-screen orphan timer. Meitou's
+- **Keeping**: an `IRemovalVeto` answering `PlatoonDespawned` and `PlatoonOrphaned` keeps a platoon that holds a prisoner in a player-owned
+  cage (loaded squad or stored members), so it is neither despawned when it unloads nor by the off-screen orphan timer. Meitou's
   own *Squads keep their people* switch (on by default) already keeps most of them; this covers it off and the Faithful rules. A corpse in a
   player cage is kept when its zone unloads (`IRemovalVeto`, `CorpseUnloaded`); its 12-hour decay is the game's. Releasing the prisoner (or
   taking the corpse out) ends the protection. The original hooks 12 game functions (`setPersistentSquad`, `reCheckPersistenceOnUnload`, `~Platoon`, ...).
@@ -27,4 +27,3 @@ Port of *PersistentPrisoners* 0.2.8 (workshop 3798215878, GPL-3.0-or-later, RE_K
 
 - The in-window settings (Apply, shortcut capture, diagnostic logging): settings are on the Mod settings page; translations for the nine game
   languages and the `languages.ini` widths and font height; the "Checking" status.
-- The platoon keep is a Harmony postfix on `PopulationSystem.Kept`: the removal vetoes have no kind for a platoon's despawn.
