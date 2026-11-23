@@ -5,9 +5,9 @@ using Meitou.Simulation.Items;
 namespace Meitou.KenshiAffixes;
 
 /// <summary>
-/// The rolls, as the original's sources: an NPC's equipped gear at its combat level (a fixed NPC's by its profile), shop stock at its quality
-/// band's level, a Meitou weapon anywhere by its template. The player's own plain gear is marked plain and never rolled (the original rolls none
-/// for it, not even once sold or stored).
+/// The sweep (every 60th tick): a fixed NPC's equipped gear by its profile (also after a load, as the original's), shop stock not yet rolled (stock
+/// from before the mod ran), a Meitou weapon anywhere by its template. The player's own plain gear is marked plain and never rolled (the original
+/// rolls none for it, not even once sold or stored). Ordinary NPC gear rolls once as the NPC is made (<see cref="Created"/>).
 /// </summary>
 sealed partial class AffixSystem
 {
@@ -18,9 +18,8 @@ sealed partial class AffixSystem
         {
             if (!table.Next[slot].Alive || table.Cold(slot) is not { Inventory: { } inventory } cold) continue;
 
-            ulong owner = Rng.Key(table.IdOf(slot));
             if (cold.IsPlayer) PlayerGear(world, inventory);
-            else if (settings.AutoNpc && cold.Stats is { } stats) NpcGear(world, cold, inventory, Rolling.NpcLevel(stats), owner);
+            else if (settings.AutoNpc && cold.Stats is { } stats) FixedNpcGear(world, cold, inventory, Rolling.NpcLevel(stats));
         }
 
         if (settings.AutoShops) RollShops(world);
@@ -37,8 +36,8 @@ sealed partial class AffixSystem
         }
     }
 
-    /// <summary>An NPC's equipped gear: Meitou first, then a fixed NPC's profile (replacing an ordinary roll), then an ordinary roll.</summary>
-    void NpcGear(World world, Simulation.CharacterCold cold, Inventory inventory, float level, ulong owner)
+    /// <summary>An NPC's equipped gear: Meitou first, then a fixed NPC's profile (replacing an ordinary roll).</summary>
+    void FixedNpcGear(World world, Simulation.CharacterCold cold, Inventory inventory, float level)
     {
         for (int i = 0; i < inventory.Items.Count; i++)
         {
@@ -46,15 +45,10 @@ sealed partial class AffixSystem
             if (!Wearing.Eligible(item) || !Wearing.Equipped(item) || Meitou(world, item) || AffixTag.Plain(item.ModTag)) continue;
             if (Rolling.BaselineOf(item, combat!) is not { } baseline) continue;
 
-            if (profiles.Npc(cold.RecordId, baseline.Armour) is { } fixedNpc && AffixTag.Profile(item.ModTag) is null)
-            {
-                var (ilvl, affixes) = Rolling.Fixed(baseline, Rolling.Band(item), level, fixedNpc.Priorities);
-                AffixTag.Write(item, ilvl, affixes, fixedNpc.Name);
-            }
-            else if (!AffixTag.Rolled(item.ModTag))
-            {
-                Roll(world, item, baseline, level, owner ^ (ulong)i << 40);
-            }
+            if (profiles.Npc(cold.RecordId, baseline.Armour) is not { } fixedNpc || AffixTag.Profile(item.ModTag) is not null) continue;
+
+            var (ilvl, affixes) = Rolling.Fixed(baseline, Rolling.Band(item), level, fixedNpc.Priorities);
+            AffixTag.Write(item, ilvl, affixes, fixedNpc.Name);
         }
     }
 

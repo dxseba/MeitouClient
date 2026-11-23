@@ -4,11 +4,13 @@ Port of *Kenshi Affixes* v0.6.0 (workshop 3821983877, GPL-3.0-or-later). Rules *
 `CombatRules.h`, `ArmourBonuses.h`, `MeitouRules.h`, `KenshiAffixes.cpp`, `config/*.json`), docs and `KenshiAffixes.ini`.
 
 Rolls (once per item, kept in `ItemInstance.ModTag`: `affix=id:value,...` or `none`, `ilvl=`, `aprof=` for an authored profile, in the shared
-`dxseba;key=value` tag also used by Equipment Durability), every 60th tick, deterministic (`Rng.Hash`):
-- Sources: an NPC's equipped gear at its level ((mean of trained strength, dexterity, toughness) + best of (melee attack + defence) / 2,
-  martial arts, bows) / 2, 1-100 (`AutoNPC`); trader stock (squad stock, a building shop's stock containers) at 12 + 16 x band
-  (`AutoShops`, `ShopBaseLevel`, `ShopLevelPerBand`). The player's characters' gear is never rolled (marked `aplain`, so selling or storing
-  it keeps it plain).
+`dxseba;key=value` tag also used by Equipment Durability), deterministic (`Rng.Hash`), as the world makes the item (`IItemCreatedObserver`):
+- Sources: a new NPC's equipped kit at its level ((mean of trained strength, dexterity, toughness) + best of (melee attack + defence) / 2,
+  martial arts, bows) / 2, 1-100 (`AutoNPC`); a shop's new stock at 12 + 16 x band (`AutoShops`, `ShopBaseLevel`, `ShopLevelPerBand`); new
+  loot (`AutoContainers`) at max(quality level, round(0.7 x site strength + 0.3 x quality level)); gear a player character crafts
+  (`AutoCrafting`) at round(0.7 x its trained weapon or armour smithing + 0.3 x quality level). A 60-tick sweep rolls fixed NPCs' gear (also
+  after a load), shop stock from before the mod ran and Meitou weapons. The player's characters' other gear is never rolled (marked `aplain`,
+  so selling or storing it keeps it plain).
 - Eligible: melee weapons and wearable armour (body, legs, hat, boots, shirt, belt, eyes, gloves, neck), single, not locked, not death items.
 - Band 0-5: armour (gear level + 5) / 20; weapons by cut-offs 15/30/45/60/80. Affix count per band: 0-1, 0-1, 1-2, 1-2, 2-3, 3.
 - iLvl = round(source) + -5..+3, 1-100; tier T = (iLvl - 1) / 20 + 1. Candidates need a positive base field (cut/blunt/bleed multiplier,
@@ -32,17 +34,21 @@ the fighting weapon and worn armour, capped 50%) multiplies cut, blunt, pierce a
 of the victim's real health lost (per part, held to 0..max, before and after) heals the attacker's recoverable stun only, the part with the
 most first, never stumps or crushed limbs; resistance affixes act through `IArmourFilter` (game caps 90% cut, 80% blunt). NPCs too.
 
-Tooltip (`AddItemTooltipLines`): "Affixes [FIXED] iLvl 50 / T3", "No affixes (rolled once)", then "[RARE] Name +12.3%" with the effect.
-"Show affixes" (a menu row, port only) posts a character's equipped gear's affixes. Rolls of the first port (`Keen:12`) still read.
+Price (`ITradePriceFilter`, `TradeDeal.Item`; `AffixPrices`, `ValueBasePercentPerAffix` 8, `ValueLevelPercentPerAffix` 32): an affixed item's
+price x (1 + n x (8% + 32% x iLvl / 100) + rares x (20% + 40% x iLvl / 100)), n at most 3, rounded; buying and selling.
+
+Tooltip (`AddItemTooltipLines`): "Affixes [FIXED] iLvl 50 / T3", "No affixes (rolled once)", "Affix value +x.x%", then "[RARE] Name +12.3%"
+with the effect; the header and affix names in the rank colour (#999999 <15, #FFFFFF <30, #50D878 <45, #53A7FF <60, #BC83FF <75, #FFA84A <90,
+#FF6262), `UiLineStyle`. "Show affixes" (a menu row, port only) posts a character's equipped gear's affixes. Rolls of the first port (`Keen:12`)
+still read.
 
 Missing:
-- Value premium (`AffixPrices`: x (1 + n x (8% + 32% x iLvl / 100) + rares x (20% + 40% x iLvl / 100))) and its "Affix value +x%" line:
-  `ITradePriceFilter`'s `TradeDeal` names the record, not the item instance.
-- Container loot (`AutoContainers`, site strength from garrison templates, `ImproveNewLootQuality`) and crafted gear (`AutoCrafting`,
-  0.7 x smith skill + 0.3 x shop level): no hook for a container's new loot or a bench's finished item.
-- The rank colours (#999999 <15, #FFFFFF <30, #50D878 <45, #53A7FF <60, #BC83FF <75, #FFA84A <90, #FF6262), the Chinese halves of names,
-  the ini's `ExcludeTemplates`, `[FixedNPCs]`/`FixedProfile_*` overrides, `TestButton`, `CombatLog`. A modded Meitou template (not in
-  `meitou.json`) and the original's fill-in affixes for a listed one that cannot apply (authored lists in its code) are left out: such
-  weapons roll as ordinary gear, or take fewer than three.
+- Loot: site strength (garrison templates, `[LootSiteLevels]`) is not known (`ItemCreated` names no site), so the default 10 applies, which
+  makes the level the quality level; camp ground loot rolls too (the original's are containers only); `ImproveNewLootQuality` (an observer
+  may only tag the item); container items from before the mod ran.
+- The original's affix effect lines (one line each under its affix): the effect is the line's value (tooltips take 8 lines from all mods).
+- The Chinese halves of names, the ini's `ExcludeTemplates`, `[FixedNPCs]`/`FixedProfile_*` overrides, `TestButton`, `CombatLog`. A modded
+  Meitou template (not in `meitou.json`) and the original's fill-in affixes for a listed one that cannot apply (authored lists in its code)
+  are left out: such weapons roll as ordinary gear, or take fewer than three.
 - A trader's stock tooltip shows no tag (the engine's), so stock affixes show once bought. Critical rolls use the world seed, not the
-  original's own stream. **Unknown**: not checked in game.
+  original's own stream. **Unknown**: not checked in game (the creation rolls included).
