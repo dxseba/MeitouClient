@@ -10,7 +10,8 @@ namespace Meitou.ElementalEnchantment;
 /// <summary>
 /// The ENCHANTMENT window of one of your characters, with the original's texts: its level and the way to the next, the main element (None or
 /// one of five) and the secondary (Locked below level 50), its aptitudes, the active effect's figures and the resonance. A choice is a command
-/// the world applies in its slow step. Sized by the panel scale setting.
+/// the world applies in its slow step. Sized by the panel scale setting; dragging its title moves it. Opened from the ENCHANTMENT button under the
+/// stats window (the original's button in that window), the character menu row or the HUD panel line.
 /// </summary>
 sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiExtension
 {
@@ -25,9 +26,20 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
     CharacterId _open = CharacterId.None;
 
     /// <summary>
+    /// The character the stats window's button was last shown for (host thread).
+    /// </summary>
+    CharacterId _statsCharacter = CharacterId.None;
+
+    /// <summary>
+    /// How far the player dragged the window from the centre, pixels (kept for the session).
+    /// </summary>
+    Vector2 _moved;
+
+    /// <summary>
     /// Registered style and action keys.
     /// </summary>
-    string _panel = "", _title = "", _text = "", _dim = "", _chosen = "", _bar = "", _barFill = "", _close = "", _main = "", _second = "";
+    string _panel = "", _title = "", _text = "", _dim = "", _chosen = "", _bar = "", _barFill = "", _close = "", _main = "", _second = "", _drag = "",
+        _statsButton = "";
 
     public string Id => "dxseba.elementalenchantment.window";
 
@@ -48,7 +60,22 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
         _close = registration.RegisterAction("close", _ => _open = CharacterId.None);
         _main = registration.RegisterAction("main", c => Choose(c.Argument, secondary: false));
         _second = registration.RegisterAction("second", c => Choose(c.Argument, secondary: true));
+        _drag = registration.RegisterAction("drag", c => _moved += c.Kind == UiEventKind.Drag ? c.Delta : Vector2.Zero);
+        _statsButton = registration.RegisterAction("stats", _ => _open = _statsCharacter);
         registration.Contribute(UiSlots.Overlay, Build, order: 62);
+        registration.AddScreenControls("stats", "Root", UiAnchorPlacement.Below, StatsButton);
+    }
+
+    /// <summary>
+    /// The ENCHANTMENT button just under the stats window, for its selected character when that is one of yours with elemental ability.
+    /// </summary>
+    UiNode? StatsButton(UiScreenContext screen)
+    {
+        if (!settings.Enabled || screen.Character is not { IsPlayer: true } character) return null;
+        if (ElementalEnchantmentMod.Running?.View.TryGetValue(character.Id, out var view) != true || !view!.Able) return null;
+
+        _statsCharacter = character.Id;
+        return new UiNode("ee-stats", UiNodeKind.Button) { Placement = new(150, 26, Left: 0, Top: 2), Text = "ENCHANTMENT", Action = _statsButton };
     }
 
     /// <summary>
@@ -75,7 +102,8 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
         var root = new UiNode("ee") { Placement = UiPlacement.Fill, Pickable = false };
         var window = new UiNode("ee-window")
         {
-            Placement = new(Width * s, Height * s, Left: (frame.Viewport.Width - Width * s) / 2, Top: (frame.Viewport.Height - Height * s) / 2),
+            Placement = new(Width * s, Height * s, Left: (frame.Viewport.Width - Width * s) / 2 + _moved.X,
+                Top: (frame.Viewport.Height - Height * s) / 2 + _moved.Y),
             Style = _panel,
         };
         Fill(window, view!, s);
@@ -89,7 +117,11 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
     void Fill(UiNode window, EnchantView view, float s)
     {
         float y = 8;
-        window.Children.Add(Text("ee-title", "ELEMENTAL ENCHANTMENT", 10, y, Width - 60, Row, s, _title));
+        window.Children.Add(new UiNode("ee-title", UiNodeKind.Label)
+        {
+            Placement = new((Width - 60) * s, Row * s, Left: 10 * s, Top: y * s), Text = "ELEMENTAL ENCHANTMENT", Style = _title, Pickable = true,
+            Pointer = UiPointerEvents.Drag, Action = _drag,
+        });
         window.Children.Add(Button("ee-close", "X", Width - 38, y, 28, Row - 2, s, _close, ""));
         y += Row + Gap;
 

@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Numerics;
-using Meitou.Game.Ui;
 using Meitou.Modding;
 using Meitou.Simulation;
 
@@ -9,19 +8,30 @@ namespace Meitou.ElementalEnchantment;
 /// <summary>
 /// The elements on a character, as the original shows them (its blade and hand particle systems, <c>SB_Prototype_*</c>): while a character has a
 /// main element, its held blade gives off that element's blade system and, once the secondary counts (level 50), the secondary's too
-/// (<see cref="ModContext.KeepEffect"/> on <see cref="EffectAnchor.Weapon"/>); fighting unarmed, both hands give off the hand systems instead
-/// (<see cref="EffectAnchor.Bone"/> on <c>Bip01 R Hand</c> and <c>Bip01 L Hand</c>, sized by level as the original's 0.8 to 1.15). Without the
-/// original mod's particles, base-game stand-ins in the element's colour. Players and the enchanted bosses alike; kept up once a second from a
-/// hidden overlay node. The <c>Blade tint</c> setting also tints the blade (<see cref="ModContext.Glow"/>).
+/// (<see cref="ModContext.KeepEffect"/> on <see cref="EffectAnchor.Weapon"/>, sized by level); fighting unarmed, both hands give off the hand
+/// systems instead (<see cref="EffectAnchor.Bone"/> on <c>Bip01 R Hand</c> and <c>Bip01 L Hand</c>). The size by level is the original's 0.8 to
+/// 1.15, times 1.3 for 0.18 s after the character lands a hit. From level 20, with *Weapon trails* on, an armed character in combat leaves the
+/// original's trail (<c>EE_Trail</c>) along its blade (<see cref="ModContext.KeepTrail"/>). Without the original mod's particles, base-game
+/// stand-ins in the element's colour. Players and the enchanted bosses alike; run once a frame (<see cref="ModContext.AddFrame"/>), renewed once a
+/// second or when a flare starts or ends. The <c>Blade tint</c> setting also tints the blade (<see cref="ModContext.Glow"/>).
 /// </summary>
-sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExtension
+sealed class WeaponAura(ModContext context, EnchantSettings settings)
 {
-    public string Id => "dxseba.elementalenchantment.aura";
-
     /// <summary>
     /// How long each renewal lasts (game seconds, so it holds at the highest game speed); renewed every <see cref="RenewSeconds"/> of real time.
     /// </summary>
-    const float GlowSeconds = 10f, RenewSeconds = 1f;
+    const float GlowSeconds = 10f, RenewSeconds = 1f, TrailKeepSeconds = 3f;
+
+    /// <summary>
+    /// The original's hit flare: the size times 1.3 for 0.18 s (real time) after a landed hit.
+    /// </summary>
+    const float FlareSize = 1.3f, FlareSeconds = 0.18f;
+
+    /// <summary>
+    /// The original's trail: from level 20, its places fade over 0.47 s (alpha 0.28 losing 0.59 a second), along the blade to the tip.
+    /// </summary>
+    const int TrailLevel = 20;
+    const float TrailSeconds = 0.47f, TrailAlpha = 0.28f, BladeSpan = 8.5f;
 
     /// <summary>The base game's stand-ins: a small fire, the parry sparks, a small smoke (ice), light dust (wind and water).</summary>
     const string Flame = "kenshi_fire1_small", Sparks = "kenshi_sparks", Smoke = "kenshi_smoke3_small", Dust = "kenshi_light_dust_particles1";
@@ -33,31 +43,54 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     const string RightHand = "Bip01 R Hand", LeftHand = "Bip01 L Hand";
 
     /// <summary>
-    /// The effects kept at the last renewal, by character and place (main blade, secondary blade, each hand's main and secondary).
+    /// The effects kept at the last renewal, by character and place (main blade, secondary blade, each hand's main and secondary): the effect, the
+    /// anchor without its size (what the effect is kept by) and the anchor it was last kept with.
     /// </summary>
-    readonly Dictionary<(CharacterId Character, int Place), (string Effect, EffectAnchor Anchor)> _kept = [];
+    readonly Dictionary<(CharacterId Character, int Place), (string Effect, EffectAnchor Key, EffectAnchor Anchor)> _kept = [];
 
-    /// <summary>The characters whose blade is tinted.</summary>
-    readonly HashSet<CharacterId> _tinted = [];
+    /// <summary>The characters whose blade is tinted, and those leaving a trail.</summary>
+    readonly HashSet<CharacterId> _tinted = [], _trailing = [];
+
+    /// <summary>When each character's hit flare ends (a <see cref="Stopwatch"/> timestamp).</summary>
+    readonly Dictionary<CharacterId, long> _flares = [];
+
+    /// <summary>The characters flaring at the last renewal.</summary>
+    readonly HashSet<CharacterId> _flaring = [];
 
     long _lastRenew;
 
-    public void Register(UiRegistration registration) =>
-        registration.Contribute(UiSlots.Overlay, _ =>
-        {
-            Renew();
-            return new UiNode("elements-aura") { Visible = false };
-        });
+    /// <summary>
+    /// A landed hit by <paramref name="attacker"/> (from the hit feed, on the host's thread): its effects flare.
+    /// </summary>
+    public void Flare(CharacterId attacker) =>
+        _flares[attacker] = Stopwatch.GetTimestamp() + (long)(FlareSeconds * Stopwatch.Frequency);
 
-    /// <summary>Once a second: keeps every enchanted character's effects and stops the ones no longer wanted.</summary>
-    void Renew()
+    /// <summary>
+    /// Once a frame: renews every enchanted character's effects once a second, or at once when a flare starts or ends.
+    /// </summary>
+    public void Frame(ModFrame frame)
     {
         long now = Stopwatch.GetTimestamp();
-        if (_lastRenew != 0 && Stopwatch.GetElapsedTime(_lastRenew, now).TotalSeconds < RenewSeconds) return;
+        foreach (var (id, end) in _flares.ToArray())
+        {
+            if (end <= now) _flares.Remove(id);
+        }
+
+        bool flaresChanged = !_flaring.SetEquals(_flares.Keys);
+        if (!flaresChanged && _lastRenew != 0 && Stopwatch.GetElapsedTime(_lastRenew, now).TotalSeconds < RenewSeconds) return;
 
         _lastRenew = now;
+        _flaring.Clear();
+        _flaring.UnionWith(_flares.Keys);
+        Renew(frame.Snapshot);
+    }
+
+    /// <summary>Keeps every enchanted character's effects and trails and stops the ones no longer wanted.</summary>
+    void Renew(WorldSnapshot snapshot)
+    {
         var wanted = new Dictionary<(CharacterId, int), (string, EffectAnchor, Vector3?)>();
-        if (settings.Enabled && ElementalEnchantmentMod.Running?.View is { } view)
+        var view = ElementalEnchantmentMod.Running?.View;
+        if (settings.Enabled && view is not null)
         {
             foreach (var (id, shown) in view)
             {
@@ -66,7 +99,8 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
         }
 
         Apply(wanted);
-        TintAll(wanted, ElementalEnchantmentMod.Running?.View);
+        TintAll(wanted, view);
+        Trails(snapshot, view);
     }
 
     /// <summary>
@@ -76,17 +110,17 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     {
         var enchant = shown.Enchant;
         Element[] elements = enchant.Second == Element.None ? [enchant.Main] : [enchant.Main, enchant.Second];
-        float scale = Elements.VisualScale(shown.Level);
+        float size = Elements.VisualScale(shown.Level) * (_flaring.Contains(id) ? FlareSize : 1);
         for (int i = 0; i < elements.Length; i++)
         {
             if (!shown.Unarmed)
             {
-                wanted[(id, i)] = Pick(Blade(elements[i]), EffectAnchor.Weapon(id), elements[i]);
+                wanted[(id, i)] = Pick(Blade(elements[i]), EffectAnchor.Weapon(id).Sized(size), elements[i]);
                 continue;
             }
 
-            wanted[(id, 2 + i)] = Pick(Hand(elements[i]), EffectAnchor.Bone(id, RightHand).Scaled(scale), elements[i]);
-            wanted[(id, 4 + i)] = Pick(Hand(elements[i]), EffectAnchor.Bone(id, LeftHand).Scaled(scale), elements[i]);
+            wanted[(id, 2 + i)] = Pick(Hand(elements[i]), EffectAnchor.Bone(id, RightHand).Scaled(size), elements[i]);
+            wanted[(id, 4 + i)] = Pick(Hand(elements[i]), EffectAnchor.Bone(id, LeftHand).Scaled(size), elements[i]);
         }
     }
 
@@ -97,13 +131,18 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
         context.HasEffect(original) ? (original, anchor, null) : (Particles(element), anchor, Colour(element));
 
     /// <summary>
-    /// Stops what is no longer wanted (or changed), keeps the rest up.
+    /// The anchor an effect is kept by: its size and stretch aside, as <see cref="ModContext.KeepEffect"/> renews a kept effect in place.
+    /// </summary>
+    static EffectAnchor KeyOf(EffectAnchor anchor) => anchor with { Stretch = null, Size = null };
+
+    /// <summary>
+    /// Stops what is no longer wanted (or changed), keeps the rest up, taking a new size in place.
     /// </summary>
     void Apply(Dictionary<(CharacterId, int), (string Effect, EffectAnchor Anchor, Vector3? Tint)> wanted)
     {
         foreach (var (key, kept) in _kept.ToArray())
         {
-            if (wanted.TryGetValue(key, out var want) && want.Effect == kept.Effect && want.Anchor == kept.Anchor) continue;
+            if (wanted.TryGetValue(key, out var want) && want.Effect == kept.Effect && KeyOf(want.Anchor) == kept.Key) continue;
 
             context.StopEffect(kept.Effect, kept.Anchor);
             _kept.Remove(key);
@@ -111,9 +150,55 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
 
         foreach (var (key, want) in wanted)
         {
-            if (context.KeepEffect(want.Effect, want.Anchor, GlowSeconds, want.Tint)) _kept[key] = (want.Effect, want.Anchor);
+            if (context.KeepEffect(want.Effect, want.Anchor, GlowSeconds, want.Tint)) _kept[key] = (want.Effect, KeyOf(want.Anchor), want.Anchor);
         }
     }
+
+    /// <summary>
+    /// The original's weapon trail on every armed enchanted character of level 20 or more that is in combat, while the setting is on: a band along
+    /// the blade to its tip in the main element's colour, fading out behind; stopped otherwise.
+    /// </summary>
+    void Trails(WorldSnapshot snapshot, IReadOnlyDictionary<CharacterId, EnchantView>? view)
+    {
+        var trailing = new HashSet<CharacterId>();
+        if (settings.Enabled && settings.Trails && view is not null)
+        {
+            var fighting = snapshot.Characters.Where(c => c.InCombat).Select(c => c.Id).ToHashSet();
+            foreach (var (id, shown) in view)
+            {
+                if (!shown.Able || shown.Main == Element.None || shown.Unarmed || shown.Level < TrailLevel || !fighting.Contains(id)) continue;
+                if (context.KeepTrail(EffectAnchor.Weapon(id), TrailOf(shown.Main), TrailKeepSeconds)) trailing.Add(id);
+            }
+        }
+
+        foreach (var id in _trailing.Except(trailing).ToArray()) context.StopTrail(EffectAnchor.Weapon(id));
+        _trailing.Clear();
+        _trailing.UnionWith(trailing);
+    }
+
+    /// <summary>
+    /// The trail's look for an element: the original's material and colour, its alpha and fade.
+    /// </summary>
+    static TrailStyle TrailOf(Element element)
+    {
+        var colour = new Vector4(TrailColour(element), TrailAlpha);
+        return new TrailStyle
+        {
+            Span = BladeSpan, Seconds = TrailSeconds, Colour = colour, EndColour = colour with { W = 0 }, Material = "EE_Trail",
+        };
+    }
+
+    /// <summary>
+    /// The original's trail colour of each element (its ribbon's initial colour).
+    /// </summary>
+    static Vector3 TrailColour(Element element) => element switch
+    {
+        Element.Fire => new(1, 0.2f, 0.04f),
+        Element.Lightning => new(0.45f, 0.72f, 1),
+        Element.Wind => new(0.65f, 1, 0.82f),
+        Element.Water => new(0.12f, 0.55f, 1),
+        _ => new(0.72f, 0.92f, 1),
+    };
 
     /// <summary>
     /// The blade tint of every armed enchanted character while the setting is on; taken off otherwise.
@@ -146,7 +231,8 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings) : IUiExten
     /// <summary>The tint grows with the level: 0.6 at level 0 to 1.6 at 100.</summary>
     static float Strength(int level) => 0.6f + Math.Clamp(level, 0, 100) / 100f;
 
-    static string Particles(Element element) => element switch
+    /// <summary>The base game's stand-in system for an element.</summary>
+    internal static string Particles(Element element) => element switch
     {
         Element.Fire => Flame,
         Element.Lightning => Sparks,

@@ -210,13 +210,19 @@ sealed class ElementSystem(EnchantSettings settings, ModSkill skill)
     }
 
     /// <summary>
-    /// The attack or block rate with the character's enchantment. Any thread; reads only the asked character.
+    /// The attack, block or reload rate or bolt speed with the character's enchantment. Any thread; reads only the asked character.
     /// </summary>
     public float Rate(World world, in CombatSpeedAsk ask)
     {
         if (!settings.Enabled || EnchantOf(world, ask.Character) is not { } enchant) return ask.Rate;
 
-        return Elements.Speed(ask.Rate, ask.Kind, enchant, settings.Strength, settings.Resonance * settings.Strength);
+        float resonance = settings.Resonance * settings.Strength;
+        return ask.Kind switch
+        {
+            CombatSpeedKind.Reload => Elements.Reload(ask.Rate, enchant, settings.Strength, resonance),
+            CombatSpeedKind.Projectile => Elements.Bolt(ask.Rate, enchant, settings.Strength),
+            _ => Elements.Speed(ask.Rate, ask.Kind, enchant, settings.Strength, resonance),
+        };
     }
 
     /// <summary>

@@ -28,8 +28,11 @@ public sealed class ElementalEnchantmentMod : IMod
         var window = new EnchantWindow(context, Settings);
         context.AddUi(window);
         context.AddUi(new ElementMenu(window));
-        context.AddUi(new WeaponAura(context, Settings));
-        context.AddCombatHitFeed(new ElementEffects(context, Settings).Feed);
+        var aura = new WeaponAura(context, Settings);
+        context.AddFrame(aura.Frame);
+        var effects = new ElementEffects(context, Settings, aura);
+        context.AddCombatHitFeed(effects.Feed);
+        context.AddProjectileFeed(effects.Projectiles);
         context.Log("Elemental Enchantment initialized");
     }
 
@@ -65,7 +68,7 @@ public sealed class EnchantSettings
     [Setting("Effect strength (x)", Hint = "0: visuals only; 1: normal; 5: five times. Applies to allies and bosses.", Min = 0, Max = 5, Step = 0.1)]
     public float Strength { get; set; } = 1;
 
-    [Setting("Weapon trails", Hint = "Show weapon trails while attacking (needs an engine trail; not drawn yet).")]
+    [Setting("Weapon trails", Hint = "Show weapon trails while attacking.")]
     public bool Trails { get; set; } = true;
 
     [Setting("Impact effects", Hint = "Show elemental bursts on hits from level 40.")]
@@ -97,7 +100,8 @@ public sealed class EnchantSettings
 }
 
 /// <summary>
-/// The "Enchantment" row on your own character's menu, which opens its ENCHANTMENT window (the original's button in the stats window).
+/// The "Enchantment" row on your own character's menu and the HUD panel's ENCHANTMENT line, which open its ENCHANTMENT window (as the stats
+/// window's button does).
 /// </summary>
 sealed class ElementMenu(EnchantWindow window) : IUiExtension
 {

@@ -141,6 +141,29 @@ static class Elements
         return rate * (1 + m * gain) + extra;
     }
 
+    /// <summary>
+    /// A crossbow reload's rate (asked as 1; the original's reload hook, <c>FUN_180001ac0</c>): Wind's block-speed factor plus, with a Wind
+    /// resonance, 2% times the resonance strength; used only between 1 and 2, as the original takes it.
+    /// </summary>
+    public static float Reload(float rate, in Enchant e, float strength, float resonance)
+    {
+        float r = Math.Clamp(resonance, 0, MaxStrength);
+        float factor = 1 + Math.Clamp(strength, 0, MaxStrength) * Minor(e.Level) * e.Weight(Element.Wind)
+            + (e.Resonant && e.Resonates(Element.Wind) && r > 0 ? 0.02f * r : 0);
+        return factor > 1 && factor < 2 ? rate * factor : rate;
+    }
+
+    /// <summary>
+    /// A bolt's flight speed (the original's shot hook): the attack-speed factor of Wind and Lightning, no resonance, used only between 1 and 2 and
+    /// for a speed above 0 and below 10000.
+    /// </summary>
+    public static float Bolt(float speed, in Enchant e, float strength)
+    {
+        float gain = Minor(e.Level) * e.Weight(Element.Wind) + LightningSpeed(e.Level) * e.Weight(Element.Lightning);
+        float factor = 1 + Math.Clamp(strength, 0, MaxStrength) * gain;
+        return factor > 1 && factor < 2 && speed > 0 && speed < 10000 ? speed * factor : speed;
+    }
+
     #endregion
 
     #region Visuals
