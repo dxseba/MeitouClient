@@ -6,8 +6,8 @@ Port of *XP Info - experience gain notifications* (workshop 3795213616, GPLv3).
   summed per skill and shown as `+N% Skill` once it reaches *Announce gains over %* and the skill's last announcement is *Announce at most every*
   ago; a character's gains of one poll are merged into one label.
 - **Levels**: a new whole level shows `Skill N` in gold, a little above the gains, at once and in place of that skill's gain.
-- **Drawing**: as Level Up Notify, a postfix on `PlayerInterface.BindUi` projects each label over its character (`PlayerInterface.Project`),
-  rising for *Seconds* (2.5, Meitou's); a first sighting (spawn, load, recruit) only records.
+- **Drawing**: an `AddFrame` callback projects each label over its character (`ModFrame.Project`) for an overlay laid out every frame while
+  any shows, rising for *Seconds* (2.5, Meitou's); a first sighting (spawn, load, recruit) only records. No Harmony.
 - **Panel XP bars** (`AddCharacterPanelLines`): under the stats in the HUD's character panel, up to *Most bars at once* of the skills that gained
   XP within *Keep a bar for* seconds, the most recent first, each `Skill  level  N%` over a bar of its progress to the next level.
 

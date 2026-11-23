@@ -1,11 +1,8 @@
 using System.Globalization;
 using System.Numerics;
-using System.Reflection;
 using System.Text;
-using HarmonyLib;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Ui;
-using Meitou.Game.Host;
 using Meitou.Game.Ui;
 using Meitou.Modding;
 using Meitou.Simulation;
@@ -34,8 +31,13 @@ public sealed class XpInfoMod : IMod
     static XpWatchSystem NewWatch(XpSettings settings, XpBoard board)
     {
         board.Clear();
-        return new XpWatchSystem(settings, board);
+        return Running = new XpWatchSystem(settings, board);
     }
+
+    /// <summary>
+    /// The running world's watch, for the labels; null before a world starts.
+    /// </summary>
+    internal static volatile XpWatchSystem? Running;
 
     internal static string Label(StatsEnumerated stat) => stat switch
     {
@@ -140,8 +142,14 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
 
     public XpLabel[] Recent => _recent;
 
+    /// <summary>
+    /// The world's tick length (seconds), for the labels' lifetime on the interface thread.
+    /// </summary>
+    public float TickSeconds { get; private set; } = 1 / 30f;
+
     public void SlowWorld(World world)
     {
+        TickSeconds = world.TickSeconds;
         if (world.Tick % 10 != 0 || !settings.Enabled) return;
 
         var labels = new List<XpLabel>();
@@ -229,55 +237,57 @@ sealed class XpBoard
 /// </summary>
 static class XpFloat
 {
-    public const string Key = "xpinfo.float.";
-    public const int Slots = 10;
     const float Head = 24, Rise = 10, LevelGap = 4;
 
+    /// <summary>
+    /// The most labels shown at once.
+    /// </summary>
+    public const int Slots = 10;
+
     static XpSettings s_settings = new();
-    static FieldInfo? s_sessionField;
-    static MethodInfo? s_project;
+
+    /// <summary>
+    /// The labels of the last frame, projected (host thread).
+    /// </summary>
+    internal static IReadOnlyList<(Vector2 At, bool Level, string Text)> Shown { get; private set; } = [];
 
     public static void Install(ModContext context, XpSettings settings)
     {
         s_settings = settings;
-        var type = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
-        s_sessionField = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Single(f => f.FieldType == typeof(WorldSession));
-        s_project = AccessTools.Method(type, "Project", [typeof(Vector3)]) ?? throw new MissingMethodException(type.FullName, "Project");
-        var bind = AccessTools.Method(type, "BindUi") ?? throw new MissingMethodException(type.FullName, "BindUi");
-        context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(XpFloat), nameof(Bound)));
+        context.AddFrame(Frame);
     }
 
-    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    static void Bound(object __instance, UiBindings __result)
-    #pragma warning restore IDE1006
+    static void Frame(ModFrame frame)
     {
-        if (!s_settings.Enabled || s_sessionField?.GetValue(__instance) is not WorldSession session) return;
-        if (session.World.Systems.OfType<XpWatchSystem>().FirstOrDefault() is not { } watch) return;
+        if (!s_settings.Enabled || XpInfoMod.Running is not { } watch)
+        {
+            Shown = [];
+            return;
+        }
 
-        float life = s_settings.Seconds / session.World.TickSeconds;
-        int slot = 0;
+        float life = s_settings.Seconds / watch.TickSeconds;
+        var shown = new List<(Vector2, bool, string)>();
         foreach (var label in watch.Recent.Reverse())
         {
-            float age = (session.World.Tick - label.Tick) / life;
-            if (age is < 0 or > 1 || slot >= Slots) continue;
-            if (Screen(__instance, session, label, age) is not { } at) continue;
-
-            __result.Text[Key + slot++] = string.Create(CultureInfo.InvariantCulture, $"{at.X:0}|{at.Y:0}|{(label.Level ? 1 : 0)}|{label.Text}");
+            float age = (frame.Tick - label.Tick) / life;
+            if (age is < 0 or > 1 || shown.Count >= Slots) continue;
+            if (Screen(frame, label, age) is { } at) shown.Add((at, label.Level, label.Text));
         }
+
+        Shown = shown;
     }
 
-    static Vector2? Screen(object player, WorldSession session, XpLabel label, float age)
+    static Vector2? Screen(ModFrame frame, XpLabel label, float age)
     {
-        var character = session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == label.Character);
+        var character = frame.Snapshot.Characters.FirstOrDefault(c => c.Id == label.Character);
         if (character is null) return null;
 
         var head = character.Position + new Vector3(0, Head + (label.Level ? LevelGap : 0) + Rise * age, 0);
-        return (Vector2?)s_project!.Invoke(player, [head]);
+        return frame.Project(head);
     }
 }
 
-/// <summary>Draws the bound labels: gains in pale green, levels in gold.</summary>
+/// <summary>Draws the frame's labels: gains in pale green, levels in gold; laid out every frame while any shows (they rise).</summary>
 public sealed class XpFloatUi : IUiExtension
 {
     const float Width = 320, Height = 22;
@@ -288,22 +298,19 @@ public sealed class XpFloatUi : IUiExtension
     {
         string gain = registration.RegisterStyle("gain", new() { Text = new(.70f, .95f, .65f, 1), TextPadding = new(0, 0, 0, 0) });
         string level = registration.RegisterStyle("level", new() { Text = new(.98f, .85f, .35f, 1), TextPadding = new(0, 0, 0, 0) });
-        registration.Contribute(UiSlots.Overlay, frame => Build(frame, gain, level), order: 42);
+        registration.Contribute(UiSlots.Overlay, _ => Build(gain, level), order: 42);
     }
 
-    static UiNode Build(UiFrameContext frame, string gain, string level)
+    static UiNode Build(string gain, string level)
     {
-        var root = new UiNode("xpinfo-float") { Placement = UiPlacement.Fill, Pickable = false };
-        for (int i = 0; i < XpFloat.Slots; i++)
+        var labels = XpFloat.Shown;
+        var root = new UiNode("xpinfo-float") { Placement = UiPlacement.Fill, Pickable = false, Animated = labels.Count > 0 };
+        for (int i = 0; i < labels.Count; i++)
         {
-            var parts = frame.Text(XpFloat.Key + i).Split('|', 4);
-            if (parts.Length != 4 || !float.TryParse(parts[0], CultureInfo.InvariantCulture, out float x)
-                || !float.TryParse(parts[1], CultureInfo.InvariantCulture, out float y))
-                continue;
-
-            var placement = new UiPlacement(Width, Height, Left: x - Width / 2, Top: y - Height / 2);
-            string style = parts[2] == "1" ? level : gain;
-            root.Children.Add(new("xpinfo-float-" + i, UiNodeKind.Label) { Placement = placement, Text = parts[3], Style = style, Pickable = false });
+            var (at, isLevel, text) = labels[i];
+            var placement = new UiPlacement(Width, Height, Left: at.X - Width / 2, Top: at.Y - Height / 2);
+            string style = isLevel ? level : gain;
+            root.Children.Add(new("xpinfo-float-" + i, UiNodeKind.Label) { Placement = placement, Text = text, Style = style, Pickable = false });
         }
 
         return root;
