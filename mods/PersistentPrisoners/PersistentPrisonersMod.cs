@@ -8,8 +8,8 @@ namespace Meitou.PersistentPrisoners;
 
 /// <summary>
 /// Port of PersistentPrisoners 0.2.8 (workshop 3798215878, GPL-3.0-or-later; rules from its DLL and README): a platoon holding a prisoner in a
-/// player-owned cage is always kept when it leaves the loaded area, whatever the keep switches say; an overview of the occupants (a key action,
-/// O by default); with starvation off the game feeds them towards Minimum Nu.
+/// player-owned cage is always kept when it leaves the loaded area, whatever the keep switches say; an overview of the occupants
+/// (Ctrl+Shift+P); with starvation off the game feeds them towards Minimum Nu.
 /// </summary>
 public sealed class PersistentPrisonersMod : IMod
 {
@@ -27,8 +27,11 @@ public sealed class PersistentPrisonersMod : IMod
         Window = new PrisonerWindow();
         context.AddUi(Window);
 
-        // The original's Ctrl+Shift+P cannot be a key action (one key, no modifiers), and P is the photo mode's key.
-        context.AddKeyAction("overview", "Prisoner overview", _ => Window.Toggle(), Key.O);
+        // The original's Ctrl+Shift+P: a binding is one key, so the action acts only with Ctrl and Shift held.
+        context.AddKeyAction("overview", "Prisoner overview (Ctrl+Shift)", key =>
+        {
+            if (key.Ctrl && key.Shift) Window.Toggle();
+        }, Key.P);
         KeepHook.Install(context);
         context.Log("PersistentPrisoners initialized");
     }
@@ -47,7 +50,10 @@ public sealed class PrisonerSettings
     public int MinimumNutrition { get; set; } = 100;
 }
 
-/// <summary>A postfix on the population's keep test (<c>PopulationSystem.Kept</c>) keeps a platoon with a prisoner in a player cage.</summary>
+/// <summary>
+/// A postfix on the population's keep test (<c>PopulationSystem.Kept</c>) keeps a platoon with a prisoner in a player cage. Harmony: the removal
+/// vetoes (<see cref="Simulation.Bodies.IRemovalVeto"/>) cover corpses only, not a platoon's despawn or the off-screen orphan timer.
+/// </summary>
 static class KeepHook
 {
     public static void Install(ModContext context)

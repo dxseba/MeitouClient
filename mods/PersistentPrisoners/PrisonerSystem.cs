@@ -16,10 +16,10 @@ sealed record PrisonerRow(string Name, string Faction, string Cage, int Nu, stri
 
 /// <summary>
 /// Learns the player's cages while they are loaded (fixture ids, saved with the world, as a cage's fixture may be gone while its zone is out),
-/// answers the keep test for any thread, sets the hunger floor the original's <c>getMagicHungerSetting</c> hook gives, and publishes the overview
-/// every 30th tick.
+/// answers the keep test for any thread, keeps a caged corpse whose zone unloads (<see cref="IRemovalVeto"/>), sets the hunger floor the original's
+/// <c>getMagicHungerSetting</c> hook gives, and publishes the overview every 30th tick.
 /// </summary>
-sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population, GameDatabase data) : ITickSystem, IModSaveData
+sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population, GameDatabase data) : IRemovalVeto, IModSaveData
 {
     const int Version = 2;
 
@@ -78,6 +78,14 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
 
         return false;
     }
+
+    /// <summary>
+    /// A corpse in a player cage stays when its zone unloads (the original keeps "caged corpses ... when you leave the area"); its decay is the
+    /// game's.
+    /// </summary>
+    public bool Keep(World world, in RemovalAsk ask) =>
+        ask.Kind == RemovalKind.CorpseUnloaded && settings.Protect && world.Characters.TryResolveNext(ask.Character, out int slot)
+        && world.Characters.Cold(slot) is { } cold && InPlayerCage(cold);
 
     #endregion
 
