@@ -31,6 +31,9 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
 {
     const int Version = 2;
 
+    /// <summary>The tab count, taken once at the start so a changed setting never changes a running world.</summary>
+    readonly int _count = Math.Clamp(settings.Count, 2, JobTabsSettings.Most);
+
     readonly Dictionary<ulong, Tabs> _tabs = [];
     readonly List<SwitchTabOrder> _orders = [];
 
@@ -62,10 +65,10 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
     void Switch(World world, CharacterId id, int tab)
     {
         var table = world.Characters;
-        if (tab < 0 || tab >= settings.Count || !table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true } cold) return;
+        if (tab < 0 || tab >= _count || !table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true } cold) return;
 
         var lasting = world.LastingIds.GetOrGive(id).Value;
-        if (!_tabs.TryGetValue(lasting, out var tabs)) _tabs[lasting] = tabs = new Tabs(settings.Count);
+        if (!_tabs.TryGetValue(lasting, out var tabs)) _tabs[lasting] = tabs = new Tabs(_count);
         if (tabs.Active == tab || tab >= tabs.Lists.Length) return;   // the count was raised since: it applies at the next start
 
         var keep = tabs.Lists[tabs.Active];
@@ -107,7 +110,7 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
     {
         var tabs = !cold.LastingId.IsNone && _tabs.TryGetValue(cold.LastingId.Value, out var kept) ? kept : null;
         int active = tabs?.Active ?? 0;
-        var jobs = new string[settings.Count][];
+        var jobs = new string[_count][];
         for (int t = 0; t < jobs.Length; t++)
         {
             var list = t == active ? cold.Jobs : tabs is not null && t < tabs.Lists.Length ? tabs.Lists[t].Select(k => Restore(world, k)) : [];
@@ -167,7 +170,7 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
         {
             ulong id = reader.ReadUInt64();
             int active = reader.ReadInt32(), count = reader.ReadInt32();
-            var tabs = new Tabs(Math.Max(count, settings.Count)) { Active = active };
+            var tabs = new Tabs(Math.Max(count, _count)) { Active = active };
             for (int t = 0; t < count; t++) ReadList(reader, tabs.Lists[t], version);
             _tabs[id] = tabs;
         }

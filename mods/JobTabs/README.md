@@ -9,15 +9,16 @@ Facts, **Verified** from the original DLL (decompiled strings and code) and its 
   target's name for a job per target. An empty tab: "Empty: hold Shift while giving an order to add jobs".
 - Saved in the vanilla save, in each character's orders record (`OrdersReceiver::serialise`): keys `jt_active`, `pjob…`, `pjobT…`.
 
-Port: *Tabs* (2 to 4, default 4) numbered buttons in a row above the Jobs list (`AddJobPanelButtons`) while a player character is selected;
-the active tab is bracketed (`[ 2 ]`). A click switches every selected player character: its job list (`CharacterCold.Jobs`, the entries
-themselves) is kept in the active tab and the chosen tab's put in its place, then its next decision is asked for (`DecisionSystem.Request`).
-A new character starts on tab 1 with its current jobs. Saved in the mod sidecar (version 2), keyed by lasting character id; a kept job per
-target keeps its target's lasting id and names the target again when restored, also after a load. Removing the mod leaves each character
-with the jobs of the tab it was on.
+Port: *Tabs* (2 to 9, default 5, read at the start) numbered buttons in a column left of the Jobs list (`AddJobPanelButtons` with
+`UiJobButtonArrangement.Columns`) while a player character is selected; the active tab is lit (the skin's selected state, as the frame). A click
+switches every selected player character: its job list (`CharacterCold.Jobs`, the entries themselves) is kept in the active tab and the chosen
+tab's put in its place, then its next decision is asked for (`DecisionSystem.Request`). A new character starts on tab 1 with its current jobs.
+Saved in the mod sidecar (version 2), keyed by lasting character id; a kept job per target keeps its target's lasting id and names the target
+again when restored, also after a load. Removing the mod leaves each character with the jobs of the tab it was on.
 
 Missing:
-- 5 and more tabs (the engine allows 4 job panel buttons across all mods; another mod's buttons take from them), the column beside the
-  list, the active frame or dot, the cfg file (the Settings screen has *Tabs*).
+- The `dot` style and the `JobTabs_ActiveFrame` skin (the lit button stands in), the cfg file (the Settings screen has *Tabs*). The engine
+  allows 9 job panel buttons across all mods, so another mod's buttons take from them.
+- The click sound plays on every press (the original's only when a list changed).
 - Not in the vanilla save (`jt_active`/`pjob` keys): a save taken to the original game loses the other tabs.
 - **Unknown**: not checked in game, the buttons and their tooltips included.

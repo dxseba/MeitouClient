@@ -26,19 +26,20 @@ public sealed class JobTabsMod : IMod
 
 public sealed class JobTabsSettings
 {
-    /// <summary>The most tabs the jobs list has room for (the engine's limit of job panel buttons across all mods).</summary>
-    public const int Most = 4;
+    /// <summary>The original's most tabs (tabCount 2-9), also the engine's limit of job panel buttons across all mods.</summary>
+    public const int Most = 9;
 
     [Setting("Tabs", Hint = "How many job tabs each character has (restart to change).", Min = 2, Max = Most)]
-    public int Count { get; set; } = 4;
+    public int Count { get; set; } = 5;
 }
 
 /// <summary>Switches the selected player characters to job tab <paramref name="Tab"/> (0 based).</summary>
 public sealed record SwitchTabOrder(int Tab) : SimCommand;
 
 /// <summary>
-/// One button per tab beside the jobs list (<see cref="UiRegistration.AddJobPanelButtons"/>) for a selected player character: the active tab's
-/// caption is bracketed, and each tooltip lists that tab's jobs.
+/// One button per tab in a column left of the jobs list (<see cref="UiRegistration.AddJobPanelButtons"/>,
+/// <see cref="UiJobButtonArrangement.Columns"/>) for a selected player character: the active tab lit (the original's frame), and each tooltip lists
+/// that tab's jobs.
 /// </summary>
 sealed class TabButtons : IUiExtension
 {
@@ -46,22 +47,21 @@ sealed class TabButtons : IUiExtension
 
     public string Id => "dxseba.jobtabs.ui";
 
-    public void Register(UiRegistration registration) => registration.AddJobPanelButtons(Buttons);
+    static readonly UiJobButtonLayout Column = new(UiJobButtonArrangement.Columns, PerLine: JobTabsSettings.Most);
+
+    public void Register(UiRegistration registration) => registration.AddJobPanelButtons(Buttons, Column);
 
     static IEnumerable<UiJobButton> Buttons(UiCharacterContext context)
     {
         if (JobTabsMod.Running?.View(context.Id) is not { } view) return [];
 
-        int count = Math.Min(JobTabsMod.Settings.Count, JobTabsSettings.Most);
-        return Enumerable.Range(0, count).Select(tab => Button(context, view, tab));
+        return Enumerable.Range(0, view.Jobs.Length).Select(tab => Button(context, view, tab));
     }
 
     static UiJobButton Button(UiCharacterContext context, TabView view, int tab)
     {
         string n = (tab + 1).ToString(CultureInfo.InvariantCulture);
-        bool active = tab == view.Active;
-        string caption = active ? $"[ {n} ]" : n;
-        return new(caption, Tooltip(view, tab, n), () => context.Enqueue(new SwitchTabOrder(tab) { Tick = context.Tick }));
+        return new(n, Tooltip(view, tab, n), () => context.Enqueue(new SwitchTabOrder(tab) { Tick = context.Tick })) { Lit = tab == view.Active };
     }
 
     /// <summary>The original's tooltip: "Tab 2: 3 jobs" and up to eight job names ("..." for more), or the hint for an empty tab.</summary>
