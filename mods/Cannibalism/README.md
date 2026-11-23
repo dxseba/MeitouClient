@@ -21,9 +21,11 @@ the facts below).
   character that is unconscious or `IN_PRISON` (cage or torture device), not the selected eater, and also on a cage (`BF_CAGE`) whose occupant
   qualifies; the eat trigger is widened to 50 units only while the eater's goal is 220; feeding 0.7 hunger per in-game hour of bites, cap 3.0,
   steps at most 0.05 h, the first bite only arms the clock, only for eaters on goal 220.
-- **Missing**: the row on a cage's own right-click menu (mod menu rows are for characters only: engine gap, a building-menu verb hook); the
-  native task itself (the engine's eat jobs run only under duty goals, so the mod drives the meal: a player-order handler for task 220 would
-  replace it); the engine's death report for this kill (`DeathObservers` is internal; the death is still reported by its sweep).
+- **Cage row**: also on a player-built cage's menu (`AddMenuVerbs`, kind `Building`) when its occupant qualifies (the cage fixture of the
+  same id, else the nearest one within 6 units).
+- **Death**: the killing bite reports the death at once with the eater as killer (`Deaths.Report`, `DeathSite.Eaten`).
+- **Missing**: the cage row on cages that are not player-built (the Building menu kind covers player sites only); the native task itself
+  (the engine's eat jobs run only under duty goals, so the mod drives the meal: a player-order handler for task 220 would replace it).
 - **Differences**: the original shows the row on unconscious robots, carried bodies and characters in beds too, leaving the outcome to the
   native task; here those are refused with a message.
 - **Unknown**: whether the native task keeps eating once the victim dies; everything in play (walk, clip, bites, barks, end on a later order).

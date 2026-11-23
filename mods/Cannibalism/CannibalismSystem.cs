@@ -203,6 +203,7 @@ sealed class CannibalismSystem(CannibalismSettings settings, PopulationData data
         bool limbs = data.BodyOptions.Dismemberment != Dismemberment.Never;
         medical.BeingEaten(rate, world.TickSeconds, Context(world, victim, c), limbs, events, vampiric: eater.Race is { Vampiric: true });
         BodyEvents(world, meal.Victim, c, medical, events);
+        if (medical.Dead) Deaths.Report(world, meal.Victim, meal.Eater, DeathSite.Eaten);
         if (medical.Dead && (victim.IsPlayer || world.Player.Faction >= 0 && victim.Faction == world.Player.Faction))
             world.Post($"{victim.Name} has been eaten alive.");
 
