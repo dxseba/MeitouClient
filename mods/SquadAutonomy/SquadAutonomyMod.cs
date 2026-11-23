@@ -6,8 +6,9 @@ namespace Meitou.SquadAutonomy;
 
 /// <summary>
 /// Port of Squad Autonomy (Au2942, workshop 3800729618, GPL-3.0): a window (the AUT button) turns a player squad into a semi-NPC squad on AI
-/// packages, through the engine's autonomous player squads (<c>SetSquadAutonomy</c>, <c>ChangeAi</c>, <c>SetSquadHome</c>): AI packages with
-/// priorities, work hours, and a home building. The original's own packages come with its <c>.mod</c> (a required item).
+/// packages, through the engine's autonomous player squads (<c>SetSquadAutonomy</c>, <c>SetSquadPackages</c>, <c>SetSquadHome</c>): AI packages
+/// with priorities, work hours, a home building, and the combat switches (a chooser desire filter). The original's own packages come with its
+/// <c>.mod</c> (a required item).
 /// </summary>
 public sealed class SquadAutonomyMod : IMod
 {
@@ -138,10 +139,11 @@ sealed record PackageList(IReadOnlyList<PackageEntry> Featured, IReadOnlyList<Pa
 public readonly record struct PlannedPackage(string Id, int Priority);
 
 /// <summary>
-/// The squad's plan: its AI packages by priority, the rest package (this port's: run outside the work hours; null none) and the work hours
-/// (0-24; start equal to end: no work time, as the original).
+/// The squad's plan: its AI packages by priority, the rest package (this port's: run outside the work hours; null none), the work hours
+/// (0-24; start equal to end: no work time, as the original) and the combat switches.
 /// </summary>
-public sealed record SquadPlanOrder(int SquadId, IReadOnlyList<PlannedPackage> Packages, string? Rest, int StartHour, int EndHour) : SimCommand;
+public sealed record SquadPlanOrder(int SquadId, IReadOnlyList<PlannedPackage> Packages, string? Rest, int StartHour, int EndHour,
+    CombatSwitches Switches = CombatSwitches.Default) : SimCommand;
 
 /// <summary>
 /// The squad's home becomes the building the HUD inspects (none inspected: no change), or none with <paramref name="Clear"/>.

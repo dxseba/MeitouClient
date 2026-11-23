@@ -6,8 +6,8 @@ namespace Meitou.SquadAutonomy;
 
 /// <summary>
 /// The Squad Autonomy window (AUT): one player squad at a time, with the original's options: Enable Autonomy, the home building, the AI packages
-/// with priorities (Add AI Package, Clear AI Packages, a searchable picker) and the work hours; this port's off-work package. The view comes
-/// from the running system; every change goes out as a command.
+/// with priorities (Add AI Package, Clear AI Packages, a searchable picker), the work hours and the Combat switches; this port's off-work
+/// package. The view comes from the running system; every change goes out as a command.
 /// </summary>
 sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExtension
 {
@@ -183,6 +183,7 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         lines.Add(HourLine(squad, plan, "start", "Start Work Time", plan.StartHour, h => plan with { StartHour = h }, $"Now {view.Hour:00}:00"));
         lines.Add(HourLine(squad, plan, "end", "End Work Time", plan.EndHour, h => plan with { EndHour = h }, ""));
         lines.Add(RestLine(plan));
+        lines.Add(CombatLine(squad, plan));
 
         string hint = !squad.Autonomous ? "Enable Autonomy to let the AI run this squad." : plan.Packages.Count == 0 ? "Add an AI package." : "";
         if (hint != "") lines.Add(Text("aut-hint", hint, _styles.Dim));
@@ -272,6 +273,32 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         return row;
     }
 
+    /// <summary>
+    /// The original's Combat switches.
+    /// </summary>
+    UiNode CombatLine(SquadRow squad, Plan plan)
+    {
+        var row = Row("aut-combat");
+        row.Children.Add(Label("aut-combat-l", "Combat", 64, _styles.Dim));
+        foreach (var (flag, text, width) in Switches)
+        {
+            bool on = (plan.Switches & flag) != 0;
+            row.Children.Add(Button("combat." + flag, text, width, () => Save(squad, plan with { Switches = plan.Switches ^ flag }), selected: on));
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    /// The switches as the original's window names them, and their buttons' widths.
+    /// </summary>
+    static readonly (CombatSwitches Flag, string Text, float Width)[] Switches =
+    [
+        (CombatSwitches.AttackEnemies, "Attack Enemies", 112), (CombatSwitches.ProtectAllies, "Protect Allies", 106),
+        (CombatSwitches.DoMedic, "Do Medic", 80), (CombatSwitches.DoRescue, "Rescue Downed Allies", 150),
+        (CombatSwitches.ManTurrets, "Man Turrets", 92),
+    ];
+
     #endregion
 
     #region Picker
@@ -353,7 +380,7 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     /// Sends the squad's plan.
     /// </summary>
     void Save(SquadRow squad, Plan plan) =>
-        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Packages, plan.Rest, plan.StartHour, plan.EndHour) { Tick = context.Tick });
+        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Packages, plan.Rest, plan.StartHour, plan.EndHour, plan.Switches) { Tick = context.Tick });
 
     /// <summary>
     /// Sets or clears the home.
