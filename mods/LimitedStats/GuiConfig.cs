@@ -106,8 +106,5 @@ sealed class GuiConfig
     public static string Tag(Vector3 c) => string.Create(CultureInfo.InvariantCulture,
         $"#{Byte(c.X):X2}{Byte(c.Y):X2}{Byte(c.Z):X2}");
 
-    /// <summary>A layout colour property ("r g b").</summary>
-    public static string Property(Vector3 c) => string.Create(CultureInfo.InvariantCulture, $"{c.X:0.######} {c.Y:0.######} {c.Z:0.######}");
-
     static int Byte(float v) => Math.Clamp((int)(v * 255 + 0.5f), 0, 255);
 }

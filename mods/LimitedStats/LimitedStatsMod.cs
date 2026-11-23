@@ -36,7 +36,7 @@ public sealed class LimitedStatsMod : IMod
         var purpose = context.RngPurpose;
         context.AddSystem("cap", _ => NewSystem(settings, config, builder, board, purpose), SystemAnchor.End);
         context.AddUi(new CapPanelLines(settings, board));
-        StatsWindowPatch.Install(context, board, gui);
+        context.AddUi(new StatsWindowOverrides(board, gui));
         context.Log("Limited Stats initialized");
     }
 

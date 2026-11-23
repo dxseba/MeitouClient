@@ -27,7 +27,9 @@ built-in defaults are the original DLL's own: caps 100 x the race multiplier (at
   limit. First aid and mass combat (added straight, no `increaseStat`) are untouched. The scan clamps every 120 frames (port: 15 ticks).
 - **Stats window**: the selected stat's race XP bonus line becomes `LevelCapLabel + cap (+rate%)`, cap and rate coloured; with
   `EnableStatColors` stat names take one of 11 colours by cap kind (special: the talent's own cap, or with `GoldCapByValue` cap >= gold;
-  high >= green; low <= red) and rate; `AttrStats` use the attribute set. Port: a Harmony postfix on the internal `StatsWindow.AddStatsContent`.
+  high >= green; low <= red) and rate; `AttrStats` use the attribute set. Port: screen overrides on the stats window (`AddScreenOverrides("stats", ...)`): the rows' labels (`*-label-*`, action `stat:N`)
+  take `TextColour`; the description body (`stat-description-body`) its `Caption` with the window's `State["race-bonus-line"]` paragraph
+  replaced by the cap line (appended when it shows none) for `State["selected"]` and the window's character. No Harmony or reflection.
 
 ## Port notes
 
@@ -35,9 +37,9 @@ built-in defaults are the original DLL's own: caps 100 x the race multiplier (at
   `CapMax`) (with over-cap protection: the scaled amount on the curve topped at `CapMax`), so caps above 101 and dummies train as in the
   original. The game holds one gain's amount to 20, so a single gain whose equivalent amount passes 20 rises a little less.
 - Port options: *Player characters only* (off) and *Panel lines* (0; HUD lines with the cap range and talent).
-- **Unknown**: everything above in game (not run). The stats window postfix and inline colour tags in its description are untested.
+- **Unknown**: everything above in game (not run). The stats window overrides and inline colour tags in its description are untested.
 - **Observed** (2026-11-17/18, an earlier port with a flat cap): the clamp holds in game.
 
 ## Missing
 
-- A public stats-window hook that can recolour the window's stat labels and replace its race XP line (the Harmony postfix stands in).
+- Nothing the port knows of beyond the notes above.
