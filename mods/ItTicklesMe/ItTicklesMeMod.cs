@@ -1,6 +1,3 @@
-using System.Reflection;
-using System.Reflection.Emit;
-using HarmonyLib;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
@@ -14,7 +11,6 @@ namespace Meitou.ItTicklesMe;
 public sealed class ItTicklesMeMod : IMod
 {
     internal static readonly TicklesSettings Settings = new();
-    [ThreadStatic] static bool s_skipNext;
 
     /// <summary>
     /// The original's config record: a LOCATIONAL_DAMAGE of this name whose <c>affects move speed</c> holds the ratio (clamped 0..1).
@@ -31,10 +27,7 @@ public sealed class ItTicklesMeMod : IMod
 
         context.AddSettings(Settings);
 
-        var apply = AccessTools.Method(typeof(CombatSystem), "BlowReaction") ?? throw new MissingMethodException(nameof(CombatSystem), "BlowReaction");
-        var stagger = AccessTools.Method(typeof(CombatSystem), "Stagger") ?? throw new MissingMethodException(nameof(CombatSystem), "Stagger");
-        context.Harmony.Patch(apply, transpiler: new HarmonyMethod(typeof(ItTicklesMeMod), nameof(Transpile)));
-        context.Harmony.Patch(stagger, prefix: new HarmonyMethod(typeof(ItTicklesMeMod), nameof(BeforeStagger)));
+        context.AddSystem("it-tickles-me", _ => new TicklesFilter(Settings), SystemAnchor.End);
         context.Log("It. Tickles. Me initialized");
     }
 
@@ -48,34 +41,19 @@ public sealed class ItTicklesMeMod : IMod
 
         return Math.Clamp(value, 0, 1);
     }
+}
 
-    /// <summary>Replaces <c>damage &gt; StumbleThreshold(...)</c> in the melee hit with <see cref="Heavy"/>, which also notes a hit too weak to react to.</summary>
-    static IEnumerable<CodeInstruction> Transpile(IEnumerable<CodeInstruction> instructions)
+/// <summary>
+/// Answers <see cref="BlowReactionKind.None"/> for a light melee stagger whose stagger damage is under the share of the victim's stumble threshold (the
+/// original's <c>_startStumble</c> skip; it also needs a threshold above 0).
+/// </summary>
+sealed class TicklesFilter(TicklesSettings settings) : IBlowReactionFilter
+{
+    public BlowReactionKind Reaction(World world, in BlowReactionAsk ask)
     {
-        var threshold = AccessTools.Method(typeof(DamageFormulas), nameof(DamageFormulas.StumbleThreshold));
-        var list = instructions.ToList();
-        int replaced = 0;
-        for (int i = 0; i + 1 < list.Count; i++)
-        {
-            if (!list[i].Calls(threshold) || list[i + 1].opcode != OpCodes.Cgt) continue;
-            list[i + 1] = new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(ItTicklesMeMod), nameof(Heavy))).MoveLabelsFrom(list[i + 1]);
-            replaced++;
-        }
-        if (replaced != 1) throw new InvalidOperationException($"expected one stumble comparison in CombatSystem.BlowReaction, found {replaced}");
-        return list;
-    }
+        if (!settings.Enabled || ask.Source != CombatHitSource.Melee || ask.Kind != BlowReactionKind.Light || ask.Threshold <= 0) return ask.Kind;
 
-    static bool Heavy(float damage, float threshold)
-    {
-        s_skipNext = Settings.Enabled && damage < threshold * Settings.Ratio;
-        return damage > threshold;
-    }
-
-    static bool BeforeStagger(bool heavy)
-    {
-        bool skip = s_skipNext && !heavy;
-        s_skipNext = false;
-        return !skip;
+        return ask.StaggerDamage < ask.Threshold * settings.Ratio ? BlowReactionKind.None : ask.Kind;
     }
 }
 
