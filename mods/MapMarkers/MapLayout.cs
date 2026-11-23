@@ -1,16 +1,35 @@
 using System.Numerics;
 using Meitou.Data.Ui;
+using Meitou.Game.Ui;
 
 namespace Meitou.MapMarkers;
 
 /// <summary>
-/// Where the map was drawn last frame: the whole map image's bounds on screen (it pans and zooms), the visible viewport it is clipped to, the UI
-/// scale and the editor panel (zero size when it is not shown). Sizes are the original's pixels times the UI scale.
+/// Where the map is drawn: the whole map image's bounds on screen (it pans and zooms), the visible viewport it is clipped to, the UI scale and
+/// the editor panel (zero size when it is not shown). Sizes are the original's pixels times the UI scale.
 /// </summary>
 readonly record struct MapLayout(UiRect Image, UiRect Viewport, float Ui, UiRect Editor)
 {
     /// <summary>A marker's square side, and the selected one's.</summary>
     const float MarkerSize = 18, SelectedSize = 26;
+
+    /// <summary>The editor's size (the fork's 510 x 198) and its offsets from the viewport's top right.</summary>
+    const float EditorWidth = 510, EditorHeight = 198, EditorTop = 48, EditorRight = 18;
+
+    /// <summary>The layout of <paramref name="view"/>, with the editor when a marker is selected.</summary>
+    public static MapLayout Of(UiWorldMapView view)
+    {
+        bool editor = MapState.Active && MapState.Selected is not null;
+        return new(view.Image, view.Viewport, view.UiScale, editor ? EditorBox(view.Viewport, view.UiScale) : default);
+    }
+
+    static UiRect EditorBox(UiRect viewport, float ui)
+    {
+        float width = EditorWidth * ui, height = EditorHeight * ui;
+        float x = Math.Max(viewport.X, viewport.X + viewport.Width - width - EditorRight * ui);
+        float y = Math.Clamp(viewport.Y + EditorTop * ui, viewport.Y, Math.Max(viewport.Y, viewport.Y + viewport.Height - height));
+        return new(x, y, width, height);
+    }
 
     /// <summary>The map image point (0..1 each way) under <paramref name="p"/>, clamped to the image.</summary>
     public Vector2 Normalized(Vector2 p) =>

@@ -17,8 +17,10 @@ public sealed class MapMarkersMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        context.AddSystem("markers", _ => Running = new MarkerBook(), SystemAnchor.End);
-        MapHooks.Install(context);
+        context.AddSystem("markers", _ => Running = new MarkerBook(context.Log), SystemAnchor.End);
+        context.AddUi(new MapUi());
+        context.AddFrame(frame => MapState.Pointer = frame.Pointer);
+        context.AddSaveWritten(folder => Running?.WriteFile(folder));
         context.Log("Map markers initialized");
     }
 }

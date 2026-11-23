@@ -6,10 +6,12 @@ using Meitou.Simulation;
 namespace Meitou.MapMarkers;
 
 /// <summary>
-/// The markers of one world, saved with it in the mod's sidecar (<see cref="IModSaveData"/>). Presentation only: the tick never reads it, so it is
-/// not hashed. The interface edits it on its own thread and the save captures it between ticks, so every access takes the lock.
+/// The markers of one world, saved with it in the mod's sidecar (<see cref="IModSaveData"/>) and, as the original keeps them, in
+/// <c>Map-markers.json</c> beside each save the game writes (<see cref="WriteFile"/>); a loaded or imported save's <c>Map-markers.json</c>, the
+/// original's own store, replaces the sidecar's (<see cref="Ready"/>). Presentation only: the tick never reads it, so it is not hashed. The
+/// interface edits it on its own thread and the save captures it between ticks, so every access takes the lock.
 /// </summary>
-public sealed class MarkerBook : ITickSystem, IModSaveData
+public sealed class MarkerBook(Action<string> log) : ITickSystem, IModSaveData, IWorldReady
 {
     const int Version = 1;
 
@@ -61,6 +63,21 @@ public sealed class MarkerBook : ITickSystem, IModSaveData
             change(marker);
         }
     }
+
+    /// <summary>A loaded or imported save's <c>Map-markers.json</c> (the original's file) replaces the markers the sidecar gave.</summary>
+    public void Ready(World world, bool fromSave)
+    {
+        if (world.Start.SaveFolder is not { } folder || MarkerFile.Read(Path.Combine(folder, MarkerFile.Name), log) is not { } markers) return;
+
+        lock (_lock)
+        {
+            _markers.Clear();
+            _markers.AddRange(markers);
+        }
+    }
+
+    /// <summary>Writes <c>Map-markers.json</c> into a save folder the game has just written (host thread; the book only).</summary>
+    public void WriteFile(string folder) => MarkerFile.Write(Path.Combine(folder, MarkerFile.Name), Snapshot(), log);
 
     public void Write(Stream stream)
     {
