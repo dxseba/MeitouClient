@@ -20,20 +20,41 @@ public sealed class DisarmMod : IMod
     {
         context.AddSettings(Settings);
 
-        var refresh = EquipmentRefresh.Create(context.Population);
-        context.AddSystem("disarm", _ => Running = new DisarmSystem(Settings, refresh, context.RngPurpose, context.Enqueue), SystemAnchor.End);
+        context.AddSystem("disarm", _ => Running = new DisarmSystem(Settings, context.Population, context.RngPurpose, context.Enqueue),
+            SystemAnchor.End);
         context.AddUi(new DisarmMenu());
-        KickMenu.Install(context);
         context.Log("Disarm initialized");
     }
 }
 
-/// <summary>The "Disarm NN%" row, through the interface's menu-verb slot: the first selected character with a chance walks over and tries.</summary>
+/// <summary>
+/// The menu rows: "Disarm NN%" on a character (the first selected character with a chance walks over and tries) and Kick on a loose ground item,
+/// after the game's Pick Up (whose quick click still picks up).
+/// </summary>
 sealed class DisarmMenu : IUiExtension
 {
     public string Id => "dxseba.disarm.ui";
 
-    public void Register(UiRegistration registration) => registration.AddCharacterMenuVerbs(Verbs);
+    public void Register(UiRegistration registration)
+    {
+        registration.AddCharacterMenuVerbs(Verbs);
+        registration.AddMenuVerbs(GroundVerbs);
+    }
+
+    /// <summary>
+    /// Kick on a ground item: the first selected character walks to it and kicks it away.
+    /// </summary>
+    static IEnumerable<UiMenuVerb> GroundVerbs(UiMenuTargetContext menu)
+    {
+        if (!DisarmMod.Settings.Enabled || !DisarmMod.Settings.Kick || menu.Target.GroundItem is not { } item) return [];
+
+        var actor = menu.Selected[0];
+        return [new UiMenuVerb("Kick", () =>
+        {
+            menu.Enqueue(new MoveOrder([actor], item.Position) { Tick = menu.Tick });
+            menu.Enqueue(new KickOrder(actor, item.Id) { Tick = menu.Tick });
+        })];
+    }
 
     static IEnumerable<UiMenuVerb> Verbs(UiMenuContext menu)
     {

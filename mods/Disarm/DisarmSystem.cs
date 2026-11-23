@@ -4,6 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Simulation;
+using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Crime;
 using Meitou.Simulation.Items;
 using Meitou.Simulation.Population;
@@ -15,7 +16,7 @@ namespace Meitou.Disarm;
 /// <see cref="DisarmRules.Chance"/> once. Success drops (or destroys) the target's hip and back weapons and trains Stealth (also on a downed target); failure is the engine's
 /// own "caught stealing" (the target wakes, a pending Theft, the stole-from-me memory). Also the knockout drop, Kick and AI rearm (partial files).
 /// </summary>
-sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refresh, RngPurpose purpose, Action<SimCommand> enqueue) : ITickSystem
+sealed partial class DisarmSystem(DisarmSettings settings, PopulationData data, RngPurpose purpose, Action<SimCommand> enqueue) : ITickSystem
 {
     /// <summary>
     /// The original's approach distances: the attempt at <see cref="Reach"/>; at <see cref="FallbackReach"/> once the actor is already caught
@@ -40,6 +41,9 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
     const float StealthXp = 15;
 
     static readonly string[] WeaponSections = ["hip", "back"];
+    /// <summary>
+    /// The engine's caught-stealing roll (<c>CrimeSystem.Roll</c>, private: no public API rolls it with a chance of 0).
+    /// </summary>
     static readonly MethodInfo? CaughtRoll = AccessTools.Method(typeof(CrimeSystem), "Roll");
 
     /// <summary>
@@ -252,7 +256,7 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
     void Rearmed(CharacterCold cold)
     {
         cold.DrawnWeapon = Meitou.Data.Gameplay.WeaponKinds.None;
-        refresh.Refresh(cold);
+        CharacterRefresh.Refresh(data, cold, CharacterRefreshKind.Equipment);
     }
 
     void PublishChances(World world)
@@ -279,17 +283,4 @@ sealed partial class DisarmSystem(DisarmSettings settings, EquipmentRefresh refr
     }
 
     static float Distance(Vector3 a, Vector3 b) => Vector2.Distance(new(a.X, a.Z), new(b.X, b.Z));
-}
-
-/// <summary>The engine's private equipment refresh (fighter and look from the inventory), reached by reflection as the captive strip uses it.</summary>
-sealed class EquipmentRefresh(object assembly, MethodInfo refresh)
-{
-    public static EquipmentRefresh Create(PopulationData data)
-    {
-        var type = AccessTools.TypeByName("Meitou.Simulation.Bodies.CharacterAssembly") ?? throw new TypeLoadException("Meitou.Simulation.Bodies.CharacterAssembly");
-        var method = AccessTools.Method(type, "RefreshEquipment") ?? throw new MissingMethodException(type.FullName, "RefreshEquipment");
-        return new(Activator.CreateInstance(type, data)!, method);
-    }
-
-    public void Refresh(CharacterCold cold) => refresh.Invoke(assembly, [cold]);
 }

@@ -8,11 +8,11 @@ Port of dafitime's *Disarm* (workshop 3759461630; rules from its GPL-3.0 source,
   detected); times *Chance multiplier*, floor `min(5, 5 x multiplier)`. The first selected character with a chance walks over (`MoveOrder`,
   aimed at the target again when it moves more than 5 or the walk ends). The roll happens once: within 18; within 28 once the actor is caught
   (chance 0) or has come no nearer for 3 s; within 30 after 5 s. It gives up after 15 s without progress, and is cancelled by another order
-  (an order in hand that is not this walk). Success drops (or destroys) the hip and back weapons and gives Stealth XP 15 (event gain, on
-  every success). Failure is the engine's caught-stealing reaction (`CrimeSystem.Roll` with chance 0, by reflection): the target wakes, a
+  (an order in hand that is not this walk). Success drops (or destroys) the hip and back weapons (then `CharacterRefresh.Refresh`) and gives Stealth XP 15 (event gain, on
+  every success). Failure is the engine's caught-stealing reaction (`CrimeSystem.Roll` with chance 0, private, by reflection): the target wakes, a
   pending Theft, the stole-from-me memory.
-- **Kick**: a Harmony prefix on `GroundItemPicks.GroundItemClick` opens the game's hold menu on a loose ground item: Pick up (also the quick
-  click) and Kick. The actor (never an animal) walks over; the item moves *Kick distance* + 0..6 along the actor-item line, stopping before
+- **Kick**: a row on a loose ground item's hold menu (`UiRegistration.AddMenuVerbs`, kind `GroundItem`), after the game's Pick Up (also the
+  quick click). The actor (never an animal) walks over; the item moves *Kick distance* + 0..6 along the actor-item line, stopping before
   unwalkable ground or a step over 2 units.
 - **Knockout drop**: a character newly down (knocked out, crippled on the ground or playing dead) drops its wielded weapon with chance
   `55 - 0.4 Strength - 0.2 Athletics` (times the multiplier, 5..90); any cause, not only the player's blows.
@@ -30,5 +30,6 @@ Port of dafitime's *Disarm* (workshop 3759461630; rules from its GPL-3.0 source,
   theft; the menu shows the chance of the first selected character only; a kick follows the actor-item line where the original uses the
   actor's facing (the same after the walk).
 - **Observed** (2026-11-17, live sandbox on origin/master f7ad84a35): the KO disarm posted "Stone has been disarmed." with her staff on the
-  ground. **Observed** (2026-11-18, headless sandbox fight, all nine mods): loads, the kick patch applies, 3000 ticks without a fault. **Observed** (2026-11-18, windowed `--sandbox 4 --sandbox-races` on origin/master f7ad84a35, user play):
-  the chance rows, Kick and the knockout drop work. Rearm (beta, off) is **Unknown**.
+  ground. **Observed** (2026-11-18, headless sandbox fight, all nine mods): loads, 3000 ticks without a fault. **Observed** (2026-11-18, windowed `--sandbox 4 --sandbox-races` on origin/master f7ad84a35, user play):
+  the chance rows, Kick (then a Harmony hold menu) and the knockout drop work. The Kick row through `AddMenuVerbs` and the rearm (beta, off)
+  are **Unknown** in play.
