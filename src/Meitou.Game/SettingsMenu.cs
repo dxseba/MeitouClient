@@ -450,6 +450,11 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     public Action<bool>? BenchFacingChanged { get; init; }
 
     /// <summary>
+    /// Applies the seat bed fix (<see cref="UserConfig.FixSeatBeds"/>).
+    /// </summary>
+    public Action<bool>? SeatBedsChanged { get; init; }
+
+    /// <summary>
     /// Applies the prisoner pose fix (<see cref="UserConfig.FixPrisonPose"/>).
     /// </summary>
     public Action<bool>? PrisonPoseChanged { get; init; }
@@ -463,6 +468,11 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
     /// Applies the bag search fix (<see cref="UserConfig.FixBagSearch"/>).
     /// </summary>
     public Action<bool>? BagSearchChanged { get; init; }
+
+    /// <summary>
+    /// Applies the pick-up theft fix (<see cref="UserConfig.FixPickUpTheft"/>).
+    /// </summary>
+    public Action<bool>? PickUpTheftChanged { get; init; }
 
     /// <summary>
     /// Applies the shop counter talk reach (<see cref="UserConfig.CounterTalk"/>).
@@ -656,7 +666,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
                 or WorldFrame.GiRaysSwitch or WorldFrame.GiCharactersSwitch => "Lighting",
             "Water" or "Water contact foam, wakes and ripples" or "Reflections" => "Water & reflections",
             "Ground parallax" or "Ground displacement (tessellation)" or "Ground trails" or WorldFrame.RockSmoothingSwitch
-                or WorldFrame.OutlineRefineSwitch => "Terrain",
+                or WorldFrame.OutlineRefineSwitch or WorldFrame.SimpleTerrainSwitch => "Terrain",
             "Foliage ranges" or "Foliage levels" or "Far impostors" or WorldFrame.GrassCoverSwitch or WorldFrame.NearTreeFadeSwitch => "Vegetation",
             "Haze" or "Night air" or "Night sky" or "Clouds" or "Cloud shadows" or "Cloud shadows in fog" or "Fog" or "Lit dust"
                 or WorldFrame.WetWorldSwitch => "Sky & weather",
@@ -1619,14 +1629,19 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         TurretAssaultChanged?.Invoke(true);
         Config.FixBenchFacing = true;
         BenchFacingChanged?.Invoke(true);
+        Config.FixSeatBeds = true;
+        SeatBedsChanged?.Invoke(true);
         Config.FixPrisonPose = true;
         PrisonPoseChanged?.Invoke(true);
         Config.FixCagedAnimals = true;
         CagedAnimalsChanged?.Invoke(true);
         Config.FixBagSearch = true;
         BagSearchChanged?.Invoke(true);
+        Config.FixPickUpTheft = true;
+        PickUpTheftChanged?.Invoke(true);
         Config.FixHeadTurnBack = false;
         Config.KeepInfoPanel = true;
+        Player.FixLockpickLabel = Config.FixLockpickLabel = true;
         Config.FixRaidClocks = true;
         Config.FixArrestLifts = true;
         Config.FixGround = true;
@@ -1666,6 +1681,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         Player.MeitouMainMenu = Config.MeitouMainMenu = true;
         Player.SpeedUnit = Config.SpeedUnit = SpeedUnit.Mph;
         Player.Floaters = Config.Floaters = FloaterMode.Simple;
+        Player.GreyUnavailableVerbs = Config.GreyUnavailableVerbs = true;
         Player.InterfaceScale = Config.InterfaceScale = 1;
         Player.ShowNames = Config.ShowNames = true;
         Player.FeedbackButtonInPlay = Config.FeedbackButton = true;

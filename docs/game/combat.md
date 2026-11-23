@@ -217,8 +217,15 @@ Meitou: `CombatSystem.MostAdvanced` (the followed swing; an exact tie keeps the 
 is clamped at 1, so it keeps blocking. A blow decided again draws afresh (`ChooseDefence` salts the blow's roll counter with the tick). The zone list: `AttackZoneLists.Contains`, double-buffered,
 so a defender sees the list an attacker built last tick (the original reads it in its own update order).
 
-**Observed** (decompiled, not measured in game), with several attackers: a target answering a request is asked by
-anyone, not only its own target, and the winner of the roll turns to attack the asker (`FUN_140666a30`). Deciding
+**Verified** (decompile of `FUN_140666a30`, `FUN_140665650`): a target answering a request is asked by anyone, not only its own target. It
+turns to attack the asker (`FUN_140665650` sets its opponent +0x290/+0x298 to the asker) only on the path taken without a current opponent, in
+the wait after its swing (+0x144), or in a state other than attacking (0) or defending (1); while it swings at or defends against its opponent
+the asker gets the plain answer (defending: the asker may swing; attacking: the initiative roll, a lost one refuses the asker) and the target
+keeps its opponent. So a fighter in a crowd finishes its combo on the one it started it on. Meitou: `CombatSystem.TurnOnYielder` (before, a
+fighter mobbed by a squad switched target between the blows of a combo, 46 times in 30 s on the save of #1248, and the later blows went to
+the new target's place with the heading still on the old one: 4 of 16 blows found nobody; after, every blow at a standing target landed).
+
+**Observed** (decompiled, not measured in game), with several attackers: Deciding
 (`FUN_14060c8b0`) tries attacking first and defends only when that fails; a waiting fighter that is attacked goes
 to deciding, except in the wait after its own swing (above). During its own swing a fighter aborts to defend only while under 50% of it with an incoming blow past
 50% (`FUN_14060a970` → `FUN_1406083d0(0.5, 0.5)`); while anyone attacks it the swing ends at the current blow's stop
@@ -250,6 +257,18 @@ HitMaterialType: `HIT_MISSED` dodged 0.2 s, `HIT_SWORD` blocked 0.3 s, flesh or 
   via `getBuildState`; a broken door nothing), a wall clamp(f / 2, 10, 60) × 0.003, destroyed at 0 (**Observed**).
 - Per target the attacker frees that one's attack slot (`AttackSlotManager::freeSlotH`), and after a hit or block takes it off its own engaged
   list (`removeAttackerH`, [attack slots](#attack-slots-and-circling)).
+
+### Enemy test
+
+**Verified** (decompile of `FUN_14079c950`, Character vtable slot 125 (+0x3e8) of `Character`, `CharacterHuman` and `CharacterAnimal`; `FUN_140678960`,
+`FUN_140678830`). `isEnemy(A, B)`: never when B is of A's faction. When their squads differ, A's squad memory decides first: B tagged TEMP_ENEMY
+(bit 4 of the entry's short-term tags) in A's squad's memory, or, when A is the player's faction (+0x250), A tagged TEMP_ENEMY in B's squad's
+memory, makes an enemy; B tagged TEMP_ALLY (bit 3) in A's squad's memory makes none. Only then the disguise, slave-owner and faction relation
+tests run. So a squad that remembers the player as a temporary enemy is the enemy of every member of the
+player's faction whatever the faction relation, and a sweep takes all of its members in the attack zone. Meitou:
+`CharacterFacts.RegardsEnemy(World, SquadMemory, ...)` (the squad memory part `SquadMemoryEnemy`, then the faction relations), used by the attack
+zone, the line of fire and the steering's repulsion. Checked on the save of #1239 (a maxed fighter against a squad of Hungry Bandits, 30 s windows):
+before, 23 blows thrown and 18 landed, never two victims to a blow; after, 11 thrown and 18 landed.
 
 **Verified** (disassembly of `FUN_1406087a0`): "attack start" is `CombatClass` +0x15c, written at each attack's start by `FUN_1402b4570` (the fight start's write is only the initial
 value), so `moved` is the 3D distance from where this swing began, in any direction: the attacker's own drift, backing or circling counts, not just a lunge. The clamp is max(−1, attack distance − moved)

@@ -309,6 +309,9 @@ static partial class WorldFrame
         }
 
         if (gpu.Gi is { } tracedScene) tracedScene.Traced = gpu.Traced;
+
+        // Without the probes the GI's parameters stay the published zeros (no GI, traced or contact sun); with the shadow pass off its term is 1.
+        LeanLighting.Active = LeanLighting.Enabled && gpu.Probes is null && gpu.Shadow is not { Enabled: true };
     }
 
     #endregion
@@ -1547,6 +1550,13 @@ static partial class WorldFrame
         if (gpu.NavmeshOverlay is { Visible: true } navOverlay && post.Target is { } navPicture)
         {
             navOverlay.Record(navPicture, width, height, post.SceneDepth, post.RenderWidth, post.RenderHeight,
+                f.RelativeRotation * SceneProjection().Projection, eye);
+        }
+
+        // The outposts' build limit rings while a building is held (Meitou only).
+        if (gpu.TownRangeOverlay is { Visible: true } ringOverlay && post.Target is { } ringPicture)
+        {
+            ringOverlay.Record(ringPicture, width, height, post.SceneDepth, post.RenderWidth, post.RenderHeight,
                 f.RelativeRotation * SceneProjection().Projection, eye);
         }
 

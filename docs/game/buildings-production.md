@@ -126,7 +126,10 @@ lists, effect 2 and the finder `FUN_140999060`, which ignores the job's target a
 buildings of the character's owner that are not blacklisted, dismantled, holding dismantle work (+0x168 > 0) or paused,
 and not (slot 0x2f0 = 19 SHELL_WITH_INTERIOR and destroyed, slot 0x330 = +0x1a1: any other destroyed building stays a candidate and the
 engineer's first touch ruins it, clearing the flag); an incomplete building (or one needing repair, slot 0x328)
-is a candidate, a complete one contributes its mounted children that need work. Score `max(2 (1 - d^2 / 9000^2),
+is a candidate, a complete one that needs none contributes its doors that need work (its door list `+0x1c0`/`+0x1c8`, each door's slot
+0x328: a damaged or broken door; **Verified**, `FUN_1409a6900`). Meitou: `ConstructionSystem.EngineerWork` (sites, and the town houses the
+faction owns, `FixtureRegistry.OwnedPropertyKeys`), a door's work is the door repair
+([locks](locks.md#cutting-and-breaking-285--185-cut-286--186-break)). Score `max(2 (1 - d^2 / 9000^2),
 0.0001)` (d 3D), x0.5 when slot 89 is set, / (n + 1) with n = characters already working it; a stalled site the
 character has no material for (condition 50 false) is multiplied by the planner cost of the 115 finder (`FUN_14060f1d0`)
 and skipped at 0, i.e. when no source exists. The highest score wins. No cap on builders per site (**Observed**: the
@@ -151,7 +154,7 @@ location (**Verified**). At an object it is
   |dy| < 35 (**Verified** `FUN_14059c6d0`; 7 is `DAT_141e3c5d0`, a writable global, its initial value). Meitou's lift reach
   `CarrySettings.Reach` 14 is the moving case.
 - Otherwise not; once the path has ended at the target it logs "Task impossible: X can't get to Y". There is no settle slack.
-- That notice (**Verified**, `FUN_14059c6d0`, also the failure handlers `FUN_14033da80` / `FUN_140332150`) calls `FUN_140796ed0`: the target's handle goes into the AI's ignore map (AI +0x20 -> +0x218) with the timer 20.0, and the squad blackboard is told. Readers skip the handle: the loose-item source finder `FUN_14059d000` (before the ownership test), the engineer finder `FUN_1409a6900` (first condition), the turret finder `FUN_1405b0da0`, the corpse-machine finder ([ai-tasks](ai-tasks.md)). Meitou `ConstructionSystem.NoteUnreachable` (`CharacterCold.Ignored`, not saved): a builder whose path ended short ignores that site or loose item for 20 s; a fetcher of a loose item goes back to its site and picks another source.
+- That notice (**Verified**, `FUN_14059c6d0`, also the failure handlers `FUN_14033da80` / `FUN_140332150`) calls `FUN_140796ed0`: the target's handle goes into the AI's ignore map (AI +0x20 -> +0x218) with the timer 20.0, and the squad blackboard is told. Readers skip the handle: the loose-item source finder `FUN_14059d000` (before the ownership test), the engineer finder `FUN_1409a6900` (first condition), the turret finder `FUN_1405b0da0`, the corpse-machine finder ([ai-tasks](ai-tasks.md)). Meitou `ConstructionSystem.NoteUnreachable` (`CharacterCold.Ignored`, not saved): a builder whose path ended short ignores that site or loose item for 20 s; a fetcher of a loose item goes back to its site and picks another source; a builder of the site itself ends the work (the plan step ends a task whose target the movement cannot reach, [combat](combat.md#combat-stance)), so the engineer job picks another site.
 
 `getReachRange`: `Building` 40 (construction), `WallBuilding` 60, `UseableStuff` (machines, storages, farms, mines, rocks) its
 `maxUseRange` +0x420, read from the functionality's `use range` (`FUN_1402a0900`), `DoorStuff` 45 (kind 7) or 25. Vanilla `use range`
@@ -179,12 +182,18 @@ none stepping on the spot, the workplaces' operators 20 at tick 9 000 (8 at tick
 
 Meitou (`SiteReach`): builders 40 (walls 60), operators and storage fetches the `use range`, doubled once stopped, measured
 to the building's footprint hull (engine choice standing in for touching; a building without collision uses its parts' bounds
-hull) or, unknown, its position. A rock's operator has arrived within 10 (20 once stopped) of its mesh's footprint (the convex hull of
+hull) or, unknown, its position. A player machine with two or more use nodes is measured instead from its position marker
+(`ProductionSystem.UseNodeMarker`: the node nearest the worker that stands on the machine's floor within the height limit above, others
+passed over), and its operator or hauler walks to that node; for a machine inside a building the worker must also stand on that building's
+floor, as the node does (`IWalkability.InteriorNear`, engine choice). **Observed** (original 1.0.68, #1180: a Copper Alloy Bench against a
+Storm House's inner wall, a worker on its operate job standing against the wall outside, about 33 from the nearest node, within the reach
+rule above once stopped): the worker walked round through the door and worked the bench from inside.
+A rock's operator has arrived within 10 (20 once stopped) of its mesh's footprint (the convex hull of
 its vertices seen from above) as the instance places it (its bounds circle without the mesh); it walks to the bounds box's centre and
 faces it (a rock's origin can lie off its pile). Engine choice, nearer than the original: its rule above has a copper rock (`use range`
 100) mined from 100 to 200 off its position marker (#587), and the bounds box let miners work a scattered or long rock from 20 m off
 (#332). **Observed** (navmesh walks at the two copper rocks by 52474,-95934, zone 43.11): a walker reaches the footprint itself. Taking its ore
-measures 40 to the footprint's edge. Height: Meitou has no floor id, so `SiteReach.AtHeight` requires |dy| below the limit above (130 door, 15 inside a building, else 45; slot 0x428 not read) for every site goal; a builder measures a `ceiling placement` site from the floor under it (`ConstructionSystem.FloorHeight`), as the same-floor test passes it (#592: lamps hang 26 to 48 over a swamp house floor).
+measures 40 to the footprint's edge. Height: Meitou knows no floor of a player building or of one standing in it, so `SiteReach.AtHeight` requires |dy| below the limit above (130 door, 15 inside a building, else 45; slot 0x428 not read) for every site goal, except that a builder or fetcher outdoors at an outdoor site (no parent, floor 0) is on its floor whatever the height (`ConstructionSystem.OnSiteFloor`; **Observed**, #1255: `more building.mod`'s Outpost s-V big stands with its origin 219 under its own slab, 199 under the terrain, and its builders stood on the slab without ever arriving); a builder measures a `ceiling placement` site from the floor under it (`ConstructionSystem.FloorHeight`), as the same-floor test passes it (#592: lamps hang 26 to 48 over a swamp house floor). Walk: a builder, a storage fetcher, a player machine's operator or hauler and a corpse carrier to a player machine walk to the site's position on its floor when they can stand there within that limit, else to the point nearest them, on rings round the site out to the reach plus 40, that stands on the floor within the limit and within the reach (builders 40, machines the `use range`) of the hull (`SiteReach.WorkSpot`, engine choice standing in for the position marker; a turret's gunner and a rock's miner keep their own spots): furniture cuts holes in a floor's mesh, and a path to the position itself may end on any surface within its goal floor slack (`NavQuery.GoalFloorSlack` 40), such as a stair beside the site, where the height test above never passes.
 
 Repair (**Verified**, Building slot 0x328 `FUN_1400f6b70`, `Task_Build` `FUN_14034a440`): a building needs repair when
 `progress < target`; building health is construction progress. Orders 2 and 95 are both `Task_Build`, which pushes the
@@ -337,6 +346,11 @@ shows the first failing message in this order (**Verified** unless marked):
   **Round 6** (**Observed**, same GOG 1.0.68 save, the Drycoom Longhouse dismantled and saved; reproduced by `OriginalTownRefitTests`): the original refitted Drycoom to (82004.72, -77760.71) radius 2907.50, and the formula gives (82004.48, -77759.97) with the radius inside 1 unit, so the **sets, weights (4 for the Watchtower, Snailhouse and gate) and building origins are exact**; the earlier 20 to 30 unit gaps are therefore the navmesh snap, not the formula. That centre lies on the +x side of the gate (local 55, 43), outside the gate's footprint; with the Longhouse the formula centre (82069.34, -77698.09) is local (-33, 56) of the gate and the original's (82078.01, -77670.35) local (-61, 45), 27 units further out along the gate's -x side: the original moved the centre out of the gate's footprint, so its runtime navmesh carries a cut of about 60 units half width there that Meitou's thin carve lacks. A load and save alone does **not** refit: a game loaded and saved without a change (save `Beep Fan Club 1 - Loaded - then - Saved`) keeps both old centres (Goonrock (-16713.25, -9280.78), Drycoom (82029.61, -77481.41)); only a dismantle (the original's refit of every town) moves them. **Verified** in the exe (`FUN_1405488f0`): after the weighted mean (houses and gates x4 plus top-level refinery-function buildings, divided by 4 times their count plus the refinery count) the centre goes through a ray straight down from 1000 units above it (mask 0x204) and, only when the ray hits a building, is replaced by that building's marker; then a Havok closest point on the navmesh with a box of 500 (second extent 20, the filter ignores doors and water) sets the town position. A wall or gate building's marker (`WallBuilding`, `FUN_140562260`) is its origin moved by (-90, 0, half its link length x scale) in its own frame, not the origin; it matters only for the ray hit, no wall lay under either formula centre. **Round 8** (**Verified** decode of the snap, `FUN_1403a2fa0` / `FUN_1403a2300`, parity round 7; **Observed** residuals on the original's own saved tiles): the snap has two steps. Step 1 is the 3D closest point from the centre, whose height is the weighted mean of the members' world Y with the same weights as X and Z (cube of half size 500, door and water faces skipped). Step 2 searches boxes of 20, 40 and 80 units horizontally, always +-20 vertically, for the point nearest step 1's that stays 20 units clear of the boundary of the faces in the box; the first box with a point wins, else step 1's point stays. Meitou: `RefitSnap` over `IWalkability.SurfaceFaces` (the navmesh's kept faces; a stand-in without faces falls back to the old 2D `WalkableSpots.Closest`). Engine choice: step 2 uses plain distance to the mesh's open edges on a 0.25-unit grid, not the original's convex hulls of boundary loops grown by 20 with 8 segments per corner. The town keeps the terrain height as its Y. On the saved tiles of `Beep Fan Club 1` (`zone/tile49.15.hkt`, `tile28.30.hkt`, the tiles the original regenerated with the buildings in them; test `Refitting_on_the_originals_saved_tiles_snaps_the_centres_to_within_the_known_residuals`): Drycoom with 4 buildings is 1.39 off the original's centre (formula alone 29.06; step 2 moves it 22.5 inward), Drycoom with 3 buildings 2.01 off (formula alone 0.78: the 3D step slides it 2.2 down the slope because the members' mean height lies 15.6 above the face), Goonrock 9.90 off (formula alone 20.3; the face's slope direction differs from the original's shift by about 25 degrees at every height tried, so the residual is the tile under it or the centre height). Meitou's own game does not read the save's tiles: its mesh at a player town is built from the shipped terrain plus the placed buildings' collision (`NavRuntimeBuildings`) and, since round 10, without the `avoid towns` foliage the player's towns keep away ([foliage](../formats/foliage.md) "Towns"; the shipped Goonrock hole was three such boulders), which round 11 compared with the saved tile, see [pathfinding](pathfinding.md#refit-snap). **Round 11** (**Observed**, live on Meitou's own mesh after dismantling Goonrock's Animal Feeder, GOG data): the 3D step must follow each navmesh polygon's real surface, not the plane through its corners (a polygon spans slopes its corner heights do not follow; the live mesh was up to 30 units off the saved tile's heights, which slid Goonrock's step 1 by 15 units); the original's terrain mesh is cut from every second height sample (36 units). Goonrock (-17110.45, -9087.41) r 2534.68 is 10.89 off the original's (22.55 before; offline on the saved tile 9.90), Drycoom with 4 buildings (82077.94, -77669.04) r 2845.17 is 1.31 off (0.88 before), Drycoom with 3 buildings (Longhouse dismantled; 82004.88, -77760.00) r 2906.87 is 0.73 off (2.75 in round 8). The remaining Goonrock gap is what the offline run on the original's own tile leaves.
   **Saves lose buildings the clean data cannot build** (**Observed**, same save before and after the original's load and save, 2026-11-12): 474 player sites before, 380 after = the dismantled Feeder, 156 sites of mods the clean GOG data lacks (Mindoors, Short Wall Ramp, ...; Meitou skips an unknown record too) and 93 furniture items of known records standing inside two houses of the `Flipped Buildings` mod (an unknown record): the original builds no interior for a missing parent, so the children vanish. Meitou keeps those children as orphans; not changed (only a missing mod causes it).
   **Verified** (`FUN_14054d080`, `FUN_1402a2860`, `FUN_14054fea0`): the placement/dismantle reassessment removes a player town only when no eligible non-foliage buildings remain (`FUN_1405488f0`); load-time normalization does not apply this empty-town removal. Meitou checks every `BuildSite` of the town, including indoor/orphan sites; foliage resource nodes live outside that registry.
+- **Ghost under the cursor** (**Verified**, `0x1404d5420`, `0x1404d3cd0`): the ghost's bounds centre, not its origin, follows the cursor. Its
+  bounds are the merge of its entities' `getLocalAabb` times `scale`; their centre with Y cleared is kept (ghost `+0xc4`), and the position
+  update puts the origin at cursor point - (yaw-only turn x centre), then calls slot 21. A ramp, whose mesh lies in its wall's space
+  ([snapping](#snapping-to-a-building)), thus sits under the cursor rather than 100 units beside it. Meitou: `BuildMode.GhostCentre`; walls
+  (`PreviewBuilding_Wall`) keep their own placement.
 - **Slope** (slot 31 `FUN_1404daa20`): ground normal from four rays at the rotated bounding-box corners (outdoors) or
   one ray (indoors); slope = angle from vertical, compared with `max slope` in degrees. With `match slope` (forced for
   interior furniture and nodes) the ghost tilts to the ground and a slope over the limit fails; without it the tilt is
@@ -420,26 +434,65 @@ shows the first failing message in this order (**Verified** unless marked):
 - **A ramp's mesh sits in its wall's own space** (**Verified**, mesh bounds): `basic_wall_ramp2.mesh` spans x -102..-20, z 0..24, just
   outside Concrete Wall's `wall_basic02.mesh` (x -19.5..3.9, z -2.7..118.7); Defensive Wall Ramp IV's staircase spans x -268..-49, z
   187..222 against Wall IV (x -59..27, z 0..305; both scale 0.85). At its wall's position and turn a ramp stands against the wall's -X side.
-- **Turrets** have no `snaps to`, and none refers to the `Node Turret` instances (node type 3, as `Node Defensive Position`) that wall parts
-  such as `Wall Level 02` carry: they stand on a wall's walkway like on any surface (**Observed**, data only).
+- **Turrets snap to `Node Turret`** (**Verified**, decompile of `PreviewBuilding_Snapping`, Steam 1.0.68): a building with `snaps to` or a
+  `gun turret` gets the `_Snapping` ghost (factory `0x1404e1a97`-`0x1404e1e48`), so turrets have one although none lists `snaps to`. Its snap
+  node type (`0x1404dd250`) is 3 for a `gun turret`, else the `node type` of the first `snaps to` record when that is an `is node` record, else
+  none (it snaps to `snaps to` buildings). With a node type the update (`0x1404dd7a0`) takes the nearest node of that **node type** (any record,
+  `0x14038aca0`) within 300 units 3D, 60 for a `gun turret`, and its position and turn; a turret then turns 180 degrees about its own up
+  (`0x1404dda21` -> `0x1404d4f80`). The `Node Turret` instances sit on wall parts' walkways (`Wall Level 02`: three at x -1.2, y 43.4, turned
+  180 degrees about Y; data).
 - **Snap nodes and blue node markers** (**Verified**, `PreviewBuilding_Snapping` vtable `0x1416e1cb8`, `0x1404dd410`, `0x1404ddb43`, `0x1404d0ff0`,
   `0x1404fe160`, `0x14038cdf0`, `0x140388e10`):
   - A building's `is node` child instances (such as `Node Light Mount`, `node type` 5, or `Node Turret`, `node type` 3) are placed at
     `parent.pos + parent.rot * instance.pos` (unscaled by `scale`) and `parent.rot * instance.rot` (`0x140388e10`).
-  - `PreviewBuilding_Snapping` searches both buildings and building nodes matching `snaps to` within squared 3D distance `32400` (`180` units,
-    `0x1404ddb43`). Slot 5 (`0x1404d0ff0`) refuses unsnapped placement with `NeedsSnapNode` ("Can only be placed on certain locations (marked by
-    blue nodes).") unless slot `+0x108` (`0x1404fe160`) finds a `gun turret` reference.
-  - `showBlueNodes` (`0x14038cdf0`) draws `unit_sphere.mesh` scaled `5.0` in cyan-blue `(0, 0.8, 1.0, 0.5)` at every matching node of player-owned
-    buildings (or all buildings in the level editor).
-- **Meitou** (`GhostSnap`, `BuildMode.SnapToTarget`, `MarkerRenderer.BlueNodes`): a `snaps to` ghost takes the position and turn of the nearest
-  building of a target record (within 150 X/Z) or the nearest matching `is node` instance of an owned building or player site (direct pointer ray
-  hover preferred, else nearest within 180 3D); it is judged by its own pitch like a wall piece, its host building does not block it, and an
+  - Without a snap node type (`0x1404dda4e`) the ghost searches its `snaps to` buildings from origin + turn x centre (the cursor point): the
+    building of a `snaps to` record under the pointer ray (mask `0x7879e00`) at any distance, else the nearest whose bounding box (Building
+    slot `0xf0`) is within squared distance `32400` (`180` units, `0x1404ddb43`, 0 inside the box, `0x1404ec030`), queued ghosts by their
+    bounds alike. Slot 5
+    (`0x1404d0ff0`) refuses unsnapped placement with `NeedsSnapNode` ("Can only be placed on certain locations (marked by blue nodes).") unless
+    slot `+0x108` (`0x1404fe160`) finds a `gun turret` reference.
+  - Slot 7 (`0x1404deb80`) calls `showBlueNodes` (`0x14038cdf0`) with the snap node type: `unit_sphere.mesh` scaled `5.0` in cyan-blue
+    `(0, 0.8, 1.0, 0.5)` at every node of that type on player-owned buildings (or all buildings in the level editor), a turret's `Node Turret`
+    ones too.
+- **Meitou** (`GhostSnap`, `BuildMode.SnapToTarget`, `MarkerRenderer.BlueNodes`): a snapping ghost with a snap node type takes the position and
+  turn of the nearest node of that type on an owned building or player site (direct pointer ray hover preferred, else nearest within 300 3D, 60
+  for a turret, which turns 180 degrees and is not blocked by walls), one without takes the building of a `snaps to` record whose bounding box
+  (its parts' mesh bounds times `scale`, turned, axis aligned) is nearest the cursor within 180 (Meitou does not prefer the one under the
+  pointer ray); it is judged by its own pitch like a wall piece, its host building does not block it, and an
   exterior snap attachment records its parent while staying outside (`Outside` / `flags` bit 0) so it remains visible and lit outdoors when the
-  house's interior is closed. While a ghost that snaps to `is node` records is held, matching nodes on player sites and owned buildings (all
+  house's interior is closed. While a ghost with a snap node type is held, the nodes of that type on player sites and owned buildings (all
   non-destroyed buildings in the level editor) show blue node spheres (`unit_sphere.mesh` scaled 5), and unsnapped placement fails with
   `NeedsSnapNode` unless the building has a `gun turret`. Resources (`is foliage`, e.g. Ore Drill -> Iron Resource) are not searched. A ghost over
   a raised walkable surface outside the rooms (a wall top, `InteriorView.SurfaceMoveHit`) stands on it level, with that height as its ground, and
   walls do not block it.
+
+### Usage node markers
+
+**Verified** by decompile (Steam 1.0.68: the preview's setup `FUN_1404dde30`, `PreviewBuilding::resetUseageNodes` `FUN_1404d3bf0`,
+`PreviewBuilding::validateUsageNodes` `FUN_1404d40c0`, the node box `FUN_1404d99b0` and its test `FUN_1404d45a0`, the queue's add, re-add, undo
+and pick-up `FUN_1404d4240`, `FUN_1404d5130`, `FUN_1404e1f70`, `FUN_1404e27e0`); data from the base game:
+
+- **Which nodes.** The preview walks the building and every record its `parts` lists name (recursively, whatever their chance); each instance
+  whose target has `node type` 4 (`n-use node`, `1183-gamedata.base`) gets a marker. The instance itself is not tested for `is node`.
+- **Look.** An entity of the `phs or mesh` of the node record's first `parts` entry (base: BUILDING_PART `nodemarker`, `1132-gamedata.base`,
+  `nodemarker.mesh`), attached under the ghost's scene node at the instance's position and rotation (unscaled; a part's offset is not applied),
+  render queue 0x53, no shadows, material `greenbuilding` (the valid ghost's).
+- **Held ghost.** Shows every marker, green, whether it can stand or not (picking a queued ghost up resets its markers so).
+- **Queued ghosts.** Each time the queue changes (a ghost queued, re-queued, undone or picked up), every queued ghost's nodes are judged; a node
+  that fails is hidden. A node's box spans X and Z -2.5 to 2.5 and Y 0 to 10 round the node; it fails when it meets the physics shapes (the
+  footprint test), when the ghost stands outdoors and the terrain under the node is more than 40 above or below it, or when it meets a footprint box
+  of another queued ghost that does not pass through this one (`isNoCollideWithThisBuilding`).
+- Meitou (`UseNodeMarkerLayout`, `UseNodeMarkers`): the markers are ghosts drawn in the valid green; a node's box is tested in X/Z against the
+  collision shapes of the player's sites (the one the ghost stands in aside) and, outdoors, of the level's buildings, and against the other queued
+  ghosts' footprints, each within its height span (engine stand-in for the physics shapes; indoors the level building the ghost stands in is not
+  told apart, so level buildings are not tested there). A node whose record has no part with a mesh has no marker.
+
+### Town range ring
+
+Meitou only (the original draws no town range): while build mode holds a building, each player outpost's radius
+([centre and radius](#placement), "Centre, radius and placement-time merge") is drawn as a red band 10 units wide inside the
+radius, on the terrain, fainter where the scene hides it (`TownRangeRing`, rebuilt when the outposts change). A building whose
+root stands outside every ring belongs to no town and gets no power ("Town at materialization").
 
 ### Upgrades
 
@@ -547,6 +600,11 @@ string; **Observed**: `finished0` of the five sample saves); Meitou adds it to e
 `build materials`, or "Nothing"), "Estimated build time:" (formula above, whole hours), then power output/consumption,
 `power capacity`, Num People (`max operators`), Produces (`produces`, `output rate`), Efficiency, Damage, Training max
 and Turrets bonus.
+Description box (`DescriptionText`): the BUILDING's `Description`, capitalised unlike an ITEM's `description` (**Verified**: every BUILDING of
+`gamedata.base`, `Newwworld.mod` and `rebirth.mod` carries `Description`; 18 also a lowercase one, empty on all but one). 25 of the 228
+research-unlocked base buildings leave it empty (walls and gates II-IV, indoor farms, medical desks, tables, storage barrels, Battery Bank, Wind
+Generator II, Oil Silo, Rain Collector, Storm_House_07); Meitou shows its own translated text for those, and a mod that sets their `Description`
+replaces it (`BuildingDescriptions`).
 Opening the menu pauses the game (a normal pause, the speed buttons resume) and closes the inventory windows
 (**Observed**, in-game).
 
@@ -601,7 +659,7 @@ rock) makes output only while someone operates it.
   works unattended (`ResearchBuilding::vfunc_28` does the same). Meitou: `MachineData.Unattended` (no base-game pair is negative on both, **Verified** over the
   base records, so mods only). Only raw +0x3ac = 0 (not the both-negative case) gives the menu order 152 Auto-Haul instead of 87
   ([ui-input](ui-input.md#context-menu-verbs)). Base game (**Verified** data): Iron Refinery III / IV, Cotton and Hemp Auto-Loom,
-  Automatic Grain Silo, Hybrid Stone Mine II (building 0); Campfire, Camp Fish Pile, Bread Oven, wind generators, Rain Collector,
+  Automatic Grain Silo, Hybrid Stone Mine II (building 0); Campfire, Camp Fish Pile, Bread Oven, Small Generator, Generator II, wind generators, Rain Collector,
   Battery Bank, storages and lights (functionality 0).
 - s = `lerp(stat/100, 0.5, 1.4)` of the effective stat `stat used` (`FUN_1408852a0`; 1 without an operator; the lerp
   helper `FUN_140015b63` is `a + (b - a) t`). **Verified**: no clamp, so a stat above 100 lifts s past 1.4 (`FUN_14035bc90` passes it
@@ -1016,6 +1074,9 @@ and `power capacity` (battery store, "in seconds" per fcs.def), plus research ([
   gets, for a consumer, a "Battery" toggle (`_recievesBatteryPower`, tooltip "This machine will run off of battery power if the main generators should run low or break down."
   / "...will NOT run off..."), then for every such machine a "Power" toggle (`powerOn`; "This machine is switched On" / "This machine is switched {1}Off"). A click
   (vfunc 161 `FUN_140297a60`, shared by every machine class) flips `powerOn`, sets the Wwise switch `Generator` to `On` / `Off` and posts `UI_Generator` on the GUI object. Meitou: `SetMachinePower`; the bar's green/red On/Off look is an engine choice.
+- **No outpost** (Meitou only): a consumer whose building is NO_TOWN (`Machine.NoTown`) shows `Outpost: None` (Bad) among its
+  power lines, with a tooltip telling the player to rebuild it inside the town range ring. On no frame its demand stays 0, so the
+  original draws no Power line and gives no hint.
 - **Kinds** (registration `FUN_14092da80`, from switching on `vfunc_99`): capacity > 0 a battery, else output > 0 a
   generator; output < 0 a consumer. Function 5 without `consumes` is a wind generator, otherwise fuelled; batteries
   (23) share the generator class (factory `FUN_14057cc70`).
@@ -1251,7 +1312,7 @@ it with them. Meitou: `MachineData.Accepts` (AI) and `TakesByHand` (player).
   `production amount` > 0, [resources](#resources)).
 - **Meitou** (`ProductionSystem.TownWork` / `TownMachines`, `AiSystem.WorkAtMachine`): a town building's machine is a virtual complete site `townwork:<building key>` of the town's
   faction (like a rock or a training dummy: no registry site, not drawn or built). Every standing farm and producer (`MachineData.IsProducer`: mine, well, refinery, rain collector) of a town
-  gets it when the town registers (a ruin once it stands); any other building when the first worker arrives or the player's first order names it (a turret's, [ui-input](ui-input.md#building-picking-and-selection)):
+  gets it when the town registers (a ruin once it stands); any other building when the first worker arrives, the player selects it while the player's faction owns it (its window opens, [ui-input](ui-input.md#building-picking-and-selection)) or the player's first order names it (a turret's, [ui-input](ui-input.md#building-picking-and-selection)):
   a research bench counts for the player's research alone, a crafting bench has no queue, a town's generators are the power frame's ([NPC generator state](#npc-generator-state)) and its storages are container fixtures.
   Its state is the original's: the production keys of the building's GAMESTATE_BUILDING and its items in the INVENTORY_STATE the building lists ([town machines](../formats/save.md)), read when the machine is made, so an
   original save's NPC mines keep their progress and output. A worker whose plan starts with
@@ -1269,15 +1330,14 @@ distinct records in item order, `FUN_140299990`; a producer its output); the fir
 count while the character has room (Character slot `0x170`), and the task ends; none wanted fails it. The machine the plan fills is not asked, so
 a mixed storage can hand over another record than the one the finder looked for, and the trip repeats: row 92's done state 66 at a
 storage is "carries its item" (`FUN_140597530`; `StorageBuilding` slot `0x550`, `FUN_14029ba60`: the record at `+0x448`, none for an ITEM
-storage), so 93 at the machine still lacks 67 and the next plan runs 92 at the same source again; the player's haul repeats it alike
-(**Observed**, headless: a farmer at a tank holding fuel before water takes the fuel a generator wants, trip by trip, before any water). The count is computed at the take, nothing is kept: over the
+storage), so 93 at the machine still lacks 67 and the next plan runs 92 at the same source again. The count is computed at the take, nothing is kept: over the
 buildings of mask `0x4002436` round the character's town (`FUN_1408cbea0`, a player outpost alike) that are complete (slot `0x228`, `+0x160`),
 not the source and not of its record, each that takes the item (slot `0x4a0`) adds the room of its input of it (`max` - count; 1 for `max`
 -1 with room) when that is its first input; a storage (its entry 0 is empty) or a machine whose input of it comes later makes the count 5 at
 once (the inventory-room test `FUN_14074afa0` on the entry before). One more when the item is food (`item function` 3) and the character carries
 none (slot `0x2f0`, `FUN_1405972d0`: functions 3 and 15). A crafting bench source (class 6) with nothing wanted gives 1 of the last record the
 character has room for (no Meitou finder yields a bench). Meitou `FillDemand.Count` (no distance bound; town data absent: every machine) serves
-the NPC fetch at a storage, the player's haul fetch (`ProductionSystem.FetchAt`, a storage or a producer's output) and a worker's 92 at a
+the NPC fetch at a storage, an automatic machine's hauler's fetch (`ProductionSystem.FetchTownWants`, a storage or a producer's output) and a worker's 92 at a
 producer (its own or a fetch source: `TakeOutput`, once per task, `AiSystem.CollectDone`) alike, so an NPC mine's worker takes 5 of a full output
 when a storage of the town takes ore, and none when nothing in the town wants it (the output stays full). A fetch that takes nothing asks a
 replan (the failed flag `+0x26d`, handler `FUN_14050d080`); a walk that ended short also ignores the source for 20 s. The player's hauling fetch (`NearestSource`) walks the empty
@@ -1301,11 +1361,25 @@ inputs in list order as the finder does, takes storages before producers and ski
   on a storage 124 "Hauling to" (several targets allowed); an automatic machine (152) adds 152 plus 124 on it. The first job in a
   character's list that can run wins; operating is skipped while the machine's output is full or its inputs are empty (row 87's !63 and !62 unmet at the job's root,
   [perma-jobs](ai-tasks.md#perma-jobs)), so a character moves down its list and returns when the machine can work again.
+- **Fuel generators**: automatic with `consumes` (Small Generator, Generator II: Fuel 10, rate 100), so 152 Auto-Haul, with Shift 152 plus 124
+  (Generator class slot 131, [ui-input](ui-input.md#building-picking-and-selection)). Meitou: `MachineData.IsFuelGenerator` makes them `Operable`
+  and `IsHauledAutomatic`, so the hauler fetches Fuel from a storage into the tank as for an automatic producer; wind generators and batteries
+  get no verb.
 - **Storage pick** (**Verified**, `FUN_14059acd0`, also called by the 242 ditch finder `FUN_1405a59a0`): the candidates are the current town's
   buildings (the nearest-allies query, mask `0x4002436`) with a StorageBuilding cast, complete, of the character's faction, whose slot `0x4a0`
   takes the item; the nearest to the character by squared 3D distance wins, within the AI's range-mode bound (ROAM_FAR 4.246733e7).
-- **Unknown:** when an operator leaves a machine to haul, where a 124 job takes its items from, and whether 152 / 124 on an automatic machine ever empty its output
-  (152's goal is only "no empty inputs", !62).
+- **Observed** (the original 1.0.68, no mods, 2026-11-23): an operator's job 87 at an empty machine fetches nothing. A Copper Alloy Bench with
+  its Copper input emptied by hand and a General Storage Chest in the same room holding Iron Plates (listed first) and 11 Copper: the operator,
+  with jobs on and nothing else to do, stayed Aimless beside the bench for two game hours and never went to the chest.
+- **Sources of 124** (**Verified**, decompile): 124 needs state 67 at its storage, which row 94 Try filling machine achieves (its list A), so the
+  planner runs 94's finder `FUN_14059d9b0` on the storage, then 92 at the source found and 124 at the storage. The finder asks the target's
+  `StorageBuilding` slot `0x560` (`FUN_140299c30`) for the records it wants: its item entry (`+0x448`) while that has room, the entry's item list
+  when it has one; with none, slot `0x568` (`FUN_14029bab0`). Per record it calls `FUN_14059d000`, whose first pass is the loose items within
+  1200 of the character ([NPC town machines](#npc-town-machines)), then the buildings. Row 92 at a loose item is `Task_Pickup`. Meitou
+  (`ProductionSystem.LooseFor`): the records of the storage's `limit inventory` it and the hauler's main grid have room for; never an item another
+  faction owns (engine choice); then the player machines' outputs ([job lists](../simulation.md#job-lists)). The item taken is kept for the trip
+  (`CharacterCold.HaulItem`): while it still lies there the job is not blocked, wherever the walk to it leads (`FetchesLoose`, engine choice).
+- Meitou's operator hauling (Auto haul, an engine option): [simulation](../simulation.md) "Hauling".
 
 ## House sales
 

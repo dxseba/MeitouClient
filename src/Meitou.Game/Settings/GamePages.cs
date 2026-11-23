@@ -390,6 +390,11 @@ sealed class GamePages(SettingsMenu menu)
             + "Simple shows the total, Full one number per damage type and the part hit.",
             Choice: new(() => ["Off", "Simple info", "Full info"], () => (int)menu.Config.Floaters,
                 i => menu.Player.Floaters = menu.Config.Floaters = (FloaterMode)i)));
+        result.Add(new("Unavailable menu rows",
+            "Greyed: a menu row your selection can't do now, such as First Aid without a medkit, is greyed; Shift-click it to "
+            + "set up the job anyway. Faithful: every row as in the game.",
+            Choice: new(() => ["Faithful", "Greyed"], () => menu.Config.GreyUnavailableVerbs ? 1 : 0,
+                i => menu.Player.GreyUnavailableVerbs = menu.Config.GreyUnavailableVerbs = i == 1)));
         result.Add(new("Font size", "Points added to every interface font's default height (the game: 3).",
             Slider: new("Font size", UserConfig.MinFontSize, UserConfig.MaxFontSize, () => menu.Config.FontSize ?? KenshiFontSize.DefaultSetting,
                 v => SetFontSize(v), "0", Faithful: KenshiFontSize.DefaultSetting)));
@@ -644,6 +649,11 @@ sealed class GamePages(SettingsMenu menu)
             + "The game mirrors the bench's look point through the middle of the world map, so the sitter faces an unrelated direction.",
             Toggle: new("Bench facing", () => menu.Config.FixBenchFacing,
                 v => { menu.Config.FixBenchFacing = v; menu.BenchFacingChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
+        result.Add(new("Beds used as seats",
+            "A character sleeping on furniture that works as a seat, such as Bed (job), lies along the mattress as in a real bed. "
+            + "The game seats it on the furniture's middle, so it lies across the foot of the bed.",
+            Toggle: new("Beds used as seats", () => menu.Config.FixSeatBeds,
+                v => { menu.Config.FixSeatBeds = v; menu.SeatBedsChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
         result.Add(new("Prisoners hold still",
             "A wounded prisoner on a pole or in a cage keeps the pole's or cage's pose. "
             + "In the game it clutches its wounds there instead.",
@@ -674,6 +684,11 @@ sealed class GamePages(SettingsMenu menu)
             + "confiscating stolen goods inside the worn backpack. The game misses those bags, so goods hidden in them are never found.",
             Toggle: new("Bags in the inventory", () => menu.Config.FixBagSearch,
                 v => { menu.Config.FixBagSearch = v; menu.BagSearchChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
+        result.Add(new("Pick-up thefts from the owner",
+            "Taking someone else's item from the floor of a building is a theft from the item's owner. "
+            + "The game counts it as stolen from whoever owns the building you stand in, even when the item belongs to someone else.",
+            Toggle: new("Pick-up thefts from the owner", () => menu.Config.FixPickUpTheft,
+                v => { menu.Config.FixPickUpTheft = v; menu.PickUpTheftChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
         result.Add(new("Guards spare their own",
             "Slavers and other cage guards leave their own faction's people in their cages alone instead of making them slaves. "
             + "In the game they enslave them too. Arrests that end in slavery are not affected.",
@@ -688,6 +703,11 @@ sealed class GamePages(SettingsMenu menu)
             + "The game starts it collapsed every time.",
             Toggle: new("Information panel stays open", () => menu.Config.KeepInfoPanel, v => menu.Config.KeepInfoPanel = v, Remaster: true,
                 OnOff: true)));
+        result.Add(new("Lockpick chance on the pointer",
+            "Pointing at a lock too hard to pick shows 0%, as its Pick Lock menu entry does, since the character cannot pick it. "
+            + "The game shows the chance before that limit there, such as 3% for a lock the menu gives 0%.",
+            Toggle: new("Lockpick chance on the pointer", () => menu.Config.FixLockpickLabel,
+                v => menu.Player.FixLockpickLabel = menu.Config.FixLockpickLabel = v, Remaster: true, OnOff: true)));
         result.Add(GroundRow());
         result.Insert(0, menu.PageSidesEntry(result, "All fixes", "Every bug on this page as the game ships it, or every fix.", "fix"));
     }

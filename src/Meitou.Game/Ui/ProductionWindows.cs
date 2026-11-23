@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using Meitou.Data.Gameplay;
 using Meitou.Data.Ui;
+using Meitou.Game.Building;
 using Meitou.Game.Rendering.Ui;
 using Meitou.Game.Tutorials;
 using Meitou.Simulation;
@@ -126,7 +127,7 @@ sealed class ProductionWindows(PlayerInterface player)
         var focus = player.BuildingSelection.BuildingFocus();
 
         // A rock's natural site is no registry building: its machine, once mined, is enough.
-        var selected = SiteMachine(focus?.SiteId);
+        var selected = SiteMachine(MachineSiteOf(focus));
         if (selected is { Inputs.Count: 0, Output: null, HasStorage: false, Craft: null }) selected = null;
 
         SyncShownMachine(selected);
@@ -309,7 +310,7 @@ sealed class ProductionWindows(PlayerInterface player)
     {
         ShownMachine = m.Site;
         _shownName = player.BuildingSelection.Selected?.Name;
-        _targetSelection = player.BuildingSelection.BuildingFocus()?.SiteId;
+        _targetSelection = MachineSiteOf(player.BuildingSelection.BuildingFocus());
         string screen = MachineScreen(m);
         player.ScrollBars.InventoryScroll.Remove(screen);
 
@@ -358,6 +359,20 @@ sealed class ProductionWindows(PlayerInterface player)
 
         string screen = MachineScreen(m);
         return player.FaithfulScreens.IsOpen(screen) ? screen : null;
+    }
+
+    /// <summary>
+    /// The machine site a selected building's window shows: its own site, else the <c>townwork:</c> machine of a town building or layout object of
+    /// the player's faction, as the original opens the window of any complete building the player's faction owns (<c>FUN_1405504a0</c>,
+    /// docs/game/ui-input.md "Building picking and selection"); null for none.
+    /// </summary>
+    string? MachineSiteOf(BuildingSelection.SelectedBuilding? focus)
+    {
+        if (focus is null) return null;
+        if (focus.SiteId is { } site) return site;
+
+        string? own = player.Session.CurrentSnapshot.InspectedOwnMachine;
+        return own == ProductionSystem.TownWorkPrefix + focus.Instance ? own : null;
     }
 
     /// <summary>
@@ -1228,6 +1243,20 @@ sealed class ProductionWindows(PlayerInterface player)
 
             stats.Add(ConsumerPowerLine(pw.Granted, pw.Demand));
         }
+
+        // A machine in no town is on no frame, so its demand stays 0 and the Power line above is not drawn.
+        if (pw.Kind == PowerKind.Consumer && pw.NoTown) stats.Add(NoOutpostLine());
+    }
+
+    /// <summary>
+    /// Meitou only: a consumer's line when its building belongs to no outpost (NO_TOWN), which gets no power however many generators stand nearby
+    /// (docs/game/buildings-production.md "Power"; the original gives no hint).
+    /// </summary>
+    static PlayerInterface.HudLine NoOutpostLine()
+    {
+        string tip = Loc.Tr(
+            "This building stands outside every outpost's build limit, so no generator can power it. Dismantle it and build it again inside the red ring.");
+        return new(Loc.Tr("Outpost:"), Loc.Tr("None"), PlayerInterface.MainColour, PlayerInterface.BadColour, tip);
     }
 
     /// <summary>

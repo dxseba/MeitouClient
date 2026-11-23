@@ -261,6 +261,12 @@ sealed class UserConfig
     /// </summary>
     public FloaterMode Floaters { get; set; } = FloaterMode.Simple;
     /// <summary>
+    /// Meitou's greyed context-menu rows (Interface settings, on by default): a row the selection cannot carry out now (First Aid or Repairs with no
+    /// kit at hand, Splint Injuries without a splint kit, a mod row marked unavailable) is greyed and takes only a Shift click, which sets up its
+    /// job. Off is the original's menu.
+    /// </summary>
+    public bool GreyUnavailableVerbs { get; set; } = true;
+    /// <summary>
     /// The original's <c>censorship</c> option (Interface settings, off by default): five words swapped in the displayed dialogue.
     /// </summary>
     public bool Censorship { get; set; }
@@ -517,6 +523,11 @@ sealed class UserConfig
     /// </summary>
     public bool FixBenchFacing { get; set; } = true;
     /// <summary>
+    /// A seat playing a bed's clip is lain on at its nearest use node (Fixes settings; off: on its origin, across the bed, as the game does;
+    /// docs/game/ai-tasks.md "Town goals").
+    /// </summary>
+    public bool FixSeatBeds { get; set; } = true;
+    /// <summary>
     /// A prisoner in a cage or on a pole plays only the fixture's pose (Fixes settings; off: it holds its wounds there, as the game does;
     /// docs/animation.md "Injury holds").
     /// </summary>
@@ -530,6 +541,11 @@ sealed class UserConfig
     /// and the worn backpack, as the game does; docs/game/dialogue.md "Conditions").
     /// </summary>
     public bool FixBagSearch { get; set; } = true;
+    /// <summary>
+    /// A stolen ground pick-up is a Theft from the item's owner (Fixes settings; off: from the building the thief stands in, as the game does;
+    /// docs/game/economy.md "Fencing, stealing and smuggling").
+    /// </summary>
+    public bool FixPickUpTheft { get; set; } = true;
     /// <summary>
     /// A shopkeeper at its counter is talked to from the counter's front (Gameplay settings, Meitou; off: the game's talk reach, so the customer
     /// walks round behind the counter; <c>World.CounterTalk</c>).
@@ -565,6 +581,11 @@ sealed class UserConfig
     /// settings; off: collapsed at every start, as the game does; docs/game/ui-screens.md "Information panel").
     /// </summary>
     public bool KeepInfoPanel { get; set; } = true;
+    /// <summary>
+    /// The lockpick pointer's chance label shows 0 for a building's lock below the minimum pick chance, as the Pick Lock row does (Fixes settings;
+    /// off: the bare chance, as the game does; docs/game/ui-input.md "Pointer chance label").
+    /// </summary>
+    public bool FixLockpickLabel { get; set; } = true;
     /// <summary>
     /// The information panel was last left extended (its ^ button), written at every press; read at start while <see cref="KeepInfoPanel"/> is on.
     /// </summary>
@@ -864,6 +885,29 @@ sealed class UserConfig
     public string Path { get; private set; } = FileName;
 
     /// <summary>
+    /// A config that is never written (<see cref="Save"/> does nothing): the launcher benchmark's (<c>--benchmark</c>).
+    /// </summary>
+    [JsonIgnore]
+    public bool ReadOnly { get; private set; }
+
+    /// <summary>
+    /// The launcher benchmark's config (docs/bench.md "Launcher benchmark"): the defaults with the tutorials off (else the install's settings.cfg
+    /// decides, and their state file in the working directory carries from run to run), the file neither read nor written.
+    /// </summary>
+    public static UserConfig ForBenchmark() => new()
+    {
+        Path = System.IO.Path.Combine(Directory.GetCurrentDirectory(), FileName),
+        ReadOnly = true,
+        Tutorials = false,
+    };
+
+    /// <summary>
+    /// <see cref="ForBenchmark"/>'s config as compact JSON (the benchmark's fingerprint, BenchmarkSpec).
+    /// </summary>
+    internal static string BenchmarkText() =>
+        JsonSerializer.Serialize(ForBenchmark(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+    /// <summary>
     /// Reads the config from the working directory, else from next to the executable; without either file, the defaults, for the working directory.
     /// </summary>
     public static UserConfig Load()
@@ -1110,6 +1154,8 @@ sealed class UserConfig
     /// </summary>
     public void Save()
     {
+        if (ReadOnly) return;
+
         try
         {
             AtomicFile.WriteAllText(Path, JsonSerializer.Serialize(this, Json));

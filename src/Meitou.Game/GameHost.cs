@@ -210,6 +210,10 @@ sealed partial class GameHost(
     /// </summary>
     internal DebugOverlays DebugOverlays = null!;
     /// <summary>
+    /// The outposts' build limit rings in build mode.
+    /// </summary>
+    internal Building.TownRangeRing TownRangeRing = null!;
+    /// <summary>
     /// The dev console.
     /// </summary>
     internal DevConsoleHost DevConsoleHost = null!;
@@ -278,6 +282,7 @@ sealed partial class GameHost(
 
         DebugMenu = new(this);
         DebugOverlays = new(this);
+        TownRangeRing = new(this);
         DevConsoleHost = new(this);
         AgentChannel = new(this);
         AgentPlay = new(this);
@@ -648,9 +653,11 @@ sealed partial class GameHost(
             clock: clock, simulation: settings, systems: systems, walkability: walkability);
 
         Session.World.BenchFacingFix = Config.FixBenchFacing;
+        Session.World.SeatBedFix = Config.FixSeatBeds;
         Session.World.PrisonPoseFix = Config.FixPrisonPose;
         Session.World.CagedAnimalFix = Config.FixCagedAnimals;
         Session.World.BagSearchFix = Config.FixBagSearch;
+        Session.World.PickUpTheftFix = Config.FixPickUpTheft;
         Session.World.CounterTalk = Config.CounterTalk;
         Session.World.TakeIntoBackpack = Config.TakeIntoBackpack;
         Session.World.ActionLog = ActionLogs.Log;
@@ -811,7 +818,7 @@ sealed partial class GameHost(
             bindings.Set(InputAction.ToggleDebugMenu, EngineKey.F10);
         }
 
-        // F9 is the game's quickload now (F5 quicksave); older saved configs took F9 for the fps counter, which is on Ctrl+F9 and unbound here.
+        // F9 is the game's quickload now (F5 quicksave); older saved configs took F9 for the fps counter, which is on Shift+F9 and unbound here.
         if (BoundOnlyTo(InputAction.ToggleFps, Binding.Of(EngineKey.F9))) bindings.Set(InputAction.ToggleFps);
 
         // Tab is the game's change_squad, not the settings (they open from the Esc menu); older saved configs bound Tab to them.
@@ -848,6 +855,8 @@ sealed partial class GameHost(
         Player.SpeedUnit = Config.SpeedUnit;
         Player.ShowNames = Config.ShowNames;
         Player.Floaters = Config.Floaters;
+        Player.GreyUnavailableVerbs = Config.GreyUnavailableVerbs;
+        Player.FixLockpickLabel = Config.FixLockpickLabel;
         Player.FeedbackButtonInPlay = Config.FeedbackButton;
         Player.XpLabel = SkillXp.Label(Config);
         Player.Frontend.FixLoadButton = Config.FixLoadButton;
@@ -866,6 +875,7 @@ sealed partial class GameHost(
         Gpu.NavmeshOverlay ??= new NavmeshOverlayRenderer(context);
         DebugOverlays.NavOverlayRenderer = Gpu.NavmeshOverlay;
         Gpu.InspectorOverlay ??= new NavmeshOverlayRenderer(context);
+        Gpu.TownRangeOverlay ??= new NavmeshOverlayRenderer(context);
     }
 
     /// <summary>

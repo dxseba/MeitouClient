@@ -717,7 +717,7 @@ public sealed class TownDutySystem(PopulationData data, PopulationSystem populat
     float NpcFoodDesire(World world, int slot, CharacterCold c, Vector3 at)
     {
         if (c is not { Medical: { Dead: false } med }) return 0;
-        if (!med.HasStatsObject && (world.Player.SquadAi & SquadAi.Feed) == 0) return 0;
+        if (!med.HasStatsObject && (SquadAiRules.For(world, c) & SquadAi.Feed) == 0) return 0;
 
         var town = AiSystem.TownAt(data, world, at);
         if (town.IsNone) return 0;
@@ -1520,7 +1520,7 @@ public sealed class TownDutySystem(PopulationData data, PopulationSystem populat
     }
 
     /// <summary>
-    /// A fetch's take at its storage, the player's haul take (<see cref="Production.FillDemand.TakeStored"/>, <c>Task_EmptyMachine</c> with flag 0):
+    /// A fetch's take at its storage (<see cref="Production.FillDemand.TakeStored"/>, <c>Task_EmptyMachine</c> with flag 0):
     /// the first record the storage lists that the town wants, up to that count, whatever the machine the plan fills next needs; the units moved.
     /// </summary>
     int TakeAt(World world, TownDuty d, CharacterCold gc, Vector3 at)

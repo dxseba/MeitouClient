@@ -378,13 +378,14 @@ sealed class BuildingSync(GameHost host)
             water.Walls = (centre, radius) => footprints.PlaneCut(centre, radius, Data.World.WorldWater.Height);
 
         var parts = new Dictionary<string, IReadOnlyList<PlacedMesh>>(StringComparer.Ordinal);
+        var markers = new Dictionary<string, IReadOnlyList<PlacedMesh>>(StringComparer.Ordinal);
         var icons = new BuildingIcons(Path.Combine(host.Install.DataDirectory, "icons", "buildings"));
         IReadOnlyList<PlacementTown>? towns = null;
         return new Building.BuildServices
         {
             Menu = new Building.BuildMenu([.. BuildData().Values]),
             ItemName = id => db.Find(id)?.Name ?? id,
-            Description = id => db.Find(id)?.GetString("description") ?? "",
+            Description = id => Building.BuildingDescriptions.Of(db.Find(id)),
             Parts = id =>
             {
                 if (parts.TryGetValue(id, out var cached)) return cached;
@@ -392,6 +393,8 @@ sealed class BuildingSync(GameHost host)
                     ? WorldObjectLayout.Building(db, record, "ghost:" + id, Vector3.Zero, Quaternion.Identity, new BuildingState())
                     : [];
             },
+            UseNodeMarkers = id => markers.TryGetValue(id, out var cached) ? cached
+                : markers[id] = db.Find(id) is { } record ? UseNodeMarkerLayout.Markers(db, record) : [],
             IconFile = icons.Find,
             Placement = MakePlacementServices(db, footprints),
             WorldInfo = MakeWorldInfo(db),
@@ -428,9 +431,14 @@ sealed class BuildingSync(GameHost host)
             lastReadout = (record, at, readout);
             return readout;
         }
-        var isNode = new Dictionary<string, bool>(StringComparer.Ordinal);
-        bool IsNodeRecord(string record) => isNode.TryGetValue(record, out bool known) ? known
-            : isNode[record] = db.Find(record) is { Type: Data.Fcs.FcsRecordType.Building } r && r.GetBool("is node");
+        var nodeTypes = new Dictionary<string, int?>(StringComparer.Ordinal);
+        int? NodeTypeOf(string record)
+        {
+            if (nodeTypes.TryGetValue(record, out int? known)) return known;
+
+            var r = db.Find(record);
+            return nodeTypes[record] = r is { Type: Data.Fcs.FcsRecordType.Building } && r.GetBool("is node") ? r.GetInt("node type") : null;
+        }
         var snapNodes = new Dictionary<string, IReadOnlyList<PlacedSnapNode>>(StringComparer.Ordinal);
         IReadOnlyList<PlacedSnapNode> SnapNodesOf(string record) => snapNodes.TryGetValue(record, out var known) ? known
             : snapNodes[record] = db.Find(record) is { Type: Data.Fcs.FcsRecordType.Building } r ? WorldObjectLayout.SnapNodes(db, r) : [];
@@ -492,7 +500,7 @@ sealed class BuildingSync(GameHost host)
             LinkedAround = (centre, radius) => footprints.LinkedAround(centre, radius, (x, z) => host.ActiveGround((float)x, (float)z)),
             PlacedAround = (centre, radius, record) =>
                 footprints.PlacedAround(centre, radius, record, (x, z) => host.ActiveGround((float)x, (float)z)),
-            IsNodeRecord = IsNodeRecord,
+            NodeTypeOf = NodeTypeOf,
             SnapNodesOf = SnapNodesOf,
             SnapHostsAround = SnapHostsAround,
             StaticAround = footprints.StaticAround,
@@ -500,8 +508,16 @@ sealed class BuildingSync(GameHost host)
             StaticAlong = (origin, direction, length) => footprints.Along(origin, direction, length).Where(b => Pickable(b.Placement.BuildingId)),
             FloorAlong = GhostFloorAlong,
             Readout = Readout,
+            Waive = host.Modding.Mods is { HasPlacementRules: true } waivers ? (q, failure) => waivers.WaivePlacement(Ask(q), failure) : null,
+            Refuse = host.Modding.Mods is { HasPlacementRules: true } refusers ? q => refusers.RefusePlacement(Ask(q)) : null,
         };
     }
+
+    /// <summary>
+    /// What the mods' placement rules are asked about a ghost (docs/modding.md "Placement rules").
+    /// </summary>
+    static Modding.PlacementAsk Ask(Building.PlacementQuery q) =>
+        new(q.Building, q.Position, q.Yaw, q.On?.Building ?? q.SnappedOn?.Id, q.Floor, q.WallPiece);
 
     /// <summary>
     /// The movement pick's floors up to the viewed one: the build window's floor arrows choose the floor the ghost stands on.

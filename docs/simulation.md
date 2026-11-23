@@ -1195,7 +1195,11 @@ Loot on another faction's sleeper or prisoner opens its inventory (`CarrySystem.
 character sets the call site's code (`CrimeSystem.TakeCode`: right click, drag, give) and rolls with the owner watching (a playing-dead owner
 too); the take-all (`LootOrder`) keeps the Looting of `CrimeSystem.Loot`. Floors are `SightMap.FloorOf` / `FloorAt`. Engine choices: every squad
 living in the building watches (Meitou may house more than one), the window closes when the sleeper wakes. A stolen ground pick-up inside
-a building is a pending Theft with thievery XP 20, no roll.
+a building is a pending Theft with thievery XP 20, no roll; against the building's faction with its resident leader as the victim, or with the Fixes option "Pick-up thefts from the owner" (on by default)
+against the item's owner (`StolePickUp`, [economy](game/economy.md#fencing-stealing-and-smuggling)).
+Every witness says its witness line at a player's culprit once per pending crime (`PendingCrime.Told`; the original on every reacting run), so the
+victim's guards who see the crime after the first witness still say theirs, the Hub bar's Ninja Guards "Thief!" with DA 6 (#1251, **Observed** with the
+probe on the report's save).
 
 ## Cages, beds and locks
 
@@ -1847,7 +1851,9 @@ optional), `EdgeGap` (site, point -> gap to its footprint hull; the host's).
   materials back."; `PauseSite` sets `Paused` (only the auto-job skips it). `PlaceBuildings`, `CancelSite`, `ConfirmDismantle` and `PauseSite`
   also apply while paused (`ApplyPausedInterfaceCommands`).
 - `Schedule`: a worker walks to the site like a medic to a patient (goal = site XZ, free speed, asked again after a wait
-  when the path failed). It has arrived within the [work distance](game/buildings-production.md#work-distance) (`SiteReach`:
+  when the path failed). A builder starting on a stalled site it carries nothing for starts as *FetchMaterials* when `Source`
+  finds one (`FetchFirst`), as the original's row 2 plan starts with 247 at the 115 finder's source
+  ([material delivery](game/buildings-production.md#material-delivery)). It has arrived within the [work distance](game/buildings-production.md#work-distance) (`SiteReach`:
   40, walls 60, twice that once stopped, from the footprint hull). A fetcher walks to its source instead (a storage within its
   `use range`; a ground item within `PickUps.PickUpReach`, twice that once stopped; a source that is gone sends it back
   to building). Work ends when the site is gone,
@@ -1879,10 +1885,10 @@ optional), `EdgeGap` (site, point -> gap to its footprint hull; the host's).
   `2000 + (i << 16) + 2k` and `+1`, r = the footprint radius, at least `Reach` (engine: the original's bounding box is
   not in the sim). A destroyed flag (a save's, or a wall line hit to 0) turns a player-built building into a ruin on the next tick; a town house waits for Repair
   (**Verified** rule: progress 0.4 x target, delivered floor(delivered x U[0.3, 0.5) + 0.5)).
-- Engineer job (125, run by the [job lists](#production)): `EngineerSite` scores the faction's sites that `NeedsWork`,
-  not paused, destroyed, attached or being dismantled, `max(2 (1 - d^2/9000^2), 0.0001) / (n + 1)` (d 3D, n others
-  working it), skipping a stalled site the character carries nothing for and `Source` cannot feed; `StartBuilding` sends
-  it there. Without the job nobody builds unordered (the original has no other auto-build).
+- Engineer job (125, run by the [job lists](#production)): `EngineerWork` scores the faction's sites that `NeedsWork`,
+  not paused, destroyed, attached or being dismantled, and the doors needing repair of its complete ones and of the town houses it owns (at the leaf),
+  `max(2 (1 - d^2/9000^2), 0.0001) / (n + 1)` (d 3D, n others working it), skipping a stalled site the character carries
+  nothing for and `Source` cannot feed; `StartBuilding` sends it there (a door: the door repair). Without the job nobody builds unordered (the original has no other auto-build).
 - `BuildingsRevision` bumps on add, complete, a complete building becoming a site (dismantling started), destroyed and
   remove. `Version` (progress, delivery, pause) only rebuilds the published list.
 
@@ -2063,12 +2069,13 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   Excess fetched inputs stay with the operator. A fetch's source and a storage taking output are within squared distance 4.246733e7 (3D)
   of the machine, the bound of the original's fill and per-item storage finders in the default ROAM_FAR mode (`FUN_14059d000`,
   `FUN_14059acd0`, [material delivery](game/buildings-production.md#material-delivery); they measure from the character, who stands at the
-  machine) (#963, #965). A fetch takes what the town wants, the NPC fetch's take (`FillDemand`, [NPC town machines](game/buildings-production.md#npc-town-machines)), not what this machine's inputs have room for. Engine choices: ties by site id; the trip is not saved. A crafting bench's output is its finished items: an operator
+  machine) (#963, #965). An operator's fetch takes the item it went for, up to the room this machine's inputs have for it (engine choice: the original's operator fetches nothing, [hauling](game/buildings-production.md#hauling)); an automatic machine's hauler takes what the town wants, the NPC fetch's take (`FillDemand`, [NPC town machines](game/buildings-production.md#npc-town-machines)), not what this machine's inputs have room for. Engine choices: ties by site id; the trip is not saved. A crafting bench's output is its finished items: an operator
   takes those a storage accepts once the first craft's store is full, and a full bench whose items no storage takes is no work (the job passes
   on); a "Hauling to" job fetches finished items as it does a producer's output, the instances themselves (quality and model kept) (#762). Carried output
   goes only with a full output just taken, or while the output stays full: a stray unit sends no one on a trip (#388). A walker
   stopped within reach of a site whose height has no floor (furniture on an upper storey the navmesh lacks, the Hub's Storm House)
-  counts as there (`ProductionSystem.OffFloor`).
+  counts as there (`ProductionSystem.OffFloor`). Leg beat (engine choice): a worker's walk stops where a leg ends (a pick-up, a fetch, a fill, a
+  drop-off) and it stands `ProductionSystem.StepPauseSeconds` (0.5 s) before the next leg or job; a path left to finish by itself set a wanderer's 5-10 s wait.
 - **Automatic machines** (`MachineData.IsAutomatic`, raw `max operators` 0; [facts](game/buildings-production.md#production)) produce
   every tick with nobody at them at s = 1 (producers only: refineries, mines, auto-looms, campfires), and their power demand is full. A character
   operating one (job 152, or the quick order) does not work it: it only hauls as above, every round whatever `AutoHaul` says.
@@ -2106,13 +2113,18 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   - 87 Operating machine: blocked while others hold every operator place or the machine has no work (no power; no queued research or craft; a
     farm growing with water, or with no water it holds or can get, or ripe with no plant left or no room; an empty input the operator cannot fill from its pack, a storage or a machine's output;
     a full output (a bench's first craft at its store) no storage takes). A farmer goes to a growing farm only to fill an empty input; he plays the farm's clip after the fill until his next job check, then goes on to his next job ([farming](game/buildings-production.md#farming)).
-  - 124 Hauling to (`CharacterTask.Haul`): the nearest player machine within that 4.246733e7 bound (3D, engine choice: the original's 124 sources nothing) of the storage whose output (a bench's: its finished items) the storage takes is
-    emptied into the hauler's pack and carried there; items the hauler already carries that some machine makes or crafts go first. Blocked with neither.
+  - 124 Hauling to (`CharacterTask.Haul`): items the hauler already carries that the storage's `limit inventory` lists or some machine makes or crafts
+    go first; else the nearest loose item of a listed record within 1200 of the hauler is picked up and carried there (`ProductionSystem.LooseFor`, the
+    original's source order, [hauling](game/buildings-production.md#hauling)), never one another faction owns (engine choice: the ownership test alone
+    lets a hauler in a player town take such an item, which marks it stolen); else the nearest player machine within that 4.246733e7 bound (3D) of the storage whose output
+    (a bench's: its finished items) the storage takes is emptied into the hauler's pack and carried there. Blocked with none. The walk stops at
+    the pick-up and the drop-off ([leg beat](#production), engine choice).
   - 152 Operating automatic machine (Shift + Auto-Haul on an automatic machine; its companion 124 lands on the same machine): the operator above at the machine, hauling only. Its done list is `!62` (machineHasEmptyInputs false, **Verified**, TaskData row 152): the job is finished, and the list moves on to the 124 companion, as soon as no input of the machine is empty (`ProductionSystem.Blocked`).
     Blocked unless it is mid-trip for it, carries an item an input has room for, an empty input's item is in a storage, or a full or carried output has a storage that takes it
     (engine reading of the row's goal "no empty inputs", `AutoWork`). 124 on an automatic machine runs the same way, blocked unless it carries an item an input has room for.
-  - 125 Engineer (ordered as 2 Build or 95 Repair; Shift + quick right click on an unfinished site): builds `ConstructionSystem.EngineerSite`'s
-    pick, whatever the job's target ([buildings](#buildings)); its tasks are *Build*, *DeliverMaterials* and *FetchMaterials*. Blocked with no site.
+  - 125 Engineer (ordered as 2 Build or 95 Repair; Shift + quick right click on an unfinished site): builds the site or repairs the door of
+    `ConstructionSystem.EngineerWork`'s pick, whatever the job's target ([buildings](#buildings)); its tasks are *Build*, *DeliverMaterials* and
+    *FetchMaterials*. Blocked with nothing to work.
   - Implicit jobs (`ImplicitPick`, `ImplicitJobs`, the decision step's step 5 after the list): with no list job to run, the switch on, not sneaking and not a slave (Sleep and Sit also not while holding position), the squad AI options (`PlayerState.SquadAi`, the
     overview's AI tab, on by default) start, in this order: Ditch items (242: carried ITEMs of function 0 or 15, and food but the first, go to the nearest
     storage within the 4.246733e7 bound (3D) of the character that takes them (finder `FUN_1405a59a0`, **Verified**), as a Haul trip; only with no queued orders; re-tested every pass, so a trip whose storage no longer takes a carried item, or that gained a queued order, drops out or re-picks at once, **Verified** `FUN_14050e5b0`), Sleep when injured (153: a character in a player town or a player building whose rested level is at most 0.9 and whose organic

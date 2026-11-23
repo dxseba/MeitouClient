@@ -59,9 +59,9 @@ public sealed class ConstructionSettings
 /// (capped at 15; the reset is <b>Unknown</b>, per tick is the engine reading), progress += <c>build speed mult / (1200/11)</c> x that. Dismantling:
 /// <c>dt x lerp(0.05, 4, engineering/100) x 4</c> x rate
 /// off the progress; at 0 the delivered materials (60 to 100 %, at least 1 each) fall on the ground, one item per unit.</item>
-/// <item><b>Engineer job</b> (125, run by the production system's job lists): <see cref="EngineerSite"/> picks the best-scoring unpaused site
-/// (<c>max(2 (1 - d^2/9000^2), 0.0001) / (n + 1)</c>, n builders on it), skipping a stalled site the character carries nothing for and no material
-/// source can feed; <see cref="StartBuilding"/> sends the character there.</item>
+/// <item><b>Engineer job</b> (125, run by the production system's job lists): <see cref="EngineerWork"/> picks the best-scoring unpaused site,
+/// or a door of a complete one that needs repair (<c>max(2 (1 - d^2/9000^2), 0.0001) / (n + 1)</c>, n builders on it), skipping a stalled site
+/// the character carries nothing for and no material source can feed; <see cref="StartBuilding"/> sends the character there.</item>
 /// </list>
 /// Placed after the carry system and before combat. Everything here is serial and reads only the world's state and the command order.
 /// </summary>
@@ -423,15 +423,57 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
         foreach (var plan in place.Plans)
             if (Place(world, plan) is { } site) placed.Add(site);
 
-        TownForWalls(world, placed);
-        AssignFinalTowns(world, placed);
-        AttachWalls(world.Buildings, Data, placed);
-        // Once, with the last placed building's town (FUN_1404d72a0), not once per town the batch touched.
-        if (placed.Count > 0 && !placed[^1].InNoTown)
-            TownRefit.Reassess(world, TownLookup.PlayerTownOf(world, placed[^1]), this);
+        Settle(world, placed);
 
         // Confirm ends by sending the selection to build the last building created (FUN_1404d72a0: order 2 through FUN_1407f9e20, Shift ignored).
         if (placed.Count > 0) OrderBuild(world, world.Player.Selection.ToArray(), Root(reg, placed[^1]), queued: false);
+    }
+
+    /// <summary>
+    /// A code mod's buildings for the player's faction (engine API, not in the original): a site for each plan, in order, as build mode's Confirm
+    /// makes them (<see cref="PlaceBuildings"/>: the same town block, the same player town or new outpost, walls joined, the town reassessed once),
+    /// without research's gate, without a message and without sending anyone to build. <paramref name="complete"/> makes every site standing
+    /// already: built to its target with all its materials delivered (as a saved complete building is, so dismantling it refunds them), with no
+    /// "construction complete" message; else each waits for builders as a placed ghost does. The game gives a standing site its doors, beds,
+    /// seats and machine on its next step. Furniture goes inside a building by a plan whose <see cref="PlannedBuilding.Parent"/> is that
+    /// building's site id, so place the building first and its furniture in a second call; the position is absolute, and nothing checks that it
+    /// lies inside. A plan's <see cref="PlannedBuilding.BoundsSize"/> moves a new outpost's centre as a ghost's does (zero: the building's
+    /// position). Returns the sites in plan order (<see cref="BuildSite.Id"/> for <c>SetSquadHome</c> or a parent, <see cref="BuildSite.Town"/>
+    /// for <see cref="BuildingRegistry.FindTown"/>), null for a plan refused: a record that is not a BUILDING, a position that is not finite, too
+    /// close to a town (<see cref="PlacementRules.TownBlock"/>), and every plan when the world has no player faction or during the parallel
+    /// phase. Serial phases and <see cref="IWorldReady"/>; costs as much as build mode's Confirm.
+    /// </summary>
+    public BuildSite?[] PlaceSites(World world, IReadOnlyList<PlannedBuilding> plans, bool complete)
+    {
+        var sites = new BuildSite?[plans.Count];
+        if (world.Characters.Phase == TablePhase.Parallel || world.Player.Faction < 0) return sites;
+
+        var placed = new List<BuildSite>(plans.Count);
+        for (int i = 0; i < plans.Count; i++)
+        {
+            var plan = plans[i];
+            if (!float.IsFinite(plan.Position.X) || !float.IsFinite(plan.Position.Y) || !float.IsFinite(plan.Position.Z)) continue;
+            if (Data(plan.Record) is not { } data || Blocked(data, plan) != PlacementFailure.None) continue;
+
+            sites[i] = NewSite(world, plan, data, complete);
+            placed.Add(sites[i]!);
+        }
+
+        Settle(world, placed);
+        return sites;
+    }
+
+    /// <summary>
+    /// Settles a batch of new sites into towns: queued walls take their town, every site its final town, walls are joined, and the last site's town
+    /// is reassessed once (FUN_1404d72a0), not once per town the batch touched.
+    /// </summary>
+    void Settle(World world, List<BuildSite> placed)
+    {
+        TownForWalls(world, placed);
+        AssignFinalTowns(world, placed);
+        AttachWalls(world.Buildings, Data, placed);
+        if (placed.Count > 0 && !placed[^1].InNoTown)
+            TownRefit.Reassess(world, TownLookup.PlayerTownOf(world, placed[^1]), this);
     }
 
     /// <summary>
@@ -632,17 +674,37 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
             return null;
         }
 
-        // A plan with a parent stands in a building the host found ours.
-        var fail = PlacementRules.TownBlock(data, new Vector2(plan.Position.X, plan.Position.Z), _towns, _playerFactionId, plan.Parent is not null);
+        var fail = Blocked(data, plan);
         if (fail != PlacementFailure.None)
         {
             world.Post(PlacementRules.Message(fail));
             return null;
         }
 
+        return NewSite(world, plan, data, complete: false);
+    }
+
+    /// <summary>
+    /// Whether a town keeps the plan off its ground (<see cref="PlacementRules.TownBlock"/>); a plan with a parent stands in a building the host
+    /// found ours.
+    /// </summary>
+    PlacementFailure Blocked(BuildingBuildData data, PlannedBuilding plan) =>
+        PlacementRules.TownBlock(data, new Vector2(plan.Position.X, plan.Position.Z), _towns, _playerFactionId, plan.Parent is not null);
+
+    /// <summary>
+    /// Adds the plan's site for the player's faction, in its town (<see cref="TownFor"/>): a ghost, or <paramref name="complete"/> built to its
+    /// target with every material delivered. A record whose target is 0 is complete at once.
+    /// </summary>
+    BuildSite NewSite(World world, PlannedBuilding plan, BuildingBuildData data, bool complete)
+    {
         var reg = world.Buildings;
         var materials = new MaterialSlot[data.Materials.Count];
-        for (int i = 0; i < materials.Length; i++) materials[i] = new MaterialSlot(data.Materials[i].Item, data.Materials[i].Required);
+        for (int i = 0; i < materials.Length; i++)
+        {
+            float required = data.Materials[i].Required;
+            materials[i] = new MaterialSlot(data.Materials[i].Item, required) { Delivered = complete ? required : 0 };
+        }
+
         var site = new BuildSite
         {
             Id = reg.NewId(WorldLayout.ZoneOf(plan.Position.X, plan.Position.Z), _levelIds),
@@ -658,7 +720,8 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
             Target = data.Target,
             Rate = data.Rate,
         };
-        site.Complete = site.Target <= 0;   // a total of 0 completes at once (Verified)
+        site.Complete = complete || site.Target <= 0;   // a total of 0 completes at once (Verified)
+        if (complete) site.Progress = site.Target;
         site.Town = TownFor(world, site, data, plan.BoundsSize);
         reg.Add(site);
         return site;
@@ -1115,13 +1178,49 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
 
     /// <summary>
     /// Whether the worker is near enough its goal (<see cref="SiteReach.Within"/>): a site by its footprint, a ground item by its position (within
-    /// <see cref="PickUps.PickUpReach"/>, twice that once stopped).
+    /// <see cref="PickUps.PickUpReach"/>, twice that once stopped); for a site also on its floor (<see cref="OnSiteFloor"/>).
     /// </summary>
-    bool Arrived(World world, in CharacterHot n, (Vector3 At, BuildSite? Site, float Reach) goal) =>
+    bool Arrived(World world, int slot, in CharacterHot n, (Vector3 At, BuildSite? Site, float Reach) goal) =>
         SiteReach.Within(n, goal.Site is { } site
             ? SiteReach.Gap(Settings.EdgeGap, site, n.Position)
             : Vector2.Distance(new(n.Position.X, n.Position.Z), new(goal.At.X, goal.At.Z)), goal.Reach)
-        && (goal.Site is not { } high || SiteReach.AtHeight(n, high, FloorHeight(world, high), world.Fixtures.DoorsByBuilding[high.Id].Any()));
+        && (goal.Site is not { } high || OnSiteFloor(world, slot, n, high));
+
+    /// <summary>
+    /// The floor half of <c>AI::isWithinChoppingRange</c>: the same floor whatever the height, else within <see cref="SiteReach.HeightLimit"/>
+    /// (<see cref="SiteReach.AtHeight(in CharacterHot, BuildSite, float, bool)"/>). Meitou knows the floor of neither a player building nor one
+    /// standing in it, so only an outdoor worker at an outdoor site counts as the same floor (both floor 0): a site whose origin lies far below the
+    /// ground it stands on is built from that ground (#1255: a sunk Outpost s-V big, 219 under its slab).
+    /// </summary>
+    bool OnSiteFloor(World world, int slot, in CharacterHot n, BuildSite site)
+    {
+        if (site.Parent is null && site.Floor == 0 && world.Sight.Outdoors(slot)) return true;
+        return SiteReach.AtHeight(n, site, FloorHeight(world, site), HasDoor(world, site));
+    }
+
+    /// <summary>
+    /// Whether the site is a building with a door, for <see cref="SiteReach.HeightLimit"/>.
+    /// </summary>
+    static bool HasDoor(World world, BuildSite site) => world.Fixtures.DoorsByBuilding[site.Id].Any();
+
+    /// <summary>
+    /// Sends the worker toward its goal: for a site, to the spot on the site's floor within its reach nearest the worker
+    /// (<see cref="SiteReach.WorkSpot"/>), which <see cref="Arrived"/> then passes; for a ground item, to the item. The spot's height is the walk's
+    /// floor: a site upstairs is walked to, not stood under (#353).
+    /// </summary>
+    void WalkTo(World world, ref CharacterHot n, CharacterCold cold, (Vector3 At, BuildSite? Site, float Reach) goal)
+    {
+        var spot = goal.At;
+        if (goal.Site is { } site)
+        {
+            float limit = SiteReach.HeightLimit(HasDoor(world, site), SiteReach.InBuilding(site));
+            spot = SiteReach.WorkSpot(world.Walkability, Settings.EdgeGap, site, FloorHeight(world, site), limit, goal.Reach, n.Position);
+        }
+
+        n.Goal = new Vector2(spot.X, spot.Z);
+        (cold.GoalHeight, cold.GoalHeightAt) = (spot.Y, n.Goal);
+        n.Flags |= (ushort)MoveFlags.NeedPath;
+    }
 
     /// <summary>
     /// The height of the floor a site belongs to: a <c>ceiling placement</c> site's is the floor under it (it hangs from the ceiling, and the
@@ -1147,7 +1246,8 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
     }
 
     /// <summary>
-    /// Gives the character a site to work (serial phases): it stands, then walks there unless it is there already.
+    /// Gives the character a site to work (serial phases): it stands, then walks there unless it is there already. A builder of a stalled site it
+    /// carries nothing for goes for a material first (<see cref="FetchFirst"/>).
     /// </summary>
     void Begin(World world, int slot, BuildSite site, CharacterTask task)
     {
@@ -1161,14 +1261,28 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
         cold.BuildSite = site.Id;
         cold.BuildBar = 0;
         ClearFetch(cold);
-        if (!Arrived(world, n, (site.Position, site, ReachOf(site))))
-        {
-            n.Goal = new Vector2(site.Position.X, site.Position.Z);
-            (cold.GoalHeight, cold.GoalHeightAt) = (site.Position.Y, n.Goal);   // the site's floor: one upstairs is walked to, not stood under (#353)
-            n.Flags |= (ushort)MoveFlags.NeedPath;
-        }
-
         _sweep = true;
+        if (task == CharacterTask.Build && FetchFirst(world, slot, cold, site)) return;
+
+        var goal = (site.Position, (BuildSite?)site, ReachOf(site));
+        if (!Arrived(world, slot, n, goal)) WalkTo(world, ref n, cold, goal);
+    }
+
+    /// <summary>
+    /// Sends a builder starting on a stalled site it carries nothing for straight to a material's source, as the original's plan for row 2
+    /// starts: 2 Building needs 51 (the site has its materials), whose provider 71 Adding materials needs 50 (the builder carries them), whose
+    /// provider chain 115 -> 247 Collecting resource walks to the 115 finder's source first (<b>Verified</b>, the TaskData rows of
+    /// <c>FUN_140319a60</c>; docs/game/buildings-production.md "Material delivery"). Walking to the site first could carry the builder out of the
+    /// finder's reach of a loose item (1200), so the engineer job's finder dropped the site and the job flipped on and off at that edge. False
+    /// when it builds at the site: the site is not stalled, the builder carries a material for it, or no source is found.
+    /// </summary>
+    bool FetchFirst(World world, int slot, CharacterCold cold, BuildSite site)
+    {
+        if (Root(world.Buildings, site) is not { Stalled: true } root || Carries(cold, root) || Source(world, slot, cold, root) is not { } source)
+            return false;
+
+        Fetch(world, slot, cold, source);
+        return true;
     }
 
     /// <summary>
@@ -1200,10 +1314,10 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
 
     /// <summary>
     /// The engineer job's start (job <paramref name="job"/> of the list; <see cref="Production.ProductionSystem"/> runs the lists): the character
-    /// works <paramref name="site"/>.
+    /// works <paramref name="work"/>, a site or a door.
     /// </summary>
-    public void StartBuilding(World world, int slot, BuildSite site, int job) =>
-        Start(world, slot, new TaskRequest(CharacterTask.Build, TaskType.JobBuilder, TaskSource.Job) { Job = job, Site = site.Id });
+    public void StartBuilding(World world, int slot, EngineerTarget work, int job) =>
+        Start(world, slot, new TaskRequest(CharacterTask.Build, TaskType.JobBuilder, TaskSource.Job) { Job = job, Site = work.Id });
 
     /// <summary>
     /// Starts work through <see cref="TaskStart.Start"/>; a worker already at work keeps the task it goes back to.
@@ -1305,7 +1419,7 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
         }
 
         const ushort path = (ushort)MoveFlags.AnyPath;
-        if (Arrived(world, n, goal))
+        if (Arrived(world, i, n, goal))
         {
             // There: stand still and let the slow world work.
             if ((n.Flags & path) != 0)
@@ -1326,10 +1440,8 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
         n.TaskTime -= dt;
         if (n.TaskTime > 0) return;
 
-        n.Goal = new Vector2(goal.At.X, goal.At.Z);
-        (cold.GoalHeight, cold.GoalHeightAt) = (goal.At.Y, n.Goal);
         n.Mode = SpeedMode.Free;
-        n.Flags |= (ushort)MoveFlags.NeedPath;
+        WalkTo(world, ref n, cold, goal);
         n.TaskTime = PursuitSystem.RepathSeconds;
     }
 
@@ -1345,8 +1457,10 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
 
     /// <summary>
     /// The path of a worker ended short of its target (<c>FUN_14059c6d0</c>, "Task impossible: X can't get to Y"): the site, or the loose item it
-    /// fetches, is ignored for <see cref="UnreachableSeconds"/> (readers: <see cref="EngineerSite"/>, <see cref="Source"/>). A fetcher of a loose
-    /// item goes back to its site, which picks another source. True when the worker left its goal.
+    /// fetches, is ignored for <see cref="UnreachableSeconds"/> (readers: <see cref="EngineerWork"/>, <see cref="Source"/>). A fetcher of a loose
+    /// item goes back to its site, which picks another source; a worker of the site itself ends the work, as the plan step ends a task whose target
+    /// the movement cannot reach (<c>FUN_14050d970</c>, <b>Verified</b>, docs/game/combat.md), so the engineer job picks another site. True when the
+    /// worker left its goal.
     /// </summary>
     bool NoteUnreachable(World world, int slot, CharacterCold cold, BuildSite site)
     {
@@ -1354,8 +1468,9 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
         string? key = !fetch ? site.Id : cold.FetchItem is { } item ? LooseSource.Key(item) : null;
         if (key is null) return false;
         cold.NoteUnreachable(key, world.Tick + (long)MathF.Ceiling(UnreachableSeconds / world.TickSeconds));
-        if (!fetch) return false;
-        BackToSite(world.Characters, slot, cold);
+
+        if (fetch) BackToSite(world.Characters, slot, cold);
+        else End(world, slot);
         return true;
     }
 
@@ -1445,7 +1560,7 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
             return;
         }
 
-        if (!Arrived(world, n, goal)) return;
+        if (!Arrived(world, i, n, goal)) return;
         if (cold.StaggeredUntil > world.Tick) return;   // a stagger interrupts the work
 
         if (n.Velocity.X == 0 && n.Velocity.Z == 0) n.Yaw = MathF.Atan2(goal.At.X - n.Position.X, goal.At.Z - n.Position.Z);
@@ -2027,57 +2142,55 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
     #region The engineer job
 
     /// <summary>
-    /// The site the engineer job (125) works next (<b>Verified</b>, <c>BuildingFinderForEngineers</c> <c>FUN_1409a6900</c> / <c>FUN_1409a6c10</c>):
-    /// the character's faction's unfinished or damaged, unpaused, not dismantled sites, not a destroyed house (function 19; any other destroyed
-    /// building is ruined by the engineer's first touch); score <c>max(2 (1 - d^2/9000^2), 0.0001) / (n + 1)</c>, d the 3D distance, n the others
-    /// working it; the highest wins (the first on a tie). A stalled site the character carries nothing for counts only when <see cref="Source"/>
-    /// finds a material. Null: none.
+    /// What the engineer job (125) works next (<b>Verified</b>, <c>BuildingFinderForEngineers</c> <c>FUN_1409a6900</c> / <c>FUN_1409a6c10</c>):
+    /// of the character's faction's unpaused, not dismantled sites, not a destroyed house (function 19; any other destroyed building is ruined by
+    /// the engineer's first touch), and the town houses it owns, one that needs work is itself a candidate, a complete one that needs none puts in
+    /// its doors that need work (its door list, Building <c>+0x1c0</c>; slot 101, progress below target: a damaged or broken door); score
+    /// <c>max(2 (1 - d^2/9000^2), 0.0001) / (n + 1)</c>, d the 3D distance, n the others working it; the highest wins (the first on a tie). A
+    /// stalled site the character carries nothing for counts only when <see cref="Source"/> finds a material; a door never stalls. Null: none.
     /// </summary>
-    public BuildSite? EngineerSite(World world, int slot) => EngineerPick(world, slot).Site;
+    public EngineerTarget? EngineerWork(World world, int slot) => EngineerPick(world, slot).Work;
 
     /// <summary>
     /// A loaded 125 Engineer entry's score in the second list (<c>FUN_14060fd80</c>, <b>Verified</b>): row 125's desire (AI slot 19, 1; its stub
-    /// jumps through the AI vtable at <c>+0x98</c>) times its finder's value (<c>FUN_140999060</c>, the pick's score of <see cref="EngineerSite"/>;
+    /// jumps through the AI vtable at <c>+0x98</c>) times its finder's value (<c>FUN_140999060</c>, the pick's score of <see cref="EngineerWork"/>;
     /// 0 with none).
     /// </summary>
     internal float EngineerEntryScore(World world, int slot) => EngineerPick(world, slot).Score;
 
     /// <summary>
-    /// Whether a loaded 125 entry can start, as the engineer job can (<c>Production.ProductionSystem</c>'s list jobs): its finder picks a site
-    /// (the saved hand is not asked) that row 2, the provider of 125's effect 2, can build: a character that can work with a working arm (state
-    /// 38), not getting up, the site within <see cref="Production.ProductionSystem.JobRangeSq"/> (the walk the pick plans needs state 27).
+    /// Whether a loaded 125 entry can start, as the engineer job can (<c>Production.ProductionSystem</c>'s list jobs): its finder picks work
+    /// (the saved hand is not asked) that row 2, the provider of 125's effect 2, can do: a character that can work with a working arm (state
+    /// 38), not getting up, the work within <see cref="Production.ProductionSystem.JobRangeSq"/> (the walk the pick plans needs state 27).
     /// </summary>
     OrderCheck EngineerEntryCheck(World world, int slot, CharacterCold cold)
     {
         if (!Able(cold) || !HasWorkingArm(cold) || CharacterFacts.GettingUp(cold, world.Tick)) return OrderCheck.Blocked();
-        if (EngineerSite(world, slot) is not { } pick) return OrderCheck.Blocked();
+        if (EngineerWork(world, slot) is not { } pick) return OrderCheck.Blocked();
 
         var at = world.Characters.Next[slot].Position;
         return Vector3.DistanceSquared(at, pick.Position) < Production.ProductionSystem.JobRangeSq ? OrderCheck.Run : OrderCheck.Blocked();
     }
 
     /// <summary>
-    /// Starts a loaded 125 entry: row 2 Building on the site its finder picks now, as the build order starts it (serial).
+    /// Starts a loaded 125 entry: row 2 Building on the work its finder picks now, as the build order starts it (serial).
     /// </summary>
     void StartEngineerEntry(World world, int slot)
     {
-        if (EngineerSite(world, slot) is not { } site) return;
+        if (EngineerWork(world, slot) is not { } work) return;
 
-        if (site.LevelPlacement is not null) Touch(world, site);
-        Start(world, slot, new TaskRequest(CharacterTask.Build, TaskType.Build, TaskSource.Order) { Site = site.Id });
+        if (work.Site is { LevelPlacement: not null } site) Touch(world, site);
+        Start(world, slot, new TaskRequest(CharacterTask.Build, TaskType.Build, TaskSource.Order) { Site = work.Id });
     }
 
     /// <summary>
-    /// <see cref="EngineerSite"/>'s pick and its score (0 with none).
+    /// <see cref="EngineerWork"/>'s pick and its score (0 with none).
     /// </summary>
-    (BuildSite? Site, float Score) EngineerPick(World world, int slot)
+    (EngineerTarget? Work, float Score) EngineerPick(World world, int slot)
     {
         var reg = world.Buildings;
-        if (!reg.AnyNeedsWork) return (null, 0);
-        var table = world.Characters;
-        var cold = table.Cold(slot)!;
-        var at = table.Next[slot].Position;
-        BuildSite? best = null;
+        var cold = world.Characters.Cold(slot)!;
+        EngineerTarget? best = null;
         float bestScore = 0;
 
         // By index: Source registers the builder's town on first use (FixtureRegistry.TownCandidates), which adds its properties' construction
@@ -2085,22 +2198,65 @@ public sealed class ConstructionSystem : ITickSystem, ITaskOwner, ITaskHandler, 
         for (int i = 0; i < reg.All.Count; i++)
         {
             var site = reg.All[i];
-            if (IsUnreachable(world, cold, site.Id)) continue;   // the first condition of FUN_1409a6900
-            if (!site.NeedsWork || site.Paused || site.Destroyed && IsShell(site.Record) || site.Dismantling || site.WallParent is not null
-                || site.Owner != cold.Faction)
-                continue;
+            if (!EngineerCandidate(world, cold, site)) continue;
 
-            if (site.Stalled && !Carries(cold, site) && Source(world, slot, cold, site) is null) continue;
-            float d2 = Vector3.DistanceSquared(at, site.Position);
-            float score = MathF.Max(2 * (1 - d2 / (9000f * 9000f)), 0.0001f) / (Workers(table, site.Id, slot) + 1);
-            if (best is null || score > bestScore)
-            {
-                best = site;
-                bestScore = score;
-            }
+            if (site.NeedsWork) WeighSite(world, slot, cold, site, ref best, ref bestScore);
+            else WeighDoors(world, slot, site.Id, ref best, ref bestScore);
+        }
+
+        // The town houses the faction owns are its buildings too; one that is a site was weighed above.
+        foreach (var house in world.Fixtures.OwnedPropertyKeys(cold.Faction))
+        {
+            if (reg.Find(house) is null && !IsUnreachable(world, cold, house)) WeighDoors(world, slot, house, ref best, ref bestScore);
         }
 
         return (best, bestScore);
+    }
+
+    /// <summary>
+    /// The finder's tests of a building (<c>FUN_1409a6900</c>): not ignored as unreachable (its first condition), the character's faction's, not
+    /// paused, dismantled or a wall line's member, and not a destroyed house.
+    /// </summary>
+    bool EngineerCandidate(World world, CharacterCold cold, BuildSite site) =>
+        !IsUnreachable(world, cold, site.Id) && !site.Paused && !(site.Destroyed && IsShell(site.Record)) && !site.Dismantling
+            && site.WallParent is null && site.Owner == cold.Faction;
+
+    /// <summary>
+    /// Weighs a site that needs work; a stalled one counts only when the character carries its material or a source has it.
+    /// </summary>
+    void WeighSite(World world, int slot, CharacterCold cold, BuildSite site, ref EngineerTarget? best, ref float bestScore)
+    {
+        if (site.Stalled && !Carries(cold, site) && Source(world, slot, cold, site) is null) return;
+
+        Weigh(world, slot, new EngineerTarget(site.Id, site.Position, site), ref best, ref bestScore);
+    }
+
+    /// <summary>
+    /// Weighs the doors of a complete building that need work (<see cref="DoorNeedsWork"/>), each at its leaf (its own node in the original).
+    /// </summary>
+    static void WeighDoors(World world, int slot, string building, ref EngineerTarget? best, ref float bestScore)
+    {
+        foreach (var door in world.Fixtures.OfBuilding(building))
+        {
+            if (door.Kind != Locks.FixtureKind.Door || !DoorNeedsWork(door)) continue;
+
+            var at = world.Fixtures.DoorSpotOf(door)?.Centre ?? door.Position;
+            Weigh(world, slot, new EngineerTarget(door.Id, at, null), ref best, ref bestScore);
+        }
+    }
+
+    /// <summary>
+    /// Scores a candidate by distance and its other workers and keeps it when it beats the best so far.
+    /// </summary>
+    static void Weigh(World world, int slot, EngineerTarget work, ref EngineerTarget? best, ref float bestScore)
+    {
+        var table = world.Characters;
+        float d2 = Vector3.DistanceSquared(table.Next[slot].Position, work.Position);
+        float score = MathF.Max(2 * (1 - d2 / (9000f * 9000f)), 0.0001f) / (Workers(table, work.Id, slot) + 1);
+        if (best is not null && score <= bestScore) return;
+
+        best = work;
+        bestScore = score;
     }
 
     /// <summary>

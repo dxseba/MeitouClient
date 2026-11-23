@@ -315,7 +315,7 @@ DatapanelGUI on the `Popup` layer with one row, empty key and value `{1,num}%` =
 
 Meitou (`PlayerInterface.AddPointerChance`): the `knockout` label, from the pointed character's published `StealthKoChance` (the selection's first sneaking
 member, not the nearest); the `lockpick` label, from `Lockpicking.Chance` of the selected character nearest the lock (a caged character's cage, else the
-container, else the door under the mouse). A floating tooltip 32 px at 1080 above the mouse, recomputed every frame (engine choices); drawn with the Hardware mouse too.
+container, else the door under the mouse); Meitou fix (Fixes page `Lockpick chance on the pointer`, on by default; `UserConfig.FixLockpickLabel`): a door's or container's chance below the minimum shows 0, as the Pick Lock row (#1190). A floating tooltip 32 px at 1080 above the mouse, recomputed every frame (engine choices); drawn with the Hardware mouse too.
 
 ### Character picking
 
@@ -484,7 +484,7 @@ that activation menu-only; once the ruin becomes an unfinished construction site
 | Building | Pointer | Quick right click |
 |---|---|---|
 | not complete (+0x160, [construction](buildings-production.md#construction-state)) | `build` | 2 BUILD |
-| broken (slot 97: +0x3b6 machines, +0x3ec doors, never for plain buildings; a machine is broken only while unfinished, [broken machines](buildings-production.md#power), so only doors reach it; **Verified**: the `else` arm of the complete-building branch of `FUN_1407fc6e0` sets pointer 0x13 and, on release, order 0x5f; the 90 % health spanner below is **Observed** only) | `spanner` | 95 REPAIR. Meitou: an own broken door (`PickDoorAt`, `DoorPointer`, `DoorVerbs` Repair) sends `BuildOrder` on the door ([repair](locks.md#cutting-and-breaking-285--185-cut-286--186-break)); Shift's Engineer job is not built (it works sites only) |
+| broken (slot 97: +0x3b6 machines, +0x3ec doors, never for plain buildings; a machine is broken only while unfinished, [broken machines](buildings-production.md#power), so only doors reach it; **Verified**: the `else` arm of the complete-building branch of `FUN_1407fc6e0` sets pointer 0x13 and, on release, order 0x5f; the 90 % health spanner below is **Observed** only) | `spanner` | 95 REPAIR. Meitou: an own broken door (`PickDoorAt`, `DoorPointer`, `DoorVerbs` Repair) sends `BuildOrder` on the door ([repair](locks.md#cutting-and-breaking-285--185-cut-286--186-break)); with Shift also the Engineer job (`AddJob` Repair on the door, `FurnitureUse.RepairDoor`) |
 | door (+0x1a0) of an incomplete house (+0x368) | `build` | 2 BUILD on the house |
 | door | own: `lock` if its lock is locked, else `door`; another faction's: `lockpick` if locked (with a tooltip), else `door`; `spanner` below 90 % health | another faction's locked door without Alt: "Hold down the ALT key to pick the lock." and a move to the door; otherwise 72 OPEN_DOOR, or 73 CLOSE_DOOR when open (+0x380 = 1), to every selected character and appended to the queue, Shift or not (**Verified**, [order givers](ai-tasks.md#order-givers)); every other order of this table clears it; the barred door's move goes to every selected character too (`FUN_1407fa850` → `FUN_1407f9e20` with 29). Meitou: `DoorOrder` (`Queued`) to every selected character, the menu's Open / Close and Pick Lock too (`FUN_1407a7f10` → `FUN_1407fa650` → `FUN_1407f9e20`, clearing) |
 | function 18 (BF_FLUFF), or slot 107 (+0x198, BuildingClassType) is 7 GATEWAY, 9 WALL or 12 SHELL_WITH_INTERIOR, with an inventory (without one, or when `FUN_14004a0cf` refuses another faction's, only the selection runs) | `search` when own (or the owner faction has flag +0x1d0), else `scavenge` | 26 LOOT_TARGET; a shop (function 9) of another faction without Alt: "Hold down the ALT key to steal items" and 29 MOVE |
@@ -493,7 +493,7 @@ that activation menu-only; once the ruin becomes an unfinished construction site
 | Class | Pointer (slot 130) | Order (slot 131) |
 |---|---|---|
 | Building, GatewayBuilding, WallBuilding | `arrow` | 29 MOVE_CUS_ORDERED |
-| Crafting, Farm, Production, Generator, WindGenerator, RainCollector, Torture | `mine` for function 1 / 27, else `use` | 87 OPERATE_MACHINERY, 152 OPERATE_AUTOMATIC_MACHINERY when +0x3ac is 0 |
+| Crafting, Farm, Production, Generator, WindGenerator, RainCollector, Torture | `mine` for function 1 / 27, else `use` | 87 OPERATE_MACHINERY, 152 OPERATE_AUTOMATIC_MACHINERY when +0x3ac is 0. Meitou: of the generator classes only automatic fuelled generators ([fuel generators](buildings-production.md#hauling)) |
 | FurnaceBuilding | as Farm | 26 LOOT_TARGET |
 | ResearchBuilding | as Storage | 87 |
 | TurretBuilding | as Storage | 146 USE_TURRET |
@@ -528,7 +528,9 @@ The selected characters stay selected and keep taking orders. A building with do
 list +0x1c0), except in the editor. The focus handle `DAT_1421345d0` becomes that object and `FUN_1406e91e0` points the HUD panels at it.
 Selecting calls slot 38 (`FUN_1405504a0`): the BUILDING's `select sound` (BuildingSound) as switch `Buildings_Click` with event
 `Building_Click`; when the building is complete and the player's faction's, its window opens (`FUN_1406e6640`; window by class in
-[ui-screens](ui-screens.md#selected-building)). Clicking the selected building again reopens its inventory window if it was closed. No
+[ui-screens](ui-screens.md#selected-building)); Meitou: a player site's, and a town building's or layout object's `townwork:` machine when the
+player's faction owns it (`ProductionSystem.InspectTownWork` makes it on selection, `WorldSnapshot.InspectedOwnMachine`, `ProductionWindows.MachineSiteOf`).
+Clicking the selected building again reopens its inventory window if it was closed. No
 highlight or outline call was found for a selected building.
 
 The object stays selected until something replaces or clears it: a left click on another building or another faction's character replaces it.
@@ -575,6 +577,12 @@ and a walk there). The right button's target, for the pointer and the click alik
 
 Meitou only: the rows code mods add come after the game's ([modding](../modding.md#registration-surface), right-click menu rows). A building's
 menu also ends with the rows of the mods' job offers (modding, Mod jobs): an offer names who it is for, so an animals-only selection keeps its row.
+
+Meitou only, unavailable rows (`ContextMenuWindow.Available`; Interface setting "Unavailable menu rows", Greyed by default, Faithful turns it
+off): a row the selection cannot carry out now is drawn greyed, a plain click on it does nothing and a Shift click gives it (a medic verb then
+adds its job, Medic, Robotics or Splint Rigging). First Aid and Repairs are unavailable when no selected character has a first aid or robot kit
+at hand (its own, else a squad mate's within the kit reach: what the order's start refuses with "I don't have a medkit."), Splint Injuries
+when none holds its own splint kit; a mod row when it says so (`UiMenuVerb.Unavailable`). The original draws and gives every row alike.
 
 - **Rows**: the verbs are a set of order numbers, so each shows once, **in ascending order number**; an empty label drops it. An animals-only selection
   (PlayerInterface+0x268) keeps only 5, 31, 45, 61, 123, 226, 227 (`FUN_1407f23b0`). **Verified** (`data/gui/layout/Kenshi_ContextMenu.layout`): title

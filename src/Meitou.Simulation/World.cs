@@ -486,6 +486,11 @@ public sealed partial class World : IDisposable
     /// </summary>
     public bool BenchFacingFix { get; set; } = true;
     /// <summary>
+    /// A seat playing a bed's clip (UWE's "Bed (job)") lies its sitter at its nearest use node as a bed does (Fixes settings, Meitou); off, on the
+    /// seat's origin as the game does, across the foot of the bed (docs/game/ai-tasks.md "Town goals").
+    /// </summary>
+    public bool SeatBedFix { get; set; } = true;
+    /// <summary>
     /// A prisoner in a cage or on a pole plays only the fixture's pose, no hurt-part hold over it (Fixes settings, Meitou); off, it holds its wounds
     /// there as the game does (docs/animation.md "Injury holds").
     /// </summary>
@@ -500,6 +505,12 @@ public sealed partial class World : IDisposable
     /// the grid and the worn backpack, as the game does (docs/game/dialogue.md "Conditions", docs/game/carry-loot.md "NPC looting").
     /// </summary>
     public bool BagSearchFix { get; set; } = true;
+    /// <summary>
+    /// A ground item of another faction picked up inside a building is a Theft from the item's owner, its faction and owner character (Fixes
+    /// settings, Meitou); off, from the faction of the building the picker stands in with that building's resident leader as the victim, as the game
+    /// does (docs/game/economy.md "Fencing, stealing and smuggling").
+    /// </summary>
+    public bool PickUpTheftFix { get; set; } = true;
     /// <summary>
     /// A shopkeeper at its counter is talked to and traded with from the counter's front (Gameplay settings, Meitou): its talk reach is
     /// <see cref="Dialogue.DialogueSystem.CounterTalkReach"/>; off, the game's reach, so the customer walks round behind the counter

@@ -483,11 +483,12 @@ holds refuses the second mod.
   change the crime rules make to a character's pending crime or bounties ([rules](simulation.md#crimes-and-bounties)), by `CrimeEventKind`:
   `Pending`, a crime set on a culprit (every code the game sets, among them the assaults it notices: an unprovoked attack order, an NPC's landed
   blow or aimed bolt, a stealth knock-out swing, a hit between the police and another); `Witnessed`, the first witness to react; `Booked`, a bounty
-  raised (a witness's or a fence's booking, or a dialogue line assigning one: the speaker is the witness, the line's amount is added, and the code
-  and victim are those of the target's pending crime, which the line marks booked, if it has one); `Lapsed`, a pending crime ended, booked or not
+  raised (a witness's or a fence's booking, a dialogue line assigning one: the speaker is the witness, the line's amount is added, and the code
+  and victim are those of the target's pending crime, which the line marks booked, if it has one; or a mod's `AssignBounty`, below: no witness
+  and no crime); `Lapsed`, a pending crime ended, booked or not
   (its timer ran out, a crime of another code replaced it, or the character was recruited, bought free, dismissed or stored off screen with its
   squad, the dead with it); `Expired`, a bounty run out; `Cleared`, a bounty removed otherwise (a fine or a bail paid, a release from prison,
-  dialogue, the debug menu). Each once: a crime already pending with the same code is only refreshed and not reported again, and an assault by a
+  dialogue, the debug menu, a mod's `ClearBounty`). Each once: a crime already pending with the same code is only refreshed and not reported again, and an assault by a
   culprit with another crime pending only raises that crime's timer. So every `Pending` is followed by one `Lapsed` unless the character leaves the
   world first (a body that decays or is unloaded, a squad despawned: its crime goes with it; a dead character's crime otherwise stays frozen), and
   every bounty raised in the world is `Booked` before it is `Expired` or `Cleared`; an ending is per faction entry, so several bookings may precede
@@ -503,7 +504,12 @@ holds refuses the second mod.
   character free normally arrive this way, as do character trades, squad commands (a dismissal), a theft by hand and a fence's sale while paused.
   Observers may read the world and change their own hashed state, and gameplay changes go through commands. One that throws is disabled for that
   world and the fault enters the state hash. Without an observer no event is built. `CrimeSystem.BookingsOf(tick)` still lists the tick's bookings
-  that had a witness (the arrest system's trigger). Engine API, not in the original.
+  that had a witness (the arrest system's trigger). `CrimeSystem.AssignBounty(world, character, faction, amount)` adds a bounty as dialogue's
+  assigned one does (the original's own step, which a new NPC's rolled bounty also takes): under the faction's booking faction (its `legal
+  system`, else itself when it books bounties), the time of the last raise stamped, so it lasts 0.04 hours per cat and for ever from 10000; no
+  pending crime is touched and no message posted. It returns the entry's new amount, -1 for an amount of 0 or less, a character not in the world
+  or a faction with no booking faction. `CrimeSystem.ClearBounty(world, character, faction)` removes that entry and returns its amount (0:
+  none); relations and recognition stay. Both are for serial phases and `IWorldReady`, once per event. Engine API, not in the original.
 - **Items used up:** a registered system implementing `IItemUseObserver` receives `ItemUsedUp(World, in ItemUsed)` inside the step that
   used an item, once the item has changed: the tick, the `ItemUseKind`, the item record's string id, the user (none for a machine, a
   research order or an upgrade pulling from the building's own stock), the building it went into or came from (a construction, machine or
@@ -625,6 +631,16 @@ holds refuses the second mod.
   (names go through the translation catalog like the tab's own), leave out, or add headings (faction -1: the name alone, no number or bar),
   for example to group factions under another. It runs on the host's thread whenever the tab is drawn, so it must not touch the world; mods chain in
   load order. A throw or a null is logged and that arranger is not called again.
+- **Placement rules:** `AddPlacementRule(rule)` changes where build mode lets the player place a building. `rule.Waive(ask, failure)` may
+  lift one of the game's own reasons for refusing a ghost (`PlacementFailure`: inside only, too close to a building, uneven ground, a building
+  not owned, and the rest), and the check goes on to its next step; the town block (`TooCloseToTown`) is never asked about, since
+  the simulation applies it again on Confirm, nor is research. `rule.Refuse(ask)` may refuse a ghost the game allows, with the mod's own text as
+  build mode's message (`PlacementFailure.RefusedByMod`). `PlacementAsk` gives the building's build data, the ghost's position and turn, the
+  building it stands in or on (null outdoors), the floor and whether it is a wall piece. A reason any mod lifts is lifted; a refusal by any mod
+  stands. Asked on the host's thread for every ghost build mode shows (each frame it moves, each piece of a wall line, and the test channel's
+  `build`), so it must be cheap and must not touch the world; with no rule registered the check is unchanged. A rule that throws is logged and
+  not asked again. What a lifted reason allows is the mod's to answer for: furniture placed outdoors stands with no parent building, and
+  whatever reads indoors (rain on farms and rain collectors, lights, beds) treats it as outdoors. Engine API, not in the original.
 - **Combat moves:** `AddCombatMove(source)`: `source(world, id, tick)` answers a `CombatMove` (a `CombatTechnique` and its progress, 0 to
   1) or null, and the animation plays the first answer, in load order, as the character's technique (`CombatSystem.ModMove`);
   `CombatMove.Clip(animation, progress)` plays any ANIMATION clip instead, by record name (else string id), e.g. `medic` (the first-aid
@@ -1011,7 +1027,10 @@ holds refuses the second mod.
   the cursor (whether it offers a menu decides what a right click there does), so it must be cheap; a tick may be in flight, so it must not
   touch the world. It gets `UiMenuContext`: the target's snapshot, the selection and the cursor as the menu is built, `Shift` and `Tick` read
   when asked (so a chosen row sees them as the player chooses it), and `Enqueue`; a chosen `UiMenuVerb` queues commands. Return no rows to keep
-  a plain right click (a row makes the character offer a menu). Shift does not turn a mod row into a job; the row reads `Shift` itself. Menus
+  a plain right click (a row makes the character offer a menu). Shift does not turn a mod row into a job; the row reads `Shift` itself. A row
+  with `Unavailable = true` (the selection cannot carry it out now, e.g. it lacks the item) is greyed while the Interface setting "Unavailable
+  menu rows" is Greyed (the default): a plain click does nothing, a Shift click chooses it, so the mod can set up a job for later; on Faithful
+  it is drawn and chosen as any row ([unavailable rows](game/ui-input.md#context-menu-verbs)). Menus
   that stay empty or fixed get no mod rows: no selection, a body the first selected carries (Put Down only), a body someone outside the player's
   faction carries; an animals-only selection keeps only the original's animal verbs. A source that throws, or returns a row without a caption
   or action, is logged once and dropped for the session; a row's action that throws is logged.
@@ -1061,8 +1080,8 @@ holds refuses the second mod.
   interface's keys and the game's bindings (Ctrl+Shift+P is not photo mode's P, Ctrl+J not Rescue's J), and while that key stays down no plain
   binding of it fires. A chord is not taken while a text field has the keys, over the title or in photo mode. It is saved as `Ctrl+Shift+P`
   (modifiers in any order when read); the game's own actions take no chord (one in `bindings` is skipped as unknown). The host's own
-  combinations never reach the bindings: Alt+Enter, Alt+F4, Ctrl+F9, Ctrl+C, Ctrl+V and Shift with F1, F2, F11 or F12 are left out as defaults
-  with a log line and refused on the page; on the Metal host a chord of F7, F8, F11, F12 or Print Screen never fires. **Observed** (scratch
+  combinations never reach the bindings: Alt+Enter, Alt+F4, Shift+F9 and its Ctrl+F9 alias, Ctrl+C, Ctrl+V and Shift with F1, F2, F11 or
+  F12 are left out as defaults with a log line and refused on the page; on the Metal host a chord of F7, F8, F11, F12 or Print Screen never fires. **Observed** (scratch
   program on `InputBindings`: laying, taking, resolving against photo mode's P, saving and reading back); the hosts' key path and the Controls
   page not run.
   Once per press, also while paused, `pressed(ModKeyContext)` (the `Snapshot` on screen, `Selected`, `Tick`, `Enqueue`, and `Ctrl`, `Shift`,
@@ -1329,6 +1348,15 @@ holds refuses the second mod.
   screen's count use `SquadManagement.CappedHeads`), for townspeople, staff or followers a mod adds beside the player's own characters; the
   dismiss rule still counts everyone (`FactionHeads`). Several mods can each mark their own squads. Saved with the squad; a load without the
   owner mod running counts the squad again, with a notice. Engine API, not in the original.
+- **Squad AI options per squad** (`Meitou.Simulation.Factions`): `SetSquadOptions(squadId, options, Owner: context.Id)` gives a squad of the
+  player's faction its own squad AI options (`Squad.OwnOptions`, the `SquadAi` flags: sit when idle, sleep when injured, ditch items, share
+  food, feed animals, heal, help and rescue allies, shoot first, heal neutrals, heal all), which its members follow in place of the player's
+  faction-wide ones (the AI tab still shows and sets the player's, so a led squad given its own no longer follows the tab); `null` gives it the
+  player's again. Guards that should not sit, sleep in other people's beds or haul goods away, for
+  example: `SquadAi.Feed | SquadAi.Share`. Every system that reads the options asks `SquadAiRules.For(world, cold)` (the character's squad's,
+  else the player's), so a squad with none set behaves as in the original. A command naming another mod than the one that set them is
+  ignored. Saved with the squad; a load without the owner mod running gives the squad the player's options again, with a notice. Cost: one
+  squad lookup where an option is read (at decisions, and per character at the feed check). Engine API, not in the original.
 - **Squad purses** (`Meitou.Simulation.Factions`): `SetSquadPurse(squadId, own, Owner: context.Id)` gives a squad of the player's faction its own
   purse (`Squad.OwnPurse`, its `Squad.Money`): its members pay an NPC-style purchase (a shopper buying from a building's stock) from it
   instead of the player's money, and a shop the squad owns keeps its takings in it, so a shopkeeper keeps its own earnings. The trade window
@@ -1390,6 +1418,22 @@ holds refuses the second mod.
   pays the player once it lies in the bed, and a visitor in a player town picks the nearest bed it can afford before the NPC bed search (null
   keeps the original: NPCs never pay). Non-finite delays, hours, points and radii are refused. **Verified** by `ModHookTests` (synthetic
   world): the spawn ring, purse and refusals, a never-loaded spawn kept and reloaded with its tag, and the campaign queue.
+- **Placing characters** (engine API, not in the original; serial phases and `IWorldReady`, once per event): `CharacterPlacement.Place(world,
+  characters, at)` (`Meitou.Simulation.Movement`) puts living characters at a point at once (a start squad at its own place, a scene change, fast
+  travel): the first on the walkable spot nearest it, the rest spread round it as a ground-click move order of that many spreads them, each on
+  the ground there (the floor nearest the point's height), standing still with its fight, task, path and orders dropped as the Stop order drops
+  them; carried characters come with their carrier. Outside a tick both state buffers are written, so a new game's camera, put on the first
+  squad's leader after `IWorldReady`, sees the new place. A character carried or held in a bed, cage or on a pole is left where it is. It
+  returns how many were put (0 for a point that is not finite or with no walkable spot near it). The zones round a far place load as after a
+  long walk; nothing there is preloaded. `CharacterPlacement.WalkableNear(world, point, key)` is the spot search alone.
+- **Placing buildings** (engine API, not in the original; serial phases and `IWorldReady`, once per event): `ConstructionSystem.PlaceSites(world,
+  plans, complete)` makes a site of the player's faction for each `PlannedBuilding` as build mode's Confirm does (the town block, joining a player
+  town or founding an outpost, walls joined, the town reassessed), without research's gate, a message or a build order. With `complete` each
+  stands already, built with all its materials delivered (dismantling refunds them as for any finished building) and no completion message;
+  doors, beds, seats and machines follow on the next step. Furniture is a second call whose plans name the building's site id as `Parent`, at
+  absolute positions the mod chooses inside it. It returns the sites in plan order, null for a refused plan (not a BUILDING, a position that is
+  not finite, blocked by a town), so a mod has the id for `SetSquadHome` and the outpost through `world.Buildings.FindTown(site.Town)` (tag it
+  with `PlayerTown.ModTags`).
 - **Town overrides** (engine API, not in the original; serial phases; [simulation](simulation.md) "Town overrides"): `PopulationSystem.CheckOverrides(world,
   site)` runs a town's `override town` list now, as its zone's load would; `ApplyTownVersion(world, site, townId)` puts a TOWN of the mod's choice
   in its place (null or the town's own id: back to its own record, residents made afresh; also for a held town or one of the player's faction); both

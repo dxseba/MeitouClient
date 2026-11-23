@@ -732,6 +732,14 @@ public sealed class CharacterSnapshot
     /// </summary>
     public bool CarriesShackles { get; internal set; }
     /// <summary>
+    /// A selected character for whom First Aid or Repairs would find a kit now (<see cref="FirstAid.FirstAidSystem.MedkitAtHand"/>).
+    /// </summary>
+    public bool HasMedkit { get; internal set; }
+    /// <summary>
+    /// A selected character holding its own splint kit (<see cref="FirstAid.FirstAidSystem.SplintKitAtHand"/>).
+    /// </summary>
+    public bool HasSplintKit { get; internal set; }
+    /// <summary>
     /// The number that turns its portrait camera (<see cref="CharacterCold.PortraitSerial"/>).
     /// </summary>
     public uint PortraitSerial { get; internal set; }
@@ -1138,6 +1146,11 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     /// machine, or a view of one where none is made yet, <see cref="Production.ProductionSystem.TownMachineOf"/>); null for others.
     /// </summary>
     public Production.MachineSnapshot? InspectedTownMachine { get; init; }
+    /// <summary>
+    /// The <c>townwork:</c> machine site of the building the HUD shows when it is a standing town building or layout object of the player's faction
+    /// (<see cref="Production.ProductionSystem.OwnTownMachineOf"/>): its window opens on selection; null for others.
+    /// </summary>
+    public string? InspectedOwnMachine { get; init; }
     /// <summary>
     /// The gun numbers of the building the HUD shows when it is a turret (its Stats 1 gun lines); null for others.
     /// </summary>

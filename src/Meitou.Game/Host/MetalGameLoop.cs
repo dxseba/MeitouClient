@@ -796,9 +796,11 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
             },
             systems: systems, walkability: walkability);
         host.Session.World.BenchFacingFix = host.Config.FixBenchFacing;
+        host.Session.World.SeatBedFix = host.Config.FixSeatBeds;
         host.Session.World.PrisonPoseFix = host.Config.FixPrisonPose;
         host.Session.World.CagedAnimalFix = host.Config.FixCagedAnimals;
         host.Session.World.BagSearchFix = host.Config.FixBagSearch;
+        host.Session.World.PickUpTheftFix = host.Config.FixPickUpTheft;
         host.Session.World.CounterTalk = host.Config.CounterTalk;
         host.Session.World.TakeIntoBackpack = host.Config.TakeIntoBackpack;
         host.Session.World.ActionLog = host.ActionLogs.Log;
@@ -1139,6 +1141,8 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
         {
             SpeedUnit = host.Config.SpeedUnit,
             Floaters = host.Config.Floaters,
+            GreyUnavailableVerbs = host.Config.GreyUnavailableVerbs,
+            FixLockpickLabel = host.Config.FixLockpickLabel,
             FeedbackButtonInPlay = host.Config.FeedbackButton,
             XpLabel = Settings.SkillXp.Label(host.Config),
         };
@@ -1232,6 +1236,7 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
         _worldGpu.Markers = _moveMarker;
         _worldGpu.NavmeshOverlay = _navOverlay;
         _worldGpu.InspectorOverlay = new NavmeshOverlayRenderer(_ctx);   // the pick & collision inspector's hulls (F10 > Tools)
+        _worldGpu.TownRangeOverlay = new NavmeshOverlayRenderer(_ctx);   // the outposts' build limit rings in build mode
         _worldGpu.HoverOutline = _hoverOutline;
         Console.WriteLine($"metal     HUD ready ({hud.UiMode})");
     }
@@ -1354,9 +1359,11 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
                 foreach (var players in host.Session.World.Systems.OfType<Meitou.Simulation.Player.PlayerSystem>()) players.AnimalsPickUp = on;
             },
             BenchFacingChanged = on => host.Session.World.BenchFacingFix = on,
+            SeatBedsChanged = on => host.Session.World.SeatBedFix = on,
             PrisonPoseChanged = on => host.Session.World.PrisonPoseFix = on,
             CagedAnimalsChanged = on => host.Session.World.CagedAnimalFix = on,
             BagSearchChanged = on => host.Session.World.BagSearchFix = on,
+            PickUpTheftChanged = on => host.Session.World.PickUpTheftFix = on,
             CounterTalkChanged = on => host.Session.World.CounterTalk = on,
             TakeIntoBackpackChanged = on => host.Session.World.TakeIntoBackpack = on,
             TutorialsChanged = on => { if (host.Saves.Tutorials is { } t) t.Enabled = on; },
@@ -2033,7 +2040,7 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
     }
 
     /// <summary>
-    /// The keys that are the host's own and not the session's: Shift+F11 steps the navmesh overlay, Ctrl+F9 the fps counter (F9 is the game's
+    /// The keys that are the host's own and not the session's: Shift+F11 steps the navmesh overlay, Shift+F9 the fps counter (F9 is the game's
     /// quickload), the interface's switch hides the interface (true: taken). The screenshot, statistics, fps and profiler bindings reach
     /// <see cref="OnTicked"/> as actions, so they can be rebound.
     /// </summary>
@@ -2044,7 +2051,7 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
             host.DebugOverlays.ToggleNavOverlay();
             return true;
         }
-        if (key == SilkKey.F9 && Ctrl())
+        if (key == SilkKey.F9 && (_shiftDown || Ctrl()))
         {
             host.DebugMenu.FpsVisible = !host.DebugMenu.FpsVisible;
             return true;
@@ -2937,6 +2944,7 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
         host.UpdateNav();
         host.DebugOverlays.UpdateNavOverlay();
         if (_hud is not null) host.DebugOverlays.UpdateInspectorOverlay();
+        if (_hud is not null) host.TownRangeRing.Update();
         // Diagnostic isolation for the far-travel freeze: skip the runtime building/ground-item/lamps diff.
         if (Environment.GetEnvironmentVariable("MEITOU_METAL_NO_BUILDINGS") != "1") host.BuildingSync.UpdateBuildings();
         // The interior view (docs/formats/zones.md): the player's building opens, its upper floors and their characters are hidden.

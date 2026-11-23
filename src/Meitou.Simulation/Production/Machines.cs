@@ -41,6 +41,12 @@ public sealed class InputSlot(RecipeInput recipe)
     /// Whether the section takes units of <paramref name="record"/>: its item, unless it is <see cref="Idle"/>.
     /// </summary>
     public bool Takes(string record) => !Idle && Item == record;
+
+    /// <summary>
+    /// The units an operator puts into the section (the Auto haul fill): its capacity less what it holds, 0 when it draws nothing (rate 0) or its
+    /// capacity is not positive.
+    /// </summary>
+    public int FillRoom => Rate > 0 ? Math.Max(0, Recipe.Capacity - Count) : 0;
 }
 
 /// <summary>
@@ -349,6 +355,11 @@ public sealed class Machine : IPowerDraw
     /// drained (+0x484) overall, which the battery's header word reads (<c>FUN_140300b40</c>). Derived each tick; not saved, not hashed.
     /// </summary>
     public bool OnGrid { get; set; }
+    /// <summary>
+    /// Its building belongs to no town at all (NO_TOWN, docs/game/buildings-production.md "Town at materialization"), so no power frame runs it and a
+    /// machine that draws power gets none. Derived each tick; not saved, not hashed.
+    /// </summary>
+    public bool NoTown { get; set; }
     /// <summary>
     /// Whether the battery's town grid charged its batteries overall this tick (see <see cref="OnGrid"/>).
     /// </summary>

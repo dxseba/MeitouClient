@@ -128,6 +128,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         this._nodes = nodes;
         _craftOptions = new CraftOptionsCache(BuildCraftOptions);
         _smiths = new SmithViewCache(db);
+        _seatBeds = new SeatBeds(db);
         UnloadedProduction = Settings.UnloadedProduction;
     }
 
@@ -356,9 +357,25 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     readonly Dictionary<string, (Vector3 Spot, float Range)> _turretSpots = [];
 
     /// <summary>
+    /// The seats that play a bed's clip, lain on at their use nodes with <see cref="World.SeatBedFix"/>.
+    /// </summary>
+    readonly SeatBeds _seatBeds;
+
+    /// <summary>
     /// The clip a turret's gunner holds.
     /// </summary>
     public const string TurretClip = "combatstance";
+
+    /// <summary>
+    /// Each building record's use nodes in its own frame (<see cref="Locks.FixtureRegistry.UseNodes"/>), none for a record without them
+    /// (<see cref="UseNodeMarker"/>; read from the game data, not saved, not hashed).
+    /// </summary>
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, Vector3[]> _useNodes = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How far from a point <see cref="SameRoom"/> looks for the walkable face under it (engine choice: a worker or a node stands on one).
+    /// </summary>
+    const float RoomFaceReach = 10;
 
     /// <summary>
     /// The characters an order names, else the player's selection.
@@ -375,6 +392,9 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         {
             switch (command)
             {
+                case InspectBuildingCommand inspect:
+                    InspectTownWork(world, inspect.Instance);
+                    break;
                 case OperateOrder order:
                     {
                         var site = Site(world, order.Site) ?? TownMachineSite(world, order.Site);
@@ -548,33 +568,96 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     Meitou.Data.World.TurretPost? TurretPostOf(BuildSite site) => PlacedTurrets.PostOf(_db, site);
 
     /// <summary>
-    /// Where an operator walks to: a turret's gunner spot (<see cref="Ai.AiSystem.TurretSpot"/>), else the floor point at or next to the building's
-    /// place, a rock's middle (furniture cuts a hole in the floor's navmesh; <see cref="MovementSystem.GoToFloor"/>).
+    /// Where a character at <paramref name="from"/> walks to for a machine, and the height of the floor it walks on: a turret's gunner spot
+    /// (<see cref="Ai.AiSystem.TurretSpot"/>); a rock's middle (<see cref="RockGoal"/>); else the spot on the machine's floor within its use range
+    /// nearest the walker (<see cref="SiteReach.WorkSpot"/>), which <see cref="AtSite"/> then passes: furniture cuts a hole in the floor's navmesh,
+    /// and a walk to the place itself could end on a stair beside it, short of the height test.
     /// </summary>
-    Vector2 GoalOf(World world, BuildSite site, Machine m)
+    Vector3 GoalOf(World world, BuildSite site, Machine m, Vector3 from)
     {
         if (m.Data.Function == Meitou.Data.World.ObjectRanges.TurretFunction && TurretPostOf(site) is { } post)
         {
             var spot = AiSystem.TurretSpot(world, post);
             _turretSpots[site.Id] = (spot, post.UseRange);
-            return new Vector2(spot.X, spot.Z);
+            return spot;
         }
 
-        // A rock is walked to at its bounds' middle, which its footprint holds (its origin can lie off its pile).
-        var to = _naturalBounds.TryGetValue(site.Id, out var rock) ? rock.Centre : site.Position;
-        var at = world.Walkability.FloorNear(to.X, to.Z, to.Y, MovementSystem.FloorSlack) ?? to;
-        return new Vector2(at.X, at.Z);
+        if (_naturalBounds.TryGetValue(site.Id, out var rock)) return RockGoal(world, site, rock.Centre);
+
+        float limit = SiteReach.HeightLimit(world.Fixtures.DoorsByBuilding[site.Id].Any(), SiteReach.InBuilding(site));
+        if (UseNodeMarker(world, site, from, limit) is { } node) return node;
+        return SiteReach.WorkSpot(world.Walkability, Settings.EdgeGap, site, site.Position.Y, limit, m.Data.UseRange, from);
     }
 
     /// <summary>
-    /// Sends an operator towards <paramref name="goal"/> (<see cref="GoalOf"/>) on the site's own floor (or a turret's gunner spot floor).
+    /// A machine's position marker (<c>Building::getPositionMarker</c>, docs/game/buildings-production.md "Work distance"): of two or more use nodes,
+    /// the one nearest <paramref name="from"/> that a worker can stand on at the machine's floor (within <paramref name="heightLimit"/> of it); null
+    /// with fewer than two (the original takes the construction position) or when none can be stood on (engine choice, for the original's bad-node
+    /// map, which skips a node a walk to which proved impossible), and the footprint's rule then stands. Asked by <see cref="AtSite"/> for each
+    /// operator every tick and by <see cref="GoalOf"/>: a few node transforms and usually one surface test, nothing allocated.
     /// </summary>
-    void WalkToSite(ref CharacterHot n, CharacterCold cold, BuildSite site, Vector2 goal)
+    Vector3? UseNodeMarker(World world, BuildSite site, Vector3 from, float heightLimit)
     {
-        n.Goal = goal;
+        var nodes = _useNodes.GetOrAdd(site.Record, ReadUseNodes, _db);
+        if (nodes.Length < 2) return null;
+
+        Span<bool> refused = stackalloc bool[nodes.Length];
+        for (int tries = 0; tries < nodes.Length; tries++)
+        {
+            int best = -1;
+            float bestD = float.MaxValue;
+            for (int k = 0; k < nodes.Length; k++)
+            {
+                if (refused[k]) continue;
+                float d = Vector3.DistanceSquared(site.Position + Vector3.Transform(nodes[k], site.Rotation), from);
+                if (d < bestD) (best, bestD) = (k, d);
+            }
+
+            // None left (or every distance NaN, a broken position).
+            if (best < 0) return null;
+
+            var at = site.Position + Vector3.Transform(nodes[best], site.Rotation);
+            if (SiteReach.OnFloor(world.Walkability, at.X, at.Z, site.Position.Y, heightLimit, out float y))
+                return new Vector3(at.X, y, at.Z);
+            refused[best] = true;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The use nodes of building record <paramref name="id"/> in its own frame, none for a record without them (<see cref="_useNodes"/>).
+    /// </summary>
+    static Vector3[] ReadUseNodes(string id, GameDatabase db) =>
+        db.Find(id) is { } record && Locks.FixtureRegistry.UseNodes(db, record) is { } nodes ? [.. nodes.Select(u => u.At)] : [];
+
+    /// <summary>
+    /// Whether <paramref name="a"/> and <paramref name="b"/> stand on the same building's interior navmesh, or both outside any
+    /// (<see cref="IWalkability.InteriorNear"/>). Two closest-face queries, asked by <see cref="AtSite"/> only for a machine inside a building once
+    /// the worker is within its reach.
+    /// </summary>
+    static bool SameRoom(IWalkability walk, Vector3 a, Vector3 b) =>
+        string.Equals(walk.InteriorNear(a, RoomFaceReach), walk.InteriorNear(b, RoomFaceReach), StringComparison.Ordinal);
+
+    /// <summary>
+    /// A rock is walked to at its bounds' middle, which its footprint holds (its origin can lie off its pile): the floor point at or next to it
+    /// (<see cref="MovementSystem.GoToFloor"/>), on the rock's own height.
+    /// </summary>
+    static Vector3 RockGoal(World world, BuildSite site, Vector3 centre)
+    {
+        var at = world.Walkability.FloorNear(centre.X, centre.Z, centre.Y, MovementSystem.FloorSlack) ?? centre;
+        return new Vector3(at.X, site.Position.Y, at.Z);
+    }
+
+    /// <summary>
+    /// Sends an operator towards <paramref name="goal"/> (<see cref="GoalOf"/>) on the goal's floor (a turret's gunner spot's own).
+    /// </summary>
+    void WalkToSite(ref CharacterHot n, CharacterCold cold, BuildSite site, Vector3 goal)
+    {
+        cold.PathFailed = false;   // a failure from before is not this walk's
+        n.Goal = new Vector2(goal.X, goal.Z);
         n.Flags |= (ushort)MoveFlags.NeedPath;
-        float y = _turretSpots.TryGetValue(site.Id, out var turret) ? turret.Spot.Y : site.Position.Y;
-        (cold.GoalHeight, cold.GoalHeightAt) = (y, n.Goal);
+        (cold.GoalHeight, cold.GoalHeightAt) = (goal.Y, n.Goal);
     }
 
     /// <summary>
@@ -695,9 +778,19 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         // rock mined from 100 to 200 off its middle).
         if (_naturalBounds.TryGetValue(site.Id, out var rock)) return SiteReach.Within(n, rock.Gap(n.Position), RockReach);
 
-        // The machine's use range (UseableStuff::getReachRange).
+        // The machine's use range (UseableStuff::getReachRange): from its position marker when it has use nodes (FUN_14059c6d0: the X/Z distance to
+        // getPositionMarker), and for one inside a building from the same building's floor as that node (engine choice: the original's worker
+        // pressed against the outside of a wall walked round through the door to a bench against the wall's inside, though within reach of its
+        // node, #1180); else from its footprint, which stands in for the original's touching the building.
+        bool door = world.Fixtures.DoorsByBuilding[site.Id].Any(), inside = SiteReach.InBuilding(site);
+        if (UseNodeMarker(world, site, n.Position, SiteReach.HeightLimit(door, inside)) is { } marker)
+        {
+            return SiteReach.Within(n, Gap(n.Position, marker), m.Data.UseRange) && SiteReach.AtHeight(n, site, door)
+                && (!inside || SameRoom(world.Walkability, n.Position, marker));
+        }
+
         if (!SiteReach.Within(n, GapTo(site, n.Position), m.Data.UseRange)) return false;
-        return SiteReach.AtHeight(n, site, world.Fixtures.DoorsByBuilding[site.Id].Any()) || OffFloor(world, n, site);
+        return SiteReach.AtHeight(n, site, door) || OffFloor(world, n, site);
     }
 
     /// <summary>
@@ -782,6 +875,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         cold.HaulFetch = null;
         cold.Operating = false;
         cold.HaulTo = null;
+        cold.HaulItem = null;
     }
 
     /// <summary>
@@ -809,7 +903,8 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         cold.HaulFetch = null;
         cold.Operating = false;
         cold.HaulTo = null;
-        var goal = GoalOf(world, site, m);
+        cold.HaulItem = null;
+        var goal = GoalOf(world, site, m, n.Position);
         if (!AtSite(world, n, site, m)) WalkToSite(ref n, cold, site, goal);
         _sweep = true;
     }
@@ -832,6 +927,24 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         cold.HaulFetch = null;
         cold.Operating = false;
         cold.HaulTo = null;
+        cold.HaulItem = null;
+    }
+
+    /// <summary>
+    /// A hauler's walk: to the loose item it fetches, else to its leg's machine; the trip ends when that is gone or the hauler cannot work.
+    /// </summary>
+    void HaulWalk(World world, int slot, ref CharacterHot n, CharacterCold cold, float dt)
+    {
+        if (cold.HaulItem is { } item)
+        {
+            ApproachLoose(world, slot, ref n, cold, item, dt);
+            return;
+        }
+
+        if (Lingers(cold)) return;
+        if (cold.HaulSite is { } to && Site(world, to) is { Complete: true } leg && world.Machines.Find(to) is { } legMachine && Able(cold))
+            Approach(world, slot, ref n, cold, leg, legMachine, dt);
+        else End(world, slot);
     }
 
     /// <summary>
@@ -841,7 +954,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     {
         // The jobs are the decision step's (RegisterSources); with no machine a sleeper of the "Sleep when injured" option still lets go of its bed
         // here once up.
-        if (world.Machines.Count == 0 && !_sweep && !(Beds is not null && (world.Player.SquadAi & SquadAi.Sleep) != 0 && world.Fixtures.Count > 0))
+        if (world.Machines.Count == 0 && !_sweep && !(Beds is not null && world.Fixtures.Count > 0 && SquadAiRules.AnyFollow(world, SquadAi.Sleep)))
             return;
 
         var table = world.Characters;
@@ -853,9 +966,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
             var cold = table.Cold(i)!;
             if (n.Task == (byte)CharacterTask.Haul)
             {
-                if (cold.HaulSite is { } to && Site(world, to) is { Complete: true } leg && world.Machines.Find(to) is { } legMachine && Able(cold))
-                    Approach(world, ref n, cold, leg, legMachine, dt);
-                else End(world, i);
+                HaulWalk(world, i, ref n, cold, dt);
                 continue;
             }
 
@@ -887,7 +998,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
 
             // A hauling operator walks to its storage instead.
             if (Hauling(world, cold) is { } haul) (site, m) = haul;
-            Approach(world, ref n, cold, site, m, dt);
+            Approach(world, i, ref n, cold, site, m, dt);
         }
 
         if (world.Machines.Count == 0) _sweep = false;
@@ -895,31 +1006,66 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
 
     /// <summary>
     /// Walks a character to a building: at it, its path is dropped; else a path is asked for, again every <see cref="PursuitSystem.RepathSeconds"/>
-    /// while it has none.
+    /// while it has none. A walk with no way there is the task's end (<see cref="Impossible"/>).
     /// </summary>
-    void Approach(World world, ref CharacterHot n, CharacterCold cold, BuildSite site, Machine m, float dt)
+    void Approach(World world, int i, ref CharacterHot n, CharacterCold cold, BuildSite site, Machine m, float dt)
     {
         const ushort path = (ushort)MoveFlags.AnyPath;
-        if (m.Data.Function == Meitou.Data.World.ObjectRanges.TurretFunction && !_turretSpots.ContainsKey(site.Id)) GoalOf(world, site, m);
+        if (m.Data.Function == Meitou.Data.World.ObjectRanges.TurretFunction && !_turretSpots.ContainsKey(site.Id)) GoalOf(world, site, m, n.Position);
         if (AtSite(world, n, site, m))
         {
-            if ((n.Flags & path) != 0)
-            {
-                n.Flags = (ushort)(n.Flags & ~path);
-                n.PathCursor = 0;
-                cold.PathRequest = 0;
-            }
-
-            n.TaskTime = 0;
+            StopWalk(ref n, cold);
             return;
         }
 
         if ((n.Flags & path) != 0) return;
+        if (cold.PathFailed)
+        {
+            Impossible(world, i, cold, site);
+            return;
+        }
+
         n.TaskTime -= dt;
         if (n.TaskTime > 0) return;
-        WalkToSite(ref n, cold, site, GoalOf(world, site, m));
+        WalkToSite(ref n, cold, site, GoalOf(world, site, m, n.Position));
         n.Mode = SpeedMode.Free;
         n.TaskTime = PursuitSystem.RepathSeconds;
+    }
+
+    /// <summary>
+    /// "Task impossible: X can't get to Y" (<c>AI::isWithinChoppingRange</c> <c>FUN_14059c6d0</c> -> <c>FUN_140796ed0</c>, <b>Verified</b>,
+    /// docs/game/buildings-production.md "Arrival"): the walk ended with no way to the building, so the building is ignored for
+    /// <see cref="ConstructionSystem.UnreachableSeconds"/> and the task ends (the AI's re-think flag, <c>FUN_14001953d</c>); the job is tried again
+    /// later.
+    /// </summary>
+    void Impossible(World world, int i, CharacterCold cold, BuildSite site)
+    {
+        cold.PathFailed = false;
+        cold.NoteUnreachable(site.Id, world.Tick + (long)MathF.Ceiling(ConstructionSystem.UnreachableSeconds / world.TickSeconds));
+        End(world, i);
+    }
+
+    /// <summary>
+    /// The beat a worker stands at the end of a leg (a pick-up, a fill, a drop-off) before it sets off on the next: a walk left to end by itself
+    /// set the idle wait of a finished path (5 to 10 s), and none at all looked mechanical.
+    /// </summary>
+    internal const float StepPauseSeconds = 0.5f;
+
+    /// <summary>
+    /// Stops a worker's walk where it stands (its path and any pending request dropped) and sets its wait to <see cref="StepPauseSeconds"/>, so its
+    /// next leg starts after that beat.
+    /// </summary>
+    static void StopWalk(ref CharacterHot n, CharacterCold cold)
+    {
+        const ushort path = (ushort)MoveFlags.AnyPath;
+        if ((n.Flags & path) != 0)
+        {
+            n.Flags = (ushort)(n.Flags & ~path);
+            n.PathCursor = 0;
+            cold.PathRequest = 0;
+        }
+
+        n.TaskTime = StepPauseSeconds;
     }
 
     #endregion
@@ -1106,7 +1252,11 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         if (Hauling(world, cold) is { } haul)
         {
             cold.OperateToolHeld = false;
-            if (AtSite(world, n, haul.Site, haul.Machine)) HaulAt(world, cold, n.Position, m, haul.Machine);
+            if (!AtSite(world, n, haul.Site, haul.Machine)) return;
+
+            // The walk stops at the storage, as a hauler's does (StopWalk), so the walk back starts after the beat.
+            HaulAt(world, cold, n.Position, m, haul.Machine);
+            StopWalk(ref n, cold);
             return;
         }
 
