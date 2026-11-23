@@ -13,10 +13,10 @@ public sealed class JobSettings
 
     /// <summary>
     /// The fork's <c>Hotkey</c> (default <c>CTRL+J</c>; <c>NONE</c>: only the panel button): a key name with optional <c>CTRL+</c>, <c>ALT+</c>,
-    /// <c>SHIFT+</c> (<see cref="WindowKey"/>).
+    /// <c>SHIFT+</c> (<see cref="WindowKey"/>), the default of the window's key action (a chord with modifiers), read at start.
     /// </summary>
-    [Setting("Window key", Hint = "The key that toggles the window, with optional CTRL+, ALT+ or SHIFT+ (CTRL+J, ALT+J, F6...); it no longer reaches the "
-        + "game's binding of that key. NONE: the button only.", MaxLength = 32)]
+    [Setting("Window key", Hint = "The window key's default binding, with optional CTRL+, ALT+ or SHIFT+ (CTRL+J, ALT+J, F9...), used while the "
+        + "Controls page has not rebound it; read at start. NONE: no default.", MaxLength = 32)]
     public string Hotkey { get; set; } = "CTRL+J";
 
     [Setting("Show JM button", Hint = "A JM button under the time panel opens the window.")]

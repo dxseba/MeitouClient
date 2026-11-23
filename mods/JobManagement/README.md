@@ -3,8 +3,9 @@
 Port of *Kenshi Job Management (MCM fork)* (workshop 3818460323), a fork of SirixKC's
 [KenshiJobManagement](https://github.com/SirixKC/KenshiJobManagement) (GPL-3.0-only); behaviour read from its source, code our own.
 
-- **Window**: the window key (the fork's `Hotkey`, a free-text setting: a key name with optional `CTRL+`, `ALT+`, `SHIFT+`, default `CTRL+J`,
-  `NONE` for none; a prefix on `GameHotkeys.Key` takes it before the game's own binding, e.g. the Rescue key's second binding J) or the **JM** button
+- **Window**: the window key (a key action, *Job Management window* on the Controls page; its default is the fork's `Hotkey`, a free-text
+  setting read at start: a key name with optional `CTRL+`, `ALT+`, `SHIFT+`, default `CTRL+J`, `NONE` for none, as a chord, which fires before
+  the game's own binding of the key, e.g. the Rescue key's second binding J; a key the page keeps, such as F6 or Escape, falls back to Ctrl+J) or the **JM** button
   under the time panel (overlay, left 486, top 44). Opening saves the clock (`SimulationClock.SaveSpeeds`) and pauses; Close puts it back unless the
   player changed the speed meanwhile. Built from `UiNode`s in `UiSlots.Overlay`; steps run once a frame on the shown snapshot (`AddFrame`); the session (only for the
   clock's pause and speeds, which no public API sets) comes from a `PlayerInterface.BindUi` postfix.
@@ -30,7 +31,7 @@ Port of *Kenshi Job Management (MCM fork)* (workshop 3818460323), a fork of Siri
   the giver only once the receiver's list shows the job. A tick system (`JobBoardSystem`, every 30 ticks) publishes skills and invalid rows: a site
   job whose player building, fixture or seat is gone, or a follow job whose character is gone; rocks, town work sites, unmatched handles and the
   original's protected types (healing, engineering, intruders, foraging, beds) are never judged.
-- **Settings**: enabled, the window key (the fork's `Hotkey`, free text), JM button, the nine station groups (defaults as
+- **Settings**: enabled, the window key's default (the fork's `Hotkey`, free text; the Controls page rebinds it), JM button, the nine station groups (defaults as
   the original: Training, Storage, Defense off). The window's filter buttons change the same values for the session; only the Settings page keeps
   them.
 - **Differences**: one job a drag, no multi-select, clipboard or portraits (a pick and Move/Copy buttons besides the drag); no Tab
@@ -41,4 +42,4 @@ Port of *Kenshi Job Management (MCM fork)* (workshop 3818460323), a fork of Siri
   additions.
 - **Verified** against the fork's DLL (decompiled strings and ini reads): the `General` keys `Enabled`, `Hotkey` (`CTRL+J`), `HudButton` (1),
   `UiScale` (100, 70-200); the per-member Jobs toggle, Clear Queue prompt and station worker line texts. Builds (0 warnings). **Unknown**: all play
-  behaviour (not run in game): the key, the pause, the commands' effect and the layout at small resolutions.
+  behaviour (not run in game): the chord, the pause, the commands' effect and the layout at small resolutions.
