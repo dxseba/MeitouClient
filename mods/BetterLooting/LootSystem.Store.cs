@@ -6,7 +6,7 @@ using Meitou.Simulation.Production;
 
 namespace Meitou.BetterLooting;
 
-/// <summary>Alt+Insert, the original's Store All: the character's loose items into the player's storage; and the fork's ground pickup.</summary>
+/// <summary>Alt + the looting key, the original's Store All: the character's loose items into the player's storage; and the fork's ground pickup.</summary>
 sealed partial class LootSystem
 {
     /// <summary>The fork's cap on queued ground pick-ups per press.</summary>

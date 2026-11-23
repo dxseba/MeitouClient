@@ -39,7 +39,7 @@ static class LootTransfer
         return bagFirst ? IntoBag() || IntoMain() : IntoMain() || IntoBag();
     }
 
-    /// <summary>Money into the player's purse (the engine's own cash step, by reflection); false when it is not reachable.</summary>
+    /// <summary>Money into the player's purse (the engine's own cash step, internal, so by reflection); false when it is not reachable.</summary>
     public static bool Cash(World world, PopulationData data, Inventory owner, ItemInstance item)
     {
         if (CashMethod is null || !owner.Items.Contains(item)) return false;
@@ -48,17 +48,4 @@ static class LootTransfer
         owner.Remove(item);
         return true;
     }
-}
-
-/// <summary>The engine's private equipment refresh (fighter and look from the inventory), by reflection as the captive strip uses it.</summary>
-sealed class EquipmentRefresh(object assembly, MethodInfo refresh)
-{
-    public static EquipmentRefresh? Create(PopulationData data)
-    {
-        var type = AccessTools.TypeByName("Meitou.Simulation.Bodies.CharacterAssembly");
-        var method = type is null ? null : AccessTools.Method(type, "RefreshEquipment");
-        return method is null ? null : new(Activator.CreateInstance(type!, data)!, method);
-    }
-
-    public void Refresh(CharacterCold cold) => refresh.Invoke(assembly, [cold]);
 }

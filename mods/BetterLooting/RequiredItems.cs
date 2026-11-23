@@ -5,7 +5,7 @@ using Meitou.Simulation.Items;
 namespace Meitou.BetterLooting;
 
 /// <summary>
-/// The fork's "Always take these items" list (<c>BetterLooting.ini</c> <c>[Rules] RequiredItems</c>): exact item names or record ids that skip
+/// The fork's "Always take these items" list (its ini's <c>[Rules] RequiredItems</c>; here a text setting): exact item names or record ids that skip
 /// the category, minimum value and value-per-kg rules (never the theft rule, storage protection, range or room). Entries are split by <c>;</c>,
 /// <c>|</c> or a new line; <c>name:</c> matches the shown or base name ignoring ASCII case, <c>id:</c> the record id exactly, an entry without a
 /// prefix either. At most 128 entries; a value over 8191 UTF-8 bytes disables the list.
@@ -96,33 +96,5 @@ public sealed class RequiredItems
         if (_ids.Contains(item.Record) || _names.Contains(item.Name)) return true;
 
         return db.Find(item.Record) is { } record && (_names.Contains(record.Name) || _names.Contains(record.BaseName));
-    }
-
-    /// <summary>
-    /// The <c>RequiredItems</c> value of <c>BetterLooting.ini</c> in the mod folder (<c>[Rules]</c>); null without the file or key.
-    /// </summary>
-    public static string? ReadIni(string folder)
-    {
-        var path = Path.Combine(folder, "BetterLooting.ini");
-        if (!File.Exists(path)) return null;
-
-        string? section = null;
-        foreach (var line in File.ReadLines(path))
-        {
-            var text = line.Trim();
-            if (text.StartsWith('[') && text.EndsWith(']')) section = text[1..^1].Trim();
-            else if (string.Equals(section, "Rules", StringComparison.OrdinalIgnoreCase) && Value(text, "RequiredItems") is { } value) return value;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The value of a <c>key=value</c> line for that key; null for another line.
-    /// </summary>
-    static string? Value(string line, string key)
-    {
-        int eq = line.IndexOf('=');
-        return eq > 0 && string.Equals(line[..eq].Trim(), key, StringComparison.OrdinalIgnoreCase) ? line[(eq + 1)..].Trim() : null;
     }
 }

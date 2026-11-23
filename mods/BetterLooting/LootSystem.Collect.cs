@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Simulation;
+using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Crime;
 using Meitou.Simulation.Items;
 
@@ -8,7 +9,7 @@ namespace Meitou.BetterLooting;
 /// <summary>A place to loot: its inventory, the body's slot (-1 for storage) and its distance from the looter.</summary>
 readonly record struct LootSource(Inventory Inventory, int Body, float Distance);
 
-/// <summary>Insert: the bodies round the lead, nearest first, then the ground.</summary>
+/// <summary>The looting key: the bodies round the lead, nearest first, then the ground.</summary>
 sealed partial class LootSystem
 {
     void Collect(World world, int lead, CharacterCold looter)
@@ -97,7 +98,7 @@ sealed partial class LootSystem
             worn |= moved > 0 && equipment;
         }
 
-        if (worn && victim is not null) _refresh?.Refresh(victim);
+        if (worn && victim is not null) CharacterRefresh.Refresh(data, victim, CharacterRefreshKind.Equipment);
         if (units > 0 && theft) world.Systems.OfType<CrimeSystem>().FirstOrDefault()?.Loot(world, lead, source.Body);
         return units;
     }

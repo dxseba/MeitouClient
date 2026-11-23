@@ -5,12 +5,8 @@ namespace Meitou.BetterLooting;
 /// <summary>The original's BetterLooting.ini rules and the fork's extras, same defaults (BetterLootingRules.h <c>g_betterLootingRules</c>).</summary>
 public sealed class LootSettings
 {
-    [Setting("Better Looting", Hint = "Insert with the inventory open: loot nearby bodies. Alt+Insert: store your items in nearby storage.")]
+    [Setting("Better Looting", Hint = "The looting key (Controls page) with the inventory open: loot nearby bodies. With Alt: store your items nearby.")]
     public bool Enabled { get; set; } = true;
-
-    [Setting("Looting key", Hint = "Key that collects loot around the selected character; with Alt it deposits.",
-        Options = ["Insert", "Delete", "Home", "End", "PageUp", "PageDown"])]
-    public string LootingKey { get; set; } = "Insert";
 
     [Setting("Deposit only by looting rules", Hint = "Off: every item that is not worn is put away. On: only items that pass the looting rules.")]
     public bool DepositByRules { get; set; }
@@ -39,6 +35,10 @@ public sealed class LootSettings
 
     [Setting("Ground pickup", Hint = "Also queue pick-up orders for up to 32 qualifying items on the ground, nearest first.")]
     public bool GroundPickup { get; set; }
+
+    [Setting("Always take these items", Hint = "Names or record ids split by ; or | (name: or id: to say which); they skip the category and price rules.",
+        MaxLength = ModSetting.MaxTextLength)]
+    public string RequiredItems { get; set; } = "";
 
     [Setting("Weapons")]
     public bool Weapons { get; set; } = true;

@@ -7,8 +7,8 @@ using Meitou.Simulation.Trading;
 namespace Meitou.BetterLooting;
 
 /// <summary>
-/// A loot key press: the character whose inventory window was open, Alt (store instead of loot) and the "Always take these items" list read
-/// from <c>BetterLooting.ini</c> at the press.
+/// A loot key press: the character whose inventory window was open, Alt (store instead of loot) and the "Always take these items" list as
+/// set at the press.
 /// </summary>
 public sealed record LootRequest(CharacterId Lead, bool Deposit, RequiredItems Required);
 
@@ -21,8 +21,6 @@ readonly record struct LootCandidate(ItemInstance Item, Inventory Owner, int Val
 /// </summary>
 sealed partial class LootSystem(PopulationData data) : ITickSystem
 {
-    readonly EquipmentRefresh? _refresh = EquipmentRefresh.Create(data);
-
     static LootSettings Settings => BetterLootingMod.Settings;
 
     /// <summary>
