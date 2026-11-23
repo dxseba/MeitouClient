@@ -5,8 +5,9 @@ using Meitou.Modding;
 namespace Meitou.WorkForCats;
 
 /// <summary>
-/// The separate employment window (the original's, on by default): while a workplace is inspected, its employer, the selected character's skill
-/// and hourly rate, and Get a job / Quit job. The view comes from the running system (<see cref="WorkSystem.View"/>); a press queues a command.
+/// The separate employment window (the original's, on by default) and the panel under each open window of the workplace (the original adds one to
+/// every inventory window of an eligible building): the rate line for the selected character and Get a job / Quit job. The view comes from the
+/// running system (<see cref="WorkSystem.View"/>); a press queues a command.
 /// </summary>
 internal sealed class EmploymentWindow(ModContext context) : IUiExtension
 {
@@ -29,6 +30,36 @@ internal sealed class EmploymentWindow(ModContext context) : IUiExtension
         string hire = registration.RegisterAction("hire", _ => Hire());
         string quit = registration.RegisterAction("quit", _ => Quit());
         registration.Contribute(UiSlots.Overlay, _ => Build(styles, hire, quit), order: 55);
+        foreach (var screen in WorkplaceScreens)
+            registration.AddScreenControls(screen, "Root", UiAnchorPlacement.Below, c => Panel(c, styles, hire, quit));
+    }
+
+    /// <summary>
+    /// The building, bench and storage windows, the shown one's and the selected building's own.
+    /// </summary>
+    static readonly string[] WorkplaceScreens = ["building", "bench", "storage", "building-own", "bench-own", "storage-own"];
+
+    /// <summary>
+    /// The panel just under a workplace's window while it is the inspected workplace: the rate line (or why it offers no job) and the button.
+    /// </summary>
+    static UiNode? Panel(UiScreenContext context, Styles styles, string hire, string quit)
+    {
+        if (WorkForCatsMod.Running?.View is not { } view || context.Building is null || context.Building != view.Site) return null;
+        if (view.Refusal is not null && !view.EmployedHere) return null;
+
+        var lines = Lines(view).Skip(1).ToList();
+        var panel = new UiNode("workforcats-panel")
+        {
+            Placement = new(UiLength.Fill, 8 + lines.Count * (Line + 1) + Line + 4),
+            Style = styles.Panel,
+            Flow = UiFlow.Column,
+            Padding = 4,
+            Gap = 1,
+        };
+
+        for (int i = 0; i < lines.Count; i++) panel.Children.Add(Label($"workforcats-panel-line-{i}", lines[i], styles.Text));
+        panel.Children.Add(Button(view, styles.Button, hire, quit));
+        return panel;
     }
 
     readonly record struct Styles(string Panel, string Text, string Button);

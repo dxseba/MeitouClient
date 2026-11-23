@@ -1,6 +1,7 @@
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Modding;
 using Meitou.Simulation;
+using Meitou.Simulation.Ai;
 
 namespace Meitou.WorkForCats;
 
@@ -27,7 +28,7 @@ public sealed class WorkForCatsMod : IMod
     {
         context.AddSettings(Settings);
         context.AddJobType(JobType, "Paid work");
-        context.AddSystem("work", _ => Running = new WorkSystem(Settings, context.Population), SystemAnchor.End);
+        context.AddSystem("work", build => Running = new WorkSystem(Settings, context.Population, build.Find<AiSystem>()), SystemAnchor.End);
         context.AddUi(new EmploymentWindow(context));
         context.Log("Work for Cats initialized");
     }

@@ -5,7 +5,8 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
 
 - **Employment window** (`UiSlots.Overlay`, *Show employment window*): while the HUD inspects an eligible workplace
   (`PlayerState.InspectedBuilding`), a window titled with the building, the rate line and **Get a job** / **Quit job** for the first selected
-  character. The press queues `HireOrder` / `QuitOrder`, applied in the system's `Inputs`.
+  character. The press queues `HireOrder` / `QuitOrder`, applied in the system's `Inputs`. The same rate line and button show in a panel under
+  the workplace's own building, bench or storage window (`AddScreenControls(..., "Root", Below, ...)`) while it is the inspected one.
 - **Workplaces** (`Workplaces.cs`): a registry building, a town's level building or an object of its layout; `MachineData.From` decides.
 - **The job** (`AddJobType`, task type 4290, "Paid work"): hiring puts the mod job first in the job list and turns Jobs on; its handler walks to
   the functionality's `use range` and stands at the work clip. Player orders pause it; removing the job quits.
@@ -22,7 +23,8 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
   (Iron Refinery), `1512-gamedata.base` (Ore Processor), `42248-gamedata.base`, `42249-gamedata.base` (Iron, Copper Resource),
   `14521-rebirth.mod` (Iron Rock). **Verified** (original source). Meitou also refuses training dummies, turrets, ruins and automatic machines.
 - **Working**: a living, conscious player character out of combat, doing its operate action on the bench with Jobs on and the bench job in its
-  list, holding an operator slot. **Verified** (original source). Meitou: at the station at the work clip; no slot is held (below).
+  list, holding an operator slot. **Verified** (original source). Meitou: at the station at the work clip; a hire needs a free operator slot
+  (`AiSystem.WorkSlots(site).Free`, "Every station here is taken."), but the employee then holds none, so NPCs may still fill the station.
 - **Wage** per in-game hour: lerp(WageAtSkill0, WageAtSkill100, clamp(skill, 0, 100) / 100) x (1 + clamp(relation, 0, 100) / 100 x
   BonusPercentAt100 / 100), the bonus only with RelationBonusEnabled at a foreign workplace. Hours and cats accrue while working; at a full hour
   the whole cats earned less the overshoot's share at the current rate are paid, the rest carries. Quitting discards the unfinished hour.
@@ -37,9 +39,9 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
 
 ## Missing
 
-- The employment panel inside a workbench's inventory window (the original adds one to every open inventory of an eligible building): no
-  extension point for inventory windows.
-- An operator slot for the employee: the AI's slot count (`AiSystem._workTaken`) is internal, so an NPC may stand at the same station.
+- Holding an operator slot for the employee: `WorkSlots` is read only, so an NPC may take the station after the hire.
+- The panel shows only in the windows the engine opens for a building (its own machine windows); whether an NPC town's bench opens one is not
+  checked.
 - Russian captions.
 - The original's approach (to within 3 units of the building's position marker, retries after 0.5 or 2 s) is Meitou's walk to the use range,
   with a 60 s wait after three short walks.

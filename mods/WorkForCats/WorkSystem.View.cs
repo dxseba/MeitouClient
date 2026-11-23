@@ -22,7 +22,7 @@ internal sealed partial class WorkSystem
 
     void Publish(World world)
     {
-        var lookup = _finder.Find(world, world.Player.InspectedBuilding, _rules);
+        var lookup = Find(world, world.Player.InspectedBuilding);
         _view = lookup.Place is { } place ? ViewOf(world, place, lookup.Refusal) : null;
     }
 

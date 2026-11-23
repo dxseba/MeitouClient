@@ -42,12 +42,14 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
     readonly WorkJob _job;
     readonly Dictionary<CharacterId, Employee> _employees = [];
     readonly SortedDictionary<string, double> _relationHours = new(StringComparer.Ordinal);
+    readonly AiSystem? _ai;
     WorkRules _rules = WorkRules.Defaults;
 
-    public WorkSystem(WorkSettings settings, PopulationData data)
+    public WorkSystem(WorkSettings settings, PopulationData data, AiSystem? ai)
     {
         _settings = settings;
         _data = data;
+        _ai = ai;
         _finder = new WorkplaceFinder(data);
         _job = new WorkJob(this);
         _rules = settings.Rules();
@@ -74,6 +76,18 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
 
         Sweep(world);
         Publish(world);
+    }
+
+    /// <summary>
+    /// The workplace of <paramref name="site"/> and why it offers no job; a new hire also needs one of its operator slots free (the AI's
+    /// <c>WorkSlots</c>: the original's employee holds one, so a full station takes nobody).
+    /// </summary>
+    Lookup Find(World world, string? site)
+    {
+        var lookup = _finder.Find(world, site, _rules);
+        if (lookup.Eligible is null || site is null || _ai?.WorkSlots(site) is not { Free: false }) return lookup;
+
+        return lookup with { Refusal = "Every station here is taken." };
     }
 
     /// <summary>
@@ -118,7 +132,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
         var table = world.Characters;
         if (!table.TryResolveNext(order.Actor, out int slot) || table.Cold(slot) is not { IsPlayer: true, Medical.Dead: false } cold) return;
 
-        var lookup = _finder.Find(world, order.Site, _rules);
+        var lookup = Find(world, order.Site);
         if (lookup.Eligible is not { } place)
         {
             world.Post(lookup.Refusal ?? "This building offers no employment.");
