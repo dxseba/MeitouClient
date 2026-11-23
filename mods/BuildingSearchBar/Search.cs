@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Modding;
 
 namespace Meitou.BuildingSearchBar;
 
@@ -19,9 +20,9 @@ static class Search
     public const int MaxResults = 80;
 
     /// <summary>
-    /// The interface seen in the last frame.
+    /// The mod's interface actions (the build window's entries and choice); set at start.
     /// </summary>
-    static object? s_player;
+    static ModInterface? s_ui;
 
     /// <summary>
     /// The query as typed.
@@ -54,15 +55,20 @@ static class Search
     public static Vector2? BuildOrigin { get; private set; }
 
     /// <summary>
-    /// The frame's interface and build window state; closing the window clears the search.
+    /// Binds the mod's interface actions.
     /// </summary>
-    public static void Frame(object player, bool open)
+    public static void Bind(ModInterface ui) => s_ui = ui;
+
+    /// <summary>
+    /// Once a frame on the host's thread: whether the build window is open and where; closing it clears the search.
+    /// </summary>
+    public static void Frame()
     {
-        s_player = player;
+        bool open = s_ui?.IsOpen(ModScreen.Build) ?? false;
         if (!open && BuildOpen) Clear();
 
         BuildOpen = open;
-        BuildOrigin = open ? BuildAccess.BuildWindowOrigin(player) : null;
+        BuildOrigin = open && s_ui!.ScreenBounds(ModScreen.Build) is { } bounds ? new Vector2(bounds.X, bounds.Y) : null;
     }
 
     /// <summary>
@@ -91,7 +97,7 @@ static class Search
     static void Refresh()
     {
         string q = Query.Trim();
-        Results = q.Length == 0 || s_player is null ? [] : [.. BuildAccess.Entries(s_player).Where(e => e.Matches(q)).Take(MaxResults)];
+        Results = q.Length == 0 || s_ui is null ? [] : [.. s_ui.BuildEntries().Select(e => new SearchEntry(e)).Where(e => e.Matches(q)).Take(MaxResults)];
     }
 
     /// <summary>
@@ -99,10 +105,10 @@ static class Search
     /// </summary>
     public static void Choose(int index)
     {
-        if (s_player is null || index < 0 || index >= Results.Count) return;
+        if (s_ui is null || index < 0 || index >= Results.Count) return;
 
         Chosen = index;
-        BuildAccess.Choose(s_player, Results[index]);
+        s_ui.ChooseBuild(Results[index].Entry.Building);
     }
 
     /// <summary>
@@ -117,4 +123,25 @@ static class Search
     /// The status line: "chosen/count" once one is chosen, else the count; empty without a query.
     /// </summary>
     public static string Status => Query.Trim().Length == 0 ? "" : Chosen >= 0 ? $"{Chosen + 1}/{Results.Count}" : $"{Results.Count}";
+}
+
+/// <summary>
+/// One building of the build window (<see cref="UiBuildEntry"/>) as a search result.
+/// </summary>
+sealed record SearchEntry(UiBuildEntry Entry)
+{
+    /// <summary>
+    /// The result row's text: the name, then the group in brackets when it has one other than the name.
+    /// </summary>
+    public string Caption => Entry.Group.Length > 0 && Entry.Group != Entry.Name ? $"{Entry.Name} [{Entry.Group}]" : Entry.Name;
+
+    /// <summary>
+    /// Whether the query is in the name, group, category or string id, ignoring case.
+    /// </summary>
+    public bool Matches(string query) => Has(Entry.Name, query) || Has(Entry.Group, query) || Has(Entry.Category, query) || Has(Entry.Building, query);
+
+    /// <summary>
+    /// Whether <paramref name="text"/> contains the query, ignoring case.
+    /// </summary>
+    static bool Has(string text, string query) => text.Contains(query, StringComparison.OrdinalIgnoreCase);
 }

@@ -6,25 +6,30 @@ namespace Meitou.BuildingSearchBar;
 
 /// <summary>
 /// The SEARCH window while the build window is open, laid out as the original's (468 by 430, placed just above the build window's top-left):
-/// "Search", the query box, a clear and a Next button, the status line and the results list (13 rows shown, up and down buttons page through
-/// longer lists). Its caption's fold button shrinks it to a SEARCH button, which opens it again.
+/// "Search", the query box, a clear and a Next button, the status line and the results list (a scroll view). Dragging its caption moves it; its
+/// caption's fold button shrinks it to a SEARCH button, which opens it again.
 /// </summary>
 sealed class SearchWindow : IUiExtension
 {
     /// <summary>
     /// The original's window and widget sizes.
     /// </summary>
-    const int Width = 468, Height = 430, Caption = 28, Row = 22, Rows = 13, ToggleWidth = 170, ToggleHeight = 26;
+    const int Width = 468, Height = 430, Caption = 28, Row = 22, ListHeight = 306, ToggleWidth = 170, ToggleHeight = 26;
 
     /// <summary>
-    /// The first result row shown.
+    /// How far the player dragged the window from its place by the build window, pixels (kept for the session).
     /// </summary>
-    int _top;
+    Vector2 _moved;
+
+    /// <summary>
+    /// Bumped by each new query, so the results list (its scroll offset kept by node id) starts at the top again.
+    /// </summary>
+    int _generation;
 
     /// <summary>
     /// Registered style and action keys.
     /// </summary>
-    string _panel = "", _text = "", _row = "", _chosenRow = "", _typed = "", _clear = "", _next = "", _pick = "", _fold = "", _page = "";
+    string _panel = "", _text = "", _row = "", _chosenRow = "", _typed = "", _clear = "", _next = "", _pick = "", _fold = "", _drag = "";
 
     public string Id => "dxseba.buildingsearchbar.ui";
 
@@ -40,7 +45,7 @@ sealed class SearchWindow : IUiExtension
         _next = registration.RegisterAction("next", _ => Next());
         _pick = registration.RegisterAction("pick", c => Search.Choose(int.Parse(c.Argument)));
         _fold = registration.RegisterAction("fold", _ => Search.Collapsed = !Search.Collapsed);
-        _page = registration.RegisterAction("page", c => Page(int.Parse(c.Argument)));
+        _drag = registration.RegisterAction("drag", Dragged);
         registration.Contribute(UiSlots.Overlay, Build, order: 61);
     }
 
@@ -52,22 +57,21 @@ sealed class SearchWindow : IUiExtension
     void Typed(string text)
     {
         Search.Set(text);
-        _top = 0;
+        _generation++;
     }
 
     /// <summary>
-    /// Next, keeping the chosen row in view.
+    /// Next: the following result.
     /// </summary>
-    void Next()
+    static void Next() => Search.Next();
+
+    /// <summary>
+    /// A drag of the caption moves the window (and its folded button) by the pointer's movement.
+    /// </summary>
+    void Dragged(UiActionContext c)
     {
-        Search.Next();
-        if (Search.Chosen < _top || Search.Chosen >= _top + Rows) _top = Math.Max(0, Search.Chosen - Rows / 2);
+        if (c.Kind == UiEventKind.Drag) _moved += c.Delta;
     }
-
-    /// <summary>
-    /// A page up (-1) or down (1).
-    /// </summary>
-    void Page(int step) => _top = Math.Clamp(_top + step * Rows, 0, Math.Max(0, Search.Results.Count - Rows));
 
     #endregion
 
@@ -81,7 +85,7 @@ sealed class SearchWindow : IUiExtension
         if (!Search.BuildOpen) return new UiNode("bsb-hidden") { Visible = false };
 
         var root = new UiNode("bsb") { Placement = UiPlacement.Fill, Pickable = false };
-        var origin = Search.BuildOrigin ?? new Vector2(6, Height + 28);
+        var origin = (Search.BuildOrigin ?? new Vector2(6, Height + 28)) + _moved;
         root.Children.Add(Search.Collapsed ? Toggle(origin) : Window(origin));
         return root;
     }
@@ -104,7 +108,11 @@ sealed class SearchWindow : IUiExtension
         {
             Placement = new(Width, Height, Left: Math.Max(6, origin.X), Top: Math.Max(20, origin.Y - Height - 8)), Style = _panel,
         };
-        window.Children.Add(Label("bsb-caption", "SEARCH", 8, 4, Width - 48, Caption - 6));
+        window.Children.Add(new UiNode("bsb-caption", UiNodeKind.Label)
+        {
+            Placement = new(Width - 48, Caption - 6, Left: 8, Top: 4), Text = "SEARCH", Style = _text, Pickable = true, Pointer = UiPointerEvents.Drag,
+            Action = _drag,
+        });
         window.Children.Add(Button("bsb-fold", "-", Width - 34, 4, 26, Caption - 6, _fold));
         AddSearchLine(window);
         AddResults(window);
@@ -123,26 +131,29 @@ sealed class SearchWindow : IUiExtension
         });
         window.Children.Add(Button("bsb-clear", "X", 384, Caption + 16, 30, 30, _clear, Search.Query.Length > 0));
         window.Children.Add(Button("bsb-next", ">", 420, Caption + 16, 30, 30, _next, Search.Results.Count > 0));
-        window.Children.Add(Label("bsb-status", Search.Status, 16, Caption + 52, 380, 22));
-        window.Children.Add(Button("bsb-up", "^", 400, Caption + 52, 24, 22, _page, _top > 0, "-1"));
-        window.Children.Add(Button("bsb-down", "v", 428, Caption + 52, 24, 22, _page, _top + Rows < Search.Results.Count, "1"));
+        window.Children.Add(Label("bsb-status", Search.Status, 16, Caption + 52, 436, 22));
     }
 
     /// <summary>
-    /// The shown rows of the results list; a click chooses that building.
+    /// The results list, scrolled by its bar or the wheel; a click on a row chooses that building.
     /// </summary>
     void AddResults(UiNode window)
     {
-        var results = Search.Results;
-        _top = Math.Clamp(_top, 0, Math.Max(0, results.Count - Rows));
-        for (int i = _top; i < Math.Min(results.Count, _top + Rows); i++)
+        var list = new UiNode($"bsb-results{_generation}", UiNodeKind.ScrollView)
         {
-            window.Children.Add(new UiNode($"bsb-row{i - _top}", UiNodeKind.Button)
+            Placement = new(436, ListHeight, Left: 16, Top: Caption + 76), Flow = UiFlow.Column, ScrollStep = Row,
+        };
+        var results = Search.Results;
+        for (int i = 0; i < results.Count; i++)
+        {
+            list.Children.Add(new UiNode($"bsb-row{i}", UiNodeKind.Button)
             {
-                Placement = new(436, Row, Left: 16, Top: Caption + 76 + (i - _top) * Row), Text = results[i].Caption, Action = _pick,
+                Placement = new(UiLength.Percent(100), Row), Text = results[i].Caption, Action = _pick,
                 Argument = i.ToString(System.Globalization.CultureInfo.InvariantCulture), Style = i == Search.Chosen ? _chosenRow : _row,
             });
         }
+
+        window.Children.Add(list);
     }
 
     /// <summary>

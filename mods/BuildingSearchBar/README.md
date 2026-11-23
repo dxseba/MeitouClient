@@ -10,17 +10,15 @@ Port of *Building Search Bar* (workshop 3786979230, GPLv3), rebuilt from its des
   `n` matches, or `i/n` once one was chosen. The build window's own lists are not filtered. The caption's fold button shrinks the window to
   a SEARCH button, which opens it again. Closing the build window clears the search.
 - **Place**: as the original, the window's left edge at the build window's (at least 6 px), its bottom 8 px above the build window's top
-  (its top at least 20); folded, the button 30 px right of that edge and 28 px above the top. The build window's place is read by
-  reflection (`MyGuiScreenHost` screen `build`, `Placed`); without it the window sits at the left.
-- **Hooks**: a postfix on `PlayerInterface.BindUi` notes the interface each frame; `BuildMode`'s lists and choice are read and set by
-  reflection (`BuildCategories`, `Unlocked`, `Services.Menu.Groups`, `_buildCategory`, `_buildGroup`, `BuildMember`, `BuildDiscarded`,
-  `FollowChoiceInLists`).
+  (its top at least 20); folded, the button 30 px right of that edge and 28 px above the top. Dragging the caption moves the window (and the
+  folded button) from there for the session. Without the build window's place the window sits at the left.
+- **Hooks**: `ModContext.Interface` (`IsOpen` / `ScreenBounds(ModScreen.Build)`, polled in `AddFrame`; `BuildEntries`, `ChooseBuild`); the
+  results are a `ScrollView` (bar and wheel), back at the top for each new query. No Harmony or reflection.
 - **Verified** (original DLL, decompiled): widget names and sizes (window `BuildSearch_Window` `Kenshi_WindowCX` 468x430 captioned
   "SEARCH"; toggle `Kenshi_Button1` 170x26; label "Search" 16,16 56x24; `Kenshi_EditBox` 92,16 286x30; clear 384,16 and next 420,16 30x30;
   status 16,52 436x22; results `Kenshi_ListBoxEmpty` 16,76 436x306); the placement rule above; the list cap of 80; a result's text is the
   name plus ` [` field `]` when that field is set; the status `i/n` or `n`; Next wraps; the index is rebuilt from the build window's visible
   categories and groups; the haystack is lower-cased (ASCII `tolower`). Translations (en, de, es, fr, ja, ko, pt, ru, zh) hold only
   "SEARCH" and "Search".
-- **Differences**: the window cannot be dragged (mod UI nodes get no drag events: engine gap); its list pages with ^ / v buttons instead of
-  a scroll bar; texts are English only.
+- **Differences**: Next does not scroll its row into view (no API sets a scroll view's offset); texts are English only.
 - **Unknown**: which field the original shows in brackets (group or category; the port shows the group); look and typing in game untested.
