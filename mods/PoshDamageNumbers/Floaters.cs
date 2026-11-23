@@ -1,10 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
-using System.Reflection;
-using HarmonyLib;
-using Meitou.Data.Ui;
-using Meitou.Game.Host;
 using Meitou.Modding;
 using Meitou.Simulation;
 
@@ -26,39 +22,26 @@ sealed class Floater
 /// <summary>
 /// The numbers' life on the host thread (<b>Verified</b>, <c>damage_numbers.lua</c> <c>spawn</c>, <c>addToFloater</c>, <c>animate</c>): a hit
 /// opens a "-N" floater, or adds to its victim's last one while it is younger than the merge window + 0.05 s; each frame the floaters age by
-/// real time and are laid out in the HUD bindings by a postfix on <c>PlayerInterface.BindUi</c> (projection by its <c>Project</c>).
+/// real time once a frame (<see cref="Meitou.Modding.ModContext.AddFrame"/>, projection by <see cref="ModFrame.Project"/>) into
+/// <see cref="Drawn"/>, which the overlay draws. Healing (<c>ShowHealing</c>) is summed per character over a second of real time and shown as a
+/// green "+N" from <c>HealingThreshold</c>.
 /// </summary>
 static class Floaters
 {
-    public const string Key = "posh.dmg.";
-    public const int Slots = 40;
     const float TypicalHeight = 18, HeadShare = 0.95f;
-
-    static readonly Vector3 Light = Hex(0xFFF5DB), Medium = Hex(0xFFD140), Heavy = Hex(0xFF7A1F), Squad = Hex(0xFF4040);
-    static readonly Vector3 Ko = Hex(0x96BFFF), Limb = Hex(0xFF593D), Dead = Hex(0xD91A1A);
 
     static readonly List<Floater> Active = [];
     static readonly Dictionary<CharacterId, Floater> LastOf = [];
     static readonly Dictionary<CharacterId, float> LastSide = [];
+    static readonly Dictionary<CharacterId, (float Healed, double Since)> Healing = [];
     static readonly Stopwatch Clock = Stopwatch.StartNew();
     static readonly Random Jitter = new();
     static double s_lastFrame;
-    static FieldInfo? s_sessionField;
-    static MethodInfo? s_project;
+
+    /// <summary>The floaters as laid out this frame, for <see cref="NumbersUi"/> (host thread).</summary>
+    public static IReadOnlyList<DrawnFloater> Drawn { get; private set; } = [];
 
     static DamageSettings Settings => PoshDamageNumbersMod.Settings;
-
-    static Vector3 Hex(uint rgb) => new(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f);
-
-    public static void Install(ModContext context)
-    {
-        var type = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
-        s_sessionField = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Single(f => f.FieldType == typeof(WorldSession));
-        s_project = AccessTools.Method(type, "Project", [typeof(Vector3)]) ?? throw new MissingMethodException(type.FullName, "Project");
-        var bind = AccessTools.Method(type, "BindUi") ?? throw new MissingMethodException(type.FullName, "BindUi");
-        context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(Floaters), nameof(Bound)));
-    }
 
     #region Spawning
 
@@ -67,7 +50,26 @@ static class Floaters
         while (HitWatch.Queue.TryDequeue(out var shown))
         {
             if (shown is DamageShown d) Damage(d);
+            else if (shown is HealShown h) Heal(h);
             else if (shown is WordShown w) Spawn(WordFloater(w));
+        }
+    }
+
+    /// <summary>Healing adds up per character; once its second is over, a "+N" when it reached the threshold (the original's window).</summary>
+    static void Heal(HealShown h)
+    {
+        var (healed, since) = Healing.GetValueOrDefault(h.Victim, (0, Clock.Elapsed.TotalSeconds));
+        Healing[h.Victim] = (healed + h.Healed, since);
+    }
+
+    static void EndHealing(double now)
+    {
+        foreach (var (victim, (healed, since)) in Healing.Where(h => now - h.Value.Since >= 1).ToList())
+        {
+            Healing.Remove(victim);
+            if (healed < Settings.HealingThreshold) continue;
+
+            Spawn(NumberFloater(victim, MathF.Floor(healed + 0.5f), 0, "+", Settings.Heal));
         }
     }
 
@@ -80,18 +82,23 @@ static class Floaters
             return;
         }
 
-        float side = -LastSide.GetValueOrDefault(d.Victim, 1);
-        LastSide[d.Victim] = side;
-        float ratio = Math.Clamp(d.Ratio, 0, 1);
-        bool big = d.Ratio >= 0.3f;
-        f = new Floater
+        f = NumberFloater(d.Victim, value, d.Ratio, "-", d.Squad ? Settings.Squad : Severity(d.Ratio));
+        Spawn(f);
+        LastOf[d.Victim] = f;
+    }
+
+    /// <summary>A "-N" or "+N" floater, its size and life by the ratio, on the side opposite the victim's last one.</summary>
+    static Floater NumberFloater(CharacterId victim, float value, float ratio, string sign, Vector3 colour)
+    {
+        float side = -LastSide.GetValueOrDefault(victim, 1);
+        LastSide[victim] = side;
+        bool big = ratio >= 0.3f;
+        return new Floater
         {
-            Victim = d.Victim, Text = "-" + Whole(value), Colour = d.Squad ? Squad : Severity(d.Ratio), Size = 0.86f + ratio * 0.7f,
+            Victim = victim, Text = sign + Whole(value), Colour = colour, Size = 0.86f + Math.Clamp(ratio, 0, 1) * 0.7f,
             Life = (big ? 1.35f : 1.05f) * Settings.Duration, Rise = 1.25f * Settings.Rise, Lift = 0, Side = side,
             Jitter = (Jitter.NextSingle() - 0.5f) * 0.35f, Big = big, IsWord = false, Value = value,
         };
-        Spawn(f);
-        LastOf[d.Victim] = f;
     }
 
     /// <summary>Another hit within the merge window: the total grows, the number grows a little and pops again from mid-pop.</summary>
@@ -111,7 +118,7 @@ static class Floaters
     {
         Victim = w.Victim,
         Text = w.Word switch { Word.Knockout => "KNOCKOUT", Word.Severed => "SEVERED", _ => "KILLED" },
-        Colour = w.Word switch { Word.Knockout => Ko, Word.Severed => Limb, _ => Dead },
+        Colour = w.Word switch { Word.Knockout => Settings.Ko, Word.Severed => Settings.Limb, _ => Settings.Dead },
         Size = 1.05f, Life = 1.7f * Settings.Duration, Rise = 0.9f * Settings.Rise, Lift = 1.15f, Side = 0, Jitter = (Jitter.NextSingle() - 0.5f) * 0.35f,
         Big = w.Word != Word.Knockout, IsWord = true,
     };
@@ -123,9 +130,13 @@ static class Floaters
     }
 
     /// <summary>Light to medium up to 12% of the part's health, then medium to heavy by 37%.</summary>
-    static Vector3 Severity(float ratio) => ratio < 0.12f
-        ? Vector3.Lerp(Light, Medium, ratio / 0.12f)
-        : Vector3.Lerp(Medium, Heavy, Math.Clamp((ratio - 0.12f) / 0.25f, 0, 1));
+    static Vector3 Severity(float ratio)
+    {
+        var light = Settings.Light;
+        var medium = Settings.Medium;
+        var heavy = Settings.Heavy;
+        return ratio < 0.12f ? Vector3.Lerp(light, medium, ratio / 0.12f) : Vector3.Lerp(medium, heavy, Math.Clamp((ratio - 0.12f) / 0.25f, 0, 1));
+    }
 
     static string Whole(float v) => ((long)v).ToString(CultureInfo.InvariantCulture);
 
@@ -133,43 +144,46 @@ static class Floaters
 
     #region Frame
 
-#pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    static void Bound(object __instance, UiBindings __result)
-#pragma warning restore IDE1006
+    /// <summary>Once a frame: takes the new hits, ages the floaters by real time and lays them out over their characters.</summary>
+    public static void Frame(ModFrame frame)
     {
         double now = Clock.Elapsed.TotalSeconds;
         float dt = (float)Math.Clamp(now - s_lastFrame, 0, 0.25);
         s_lastFrame = now;
         Take();
-        if (!Settings.Enabled || s_sessionField?.GetValue(__instance) is not WorldSession session)
+        EndHealing(now);
+        if (!Settings.Enabled)
         {
             Active.Clear();
+            Drawn = [];
             return;
         }
 
-        var characters = session.CurrentSnapshot.Characters.ToDictionary(c => c.Id);
-        int slot = 0;
+        var characters = frame.Snapshot.Characters.ToDictionary(c => c.Id);
+        var drawn = new List<DrawnFloater>(Active.Count);
         for (int i = 0; i < Active.Count; i++)
         {
             var f = Active[i];
             f.Age += dt;
-            if (f.Age >= f.Life || !Place(__instance, f, characters))
+            if (f.Age >= f.Life || !Place(frame, f, characters))
             {
                 Active.RemoveAt(i--);
                 if (LastOf.GetValueOrDefault(f.Victim) == f) LastOf.Remove(f.Victim);
                 continue;
             }
 
-            if (slot < Slots) __result.Text[Key + slot++] = Binding(f);
+            drawn.Add(Layout(f));
         }
+
+        Drawn = drawn;
     }
 
     /// <summary>The floater's anchor over the victim's head and the victim's height on screen; the last ones once it is gone.</summary>
-    static bool Place(object ui, Floater f, Dictionary<CharacterId, CharacterSnapshot> characters)
+    static bool Place(ModFrame frame, Floater f, Dictionary<CharacterId, CharacterSnapshot> characters)
     {
         if (characters.TryGetValue(f.Victim, out var c)
-            && s_project!.Invoke(ui, [c.Position]) is Vector2 feet
-            && s_project.Invoke(ui, [c.Position + new Vector3(0, TypicalHeight, 0)]) is Vector2 top)
+            && frame.Project(c.Position) is { } feet
+            && frame.Project(c.Position + new Vector3(0, TypicalHeight, 0)) is { } top)
         {
             f.LastBody = MathF.Abs(feet.Y - top.Y);
             f.Last = Vector2.Lerp(feet, top, HeadShare);
@@ -179,37 +193,38 @@ static class Floaters
     }
 
     /// <summary>
-    /// "x|y|bodyPx|size|pop|dx|dy|shakeX|shakeY|#RRGGBB|text" for <see cref="NumbersUi"/>: the original's pop (0.35 to 1.28 in 0.1 s, back to 1 by 0.24 s, then 12% smaller
-    /// while fading from 62% of its life), its rise (easeOutQuad of the life), its sideways arc (side x 0.55 + jitter, easeOutCubic), the big hit's
-    /// shake (4 px at 1080p for 0.18 s) and the white flash (0.12 s). The offsets are in multiples of the number's base height, which the
-    /// interface works out from the character's height on screen.
+    /// The floater as drawn now (<b>Verified</b>, <c>animate</c>): the pop (0.35 to 1.28 in 0.1 s, back to 1 by 0.24 s, then 12% smaller while
+    /// fading from 62% of its life), the fade (in over 0.05 s, out by easeInQuad from 62%), the rise (easeOutQuad of the life), the sideways arc
+    /// (side x 0.55 + jitter, easeOutCubic), the big hit's shake (4 px at 1080p for 0.18 s) and the white flash (0.12 s). The offsets are in
+    /// multiples of the number's base height, which the interface works out from the character's height on screen.
     /// </summary>
-    static string Binding(Floater f)
+    static DrawnFloater Layout(Floater f)
     {
         float t = f.Age, k = t / f.Life;
         float s = t < 0.10f ? Lerp(0.35f, 1.28f, EaseOutCubic(t / 0.10f))
             : t < 0.24f ? Lerp(1.28f, 1, EaseInOutSine((t - 0.10f) / 0.14f))
             : 1;
-        float fadeStart = f.Life * 0.62f;
-        if (t > fadeStart) s *= 1 - 0.12f * ((t - fadeStart) / (f.Life - fadeStart));
+        float fadeStart = f.Life * 0.62f, alpha = t < 0.05f ? t / 0.05f : 1;
+        if (t > fadeStart)
+        {
+            float fade = (t - fadeStart) / (f.Life - fadeStart);
+            alpha = 1 - fade * fade;
+            s *= 1 - 0.12f * fade;
+        }
 
         float dy = -f.Rise * EaseOutQuad(k) - f.Lift;
         float dx = (f.Side * 0.55f + f.Jitter) * EaseOutCubic(MathF.Min(1, k * 1.25f));
-        float shakeX = 0, shakeY = 0;
-        if (f.Big && Settings.Shake && t < 0.18f)
-        {
-            float amp = (1 - t / 0.18f) * 4;
-            (shakeX, shakeY) = ((Jitter.NextSingle() * 2 - 1) * amp, (Jitter.NextSingle() * 2 - 1) * amp);
-        }
-
         var colour = Settings.Flash && t < 0.12f ? Vector3.Lerp(Vector3.One, f.Colour, t / 0.12f) : f.Colour;
-        var at = f.Last!.Value;
-        return string.Create(CultureInfo.InvariantCulture,
-            $"{at.X:0.#}|{at.Y:0.#}|{f.LastBody:0.#}|{f.Size:0.###}|{s:0.###}|{dx:0.###}|{dy:0.###}|{shakeX:0.#}|{shakeY:0.#}|{Tag(colour)}|{f.Text}");
+        return new(f.Last!.Value, f.LastBody, f.Size, s, new(dx, dy), Shake(f, t), colour, Math.Clamp(alpha, 0, 1), f.Text);
     }
 
-    static string Tag(Vector3 c) => string.Create(CultureInfo.InvariantCulture,
-        $"#{(int)(Math.Clamp(c.X, 0, 1) * 255 + 0.5f):X2}{(int)(Math.Clamp(c.Y, 0, 1) * 255 + 0.5f):X2}{(int)(Math.Clamp(c.Z, 0, 1) * 255 + 0.5f):X2}");
+    static Vector2 Shake(Floater f, float t)
+    {
+        if (!f.Big || !Settings.Shake || t >= 0.18f) return Vector2.Zero;
+
+        float amp = (1 - t / 0.18f) * 4;
+        return new((Jitter.NextSingle() * 2 - 1) * amp, (Jitter.NextSingle() * 2 - 1) * amp);
+    }
 
     static float Lerp(float a, float b, float t) => a + (b - a) * t;
     static float EaseOutCubic(float t) => 1 - (1 - t) * (1 - t) * (1 - t);
@@ -218,3 +233,6 @@ static class Floaters
 
     #endregion
 }
+
+/// <summary>A floater as laid out this frame: its anchor and the character's height on screen, size, pop, offset, shake, colour, opacity and text.</summary>
+sealed record DrawnFloater(Vector2 At, float Body, float Size, float Pop, Vector2 Offset, Vector2 Shake, Vector3 Colour, float Alpha, string Text);

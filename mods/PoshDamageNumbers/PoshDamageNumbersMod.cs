@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Numerics;
 using Meitou.Modding;
 using Meitou.Simulation;
 
@@ -7,8 +9,8 @@ namespace Meitou.PoshDamageNumbers;
 /// Port of Posh Damage Numbers (workshop 3821781631; rules from its KenshiLua script <c>damage_numbers.lua</c> and settings <c>dn_settings.lua</c>):
 /// a "-N" number over a character hit near your people, coloured by the hit's share of the part's health (warm white, gold, orange; red for your
 /// own), popping in with a white flash, floating up in an arc and fading; hits within the merge window add up; KNOCKOUT, SEVERED and KILLED words.
-/// Hits come from a combat hit observer (<see cref="HitWatch"/>), numbers are animated on the host (<see cref="Floaters"/>) and drawn in the HUD
-/// overlay (<see cref="NumbersUi"/>).
+/// Health lost and regained comes from the engine's health changes (<see cref="HitWatch"/>), numbers are animated on the host once a frame
+/// (<see cref="Floaters"/>) and drawn in the HUD overlay (<see cref="NumbersUi"/>).
 /// </summary>
 public sealed class PoshDamageNumbersMod : IMod
 {
@@ -18,7 +20,7 @@ public sealed class PoshDamageNumbersMod : IMod
     {
         context.AddSettings(Settings);
         context.AddSystem("hits", _ => new HitWatch(Settings), SystemAnchor.End);
-        Floaters.Install(context);
+        context.AddFrame(Floaters.Frame);
         context.AddUi(new NumbersUi());
         context.Log("Posh Damage Numbers initialized");
     }
@@ -39,6 +41,12 @@ public sealed class DamageSettings
 
     [Setting("Show words", Hint = "ShowWords: KNOCKOUT / SEVERED / KILLED.")]
     public bool ShowWords { get; set; } = true;
+
+    [Setting("Show healing", Hint = "ShowHealing: green +N when a character heals a lot at once.")]
+    public bool ShowHealing { get; set; }
+
+    [Setting("Healing threshold", Hint = "HealingThreshold: minimum health regained within one second to show +N.", Min = 1, Max = 50)]
+    public int HealingThreshold { get; set; } = 5;
 
     [Setting("Minimum damage", Hint = "MinDamage: smaller hits are ignored.", Min = 1, Max = 50)]
     public int MinDamage { get; set; } = 1;
@@ -67,6 +75,48 @@ public sealed class DamageSettings
     [Setting("Merge window (s)", Hint = "MergeWindow: hits closer than this on one target add up.", Min = 0, Max = 1, Step = 0.02)]
     public float MergeWindow { get; set; } = 0.22f;
 
+    [Setting("Light hits colour", Hint = "ColourLight: #RRGGBB for small hits; an invalid value draws #FFF5DB.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourLight { get; set; } = "#FFF5DB";
+
+    [Setting("Medium hits colour", Hint = "ColourMedium: #RRGGBB for solid hits; an invalid value draws #FFD140.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourMedium { get; set; } = "#FFD140";
+
+    [Setting("Heavy hits colour", Hint = "ColourHeavy: #RRGGBB for heavy hits; an invalid value draws #FF7A1F.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourHeavy { get; set; } = "#FF7A1F";
+
+    [Setting("Your people colour", Hint = "ColourSquad: #RRGGBB for damage to your own people; an invalid value draws #FF4040.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourSquad { get; set; } = "#FF4040";
+
+    [Setting("Healing colour", Hint = "ColourHeal: #RRGGBB for +N healing; an invalid value draws #6EE678.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourHeal { get; set; } = "#6EE678";
+
+    [Setting("KNOCKOUT colour", Hint = "ColourKO: #RRGGBB for the KNOCKOUT word; an invalid value draws #96BFFF.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourKo { get; set; } = "#96BFFF";
+
+    [Setting("SEVERED colour", Hint = "ColourLimb: #RRGGBB for the SEVERED word; an invalid value draws #FF593D.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourLimb { get; set; } = "#FF593D";
+
+    [Setting("KILLED colour", Hint = "ColourDead: #RRGGBB for the KILLED word; an invalid value draws #D91A1A.", MaxLength = 7, SubGroup = "Colours")]
+    public string ColourDead { get; set; } = "#D91A1A";
+
     [Setting("Numbers on screen", Hint = "MaxActive: numbers on screen at once (the oldest is recycled).", Min = 10, Max = 150)]
     public int MaxActive { get; set; } = 60;
+
+    internal Vector3 Light => Rgb(ColourLight, 0xFFF5DB);
+    internal Vector3 Medium => Rgb(ColourMedium, 0xFFD140);
+    internal Vector3 Heavy => Rgb(ColourHeavy, 0xFF7A1F);
+    internal Vector3 Squad => Rgb(ColourSquad, 0xFF4040);
+    internal Vector3 Heal => Rgb(ColourHeal, 0x6EE678);
+    internal Vector3 Ko => Rgb(ColourKo, 0x96BFFF);
+    internal Vector3 Limb => Rgb(ColourLimb, 0xFF593D);
+    internal Vector3 Dead => Rgb(ColourDead, 0xD91A1A);
+
+    /// <summary>A colour setting as rgb 0..1; an invalid value is its default (the original's <c>colour</c> kind).</summary>
+    static Vector3 Rgb(string hex, uint fallback)
+    {
+        string digits = hex.Trim().TrimStart('#');
+        bool valid = digits.Length == 6 && uint.TryParse(digits, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out _);
+        uint rgb = valid ? uint.Parse(digits, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture) : fallback;
+        return new(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f);
+    }
 }
