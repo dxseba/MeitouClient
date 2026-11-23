@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Modding;
 using Meitou.Simulation;
@@ -9,7 +8,7 @@ namespace Meitou.StackSort;
 /// <summary>
 /// Replaces the inventory window's ARRANGE with StackSort's strip <c>&lt; StackSort [n] H/W &gt;</c> (screen controls over the button): like items
 /// grouped, split stacks merged, the free space in one block. The sort button applies the best layout and cycles the best few, the arrows step
-/// through them, H/W switches the goal, and Ctrl+click on the sort button undoes the sort (the original's right click).
+/// through them, H/W switches the goal, and a right click on the sort button undoes the sort.
 /// </summary>
 public sealed class StackSortMod : IMod
 {
@@ -20,14 +19,6 @@ public sealed class StackSortMod : IMod
     /// </summary>
     internal static OriginalFiles Original { get; private set; } = null!;
 
-    /// <summary>
-    /// Whether Ctrl was held at the last frame (read by the sort button's click on the host's thread).
-    /// </summary>
-    internal static volatile bool CtrlHeld;
-
-    /// <summary>The strip's ARRANGE commands and what each asks, read on the tick thread; one without an entry (the game's button) is Next.</summary>
-    static readonly ConditionalWeakTable<ArrangeInventory, StrongBox<ArrangeMode>> Modes = new();
-
     public void Initialize(ModContext context)
     {
         Original = OriginalFiles.Load(context.Folder);
@@ -35,37 +26,19 @@ public sealed class StackSortMod : IMod
         Settings.Consolidate = Original.Consolidate;
         Settings.TopTargets = Original.TopTargets;
         context.AddSettings(Settings);
+        context.AddSystem("stacksort", _ => new StackSortSystem(), SystemAnchor.End);
         context.Harmony.Patch(ArrangeMethod(), prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeArrange)));
-        context.Harmony.Patch(ApplyMethod(), prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeApply)));
-        context.AddFrame(frame => CtrlHeld = frame.Ctrl);
         context.AddUi(new StackSortUi(Original.Strip));
         context.Log("StackSort initialized");
     }
 
     /// <summary>
-    /// The game's ARRANGE command for a strip button, tagged with what it asks. It is the game's own command so that it applies in the paused
-    /// interface step too (a mod's command waits for the next tick).
-    /// </summary>
-    internal static ArrangeInventory Order(CharacterId character, bool bag, ArrangeMode mode, long tick)
-    {
-        var arrange = new ArrangeInventory(character, bag) { Tick = tick };
-        Modes.AddOrUpdate(arrange, new(mode));
-        return arrange;
-    }
-
-    /// <summary>
-    /// The public whole-inventory arrange other callers use (a machine's storage, putting a held item back); no hook covers it.
+    /// The public whole-inventory arrange other callers use (a machine's or fixture's storage, a shop or trade window, putting a held item back);
+    /// no hook covers it.
     /// </summary>
     static System.Reflection.MethodInfo ArrangeMethod() =>
         AccessTools.Method(typeof(InventoryCommands), nameof(InventoryCommands.Arrange), [typeof(Inventory)])
             ?? throw new MissingMethodException(nameof(InventoryCommands), "Arrange");
-
-    /// <summary>
-    /// The player system's private command step, where <see cref="ArrangeInventory"/> is applied (while paused too); no hook takes it over.
-    /// </summary>
-    static System.Reflection.MethodInfo ApplyMethod() =>
-        AccessTools.Method(typeof(Meitou.Simulation.Player.PlayerSystem), "ApplyActionCommand")
-            ?? throw new MissingMethodException("PlayerSystem", "ApplyActionCommand");
 
     #pragma warning disable IDE1006 // Harmony binds __result by name
     /// <summary>Other callers of the whole-inventory arrange: the best layout for the setting's goal.</summary>
@@ -77,21 +50,33 @@ public sealed class StackSortMod : IMod
         __result = true;
         return false;
     }
+}
 
-    /// <summary>An ARRANGE of a character window runs through the layout cycle.</summary>
-    static bool BeforeApply(World world, SimCommand command)
+/// <summary>
+/// A strip button's press: StackSort's arrange of a player character's main grid or worn bag. A paused command, so it applies between ticks while
+/// paused as the game's ARRANGE does.
+/// </summary>
+public sealed record StackSortArrange(CharacterId Character, bool Bag, ArrangeMode Mode) : SimCommand, IPausedCommand;
+
+/// <summary>
+/// Applies <see cref="StackSortArrange"/> in the input step, and while paused in the paused interface step.
+/// </summary>
+sealed class StackSortSystem : IPausedCommandHandler
+{
+    public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
-        if (!Settings.Enabled || command is not ArrangeInventory arrange) return true;
+        if (!StackSortMod.Settings.Enabled) return;
 
-        var mode = Modes.TryGetValue(arrange, out var box) ? box.Value : ArrangeMode.Next;
-        LayoutCycle.Run(world, arrange.Character, arrange.Bag, mode);
-        return false;
+        foreach (var command in commands)
+        {
+            if (command is StackSortArrange arrange) LayoutCycle.Run(world, arrange.Character, arrange.Bag, arrange.Mode);
+        }
     }
 }
 
 /// <summary>
 /// What a strip button asks: the next layout (the sort button and <c>&gt;</c>), the previous one (<c>&lt;</c>), the other goal (H/W), or the layout
-/// before the first sort (Ctrl+click on the sort button).
+/// before the first sort (a right click on the sort button).
 /// </summary>
 public enum ArrangeMode { Next, Previous, SwitchGoal, Undo }
 
@@ -103,7 +88,7 @@ public sealed class StackSortSettings
     /// <summary>
     /// Whether the strip replaces ARRANGE.
     /// </summary>
-    [Setting("StackSort on Arrange", Hint = "Sort: best layout, again to cycle; < >: step; H/W: goal; Ctrl+click Sort: undo. Off: vanilla.")]
+    [Setting("StackSort on Arrange", Hint = "Sort: best layout, again to cycle; < >: step; H/W: goal; right-click Sort: undo. Off: vanilla.")]
     public bool Enabled { get; set; } = true;
 
     /// <summary>
