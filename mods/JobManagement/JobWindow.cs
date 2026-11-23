@@ -1,8 +1,8 @@
 using Meitou.Game.Host;
+using Meitou.Modding;
 using Meitou.Game.Ui;
 using Meitou.Simulation;
 using Meitou.Simulation.Production;
-using Meitou.Simulation.Session;
 
 namespace Meitou.JobManagement;
 
@@ -11,9 +11,10 @@ readonly record struct JobPick(CharacterId Owner, int Row, PermaJob Job);
 
 /// <summary>
 /// The Job Management window (Ctrl+J or the JM button): the Squad Jobs and Stations tabs, drawn into the HUD overlay. It pauses the game while open
-/// and puts the speed back on close. Edits go out as job commands in steps; each step waits for the snapshot that shows the last one applied.
+/// (a mod pause hold) and puts the speed back on close. Edits go out as job commands in steps; each step waits for the snapshot that shows the last one applied.
 /// </summary>
-public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Action<SimCommand> enqueue, StationScanner scanner) : IUiExtension
+public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Action<SimCommand> enqueue, StationScanner scanner,
+    Func<ModPauseHold?> holdPause) : IUiExtension
 {
     enum Tab { Squads, Stations }
 
@@ -24,10 +25,9 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     Styles? _styles;
     string _clickAction = "", _dragAction = "", _wheelAction = "";
 
-    WorldSession? _session;
-    World? _world;
+    JobBoardSystem? _board;
     WorldSnapshot? _snapshot;
-    SimulationClock.SpeedState? _speeds;
+    ModPauseHold? _hold;
     bool _open;
     Tab _tab;
     string _status = "";
@@ -64,14 +64,15 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     }
 
     /// <summary>
-    /// Once per frame on the host's thread (<c>AddFrame</c>), with the snapshot on screen: follows the session and runs the next due step.
+    /// Once per frame on the host's thread (<c>AddFrame</c>), with the snapshot on screen: follows the running world (its board system, told
+    /// ready) and runs the next due step.
     /// </summary>
     public void Frame(WorldSnapshot snapshot)
     {
         _snapshot = snapshot;
-        if (Hooks.Session is not { } session) return;
+        if (JobBoardSystem.Running is not { } board) return;
 
-        if (!ReferenceEquals(session, _session) || _open && !ReferenceEquals(session.World, _world)) Reset(session);
+        if (!ReferenceEquals(board, _board)) Reset(board);
         Pump();
     }
 
@@ -83,12 +84,10 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
 
     void Open()
     {
-        if (_session is null || _snapshot is not { } snapshot || !settings.Enabled) return;
+        if (_board is null || _snapshot is not { } snapshot || !settings.Enabled) return;
 
         _open = true;
-        _world = _session.World;
-        _speeds = _session.Simulation.SaveSpeeds();
-        _session.Simulation.Pause();
+        _hold = holdPause();
         _status = "";
         OpenSquads(snapshot);
     }
@@ -99,21 +98,26 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
         _open = false;
         _pick = null;
         _drag = null;
-        if (_session is { } s && _speeds is { } speeds && s.Simulation.Speed == 0) s.Simulation.RestoreSpeeds(speeds);
-        _speeds = null;
+        ReleasePause();
     }
 
-    /// <summary>A new session or world: the window closes and the steps left are dropped (their rows are gone).</summary>
-    void Reset(WorldSession session)
+    /// <summary>Lets go of the pause hold: the last hold of all mods puts the kept speeds back while the game is still paused.</summary>
+    void ReleasePause()
+    {
+        _hold?.Release();
+        _hold = null;
+    }
+
+    /// <summary>A new world: the window closes and the steps left are dropped (their rows are gone).</summary>
+    void Reset(JobBoardSystem board)
     {
         _open = false;
         _pick = null;
         _drag = null;
-        _speeds = null;
+        ReleasePause();
         _steps.Clear();
         _waitFor = null;
-        _session = session;
-        _world = session.World;
+        _board = board;
     }
 
     void Click(string key)

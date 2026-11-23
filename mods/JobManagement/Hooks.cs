@@ -1,5 +1,3 @@
-using System.Reflection;
-using HarmonyLib;
 using Meitou.Game.Host;
 using Meitou.Game.Host.Input;
 using Meitou.Modding;
@@ -9,27 +7,16 @@ namespace Meitou.JobManagement;
 /// <summary>
 /// The interface hooks. Public: <see cref="ModContext.AddFrame"/> runs the window's steps once a frame on the snapshot on screen, and a key action
 /// (<see cref="ModContext.AddKeyAction"/>) toggles the window: by default the <c>Hotkey</c> setting's key as a chord (Ctrl+J), which fires before
-/// the game's own binding of the key (J is the Rescue key's second binding). Still Harmony (no public hook does it): a postfix on the private
-/// <c>PlayerInterface.BindUi</c> keeps the session, the only way to pause the clock and put its speeds back.
+/// the game's own binding of the key (J is the Rescue key's second binding).
 /// </summary>
 static class Hooks
 {
     const string KeyName = "window", KeyLabel = "Job Management window";
 
-    static FieldInfo? s_sessionField;
-
-    /// <summary>The interface's session, as the last bind found it; null before the first.</summary>
-    internal static WorldSession? Session { get; private set; }
-
     public static void Install(ModContext context)
     {
         context.AddFrame(frame => JobManagementMod.Window.Frame(frame.Snapshot));
         AddWindowKey(context);
-
-        var player = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
-        s_sessionField = AccessTools.Field(player, "Session") ?? throw new MissingFieldException(player.FullName, "Session");
-        var bind = AccessTools.Method(player, "BindUi") ?? throw new MissingMethodException(player.FullName, "BindUi");
-        context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(Hooks), nameof(Bound)));
     }
 
     /// <summary>The window's key action; a setting key the Controls page keeps for itself (Escape, F6, a modifier) falls back to Ctrl+J.</summary>
@@ -48,13 +35,6 @@ static class Hooks
 
     /// <summary>The key action's default: the setting's key as a chord of its modifiers (a plain key without any); none for <c>NONE</c>.</summary>
     static Binding[] Defaults(string hotkey) => WindowKey.Parse(hotkey) is { } key ? [Binding.Of(key.Key).With(key.Modifiers)] : [];
-
-    #pragma warning disable IDE1006 // Harmony binds __instance by name
-    static void Bound(object __instance)
-    {
-        if (s_sessionField?.GetValue(__instance) is WorldSession session) Session = session;
-    }
-    #pragma warning restore IDE1006
 
     /// <summary>The window key toggles the window.</summary>
     static void Pressed(ModKeyContext press)

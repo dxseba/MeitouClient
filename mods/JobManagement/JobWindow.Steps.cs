@@ -149,5 +149,5 @@ public sealed partial class JobWindow
     static CharacterSnapshot? Find(WorldSnapshot snapshot, CharacterId id) => snapshot.Characters.FirstOrDefault(c => c.Id == id);
 
     /// <summary>The board the world publishes (skills, invalid rows); empty before the first tick.</summary>
-    JobBoard Board() => _session?.World.Systems.OfType<JobBoardSystem>().FirstOrDefault()?.Board ?? JobBoard.Empty;
+    JobBoard Board() => _board?.Board ?? JobBoard.Empty;
 }

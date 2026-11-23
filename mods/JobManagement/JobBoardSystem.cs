@@ -19,10 +19,18 @@ public sealed record JobBoard(FrozenDictionary<CharacterId, float[]> Skills, Fro
 
 /// <summary>
 /// Publishes a <see cref="JobBoard"/> about once a second of game time (a serial step; nothing while paused, when skills and sites cannot change).
+/// The running world's board system is <see cref="Running"/>, set when its world is told ready.
 /// </summary>
-sealed class JobBoardSystem : ITickSystem
+sealed class JobBoardSystem : IWorldReady
 {
+    static volatile JobBoardSystem? s_running;
+
     volatile JobBoard _board = JobBoard.Empty;
+
+    /// <summary>The board system of the world told ready last (the running one); null before the first.</summary>
+    public static JobBoardSystem? Running => s_running;
+
+    public void Ready(World world, bool fromSave) => s_running = this;
 
     public JobBoard Board => _board;
 

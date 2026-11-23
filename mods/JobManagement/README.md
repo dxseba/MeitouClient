@@ -6,9 +6,10 @@ Port of *Kenshi Job Management (MCM fork)* (workshop 3818460323), a fork of Siri
 - **Window**: the window key (a key action, *Job Management window* on the Controls page; its default is the fork's `Hotkey`, a free-text
   setting read at start: a key name with optional `CTRL+`, `ALT+`, `SHIFT+`, default `CTRL+J`, `NONE` for none, as a chord, which fires before
   the game's own binding of the key, e.g. the Rescue key's second binding J; a key the page keeps, such as F6 or Escape, falls back to Ctrl+J) or the **JM** button
-  under the time panel (overlay, left 486, top 44). Opening saves the clock (`SimulationClock.SaveSpeeds`) and pauses; Close puts it back unless the
-  player changed the speed meanwhile. Built from `UiNode`s in `UiSlots.Overlay`; steps run once a frame on the shown snapshot (`AddFrame`); the session (only for the
-  clock's pause and speeds, which no public API sets) comes from a `PlayerInterface.BindUi` postfix.
+  under the time panel (overlay, left 486, top 44). Opening holds the pause (`context.Interface.HoldPause()`); Close releases it, which puts the
+  speeds back unless the player chose one meanwhile. Built from `UiNode`s in `UiSlots.Overlay`; steps run once a frame on the shown snapshot
+  (`AddFrame`); the running world's `JobBoardSystem` (told by `IWorldReady`) marks a new world, which closes the window and drops its steps. No
+  Harmony or reflection.
 - **Squad Jobs**: one squad at a time (`<` `>` cycle, opens on the active squad); each member's list in priority order. A job and the companion the
   engine added after it (152+124, 148+106, 45+31/289, 137+138, 223+224, 273+274) form one unit for Up, Down and X. Click a job to pick it, then
   **Move here** / **Copy here** on another member (any squad), or drag it (`UiNode.Pointer` drag and release, the drop target from
