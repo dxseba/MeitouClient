@@ -1,10 +1,5 @@
 using System.Collections.Frozen;
-using System.Globalization;
 using System.Numerics;
-using System.Reflection;
-using HarmonyLib;
-using Meitou.Data.Ui;
-using Meitou.Game.Host;
 using Meitou.Game.Host.Input;
 using Meitou.Modding;
 using Meitou.Simulation;
@@ -17,13 +12,16 @@ namespace Meitou.VitalSense;
 readonly record struct VitalTarget(CharacterSnapshot Character, Vital Vital, Relation Relation, float Distance);
 
 /// <summary>
-/// Projects the markers: a postfix on the interface's <c>BindUi</c> (which owns the camera, <c>PlayerInterface.Project</c>) writes one binding per
-/// marker, "x|y|state|relation|tier", for <see cref="VitalMarkersUi"/> to draw, and renews the body tint (<see cref="VitalTint"/>).
+/// One marker on screen: its projected point, state (None: a bounty-only $), relation and bounty tier (-1 none).
+/// </summary>
+readonly record struct Marker(Vector2 At, VitalState State, Relation Relation, int Tier);
+
+/// <summary>
+/// Projects the markers once a frame (<c>AddFrame</c>: the snapshot, camera and projection on screen) for <see cref="VitalMarkersUi"/> to draw,
+/// and renews the body tint (<see cref="VitalTint"/>).
 /// </summary>
 static class VitalMarkers
 {
-    public const string Key = "vitalsense.marker.";
-
     /// <summary>
     /// World units (1 = 10 cm) above a downed or dead character's root where its state marker sits (the DLL's projection offset, 2.0).
     /// </summary>
@@ -34,71 +32,57 @@ static class VitalMarkers
     /// </summary>
     static readonly int[] TierMax = [1999, 4999, 9999, 19999, 39999, 74999];
 
-    static FieldInfo? s_sessionField;
-    static FieldInfo? s_altField;
-    static MethodInfo? s_project;
     static ModKeyAction? s_key;
+
+    /// <summary>
+    /// The markers of the last frame (host thread).
+    /// </summary>
+    internal static IReadOnlyList<Marker> Current { get; private set; } = [];
 
     public static void Install(ModContext context)
     {
-        var type = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
-        s_sessionField = SessionField(type);
-        s_altField = AccessTools.Field(type, "AltHeld") ?? throw new MissingFieldException(type.FullName, "AltHeld");
-        s_project = AccessTools.Method(type, "Project", [typeof(Vector3)]) ?? throw new MissingMethodException(type.FullName, "Project");
-
         // The original's highlight_key is ALT by default; a mod may not default to Alt, so the game's Highlight (Alt) also shows them.
         s_key = context.AddKeyAction("highlight", "Vital Sense highlight", _ => { });
-
-        var bind = AccessTools.Method(type, "BindUi") ?? throw new MissingMethodException(type.FullName, "BindUi");
-        context.Harmony.Patch(bind, postfix: new HarmonyMethod(typeof(VitalMarkers), nameof(Bound)));
+        context.AddFrame(Frame);
     }
-
-    internal static FieldInfo SessionField(Type player) =>
-        player.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .SingleOrDefault(f => f.FieldType == typeof(WorldSession))
-            ?? throw new MissingFieldException(player.FullName, "WorldSession");
-
-    internal static WorldSession? Session(object player) => s_sessionField?.GetValue(player) as WorldSession;
-
-    internal static bool AltHeld(object player) => s_altField?.GetValue(player) is true;
 
     /// <summary>
     /// Whether the markers show now: always on, the game's Highlight key or the mod's own key held.
     /// </summary>
-    internal static bool Active(object player) => VitalSenseMod.Settings.AlwaysOn || AltHeld(player) || s_key?.Held == true;
+    static bool Active(ModFrame frame) => VitalSenseMod.Settings.AlwaysOn || frame.Highlight || s_key?.Held == true;
 
-    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    static void Bound(object __instance, UiBindings __result)
-    #pragma warning restore IDE1006
+    static void Frame(ModFrame frame)
     {
         var settings = VitalSenseMod.Settings;
-        if (!settings.Enabled || Session(__instance) is not { } session || !Active(__instance))
+        if (!settings.Enabled || !Active(frame) || VitalSenseMod.Running is not { } system)
         {
+            Current = [];
             VitalTint.Clear();
             return;
         }
 
-        var targets = Targets(session, session.Camera.Current.Target, settings.Budget);
-        int slot = 0;
+        var targets = Targets(system, frame.Snapshot, frame.CameraTarget, settings.Budget);
+        var markers = new List<Marker>(targets.Count);
         foreach (var target in targets)
         {
-            if (Text(__instance, target) is { } text) __result.Text[Key + slot++] = text;
+            if (Project(frame, target) is { } marker) markers.Add(marker);
         }
 
-        VitalTint.Renew(session, targets);
+        Current = markers;
+        VitalTint.Renew(frame, targets);
     }
 
     /// <summary>
     /// The characters to mark round <paramref name="centre"/>, nearest first, at most <paramref name="budget"/>.
     /// </summary>
-    internal static List<VitalTarget> Targets(WorldSession session, Vector3 centre, int budget)
+    static List<VitalTarget> Targets(VitalSystem system, WorldSnapshot snapshot, Vector3 centre, int budget)
     {
         var settings = VitalSenseMod.Settings;
-        if (System(session) is not { } system || system.Vitals.Count == 0) return [];
+        if (system.Vitals.Count == 0) return [];
 
         var vitals = system.Vitals;
         var list = new List<VitalTarget>();
-        foreach (var c in session.CurrentSnapshot.Characters)
+        foreach (var c in snapshot.Characters)
         {
             if (c.Appearance is null || !vitals.TryGetValue(c.Id, out var vital) || !Shown(vital, settings)) continue;
 
@@ -110,13 +94,11 @@ static class VitalMarkers
         return list.Count > budget ? list.GetRange(0, budget) : list;
     }
 
-    internal static VitalSystem? System(WorldSession session) => session.World.Systems.OfType<VitalSystem>().FirstOrDefault();
-
     internal static float Flat(Vector3 a, Vector3 b) => Vector2.Distance(new(a.X, a.Z), new(b.X, b.Z));
 
     static bool Shown(Vital vital, VitalSettings settings)
     {
-        bool state = settings.ShowText && settings.Shows(vital.State);
+        bool state = (settings.ShowText || settings.ShowIcons) && settings.Shows(vital.State);
         bool bounty = settings.ShowBounty && vital.Bounty > 0 && (vital.State != VitalState.None || settings.BountyOnAll);
         bool tint = settings.Tint && (vital.State != VitalState.None || settings.TintBounty && vital.Bounty > 0);
         return state || bounty || tint;
@@ -144,19 +126,17 @@ static class VitalMarkers
     }
 
     /// <summary>
-    /// The marker's binding, or null when its point is behind the camera or nothing of it shows.
+    /// The marker of <paramref name="target"/>, or null when its point is behind the camera or nothing of it shows.
     /// </summary>
-    static string? Text(object player, VitalTarget target)
+    static Marker? Project(ModFrame frame, VitalTarget target)
     {
         var settings = VitalSenseMod.Settings;
-        int state = settings.ShowText && settings.Shows(target.Vital.State) ? (int)target.Vital.State : 0;
+        var state = (settings.ShowText || settings.ShowIcons) && settings.Shows(target.Vital.State) ? target.Vital.State : VitalState.None;
         int tier = settings.ShowBounty && (target.Vital.State != VitalState.None || settings.BountyOnAll) ? Tier(target.Vital.Bounty) : -1;
-        if (state == 0 && tier < 0) return null;
+        if (state == VitalState.None && tier < 0) return null;
 
         var head = target.Character.Position + new Vector3(0, Height(target.Vital.State, settings), 0);
-        if (s_project!.Invoke(player, [head]) is not Vector2 at) return null;
-
-        return string.Create(CultureInfo.InvariantCulture, $"{at.X:0}|{at.Y:0}|{state}|{(int)target.Relation}|{tier}");
+        return frame.Project(head) is { } at ? new Marker(at, state, target.Relation, tier) : null;
     }
 
     /// <summary>

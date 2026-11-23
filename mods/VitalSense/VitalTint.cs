@@ -1,5 +1,4 @@
 using System.Numerics;
-using Meitou.Game.Host;
 using Meitou.Modding;
 using Meitou.Simulation;
 
@@ -29,9 +28,10 @@ static class VitalColours
 }
 
 /// <summary>
-/// The character tint, drawn as the engine's <c>Glow</c> on the whole character while the markers show: the marked characters, the player's
-/// conscious ones within the distance (<c>character_tint_include_squad</c>), in the relation colour, or the bounty tier's colour for one with a
-/// bounty (<b>Verified</b>, original DLL (decompiled): the tier colour replaces the relation colour when the bounty is above 0). Host thread only.
+/// The character tint, the engine's <c>Tint</c> (the original's <c>coloroverride</c>: the body's albedo blended to the colour by its alpha) while
+/// the markers show, through walls as its <c>overrideDepth</c> when set: the marked characters, the player's conscious ones within the distance
+/// (<c>character_tint_include_squad</c>), in the relation colour, or the bounty tier's colour for one with a bounty (<b>Verified</b>, original DLL
+/// (decompiled): the tier colour replaces the relation colour when the bounty is above 0). Host thread only.
 /// </summary>
 static class VitalTint
 {
@@ -41,24 +41,26 @@ static class VitalTint
     const float Seconds = 0.5f;
 
     /// <summary>
-    /// Glow strength: the original replaces the lit albedo (alpha 1), the engine's glow adds light; half keeps the texture readable.
+    /// The most characters the engine draws through walls.
     /// </summary>
-    const float Strength = 0.5f;
+    const int ThroughWallsMax = 64;
 
     static ModContext? s_context;
     static readonly HashSet<CharacterId> Lit = [];
     static readonly HashSet<CharacterId> Now = [];
+    static int s_throughWalls;
 
     public static void Install(ModContext context) => s_context = context;
 
-    public static void Renew(WorldSession session, List<VitalTarget> targets)
+    public static void Renew(ModFrame frame, List<VitalTarget> targets)
     {
         var settings = VitalSenseMod.Settings;
         Now.Clear();
+        s_throughWalls = 0;
         if (settings.Tint && s_context is { } context)
         {
             foreach (var target in targets) Light(context, target);
-            if (settings.TintSquad) LightSquad(context, session, settings);
+            if (settings.TintSquad) LightSquad(context, frame, settings);
         }
 
         StopOthers();
@@ -77,24 +79,31 @@ static class VitalTint
 
         int tier = VitalMarkers.Tier(target.Vital.Bounty);
         var colour = tier >= 0 ? VitalColours.Tiers[tier] : VitalColours.Relations[(int)target.Relation];
-        Glow(context, target.Character.Id, colour);
+        Paint(context, target.Character.Id, colour);
     }
 
-    static void LightSquad(ModContext context, WorldSession session, VitalSettings settings)
+    static void LightSquad(ModContext context, ModFrame frame, VitalSettings settings)
     {
-        var centre = session.Camera.Current.Target;
-        foreach (var c in session.CurrentSnapshot.Characters)
+        var centre = frame.CameraTarget;
+        foreach (var c in frame.Snapshot.Characters)
         {
             if (!c.IsPlayer || !c.Standing || c.Appearance is null || Now.Contains(c.Id)) continue;
             if (VitalMarkers.Flat(c.Position, centre) > settings.MaxDistance) continue;
 
-            Glow(context, c.Id, VitalColours.Relations[(int)Relation.Squad]);
+            Paint(context, c.Id, VitalColours.Relations[(int)Relation.Squad]);
         }
     }
 
-    static void Glow(ModContext context, CharacterId id, Vector4 colour)
+    /// <summary>
+    /// Tints <paramref name="id"/> by the colour's alpha (1 for the relation colours, the tier's own for a bounty).
+    /// </summary>
+    static void Paint(ModContext context, CharacterId id, Vector4 colour)
     {
-        if (context.Glow(GlowTarget.Character(id), new Vector3(colour.X, colour.Y, colour.Z), Seconds, Strength)) Now.Add(id);
+        bool walls = VitalSenseMod.Settings.TintThroughWalls && s_throughWalls < ThroughWallsMax;
+        if (!context.Tint(GlowTarget.Character(id), new Vector3(colour.X, colour.Y, colour.Z), Seconds, colour.W, walls)) return;
+
+        Now.Add(id);
+        if (walls) s_throughWalls++;
     }
 
     static void StopOthers()

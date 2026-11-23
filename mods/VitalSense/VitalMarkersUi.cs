@@ -1,75 +1,93 @@
-using System.Globalization;
 using System.Numerics;
 using Meitou.Game.Ui;
 
 namespace Meitou.VitalSense;
 
 /// <summary>
-/// Draws the bound markers: the state letters centred on the point in the relation's colour, and the "$" to their left in the bounty tier's colour.
-/// A label's colour is its style's, so each colour is a registered style.
+/// Draws the frame's markers (<see cref="VitalMarkers.Current"/>) as one row centred on each point: the bounty "$" in its tier's colour (the
+/// original's default <c>before_state_icon</c>), the state icon (18 px, the DLL's) and the state letters in the relation's colour at the state's
+/// text size. A label's colour is its style's, so each colour is a registered style.
 /// </summary>
 public sealed class VitalMarkersUi : IUiExtension
 {
-    const float StateWidth = 36, BountyWidth = 16, Height = 22;
-    const int MaxSlots = 256;
+    /// <summary>
+    /// The DLL's widget sizes: the row and icon 18 px, the state text at least 45 wide, a 1 px gap after the icon and the symbol.
+    /// </summary>
+    const float Row = 18, Icon = 18, StateWidth = 45, BountyWidth = 16, Gap = 1;
+
+    /// <summary>
+    /// The pixel height of the font at text scale 1 (<c>Kenshi_StandardFont_Medium</c>, size 20).
+    /// </summary>
+    const float FontPixels = 20;
+
+    /// <summary>
+    /// <c>bounty_symbol_size_px</c>.
+    /// </summary>
+    const float BountySize = 18;
 
     static readonly string[] StateText = ["", "ZZ", "RC", "DY", "PD", "DE"];
+
+    readonly VitalIcons _icons;
+
+    string[] _relations = [], _tiers = [];
+
+    internal VitalMarkersUi(VitalIcons icons) => _icons = icons;
 
     public string Id => "dxseba.vitalsense.markers";
 
     public void Register(UiRegistration registration)
     {
-        var relations = VitalColours.Relations.Select((c, i) => registration.RegisterStyle("relation" + i, Style(c))).ToArray();
-        var tiers = VitalColours.Tiers.Select((c, i) => registration.RegisterStyle("tier" + i, Style(c))).ToArray();
-        registration.Contribute(UiSlots.Overlay, frame => Build(frame, relations, tiers), order: 40);
+        _relations = [.. VitalColours.Relations.Select((c, i) => registration.RegisterStyle("relation" + i, Style(c)))];
+        _tiers = [.. VitalColours.Tiers.Select((c, i) => registration.RegisterStyle("tier" + i, Style(c)))];
+        registration.Contribute(UiSlots.Overlay, _ => Build(), order: 40);
     }
 
     static UiStyle Style(Vector4 colour) =>
-        new() { Text = colour, TextAlign = "Center", FontName = "Kenshi_StandardFont_Large", TextPadding = new(0, 0, 0, 0) };
+        new() { Text = colour, TextAlign = "Center", FontName = "Kenshi_StandardFont_Medium", TextPadding = new(0, 0, 0, 0) };
 
-    static UiNode Build(UiFrameContext frame, string[] relations, string[] tiers)
+    UiNode Build()
     {
-        var root = new UiNode("vitalsense-markers") { Placement = UiPlacement.Fill, Pickable = false };
-        for (int i = 0; i < MaxSlots; i++)
-        {
-            if (Parse(frame.Text(VitalMarkers.Key + i)) is not { } marker) break;
+        var markers = VitalMarkers.Current;
 
-            AddMarker(root, i, marker, relations, tiers);
-        }
+        // The markers follow the camera, so the overlay is laid out every frame while any shows.
+        var root = new UiNode("vitalsense-markers") { Placement = UiPlacement.Fill, Pickable = false, Animated = markers.Count > 0 };
+        for (int i = 0; i < markers.Count; i++) AddMarker(root, i, markers[i]);
 
         return root;
     }
 
-    static void AddMarker(UiNode root, int i, Marker m, string[] relations, string[] tiers)
+    void AddMarker(UiNode root, int i, Marker m)
     {
-        string text = StateText[Math.Clamp(m.State, 0, StateText.Length - 1)];
-        float top = m.Y - Height / 2;
-        if (text.Length > 0)
+        var settings = VitalSenseMod.Settings;
+        string text = settings.ShowText ? StateText[(int)m.State] : "";
+        var icon = settings.ShowIcons && m.State != VitalState.None ? _icons.Of(m.State) : null;
+        int size = settings.TextSize(m.State);
+
+        // The state box grows past the DLL's 45 by 18 with a larger text size (a guess: 2.5 widths of the text's height for two letters).
+        float stateWidth = Math.Max(StateWidth, size * 2.5f), stateHeight = Math.Max(Row, size);
+        float width = (m.Tier >= 0 ? BountyWidth + Gap : 0) + (icon is not null ? Icon + Gap : 0) + (text.Length > 0 ? stateWidth : 0);
+        float left = m.At.X - width / 2, top = m.At.Y - Row / 2;
+
+        if (m.Tier >= 0)
         {
-            var placement = new UiPlacement(StateWidth, Height, Left: m.X - StateWidth / 2, Top: top);
-            root.Children.Add(Label("vitalsense-state-" + i, placement, text, relations[Math.Clamp(m.Relation, 0, relations.Length - 1)]));
+            var at = new UiPlacement(BountyWidth, Row, Left: left, Top: top);
+            root.Children.Add(Label("vitalsense-bounty-" + i, at, "$", _tiers[Math.Min(m.Tier, _tiers.Length - 1)], BountySize));
+            left += BountyWidth + Gap;
         }
 
-        if (m.Tier < 0) return;
+        if (icon is { } source)
+        {
+            var at = new UiPlacement(Icon, Icon, Left: left, Top: top);
+            root.Children.Add(new UiNode("vitalsense-icon-" + i, UiNodeKind.Image) { Placement = at, Image = source.File, ImageCrop = source.Crop });
+            left += Icon + Gap;
+        }
 
-        float left = text.Length > 0 ? m.X - StateWidth / 2 - BountyWidth : m.X - BountyWidth / 2;
-        var at = new UiPlacement(BountyWidth, Height, Left: left, Top: top);
-        root.Children.Add(Label("vitalsense-bounty-" + i, at, "$", tiers[Math.Min(m.Tier, tiers.Length - 1)]));
+        if (text.Length == 0) return;
+
+        var placement = new UiPlacement(stateWidth, stateHeight, Left: left, Top: m.At.Y - stateHeight / 2);
+        root.Children.Add(Label("vitalsense-state-" + i, placement, text, _relations[(int)m.Relation], size));
     }
 
-    static UiNode Label(string id, UiPlacement placement, string text, string style) =>
-        new(id, UiNodeKind.Label) { Placement = placement, Text = text, Style = style, Pickable = false };
-
-    readonly record struct Marker(float X, float Y, int State, int Relation, int Tier);
-
-    static Marker? Parse(string bound)
-    {
-        var parts = bound.Split('|');
-        if (parts.Length != 5) return null;
-
-        var c = CultureInfo.InvariantCulture;
-        bool ok = float.TryParse(parts[0], c, out float x) & float.TryParse(parts[1], c, out float y)
-            & int.TryParse(parts[2], c, out int state) & int.TryParse(parts[3], c, out int relation) & int.TryParse(parts[4], c, out int tier);
-        return ok ? new Marker(x, y, state, relation, tier) : null;
-    }
+    static UiNode Label(string id, UiPlacement placement, string text, string style, float pixels) =>
+        new(id, UiNodeKind.Label) { Placement = placement, Text = text, Style = style, Pickable = false, TextScale = pixels / FontPixels };
 }

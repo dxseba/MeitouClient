@@ -2,9 +2,8 @@
 
 Port of Emkej's *Vital Sense* (workshop 3813852288, MCM fork): while the Highlight key is held (or always), a marker over each downed or dead
 character near the camera's centre, a `$` coloured by bounty tier, and a body tint. A tick system (`VitalSystem`, every 5th tick, the original's
-150 ms) publishes states, bounties and faction standings; a Harmony postfix on `PlayerInterface.BindUi` projects the markers for an overlay
-`IUiExtension` and renews the tint (`VitalTint`, the engine's `Glow`); an optional postfix on `PointerView.HighlightTargets` adds them to the hover
-outline.
+150 ms) publishes states, bounties and faction standings; an `AddFrame` callback projects the markers for an overlay `IUiExtension` and renews
+the tint (`VitalTint`, the engine's `Tint`, through walls). No Harmony.
 
 ## Facts
 
@@ -24,16 +23,24 @@ outline.
   bounty height (1 unit = 10 cm). **Observed** (decompile: the 2.0 offset is seen on the dead path).
 - **Tint**: the original's shaders add `coloroverride` to `character`, `creature` (albedo lerped to it by its alpha) and `overrideDepth` to
   `skin` (z forced to 0, drawn through walls); the DLL sets the relation colour at alpha 1, or the bounty tier colour when the bounty is above
-  0. **Verified** (its `materials/defferred/*` against the game's `data/materials/deferred`; DLL decompile). Meitou draws a `Glow`
-  (additive, strength 0.5) instead.
+  0. **Verified** (its `materials/defferred/*` against the game's `data/materials/deferred`; DLL decompile). Meitou: `Tint` by the colour's
+  alpha (relation colours 1; a tier's own alpha, unverified) and, with *Tint through walls* (`character_tint_force_depth_override`, default
+  on), through walls for the first 64 characters (the engine's cap).
+- **Icons**: drawn 18 by 18 (the DLL's widget size; `*_icon_size_px` is the picture's own size). Recovery coma, dying and dead default to the
+  original's `gui/gfx/heart_64px.png`, `death_64px.png`, `grave_64px.png`; a missing picture, and unconscious and playing dead (empty texture),
+  fall back to `Kenshi_UI.png` cells: unconscious and recovery coma the Knockout pointer (45 122 32 32), dying and dead 108 49 34 34, playing
+  dead 80 126 38 27. **Verified** (original DLL (decompiled); `data/gui/images/kenshi_images.xml` for the Knockout cell). Pictures are looked
+  for under this mod's folder (`icons/`, `gui/gfx/`, root), then the game's `data/gui/gfx`.
+- **Row**: `$`, icon, state text (at least 45 by 18 px; text size per state, 18 by default, 8 to 128), the bounty symbol 18 px. The DLL's
+  group order and centring are not fully read; Meitou centres the row on the projected point. **Observed** (decompile, partial).
 - **Key**: the original's `highlight_key` (default ALT, with Ctrl/Shift/Alt requirements; UNBOUND for always on). Meitou: the game's Highlight
   (Alt), a bindable *Vital Sense highlight* action (no default: mods may not default to Alt), or *Always on*.
 - **Observed**: nothing in play yet (placement, colours, tint, cost at 256 markers).
 
 ## Missing
 
-- Engine: a per-character albedo colour override and a through-walls draw (`coloroverride` / `overrideDepth`); the glow is only a stand-in.
-- Engine: icons need an atlas crop on `UiNode` images (the ZZ/PD fallback is the `Kenshi_UI.png` glyph `pic_PointerKnockout`); the RC, DY,
-  DE icons and the bounty glow are the original's own PNGs (`heart_64px`, `death_64px`, `grave_64px`, `bounty_glow_64px`), not shipped.
-- Per-state text and sizes (18 px, 8 to 128), bounty symbol text, size and position (`before_state_icon`), editable colours and tiers, the
-  update interval, key modifiers, debug logs.
+- The original's own pictures (`heart_64px`, `death_64px`, `grave_64px`, `bounty_glow_64px`) are not shipped: put them in this mod's `gui/gfx`.
+  The bounty glow (24 px behind the icon) is not drawn.
+- The DLL colours the atlas glyphs of dying, playing dead and dead with the relation colour; an image node has no tint, so they keep the atlas'.
+- Per-state texts, the bounty symbol's text, size and position (`before_state_text`), editable colours and tiers, the update interval, key
+  modifiers, debug logs.

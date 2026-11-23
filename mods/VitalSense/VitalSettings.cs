@@ -78,9 +78,9 @@ public sealed class VitalSettings
     public int BountyOffsetCm { get; set; } = 420;
 
     /// <summary>
-    /// <c>enable_character_tint</c>: drawn as a <c>Glow</c> in the marker's colour (the original lerps the body's albedo to it).
+    /// <c>enable_character_tint</c>: the body's albedo blended to the marker's colour (<c>Tint</c>, the original's <c>coloroverride</c>).
     /// </summary>
-    [Setting("Character tint", Hint = "Lights marked characters in their relation colour while the markers show.")]
+    [Setting("Character tint", Hint = "Colours marked characters in their relation colour while the markers show.")]
     public bool Tint { get; set; } = true;
 
     /// <summary>
@@ -96,10 +96,46 @@ public sealed class VitalSettings
     public bool TintBounty { get; set; }
 
     /// <summary>
-    /// Meitou's: the marked downed characters also join the game's hover outline.
+    /// <c>character_tint_force_depth_override</c>: the tinted characters are also drawn where the scene hides them (at most 64).
     /// </summary>
-    [Setting("Outline downed", Hint = "While Alt is held, add downed characters to the game's hover outline (needs Settings: Hover outline).")]
-    public bool Outline { get; set; }
+    [Setting("Tint through walls", Hint = "Also draw tinted characters where walls or terrain hide them.")]
+    public bool TintThroughWalls { get; set; } = true;
+
+    /// <summary>
+    /// <c>show_icons</c>.
+    /// </summary>
+    [Setting("State icons", Hint = "Show an icon beside the state letters.")]
+    public bool ShowIcons { get; set; } = true;
+
+    /// <summary>
+    /// <c>unconscious_text_size_px</c> and the other states' (8 to 128, 18).
+    /// </summary>
+    [Setting("Unconscious text size", SubGroup = "Text sizes", Min = 8, Max = 128, Step = 1)]
+    public int UnconsciousSize { get; set; } = 18;
+
+    [Setting("Recovery coma text size", SubGroup = "Text sizes", Min = 8, Max = 128, Step = 1)]
+    public int RecoveryComaSize { get; set; } = 18;
+
+    [Setting("Dying text size", SubGroup = "Text sizes", Min = 8, Max = 128, Step = 1)]
+    public int DyingSize { get; set; } = 18;
+
+    [Setting("Playing dead text size", SubGroup = "Text sizes", Min = 8, Max = 128, Step = 1)]
+    public int PlayingDeadSize { get; set; } = 18;
+
+    [Setting("Dead text size", SubGroup = "Text sizes", Min = 8, Max = 128, Step = 1)]
+    public int DeadSize { get; set; } = 18;
+
+    /// <summary>
+    /// <paramref name="state"/>'s text size in pixels.
+    /// </summary>
+    public int TextSize(VitalState state) => state switch
+    {
+        VitalState.Unconscious => UnconsciousSize,
+        VitalState.RecoveryComa => RecoveryComaSize,
+        VitalState.Dying => DyingSize,
+        VitalState.PlayingDead => PlayingDeadSize,
+        _ => DeadSize,
+    };
 
     /// <summary>
     /// Whether a marker of <paramref name="state"/> is switched on.
