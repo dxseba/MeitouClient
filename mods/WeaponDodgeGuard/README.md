@@ -17,8 +17,10 @@ fighter dodge before it guards. Deterministic (`Rng.Hash` of the blow's key and 
   when it has names; else the dodge back; CustomAllowList (2) only the allowed. **Verified** (as above). Names are compared without case or
   spaces (Meitou's reading of the DLL's canonical names).
 - **Defaults** (shipped `WeaponDodgeGuard.ini`): Mode 1, ChanceScale 1.0, MinimumChance 0, MaximumChance 95, AdaptivePriority 0,
-  AnimationMode 1, AllowInDefensiveMode 1, RequireNormalProneState 1, DodgeCooldownMs 0. **Verified**. The allow and block lists are read from a
-  `WeaponDodgeGuard.ini` in the mod's folder (text is not a mod setting).
+  AnimationMode 1, AllowInDefensiveMode 1, RequireNormalProneState 1, DodgeCooldownMs 0. **Verified**. The allow and block lists are text
+  settings.
+- The postfix stays: no hook changes the defence choice (`ICombatDefenceObserver` only reports it, `ICombatHitFilter` runs after it). The
+  chance uses the database's `CombatConstants`, the ones the combat system is built with.
 - XP: the engine's own dodge and block XP apply (the original grants dodge XP on a weapon dodge and defence XP on a guard). **Observed**
   (description).
 - **Unknown**: not run in game.

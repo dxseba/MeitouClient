@@ -17,29 +17,9 @@ public sealed class WeaponDodgeGuardMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        ReadLists(Path.Combine(context.Folder, "WeaponDodgeGuard.ini"));
         Purpose = context.RngPurpose;
         DodgeHook.Install(context);
         context.Log("Weapon Dodge & Guard initialized");
-    }
-
-    /// <summary>
-    /// The <c>[Animations]</c> lists of an ini in the original's format, when the user puts one in the mod's folder.
-    /// </summary>
-    static void ReadLists(string path)
-    {
-        if (!File.Exists(path)) return;
-
-        string section = "";
-        foreach (var raw in File.ReadLines(path))
-        {
-            string line = raw.Trim();
-            if (line.StartsWith('[') && line.EndsWith(']')) section = line[1..^1];
-            if (section != "Animations" || line.Split('=', 2) is not [var key, var value]) continue;
-
-            if (key.Trim() == "AllowedAnimations") Settings.Allowed = value.Trim();
-            if (key.Trim() == "BlockedAnimations") Settings.Blocked = value.Trim();
-        }
     }
 }
 
@@ -124,13 +104,15 @@ public sealed class DodgeSettings
     public AnimationMode Animations { get; set; } = AnimationMode.Compatible;
 
     /// <summary>
-    /// <c>[Animations] AllowedAnimations</c>: comma-separated technique names, read from <c>WeaponDodgeGuard.ini</c> in the mod's folder (text is not
-    /// a mod setting).
+    /// <c>[Animations] AllowedAnimations</c>: comma-separated technique names.
     /// </summary>
+    [Setting("Allowed animations", Hint = "Comma-separated dodge technique names (AllowedAnimations); CustomAllowList uses only these.",
+        MaxLength = 1024)]
     public string Allowed { get; set; } = "";
 
     /// <summary>
-    /// <c>[Animations] BlockedAnimations</c>, read as <see cref="Allowed"/>.
+    /// <c>[Animations] BlockedAnimations</c>.
     /// </summary>
+    [Setting("Blocked animations", Hint = "Comma-separated dodge technique names never used (BlockedAnimations).", MaxLength = 1024)]
     public string Blocked { get; set; } = "";
 }

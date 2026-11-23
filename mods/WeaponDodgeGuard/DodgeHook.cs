@@ -20,7 +20,7 @@ namespace Meitou.WeaponDodgeGuard;
 /// </summary>
 static class DodgeHook
 {
-    static AccessTools.FieldRef<CombatSystem, CombatConstants>? s_constants;
+    static CombatConstants s_constants = CombatConstants.BaseGame;
     static PropertyInfo? s_attacker;
 
     /// <summary>
@@ -28,11 +28,17 @@ static class DodgeHook
     /// </summary>
     static readonly ConditionalWeakTable<World, ConcurrentDictionary<CharacterId, long>> LastDodge = [];
 
+    /// <summary>
+    /// No hook lets a mod change the defence choice (<c>ICombatDefenceObserver</c> reports it, <c>ICombatHitFilter</c> runs after it), so this
+    /// stays a postfix on the private <c>CombatSystem.ChooseDefence</c>, reading the attacker from its private <c>IncomingBlow</c> argument.
+    /// </summary>
     public static void Install(ModContext context)
     {
         var choose = AccessTools.Method(typeof(CombatSystem), "ChooseDefence")
             ?? throw new MissingMethodException(nameof(CombatSystem), "ChooseDefence");
-        s_constants = AccessTools.FieldRefAccess<CombatSystem, CombatConstants>("_combat");
+
+        // The combat system's constants are the database's (CombatDatabase.Constants).
+        s_constants = CombatConstants.FromDatabase(context.Data);
         var blow = AccessTools.Inner(typeof(CombatSystem), "IncomingBlow") ?? throw new TypeLoadException("CombatSystem.IncomingBlow");
         s_attacker = AccessTools.Property(blow, "Attacker") ?? throw new MissingMemberException(blow.FullName, "Attacker");
         context.Harmony.Patch(choose, postfix: new HarmonyMethod(typeof(DodgeHook), nameof(AfterChoose)));
@@ -54,7 +60,7 @@ static class DodgeHook
         if (WeaponDodgeGuardMod.Settings.Adaptive && dodge < EffectiveMeleeDefence(cold, fighter)) return;
 
         ulong roll = Rng.Hash(world.Seed, key, WeaponDodgeGuardMod.Purpose, (ulong)(uint)now);
-        if (Rng.Float(roll) * 100 >= Chance(__instance, dodge, attacker)) return;
+        if (Rng.Float(roll) * 100 >= Chance(dodge, attacker)) return;
 
         if (DodgeTechniques.Pick(__instance.Techniques, dodge, Rng.Float(Rng.Mix(roll))) is not { } pick) return;
 
@@ -93,10 +99,10 @@ static class DodgeHook
     /// The scaled chance: the vanilla dodge chance against the attacker's skill, held to [0, 100], times Chance scale, held to the minimum and
     /// maximum.
     /// </summary>
-    static float Chance(CombatSystem combat, float dodge, CharacterCold attacker)
+    static float Chance(float dodge, CharacterCold attacker)
     {
         var settings = WeaponDodgeGuardMod.Settings;
-        float vanilla = Math.Clamp(DefenceFormulas.BlockChance(dodge, AttackSkill(attacker), s_constants!(combat), 0, 95), 0, 100);
+        float vanilla = Math.Clamp(DefenceFormulas.BlockChance(dodge, AttackSkill(attacker), s_constants, 0, 95), 0, 100);
         float scaled = settings.ChanceScale * vanilla;
         return scaled < settings.MinimumChance ? settings.MinimumChance : Math.Min(scaled, settings.MaximumChance);
     }
