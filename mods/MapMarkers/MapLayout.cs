@@ -13,7 +13,7 @@ readonly record struct MapLayout(UiRect Image, UiRect Viewport, float Ui, UiRect
     /// <summary>A marker's square side, and the selected one's.</summary>
     const float MarkerSize = 18, SelectedSize = 26;
 
-    /// <summary>The editor's size (the fork's 510 x 198) and its offsets from the viewport's top right.</summary>
+    /// <summary>The editor's size (the fork's 510 x 198) and its offsets from the viewport's top right (before the player's drag).</summary>
     const float EditorWidth = 510, EditorHeight = 198, EditorTop = 48, EditorRight = 18;
 
     /// <summary>The layout of <paramref name="view"/>, with the editor when a marker is selected.</summary>
@@ -26,8 +26,10 @@ readonly record struct MapLayout(UiRect Image, UiRect Viewport, float Ui, UiRect
     static UiRect EditorBox(UiRect viewport, float ui)
     {
         float width = EditorWidth * ui, height = EditorHeight * ui;
-        float x = Math.Max(viewport.X, viewport.X + viewport.Width - width - EditorRight * ui);
-        float y = Math.Clamp(viewport.Y + EditorTop * ui, viewport.Y, Math.Max(viewport.Y, viewport.Y + viewport.Height - height));
+        float right = Math.Max(viewport.X, viewport.X + viewport.Width - width), bottom = Math.Max(viewport.Y, viewport.Y + viewport.Height - height);
+        var moved = MapState.EditorMoved;
+        float x = Math.Clamp(viewport.X + viewport.Width - width - EditorRight * ui + moved.X, viewport.X, right);
+        float y = Math.Clamp(viewport.Y + EditorTop * ui + moved.Y, viewport.Y, bottom);
         return new(x, y, width, height);
     }
 

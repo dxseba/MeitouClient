@@ -12,9 +12,11 @@ Port of *Map markers* (MCM fork, workshop 3813852161) of Emkej8's mod (GPL-3.0 s
   on the map deselects. The game still pans and gives the move order, as the original only watches the buttons.
 - **Editor** (while a marker is selected), at the map's top right, in the MCM fork's layout (**Verified**, original DLL (decompiled): a
   510 x 198 panel, header at 16,16 with an "x" close at 470,13; type button 16,42 346 wide in the type's colour cycling the ten types, Delete at
-  374,42; Label box 108,74 386 wide (port: each change kept at once, trailing spaces trimmed as the editor closes); Colour row at y 107:
+  374,42; Label box 108,74 386 wide (port: each change kept at once, trailing spaces trimmed as the editor closes; a marker just added with the middle
+  button gets the typing focus, `UiNode.Focus`; Enter commits and deselects, `UiEventKind.Submit`); Colour row at y 107:
   "-" and ten 22 px swatches 28 apart from x 108 (frame 0.05 grey; port: its own ten colours, white first, the fork's palette is its author's and not copied); a swatch replaces the label's leading `#RRGGBB` tag (7 characters, not `##`) and commits, "-" drops it; the
-  hint "MMB new marker | LMB move | Enter save" / "Del or the button - delete | RMB deselect" at 16,142). Port: sizes times the UI scale.
+  hint "MMB new marker | LMB move | Enter save" / "Del or the button - delete | RMB deselect" at 16,142). Port: sizes times the UI scale. Dragging the panel (a screen-control drag) moves the editor for
+  the session, held inside the map's viewport.
   Markers under the editor are hidden, as in the original. **Hover label**: "Type: label" in `#F5F5F5` on `#1A1A1AF2` above the marker, at
   most 480 px wide (the fork measures the text; the port estimates it, tags left out).
 - **Footer**: "Markers: On/Off" at the map's left, level with the zoom buttons.
@@ -27,15 +29,12 @@ Port of *Map markers* (MCM fork, workshop 3813852161) of Emkej8's mod (GPL-3.0 s
 - **Original's save file** (**Verified**, DLL strings): `<save>/Map-markers.json`, `{"version": 3, "markers": [{"id", "x", "y", "type", "label"}]}`, x and y
   the 0..1 map point, type `note`, `danger`, `stash`, `ruin`, `mine`, `base`, `trader`, `safe_spot`, `quest`, `todo` (the DLL also holds
   `trader_shop` and `safe`, read as aliases; its loader takes integers too); v5 keeps it across imports.
-- Hooks (public only): screen controls on the overview's `MapImage` (markers, hover label, editor; the pointer from `AddFrame`) and left of
+- Hooks (public only): screen controls on the overview's `MapImage` (markers, hover label, editor and its drag; the pointer from `AddFrame`) and left of
   `MapZoomInButton` (the footer button), `AddMapInput` (presses, Delete, the map closing). The label box is a screen-control text box.
 
 ## Missing
 
-- The editor is not draggable and has no remembered position (`editor_left`/`editor_top`): screen controls get presses only (pointer drags
-  reach overlay nodes, which draw under the screens).
-- A new marker's label box does not take the typing focus, and Enter only ends typing (the original also deselects): a mod text box has no
-  focus call and its submit is not passed on.
+- The editor's dragged place is not remembered across sessions (the original's `editor_left`/`editor_top` in its config).
 - Markers are flat coloured squares with a dark glyph, not the tinted button skin; the footer button's width is fixed, not measured.
 - No diagnostics hotkeys (Ctrl+Alt+F7/F8) or Debug logging setting; no Russian or Chinese text.
 

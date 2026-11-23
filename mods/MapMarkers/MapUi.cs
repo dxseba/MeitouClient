@@ -29,7 +29,15 @@ sealed class MapUi : IUiExtension
         r.RegisterAction("delete", _ => MapState.DeleteSelected()),
         r.RegisterAction("close", _ => MapState.Deselect()),
         r.RegisterAction("swatch", c => MapState.Colour(int.Parse(c.Argument, NumberStyles.None, CultureInfo.InvariantCulture))),
-        r.RegisterAction("label", c => MapState.Typed(c.Text)));
+        r.RegisterAction("label", Label),
+        r.RegisterAction("drag", c => MapState.DragEditor(c.Kind, c.Delta)));
+
+    /// <summary>The label box: each change kept at once; Enter commits it and closes the editor, as the original.</summary>
+    static void Label(UiActionContext c)
+    {
+        MapState.Typed(c.Text);
+        if (c.Kind == UiEventKind.Submit) MapState.Deselect();
+    }
 
     /// <summary>
     /// The map's presses (the game still pans or orders as without the mod, as the original only watches the buttons), Delete with no box being
@@ -52,7 +60,7 @@ sealed class MapUi : IUiExtension
 }
 
 /// <summary>The registered actions' keys.</summary>
-sealed record MapActions(string Toggle, string Type, string Delete, string Close, string Swatch, string Label);
+sealed record MapActions(string Toggle, string Type, string Delete, string Close, string Swatch, string Label, string Drag);
 
 /// <summary>
 /// The registered looks: the markers by kind (normal and selected), the buttons, the editor's panel and texts, the swatches, and the hover label's

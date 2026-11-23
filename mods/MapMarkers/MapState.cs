@@ -13,6 +13,9 @@ static class MapState
     /// <summary>The selected marker's id (0: none).</summary>
     static int s_selected;
 
+    /// <summary>The marker just added, whose label box takes the keys (0: none).</summary>
+    static int s_focus;
+
     static MapMarkersSettings Settings => MapMarkersMod.Settings;
 
     /// <summary>The pointer as of this frame (<see cref="Meitou.Modding.ModFrame.Pointer"/>), for the hover label.</summary>
@@ -25,6 +28,18 @@ static class MapState
 
     public static bool IsSelected(Marker marker) => marker.Id == s_selected;
 
+    /// <summary>Whether the editor's label box asks for the keys: the selected marker was just added with the middle button.</summary>
+    public static bool FocusLabel => s_focus != 0 && s_focus == s_selected;
+
+    /// <summary>How far the player dragged the editor from its place, pixels (kept for the session, held inside the map's viewport).</summary>
+    public static Vector2 EditorMoved { get; private set; }
+
+    /// <summary>A drag of the editor's panel moves it by the pointer's movement.</summary>
+    public static void DragEditor(Meitou.Game.Ui.UiEventKind kind, Vector2 delta)
+    {
+        if (kind == Meitou.Game.Ui.UiEventKind.Drag) EditorMoved += delta;
+    }
+
     /// <summary>Markers draw and take clicks: the mod is on and the markers are shown.</summary>
     public static bool Active => Settings.Enabled && Settings.MarkersVisible;
 
@@ -34,6 +49,7 @@ static class MapState
         if (Selected is { } marker) SetLabel(marker, marker.Label, trimEnd: true);
 
         s_selected = 0;
+        s_focus = 0;
     }
 
     static void Select(int id)
@@ -60,10 +76,17 @@ static class MapState
         if (!Active || Book is not { } book) return;
 
         var hovered = MarkerAt(layout, p, book.Snapshot());
-        if (button == MouseButton.Middle && hovered is null) Select(book.Add(layout.Normalized(p), Settings.DefaultType).Id);
+        if (button == MouseButton.Middle && hovered is null) AddAt(book, layout.Normalized(p));
         else if (button == MouseButton.Left && hovered is not null) Select(hovered.Id);
         else if (button == MouseButton.Left && Selected is { } moved) book.Edit(moved, m => m.At = layout.Normalized(p));
         else if (button == MouseButton.Right) Deselect();
+    }
+
+    /// <summary>A new marker of the default type, selected, its label box taking the keys.</summary>
+    static void AddAt(MarkerBook book, Vector2 at)
+    {
+        Select(book.Add(at, Settings.DefaultType).Id);
+        s_focus = s_selected;
     }
 
     /// <summary>Delete with the map showing and no box being typed in: removes the selected marker. True when it did.</summary>

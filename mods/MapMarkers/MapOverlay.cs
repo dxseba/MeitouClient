@@ -102,7 +102,8 @@ static class MapOverlay
     /// <summary>
     /// The selected marker's editor in the MCM fork's layout (<b>Verified</b>, original DLL (decompiled) and its rdata: a 510 x 198 panel): the
     /// header with an "x" close button, the type button in the kind's colour beside Delete, the label box, the Colour row (a "-" button and ten
-    /// swatches that set the label's leading colour tag) and the two-line controls hint.
+    /// swatches that set the label's leading colour tag) and the two-line controls hint. Dragging the panel moves it; a new marker's label box
+    /// takes the keys.
     /// </summary>
     static void AddEditor(UiNode root, MapLayout layout, Marker marker, MapStyles styles, MapActions actions)
     {
@@ -113,7 +114,10 @@ static class MapOverlay
             new(id, kind) { Placement = at, Style = style, Text = text, Action = action, TextScale = ui };
 
         var c = root.Children;
-        c.Add(new UiNode("editor", UiNodeKind.Panel) { Placement = Place(layout.Image, e), Style = styles.Panel });
+        c.Add(new UiNode("editor", UiNodeKind.Panel)
+        {
+            Placement = Place(layout.Image, e), Style = styles.Panel, Pointer = UiPointerEvents.Drag, Action = actions.Drag,
+        });
         c.Add(Node("header", UiNodeKind.Label, At(16, 16, 442, 18), styles.Text, MarkerKinds.Header(marker)));
         c.Add(Node("close", UiNodeKind.Button, At(470, 13, 24, 24), styles.Button, "x", actions.Close));
         string type = "Type: " + MarkerKinds.Name(marker.Kind);
@@ -123,7 +127,7 @@ static class MapOverlay
         c.Add(new UiNode("label", UiNodeKind.TextBox)
         {
             Placement = At(108, 74, 386, 24), Style = styles.Box, Text = marker.Label, Action = actions.Label, MaxLength = MarkerKinds.LabelMax,
-            TextScale = ui,
+            TextScale = ui, Focus = MapState.FocusLabel,
         });
         c.Add(Node("colour-title", UiNodeKind.Label, At(16, 106, 80, 24), styles.Text, "Colour"));
         AddSwatches(c, At, styles, actions, ui);
