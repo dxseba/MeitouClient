@@ -14,8 +14,8 @@ Port of *PersistentPrisoners* 0.2.8 (workshop 3798215878, GPL-3.0-or-later, RE_K
   hungers, carried by a player character: -10 (no free food, it starves); in a player cage: -10 with *Allow starvation* (default on), else
   Minimum Nu (1-300, default 100) / 100, so the game's own free food feeds it towards that. Port: `CharacterCold.FedTo`, set every 30 ticks and
   taken back when it no longer applies. Player squad hunger stays native.
-- **Overview** (key action *Prisoner overview*, the original's Ctrl+Shift+P: P by default, acting only with Ctrl and Shift held; P is
-  the game's photo-mode key, so the default is left out until the player frees P or binds another key on the Controls page): "Prisoners: N
+- **Overview** (key action *Prisoner overview*, Ctrl+Shift+P by default as in the original, a chord taken before
+  photo mode's P; rebindable on the Controls page): "Prisoners: N
   Corpses: N Unloaded: N", columns Name, Faction, Cage, Nu (hunger x 100), Condition, Location, Status, sortable by a click on a title;
   conditions Dead, Dying, Unconscious, Alive, Starving (Nu below 100 for a race that hungers) and the "/ Starving" pairs; statuses Player squad,
   Player / Unloaded, Unloaded, Protected; "Unknown" faction, "Unknown location"; the unloaded and feeding hints (**Verified**, DLL strings).

@@ -5,7 +5,7 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
 
 - **Opening** (**Verified**, DLL strings and `Mentors.ini`): the player reply "Could you teach me something? [training]" in a conversation with
   a character who can teach the player's character (`AddDialogueReplies`) opens training; with *Close dialogue* (`CloseDialogue`, on) the
-  conversation ends. Ctrl+Shift with the *Mentors window* key (unbound by default: the game's T is Toggle research) opens it on the inspected
+  conversation ends. The *Mentors window* key (Ctrl+Shift+T by default, a chord, so the game's T stays Toggle research) opens it on the inspected
   NPC (the HUD's shown character) when it can teach, else on the nearest teacher within *Hotkey radius* (`Radius`, 500), or closes it.
 - **Who can teach** (**Verified**): a player character learns from a living non-player character that is not a slave (state 1) and not hostile;
   port also: conscious, not imprisoned or carried (an unconscious check in the original is **Observed** only, an unnamed virtual call).

@@ -25,11 +25,8 @@ public sealed class PersistentPrisonersMod : IMod
         Window = new PrisonerWindow();
         context.AddUi(Window);
 
-        // The original's Ctrl+Shift+P: a binding is one key, so the action acts only with Ctrl and Shift held.
-        context.AddKeyAction("overview", "Prisoner overview (Ctrl+Shift)", key =>
-        {
-            if (key.Ctrl && key.Shift) Window.Toggle();
-        }, Key.P);
+        // The original's Ctrl+Shift+P, as a chord: it is taken before photo mode's P.
+        context.AddKeyAction("overview", "Prisoner overview", _ => Window.Toggle(), Binding.Of(Key.P).With(KeyModifiers.Ctrl | KeyModifiers.Shift));
         context.Log("PersistentPrisoners initialized");
     }
 }

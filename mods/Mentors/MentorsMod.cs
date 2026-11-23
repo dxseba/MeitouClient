@@ -30,7 +30,7 @@ public sealed class MentorsMod : IMod
         context.AddSystem("mentors", _ => Running = new MentorSystem(Settings, context.Data), SystemAnchor.End);
         context.AddUi(new TeachReply());
         context.AddUi(new MentorWindow(context));
-        context.AddKeyAction("window", "Mentors window (Ctrl+Shift)", LessonShortcut.Pressed);
+        context.AddKeyAction("window", "Mentors window", LessonShortcut.Pressed, Binding.Of(Key.T).With(KeyModifiers.Ctrl | KeyModifiers.Shift));
         context.Log("Mentors initialized");
     }
 }
@@ -93,13 +93,12 @@ static class Teachers
 /// Ctrl+Shift with the "Mentors window" key (the original's Ctrl+Shift+T; unbound by default, as the game holds T): closes the open window, or
 /// opens it for the first selected character on the inspected character (the HUD's shown one) when it can teach, else on the nearest character
 /// within <see cref="MentorsSettings.Radius"/> who can teach it something (the original's "selected NPC, or the nearest one who can teach").
-/// Without both modifiers the key does nothing.
 /// </summary>
 static class LessonShortcut
 {
     public static void Pressed(ModKeyContext key)
     {
-        if (!MentorsMod.Settings.Enabled || !key.Ctrl || !key.Shift) return;
+        if (!MentorsMod.Settings.Enabled) return;
 
         if (MentorsMod.Running?.Offer is not null)
         {
