@@ -1,6 +1,6 @@
 # Taunt Expansion (port)
 
-Port of *Taunt Expansion* (workshop 3771499164). A postfix on `TargetScore.Score` changes only a taunting candidate's score: the vanilla +2
+Port of *Taunt Expansion* (workshop 3771499164). A target score filter (`ITargetScoreFilter`) changes only a taunting candidate's score: the vanilla +2
 Taunt term becomes +2 x *Taunt multiplier*, and x *Re-target multiplier* again while the choosing fighter already has a target (the
 engine's `TargetCandidate.ChooserHasTarget`). Target choice, AI and pathing stay vanilla.
 

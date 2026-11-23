@@ -1,4 +1,3 @@
-using HarmonyLib;
 using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
@@ -7,68 +6,53 @@ namespace Meitou.TauntExpansion;
 
 /// <summary>
 /// Scales the vanilla Taunt term of the fight target score, and scales it again while the chooser already has a target. The vanilla target
-/// choice, AI and pathing are kept: only <see cref="TargetScore.Score"/> of a taunting candidate changes.
+/// choice, AI and pathing are kept: only the score of a taunting candidate changes, through the engine's target score filter.
 /// </summary>
 public sealed class TauntExpansionMod : IMod
 {
-    /// <summary>
-    /// The vanilla taunt bonus in <see cref="TargetScore.Score"/> (the original's ini: "Kenshi's confirmed vanilla Taunt bonus is +2.0").
-    /// </summary>
-    const float VanillaBonus = 2;
-
-    /// <summary>
-    /// Copied from the settings in a serial step; read by the parallel phases that score targets.
-    /// </summary>
-    static bool s_enabled = true;
-
-    /// <summary>
-    /// The Taunt and re-targeting multipliers, copied with <see cref="s_enabled"/>.
-    /// </summary>
-    static float s_multiplier = 5, s_retarget = 2;
-
     public void Initialize(ModContext context)
     {
         var settings = new TauntSettings();
         context.AddSettings(settings);
-        context.AddSystem("settings", _ => new SettingsCopy(settings), SystemAnchor.Before(StandardParts.Combat));
-
-        PatchScore(context.Harmony);
+        context.AddSystem("taunt", _ => new TauntSystem(settings), SystemAnchor.Before(StandardParts.Combat));
         context.Log("Taunt Expansion initialized");
+    }
+}
+
+/// <summary>
+/// The target score filter: copies the settings in its serial step and answers every taunting candidate's score with the scaled bonus. Asked on
+/// any thread, so it reads only the copies.
+/// </summary>
+sealed class TauntSystem(TauntSettings settings) : ITargetScoreFilter
+{
+    /// <summary>
+    /// The vanilla taunt bonus in the game's target score (the original's ini: "Kenshi's confirmed vanilla Taunt bonus is +2.0").
+    /// </summary>
+    const float VanillaBonus = 2;
+
+    volatile bool _enabled = true;
+
+    float _multiplier = 5, _retarget = 2;
+
+    public void Inputs(World world, IReadOnlyList<SimCommand> commands)
+    {
+        _multiplier = settings.Multiplier;
+        _retarget = settings.RetargetMultiplier;
+        _enabled = settings.Enabled;
     }
 
     /// <summary>
-    /// <see cref="TargetScore.Score"/> is public and has no filter hook; the documented route is a Harmony postfix on it.
+    /// Effective bonus: 2 x Multiplier, or 2 x Multiplier x RetargetMultiplier while the chooser already has a target (the original ini). The
+    /// original raises it the second time only in AI::chooseBestAttackTarget calls given a valid old target: the engine's ChooserHasTarget.
     /// </summary>
-    static void PatchScore(Harmony harmony)
+    public float Score(World world, in TargetScoreAsk ask)
     {
-        var score = AccessTools.Method(typeof(TargetScore), nameof(TargetScore.Score))
-            ?? throw new MissingMethodException(nameof(TargetScore), nameof(TargetScore.Score));
-        harmony.Patch(score, postfix: new HarmonyMethod(typeof(TauntExpansionMod), nameof(Scored)));
-    }
+        if (!_enabled || !ask.Candidate.Taunt) return ask.Score;
 
-    #pragma warning disable IDE1006 // Harmony binds __result by name
-    static void Scored(in TargetCandidate c, ref float? __result)
-    #pragma warning restore IDE1006
-    {
-        if (!s_enabled || !c.Taunt || __result is not { } s) return;
+        float bonus = VanillaBonus * _multiplier;
+        if (ask.Candidate.ChooserHasTarget) bonus *= _retarget;
 
-        // Effective bonus: 2 x Multiplier, or 2 x Multiplier x RetargetMultiplier while the chooser already has a target (the original ini).
-        // The original raises it the second time only in AI::chooseBestAttackTarget calls given a valid old target: the engine's
-        // ChooserHasTarget (a fighter's own choice while it fights someone).
-        float bonus = VanillaBonus * s_multiplier;
-        if (c.ChooserHasTarget) bonus *= s_retarget;
-
-        __result = s + bonus - VanillaBonus;
-    }
-
-    sealed class SettingsCopy(TauntSettings settings) : ITickSystem
-    {
-        public void Inputs(World world, IReadOnlyList<SimCommand> commands)
-        {
-            s_enabled = settings.Enabled;
-            s_multiplier = settings.Multiplier;
-            s_retarget = settings.RetargetMultiplier;
-        }
+        return ask.Score + bonus - VanillaBonus;
     }
 }
 
