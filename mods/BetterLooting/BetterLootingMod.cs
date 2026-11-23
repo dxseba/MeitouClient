@@ -1,24 +1,17 @@
-using System.Runtime.CompilerServices;
-using HarmonyLib;
 using Meitou.Game.Host.Input;
 using Meitou.Modding;
 using Meitou.Simulation;
-using Meitou.Simulation.Player;
 
 namespace Meitou.BetterLooting;
 
 /// <summary>
 /// Port of Better Looting (workshop 3816121198, GPL-3.0): with a character's inventory window open, the looting key action loots the bodies within the
-/// radius into that character by the value, weight, category and theft rules; with Alt it stores its items in the player's storage. The press travels
-/// as a <see cref="SeenDiscoveriesCommand"/> tagged in a side table, one of the interface commands the paused world still applies
-/// (World.ApplyPausedInterfaceCommands), so it works paused; a prefix on <c>PlayerSystem.ApplyViewCommand</c> runs it instead of the command's own
-/// effect (no mod command reaches a system while paused).
+/// radius into that character by the value, weight, category and theft rules; with Alt it stores its items in the player's storage. The press is a
+/// <see cref="LootRequest"/>, a paused command, so <see cref="LootSystem"/> runs it between ticks while paused too.
 /// </summary>
 public sealed class BetterLootingMod : IMod
 {
     internal static readonly LootSettings Settings = new();
-
-    static readonly ConditionalWeakTable<SeenDiscoveriesCommand, LootRequest> Requests = new();
 
     /// <summary>
     /// The mod's log.
@@ -31,15 +24,7 @@ public sealed class BetterLootingMod : IMod
         context.AddSettings(Settings);
         context.AddSystem("looting", build => new LootSystem(build.Data), SystemAnchor.End);
         context.AddKeyAction("loot", "Loot nearby bodies (Alt: store items)", Pressed, Key.O);
-        PatchCommand(context);
         context.Log("Better Looting initialized");
-    }
-
-    static void PatchCommand(ModContext context)
-    {
-        var apply = AccessTools.Method(typeof(PlayerSystem), "ApplyViewCommand")
-            ?? throw new MissingMethodException("PlayerSystem", "ApplyViewCommand");
-        context.Harmony.Patch(apply, prefix: new HarmonyMethod(typeof(BetterLootingMod), nameof(BeforeView)));
     }
 
     /// <summary>
@@ -51,10 +36,7 @@ public sealed class BetterLootingMod : IMod
         if (!Settings.Enabled || press.Frame is not { } frame || !frame.IsOpen("inventory")) return;
         if (InventoryOwner(press) is not { } lead) return;
 
-        var request = new LootRequest(lead, press.Alt, RequiredItems.Parse(Settings.RequiredItems, s_log));
-        var command = new SeenDiscoveriesCommand { Tick = press.Tick };
-        Requests.Add(command, request);
-        press.Enqueue(command);
+        press.Enqueue(new LootRequest(lead, press.Alt, RequiredItems.Parse(Settings.RequiredItems, s_log)) { Tick = press.Tick });
     }
 
     /// <summary>
@@ -69,16 +51,5 @@ public sealed class BetterLootingMod : IMod
         if (id.IsNone) return null;
 
         return snapshot.Characters.FirstOrDefault(c => c.Id == id) is { IsPlayer: true } owner ? owner.Id : null;
-    }
-
-    #pragma warning disable IDE1006 // Harmony binds __result by name
-    static bool BeforeView(World world, SimCommand command, ref bool __result)
-    #pragma warning restore IDE1006
-    {
-        if (command is not SeenDiscoveriesCommand seen || !Requests.TryGetValue(seen, out var request)) return true;
-
-        world.Systems.OfType<LootSystem>().FirstOrDefault()?.Run(world, request);
-        __result = true;
-        return false;
     }
 }

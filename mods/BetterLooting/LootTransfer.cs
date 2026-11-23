@@ -1,5 +1,3 @@
-using System.Reflection;
-using HarmonyLib;
 using Meitou.Simulation;
 using Meitou.Simulation.Items;
 using Meitou.Simulation.Population;
@@ -13,8 +11,6 @@ namespace Meitou.BetterLooting;
 static class LootTransfer
 {
     public const int MoneyFunction = 14;
-
-    static readonly MethodInfo? CashMethod = AccessTools.Method(typeof(Meitou.Simulation.Player.PlayerSystem), "Cash");
 
     /// <summary>Moves the stack <paramref name="item"/> of <paramref name="owner"/> into <paramref name="looter"/>; the units moved.</summary>
     public static int Take(Inventory owner, ItemInstance item, CharacterCold looter, bool bagFirst)
@@ -39,12 +35,17 @@ static class LootTransfer
         return bagFirst ? IntoBag() || IntoMain() : IntoMain() || IntoBag();
     }
 
-    /// <summary>Money into the player's purse (the engine's own cash step, internal, so by reflection); false when it is not reachable.</summary>
+    /// <summary>
+    /// Money into the player's purse (<c>PlayerState.Money</c>) as the engine's own cash step does: the stack's units at the record's
+    /// <c>value</c>, with its notice "{N} cats added."; false when the item is no longer there.
+    /// </summary>
     public static bool Cash(World world, PopulationData data, Inventory owner, ItemInstance item)
     {
-        if (CashMethod is null || !owner.Items.Contains(item)) return false;
+        if (!owner.Items.Contains(item)) return false;
 
-        CashMethod.Invoke(null, [world, data, item, item.Quantity]);
+        long cats = (long)(data.Items.Info(item.Record)?.Value ?? 0) * item.Quantity;
+        world.Player.Money += cats;
+        world.Post($"{cats} cats added.");
         owner.Remove(item);
         return true;
     }

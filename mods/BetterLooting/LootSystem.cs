@@ -8,18 +8,18 @@ namespace Meitou.BetterLooting;
 
 /// <summary>
 /// A loot key press: the character whose inventory window was open, Alt (store instead of loot) and the "Always take these items" list as
-/// set at the press.
+/// set at the press. A paused command: while paused it applies between ticks.
 /// </summary>
-public sealed record LootRequest(CharacterId Lead, bool Deposit, RequiredItems Required);
+public sealed record LootRequest(CharacterId Lead, bool Deposit, RequiredItems Required) : SimCommand, IPausedCommand;
 
 /// <summary>An item that passed the rules: where it is, its value per unit and weight per unit.</summary>
 readonly record struct LootCandidate(ItemInstance Item, Inventory Owner, int Value, float Weight);
 
 /// <summary>
-/// Runs a <see cref="LootRequest"/> in the player system's input step (so also while paused): loots the bodies (and, unprotected, the player's
+/// Runs each <see cref="LootRequest"/> in its input step, and while paused in the paused interface step: loots the bodies (and, unprotected, the player's
 /// storage) round the lead into it, or stores its items in the player's storage, then posts how many items moved.
 /// </summary>
-sealed partial class LootSystem(PopulationData data) : ITickSystem
+sealed partial class LootSystem(PopulationData data) : IPausedCommandHandler
 {
     static LootSettings Settings => BetterLootingMod.Settings;
 
@@ -28,7 +28,15 @@ sealed partial class LootSystem(PopulationData data) : ITickSystem
     /// </summary>
     RequiredItems _required = RequiredItems.None;
 
-    public void Run(World world, LootRequest request)
+    public void Inputs(World world, IReadOnlyList<SimCommand> commands)
+    {
+        foreach (var command in commands)
+        {
+            if (command is LootRequest request) Run(world, request);
+        }
+    }
+
+    void Run(World world, LootRequest request)
     {
         var table = world.Characters;
         if (!Settings.Enabled || !table.TryResolveNext(request.Lead, out int lead)) return;

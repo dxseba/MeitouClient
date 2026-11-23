@@ -10,7 +10,8 @@ Port of *Better Looting* (workshop 3816121198, MCM fork release 8; rules and def
   bags or death items), in *Best items first* order (value/kg, weightless as value x 10^6, then value, highest first). Rules in the
   original's order: category allowed; stolen skipped unless *Allow stolen*; unit value >= *Minimum value* (500); above 0.001 kg, value/kg
   >= *Minimum value per kg* (300). Placed into the worn bag then the main grid (*Prefer backpack*), or the reverse; never equipped. Money
-  goes into the purse (`PlayerSystem.Cash`, internal, by reflection) and counts as one item. A notice says how many items from how many sources.
+  goes into the purse (`PlayerState.Money`, at the record's `value` per unit, "{N} cats added." as the engine's own cash step) and counts as
+  one item. A notice says how many items from how many sources.
 - **Always take these items**: a text setting (the original's `[Rules] RequiredItems`, at most 4096 characters), read at every press:
   entries split by `;` or `|`; `name:` matches the shown or base name ignoring case, `id:` the record id
   exactly, a bare entry either; at most 128 entries, over 8191 UTF-8 bytes disables it. They skip the category and price rules, never the
@@ -29,9 +30,8 @@ Port of *Better Looting* (workshop 3816121198, MCM fork release 8; rules and def
 - **Protect player storage** (on) keeps the player's storage buildings and containers out of looting; off, they are looted too.
   **Pick up ground items** (off) queues up to 32 `PickUpItemOrder`s (`Queued`, `Alt` = *Allow stolen*) for qualifying ground items among
   the 256 nearest within the radius, nearest to the character first, then nearest to the previous item, never money, death items or a container holding something; another faction's item counts as stolen.
-- **Hooks**: `AddKeyAction` for the key; the request rides a `SeenDiscoveriesCommand` tagged in a side table, an interface command the paused
-  world applies, and a Harmony prefix on `PlayerSystem.ApplyViewCommand` runs it instead, so it works paused (no mod command reaches a system
-  while paused).
+- **Hooks**: `AddKeyAction` for the key; the request is a paused command (`IPausedCommand`) run by the mod's `LootSystem`
+  (`IPausedCommandHandler`), so it applies between ticks while paused. No Harmony or reflection.
 - **Verified** (original DLL, decompiled): ini sections, keys and defaults (`[General] LootRadius=20.0`; `[Rules] MinValue=500`,
   `MinValuePerKg=300.0`, `AllowStolen=0`, `RequiredItems`; `[Categories]` all 1 but `Narcotics`, `SeveredLimbs` 0; `[Behavior]
   BestItemsFirst=1`, `PreferBackpack=1`, `ActivationVirtualKey=0x2D` (Insert), `DepositKey=ALT+INSERT`, `DepositByRules=0`,
