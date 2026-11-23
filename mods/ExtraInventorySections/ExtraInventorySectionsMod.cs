@@ -1,3 +1,4 @@
+using Meitou.Game.Ui;
 using Meitou.Modding;
 using Meitou.Simulation.Items;
 
@@ -20,6 +21,12 @@ public sealed class ExtraInventorySectionsMod : IMod
         context.AddEquipmentSlot(new ModSlot("eyes", AttachEyes, 3, 1, settings.EyesX, settings.EyesY));
         context.AddEquipmentSlot(new ModSlot("hands", AttachGloves, 2, 2, settings.HandsX, settings.HandsY));
         context.AddEquipmentSlot(new ModSlot("neck", AttachNeck, 2, 2, settings.NeckX, settings.NeckY));
+        if (settings.Labels)
+        {
+            context.AddFrame(frame => SectionLabels.UiScale = frame.UiScale);
+            context.AddUi(new SectionLabels());
+        }
+
         context.Log("Extra Inventory Sections initialized");
     }
 }
@@ -27,6 +34,9 @@ public sealed class ExtraInventorySectionsMod : IMod
 /// <summary>Where each section sits, in layout pixels from the character window's top-left corner at UI scale 1 (takes effect after a restart).</summary>
 public sealed class SectionSettings
 {
+    [Setting("Section labels", Hint = "Names each section above its cells. Restart to apply.")]
+    public bool Labels { get; set; } = true;
+
     [Setting("Eyes X", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Eyes")]
     public int EyesX { get; set; } = 282;
 
@@ -44,4 +54,47 @@ public sealed class SectionSettings
 
     [Setting("Neck Y", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Neck")]
     public int NeckY { get; set; } = 84;
+}
+
+/// <summary>
+/// Each section's name just above its cells (<c>AddScreenControls</c> anchored to the section's widget, which the engine names by the section), in
+/// the character and loot windows.
+/// </summary>
+sealed class SectionLabels : IUiExtension
+{
+    const float LabelHeight = 16;
+
+    static readonly (string Section, string Caption)[] Sections = [("eyes", "Eyes"), ("hands", "Hands"), ("neck", "Neck")];
+    static readonly string[] Screens = ["inventory", "loot"];
+
+    /// <summary>The interface's scale, taken each frame.</summary>
+    internal static volatile float UiScale = 1;
+
+    string _style = "";
+
+    public string Id => "dxseba.extrainventorysections.ui";
+
+    public void Register(UiRegistration registration)
+    {
+        _style = registration.RegisterStyle("label", new UiStyle
+        {
+            FontName = "Kenshi_PaintedTextFont_Medium", TextAlign = "Left Bottom", Text = new(.84f, .80f, .70f, 1),
+        });
+
+        foreach (string screen in Screens)
+        {
+            foreach (var (section, caption) in Sections)
+                registration.AddScreenControls(screen, section, UiAnchorPlacement.Above, _ => Label(section, caption));
+        }
+    }
+
+    UiNode Label(string section, string caption)
+    {
+        float scale = UiScale;
+        return new("label-" + section, UiNodeKind.Label)
+        {
+            Placement = new(UiLength.Fill, LabelHeight * scale, Bottom: 0), Text = caption, Style = _style, TextScale = scale * 0.8f,
+            Pickable = false,
+        };
+    }
 }
