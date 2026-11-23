@@ -31,14 +31,28 @@ public sealed class LevelUpSettings
     [Setting("Offset Y", Hint = "Distance in pixels from the screen edge (at 2160 lines); ignored when centred", Min = -4000, Max = 4000)]
     public int OffsetY { get; set; } = 20;
 
-    [Setting("Color", Hint = "Color of the level up text", Options = ["Yellow", "White", "Green", "Cyan", "Orange", "Red", "Purple", "Gray"])]
+    [Setting("Color", Hint = "Color of the level up text", Options =
+        ["Yellow", "White", "Green", "Cyan", "Orange", "Red", "Purple", "Gray", "Custom"])]
     public string Colour { get; set; } = "Yellow";
+
+    [Setting("Custom Color (ARGB)", Hint = "Any text color as #AARRGGBB hex, as the original's textColor", MaxLength = 9,
+        VisibleWhen = nameof(CustomColour))]
+    public string TextColor { get; set; } = "#FFFFFF00";
+
+    /// <summary>Whether the custom colour is in use (shows its text box).</summary>
+    public bool CustomColour => Colour == "Custom";
 
     [Setting("Opacity (%)", Hint = "How see-through the text is. 100 = solid", Min = 5, Max = 100)]
     public int Opacity { get; set; } = 100;
 
     [Setting("UI Scale", Hint = "Scales everything up or down. 1.0 = normal", Min = 0.25, Max = 4, Step = 0.05)]
     public float Scale { get; set; } = 1;
+
+    [Setting("Font Size", Hint = "Text height in pixels at 2160 lines, before the UI scale", Min = 8, Max = 200)]
+    public float FontSize { get; set; } = 36;
+
+    [Setting("Hide with game UI", Hint = "Hide notifications while the game interface is hidden")]
+    public bool HideWithGameUi { get; set; } = true;
 
     [Setting("Whole squad (off = selected only)", Hint = "Everyone in your squad, or only the selected character")]
     public bool WholeSquad { get; set; } = true;

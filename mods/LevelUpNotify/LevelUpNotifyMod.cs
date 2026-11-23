@@ -13,7 +13,7 @@ public sealed class LevelUpNotifyMod : IMod
     {
         var settings = new LevelUpSettings();
         context.AddSettings(settings);
-        context.AddSystem("levels", _ => new LevelWatchSystem(settings), SystemAnchor.End);
+        context.AddSystem("levels", _ => Toasts.Watch(settings), SystemAnchor.End);
         Toasts.Install(context, settings);
         context.AddUi(new ToastUi(settings));
         context.Log("Level Up Notifications initialized");

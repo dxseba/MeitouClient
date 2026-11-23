@@ -16,12 +16,13 @@ Facts, **Verified** from the original DLL (decompiled, its string and data table
   00FF88, Cyan 00FFFF, Orange FF8800, Red FF4040, Purple C080FF, Gray C0C0C0.
 - The original's settings window is F10 ("Level Up Notifications"); `hideWithGameUI` hides toasts with the interface (F7).
 
-Port specifics: a postfix on `PlayerInterface.BindUi` ages the toasts on the real clock and binds them; `hud.overlay` labels draw them.
-**Observed** (2026-11-17/18, earlier version: notices and floating text) that level ups are detected in play; the toasts are **Unknown** in a
-running game.
+Port specifics: a frame callback (`AddFrame`) ages the toasts on the real clock; `hud.overlay` labels draw them with their own colour,
+opacity (ARGB alpha x opacity x fade), text scale (font size x screen height / 2160 x UI scale over the standard font's 13.9 px) and
+`Animated` fades; with *Hide with game UI* off the overlay sets `ShowWithHudHidden`. Settings: the panel's presets plus *Custom* with the
+ini's `textColor` as #AARRGGBB, and the ini's `fontSize`. **Observed** (2026-11-17/18, earlier version: notices and floating text) that level
+ups are detected in play; the toasts are **Unknown** in a running game.
 
 Missing:
-- Custom ARGB colours (only the presets), the font size scaling (the text keeps the HUD font size; boxes scale), and showing toasts with the
-  interface hidden (`hideWithGameUI` = false): the HUD overlay hides with it. The F10 panel's "Show Preview".
-- Toasts age only when the HUD is arranged (each tick, mouse move), so while paused with a still mouse they wait.
+- The F10 panel and its "Show Preview" (the Settings screen instead); the ini's `autoScale`, `referenceHeight` and toast box sizes (fixed at
+  their defaults).
 - Whether the original's `getStat(stat, true)` includes stat modifiers is **Unknown**; the port reads the stat with modifiers.
