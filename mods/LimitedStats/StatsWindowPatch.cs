@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Ui;
@@ -11,8 +12,10 @@ namespace Meitou.LimitedStats;
 /// <summary>
 /// The original's stats window hooks (<b>Verified</b>, original source <c>printRaceXPBonusLine_hook</c>, <c>RecolorStatsWindow</c>): the selected
 /// stat's description shows "&lt;LevelCapLabel&gt;&lt;cap&gt; (&lt;+rate%&gt;)" in place of the race XP bonus line, and with EnableStatColors each
-/// stat name takes the colour of its cap kind and rate. A postfix on the game's internal <c>StatsWindow.AddStatsContent</c> (Harmony; there is no
-/// mod slot in the window): a game that renamed it leaves the window as it is, with a log line.
+/// stat name takes the colour of its cap kind and rate. A postfix on the game's internal <c>StatsWindow.AddStatsContent</c> (Harmony): screen controls
+/// (<see cref="Meitou.Game.Ui.UiRegistration.AddScreenControls"/>) only add controls over the window, and these change its own (a label's colour,
+/// the description's race XP paragraph) for the selected stat, which the window keeps to itself. The lead is the first selected character, read
+/// each frame (<see cref="ModContext.AddFrame"/>). A game that renamed the members leaves the window as it is, with a log line.
 /// </summary>
 static class StatsWindowPatch
 {
@@ -21,8 +24,8 @@ static class StatsWindowPatch
     static CapBoard s_board = new();
     static GuiConfig s_gui = new();
     static Action<string> s_log = _ => { };
-    static FieldInfo? s_player, s_selectedStat, s_help;
-    static MethodInfo? s_selected;
+    static FieldInfo? s_selectedStat, s_help;
+    static volatile StrongBox<CharacterId>? s_lead;
     static bool s_failed;
 
     public static void Install(ModContext context, CapBoard board, GuiConfig gui)
@@ -30,16 +33,15 @@ static class StatsWindowPatch
         (s_board, s_gui, s_log) = (board, gui, context.Log);
         var window = AccessTools.TypeByName("Meitou.Game.Ui.StatsWindow");
         var target = window is null ? null : AccessTools.Method(window, "AddStatsContent");
-        s_player = window?.GetFields(BindingFlags.Instance | BindingFlags.NonPublic).FirstOrDefault(f => f.FieldType.Name == "PlayerInterface");
-        s_selected = s_player is null ? null : AccessTools.Method(s_player.FieldType, "Selected");
         s_selectedStat = window is null ? null : AccessTools.Field(window, "SelectedStat");
         s_help = window is null ? null : AccessTools.Field(window, "StatHelp");
-        if (target is null || s_selected is null || s_selectedStat is null || s_help is null)
+        if (target is null || s_selectedStat is null || s_help is null)
         {
             context.Log("stats window members not found; the Level Cap line and stat colours are off");
             return;
         }
 
+        context.AddFrame(frame => s_lead = frame.Selected.Count > 0 ? new(frame.Selected[0]) : null);
         context.Harmony.Patch(target, postfix: new HarmonyMethod(typeof(StatsWindowPatch), nameof(AfterStatsContent)));
     }
 
@@ -51,7 +53,7 @@ static class StatsWindowPatch
 
         try
         {
-            if (Lead(__instance) is not { } lead || s_board.Read(lead) is not var (entry, _)) return;
+            if (s_lead is not { } lead || s_board.Read(lead.Value) is not var (entry, _)) return;
 
             if (s_gui.Colours && !entry.IsAnimal) Recolour(controls, entry);
             if (int.TryParse((string?)s_selectedStat!.GetValue(__instance), NumberStyles.None, CultureInfo.InvariantCulture, out int n))
@@ -63,11 +65,6 @@ static class StatsWindowPatch
             s_log($"stats window hook failed, off for the session: {e.Message}");
         }
     }
-
-    static CharacterId? Lead(object window) =>
-        s_player!.GetValue(window) is { } player && s_selected!.Invoke(player, null) is IReadOnlyList<CharacterSnapshot> { Count: > 0 } selected
-            ? selected[0].Id
-            : null;
 
     /// <summary>Each stat row's label in the colour of its cap kind and rate, where the ini gives one.</summary>
     static void Recolour(List<UiControl> controls, CapEntry entry)

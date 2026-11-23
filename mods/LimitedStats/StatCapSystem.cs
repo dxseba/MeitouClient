@@ -78,18 +78,22 @@ sealed class StatCapSystem(LimitedStatsSettings settings, TalentConfig config, T
 
     /// <summary>
     /// The original's XP hook: no XP at or above the cap; the gain divided by the race's own XP multiplier for the stat, times the talent's rate
-    /// and the player or NPC rate, trained in 0.5 steps on the core curve with the cap as its top (held there); the result handed to the game as the
-    /// amount its 101 curve needs for the same rise. First aid (added past the curve, which the original's hook never sees) is left alone.
+    /// and the player or NPC rate, trained in 0.5 steps on the core curve topped at the cap (a training dummy's level ignored, as the original's
+    /// hook does), or with over-cap protection once on the curve topped at CapMax; handed to the game as one gain on the curve topped at that
+    /// limit. Gains added straight (first aid, mass combat), which the original's hook never sees, are left alone.
     /// </summary>
-    public float Gain(World world, in ExperienceGain gain)
+    public float Gain(World world, in ExperienceGain gain) => Adjust(world, gain).Amount;
+
+    public ExperienceGain Adjust(World world, in ExperienceGain gain)
     {
-        if (gain.Source == ExperienceSource.FirstAid || board.Read(gain.Character) is not var (entry, rules)) return gain.Amount;
+        if (gain.Source == ExperienceSource.FirstAid || float.IsInfinity(gain.Cap)) return gain;
+        if (board.Read(gain.Character) is not var (entry, rules)) return gain;
 
         var stat = StatsInfo.StorageOf(gain.Skill);
-        if (stat == StatsEnumerated.None || (int)stat >= entry.Caps.Length || entry.Caps[(int)stat] < 0) return gain.Amount;
-        if (!world.Characters.TryResolveNext(gain.Character, out int slot) || world.Characters.Cold(slot)?.Stats is not { } stats) return gain.Amount;
+        if (stat == StatsEnumerated.None || (int)stat >= entry.Caps.Length || entry.Caps[(int)stat] < 0) return gain;
 
-        return CurveMath.Amount(stats.Stored(stat), gain.Amount, entry, stat, rules, gain.Source == ExperienceSource.Training);
+        var (amount, cap) = CurveMath.Gain(gain.Level, gain.Amount, entry, stat, rules);
+        return gain with { Amount = amount, Cap = cap };
     }
 
     public void Hash(ref StateHasher hasher)
@@ -135,28 +139,29 @@ static class CurveMath
     const float Chunk = 0.5f;
     const int Guard = 40000;
 
-    public static float Amount(float value, float amount, CapEntry entry, StatsEnumerated stat, Rules rules, bool dummy)
+    /// <summary>The amount and curve top for the game's one gain that makes the original's rise of <paramref name="value"/> (amount 0: none).</summary>
+    public static (float Amount, float Cap) Gain(float value, float amount, CapEntry entry, StatsEnumerated stat, Rules rules)
     {
         float cap = entry.Caps[(int)stat];
         bool protect = rules.ProtectGap >= 0 && value > cap && value - cap >= rules.ProtectGap;
-        if (value >= cap && !protect) return 0;
+        if (value >= cap && !protect) return (0, CharacterStats.XpCap);
 
         float race = entry.RaceXp[(int)stat];
         if (race > 0.001f && MathF.Abs(race - 1) > 0.0001f) amount /= race;
         float scaled = amount * entry.Rates[(int)stat] * entry.XpRate;
 
-        // A training dummy's gain keeps the game's curve, whose top is the dummy's level (not told to filters): only the rate is applied.
-        if (dummy) return scaled;
+        // Protected: the original trains once on the curve topped at CapMax, which is the game's own gain with that top.
+        if (protect) return (scaled, rules.CapMax);
 
-        float after = protect ? CharacterStats.CoreGain(value, scaled, rules.CapMax) : Chunked(value, scaled, MathF.Min(cap, rules.CapMax));
-        return AsGameAmount(value, MathF.Min(after, protect ? after : cap));
+        float limit = MathF.Min(cap, rules.CapMax);
+        if (limit <= value) return (0, CharacterStats.XpCap);
+
+        return (AsGameAmount(value, Chunked(value, scaled, limit), limit), limit);
     }
 
     /// <summary>The original's training: 0.5 at a time on the curve topped at <paramref name="limit"/>, until spent or nothing more is added.</summary>
     static float Chunked(float value, float amount, float limit)
     {
-        if (limit <= value) return value;
-
         for (int i = 0; amount > 0.000001f && value < limit && i < Guard; i++)
         {
             float chunk = MathF.Min(amount, Chunk);
@@ -170,13 +175,12 @@ static class CurveMath
         return value;
     }
 
-    /// <summary>The amount the game's own curve (top 101) needs to raise <paramref name="value"/> to <paramref name="target"/>; 0 for no rise.</summary>
-    static float AsGameAmount(float value, float target)
+    /// <summary>The amount the curve topped at <paramref name="limit"/> needs to raise <paramref name="value"/> to <paramref name="target"/>.</summary>
+    static float AsGameAmount(float value, float target, float limit)
     {
-        float f = (CharacterStats.XpCap - value) / CharacterStats.XpCap;
+        float f = (limit - value) / limit;
         f *= f;
-        if (!(target > value) || !(f > 0 && f <= 20)) return 0;
 
-        return (target - value) / f;
+        return target > value && f > 0 ? (target - value) / f : 0;
     }
 }

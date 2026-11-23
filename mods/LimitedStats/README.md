@@ -23,20 +23,21 @@ built-in defaults are the original DLL's own: caps 100 x the race multiplier (at
   `IModSaveData` by lasting id). The original seeds from `GetTickCount64`; the port from the world seed and the lasting id.
 - **XP** (`increaseStat` hook): none at or above the cap (unless `ProtectGap` >= 0 and the stat is at least that far above, which trains toward
   `CapMax`); the gain is divided by the race's own multiplier, times the talent rate and `PlayerExpRate`/`NpcExpRate`, added in 0.5 chunks on the
-  core curve whose top is the cap. First aid (added straight, no `increaseStat`) is untouched. The scan clamps every 120 frames (port: 15 ticks).
+  core curve whose top is the cap; the game's own top (101, a training dummy's level) is ignored, as the original's hook passes its own
+  limit. First aid and mass combat (added straight, no `increaseStat`) are untouched. The scan clamps every 120 frames (port: 15 ticks).
 - **Stats window**: the selected stat's race XP bonus line becomes `LevelCapLabel + cap (+rate%)`, cap and rate coloured; with
   `EnableStatColors` stat names take one of 11 colours by cap kind (special: the talent's own cap, or with `GoldCapByValue` cap >= gold;
   high >= green; low <= red) and rate; `AttrStats` use the attribute set. Port: a Harmony postfix on the internal `StatsWindow.AddStatsContent`.
 
 ## Port notes
 
-- The game's curve tops at 101 and a filter cannot change it: the port works out the original's rise and hands the game the amount its own curve
-  needs for it. The game holds that amount to 20, and above 101 to the incoming amount, so near and above 101 a cap above 101 trains slower
-  than in the original. A training dummy's gain keeps the game's curve (its top, the dummy level, is not told to filters) with only the rates.
+- XP through `IExperienceFilter.Adjust`: the original's chunked rise is handed to the game as one gain on the curve topped at min(cap,
+  `CapMax`) (with over-cap protection: the scaled amount on the curve topped at `CapMax`), so caps above 101 and dummies train as in the
+  original. The game holds one gain's amount to 20, so a single gain whose equivalent amount passes 20 rises a little less.
 - Port options: *Player characters only* (off) and *Panel lines* (0; HUD lines with the cap range and talent).
 - **Unknown**: everything above in game (not run). The stats window postfix and inline colour tags in its description are untested.
 - **Observed** (2026-11-17/18, an earlier port with a flat cap): the clamp holds in game.
 
 ## Missing
 
-- Exact training above 101 and at dummies (needs the curve's top in `ExperienceGain` and a way to return one).
+- A public stats-window hook that can recolour the window's stat labels and replace its race XP line (the Harmony postfix stands in).
