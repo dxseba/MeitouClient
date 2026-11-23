@@ -6,7 +6,7 @@ Port of *Building Search Bar* (workshop 3786979230, GPLv3), rebuilt from its des
   to 40 characters), a clear (X) and a Next (>) button, a status line and a results list. Results are the buildings the build window offers
   (its listed categories, their groups and each group's variants; unresearched buildings are not offered) whose name, group, category or
   string id contains the query, ignoring case, in the window's own order, at most 80, each shown as "Name [group]". Clicking one, or Next
-  (wrapping round), chooses that building in the build window's lists (category, group, variant), as clicks there would; the status reads
+  (wrapping round, its row scrolled into view: `UiRegistration.ScrollTo`), chooses that building in the build window's lists (category, group, variant), as clicks there would; the status reads
   `n` matches, or `i/n` once one was chosen. The build window's own lists are not filtered. The caption's fold button shrinks the window to
   a SEARCH button, which opens it again. Closing the build window clears the search.
 - **Place**: as the original, the window's left edge at the build window's (at least 6 px), its bottom 8 px above the build window's top
@@ -20,5 +20,5 @@ Port of *Building Search Bar* (workshop 3786979230, GPLv3), rebuilt from its des
   name plus ` [` field `]` when that field is set; the status `i/n` or `n`; Next wraps; the index is rebuilt from the build window's visible
   categories and groups; the haystack is lower-cased (ASCII `tolower`). Translations (en, de, es, fr, ja, ko, pt, ru, zh) hold only
   "SEARCH" and "Search".
-- **Differences**: Next does not scroll its row into view (no API sets a scroll view's offset); texts are English only.
+- **Differences**: texts are English only.
 - **Unknown**: which field the original shows in brackets (group or category; the port shows the group); look and typing in game untested.

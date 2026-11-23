@@ -27,6 +27,11 @@ sealed class SearchWindow : IUiExtension
     int _generation;
 
     /// <summary>
+    /// The registration, for the results list's scroll offset.
+    /// </summary>
+    UiRegistration? _registration;
+
+    /// <summary>
     /// Registered style and action keys.
     /// </summary>
     string _panel = "", _text = "", _row = "", _chosenRow = "", _typed = "", _clear = "", _next = "", _pick = "", _fold = "", _drag = "";
@@ -35,6 +40,7 @@ sealed class SearchWindow : IUiExtension
 
     public void Register(UiRegistration registration)
     {
+        _registration = registration;
         _panel = registration.RegisterStyle("panel", new() { Skin = "Kenshi_GenericTextBoxFlatSkin" });
         _text = registration.RegisterStyle("text", new() { Text = new(.91f, .86f, .74f, 1), TextPadding = new UiInsets(4, 0, 4, 0) });
         var rowPad = new UiInsets(6, 0, 4, 0);
@@ -61,9 +67,23 @@ sealed class SearchWindow : IUiExtension
     }
 
     /// <summary>
-    /// Next: the following result.
+    /// Next: the following result, its row scrolled into view.
     /// </summary>
-    static void Next() => Search.Next();
+    void Next()
+    {
+        Search.Next();
+        if (Search.Chosen < 0 || _registration is not { } registration) return;
+
+        string list = ResultsId;
+        float top = Search.Chosen * Row, offset = registration.ScrollOffset(list);
+        if (top < offset) registration.ScrollTo(list, top);
+        else if (top + Row > offset + ListHeight) registration.ScrollTo(list, top + Row - ListHeight);
+    }
+
+    /// <summary>
+    /// The results list's node id (a new one for each query).
+    /// </summary>
+    string ResultsId => $"bsb-results{_generation}";
 
     /// <summary>
     /// A drag of the caption moves the window (and its folded button) by the pointer's movement.
@@ -139,7 +159,7 @@ sealed class SearchWindow : IUiExtension
     /// </summary>
     void AddResults(UiNode window)
     {
-        var list = new UiNode($"bsb-results{_generation}", UiNodeKind.ScrollView)
+        var list = new UiNode(ResultsId, UiNodeKind.ScrollView)
         {
             Placement = new(436, ListHeight, Left: 16, Top: Caption + 76), Flow = UiFlow.Column, ScrollStep = Row,
         };
