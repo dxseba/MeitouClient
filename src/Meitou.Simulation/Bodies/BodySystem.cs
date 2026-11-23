@@ -185,8 +185,8 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
 
     /// <summary>
     /// The update budgets' turns of this tick (<see cref="MedicalTimeBudget"/>); then who may not get up this tick: a knocked-out person (not an
-    /// animal) whose knockout ends, or who plays dead, when <see cref="SafeToGetUp"/> fails, and who is kept down until it has looked
-    /// (<see cref="Unasked"/>). Serial, from the last tick's state.
+    /// animal, not in a bed or a cage) whose knockout ends, or who plays dead, when <see cref="SafeToGetUp"/> fails, and who is kept down until it
+    /// has looked (<see cref="Unasked"/>). Serial, from the last tick's state.
     /// </summary>
     public void Schedule(World world)
     {
@@ -202,6 +202,11 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             if (!table.Previous[i].Alive
                 || table.Cold(i) is not { Animal: null, Medical: { Unconscious: true, Dead: false, HasStatsObject: true } medical } cold)
                 continue;
+
+            // The posture is chosen only in a whole-body ragdoll, which a bed or a cage refuses: one held there wakes, and one playing dead
+            // when put in gets up (docs/game/ragdolls.md "Playing dead").
+            if (cold.InSomething != Locks.HeldState.None) continue;
+
             if (medical.PlayingDead && was && (world.Tick + i) % PlayDeadRecheckTicks != 0)
             {
                 _playDead[i] = true;
@@ -312,7 +317,9 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             BloodTrail(world, marks, i, cold, medical.Bleeding, race, in n);
         events ??= [];
         events.Clear();
+        HealthObservers.Before(world, i);
         medical.Tick(dt, ctx, events);
+        HealthObservers.After(world, i, HealthChangeKind.Body);
         cold.SwimSpeed = Speed.Swim(race, stats, medical, encumbrance);
         float now = TopSpeedNow(world, i, cold, race, stats, medical, encumbrance);
         cold.TopSpeedNow = now;
@@ -413,6 +420,8 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             UseHungerRate = UseHungerRate(cold, in n),
             Idle = AmIdle(world, cold, medical, in n),
             BudgetSeconds = cold.MedicalBudgetSeconds,
+            Needs = world.NeedRateFilters.Active ? world : null,
+            NeedsOf = world.Characters.IdOf(i),
         };
     }
 
@@ -548,7 +557,8 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
         float runValue = Speed.RunValue(race, stats);
         float toughness = XpService.ToughnessFactor(medical);
         bool rest = ctx.Resting || medical.Unconscious || medical.Dead;
-        float hunger = race.HungerRate * MedicalState.HungerSituationFactor(Constants, rest, ctx.Still, ctx.Idle, encumbrance, ctx.UseHungerRate);
+        float hunger = NeedRateFilters.Hunger(ctx,
+            race.HungerRate * MedicalState.HungerSituationFactor(Constants, rest, ctx.Still, ctx.Idle, encumbrance, ctx.UseHungerRate));
         return new ExtendedStats(XpService.AthleticsRate(encumbrance, speed, runValue), _xp.StrengthCarryRate(encumbrance, carrying), toughness,
             MedicalState.KoPoint(Constants, stats.ScaledToughness), speed, runValue, hunger, rest, WorkHungerRate: ctx.UseHungerRate, Idle: ctx.Idle);
     }
@@ -754,6 +764,8 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                     continue;
                 }
                 var corpse = new CharacterId(i, table.Next[i].Generation);
+                if (world.RemovalVetoes.Keeps(world, corpse, unloaded ? RemovalKind.CorpseUnloaded : RemovalKind.CorpseDecayed)) continue;
+
                 world.Uniques.Left(corpse);
                 table.Remove(corpse);
             }

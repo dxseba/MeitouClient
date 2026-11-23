@@ -166,6 +166,12 @@ msgstr "部隊の周辺に戻ってきた部隊は、離れていた間の分だ
 msgid "A swamp turtle butts and bites when it fights. In the game it fights with a sword or club drawn for it, whose moves its body cannot play, so its blows land without any motion."
 msgstr "沼ガメは戦うとき頭突きと噛みつきをします。ゲームでは用意された剣や棍棒で戦いますが、その動きを体で再生できないため、攻撃が何の動作もなく当たります。"
 
+msgid "Turret fire is a crime"
+msgstr "タレット射撃は犯罪"
+
+msgid "Shooting a turret at someone who is not an enemy and not fighting is an assault, as attacking them in person is, and guards who see it put a bounty on you. In the game turret fire is never a crime: the victim's faction only likes you less."
+msgstr "敵ではなく戦ってもいない相手をタレットで撃つと、直接攻撃したときと同じく暴行となり、目撃した衛兵に賞金を懸けられます。本来のゲームではタレット射撃は決して犯罪にならず、被害者の勢力の好感度が下がるだけです。"
+
 msgid "A town far from your squads is taken over or destroyed as soon as its story calls for it, so the map and the factions show it at once. In the game it changes only when you come near."
 msgstr "部隊から遠く離れた町は、ストーリーが求めるとすぐに占領または破壊されるので、マップと勢力にすぐ反映されます。ゲームでは近づいたときにしか変わりません。"
 
@@ -4790,3 +4796,53 @@ msgstr "適応露出の強さ"
 
 msgid "The most deep shade by day is brightened, as a multiple of the game's exposure."
 msgstr "日中の深い日陰を最大でどれだけ明るくするか（ゲームの露出の倍率）。"
+
+msgid "Knocked out stay"
+msgstr "気絶した者が残る"
+
+msgid "A knocked-out character left lying near your squads, such as a guard you carried off and put down, stays when his squad or town unloads far away. In the game he vanishes with them once you look away."
+msgstr "部隊の近くに倒れたままの気絶したキャラクター（運び出して下ろした衛兵など）は、遠くでその部隊や町がアンロードされても残ります。ゲームでは目を離すとそれらと一緒に消えます。"
+
+#. machine-translated
+msgid "Information panel stays open"
+msgstr "情報パネルを開いたままにする"
+
+#. machine-translated
+msgid "The character information panel at the bottom left stays extended or collapsed as you last left it, also after restarting the game. The game starts it collapsed every time."
+msgstr "左下のキャラクター情報パネルが、最後に残した展開・折りたたみの状態のままになります。ゲームを再起動した後も同じです。ゲームでは毎回折りたたまれた状態で始まります。"
+
+#. machine-translated
+msgid "Set hunger (1-300)"
+msgstr "空腹度を設定 (1-300)"
+
+#. machine-translated
+msgid "Enter a hunger value from 1 to 300."
+msgstr "空腹度を1から300の範囲で入力してください。"
+
+#. machine-translated
+msgid "Hunger set to {1}."
+msgstr "空腹度を{1}に設定しました。"
+
+msgid "Date added"
+msgstr "追加日"
+
+msgid "Hide incompatible RE_Kenshi plugins"
+msgstr "非対応のRE_Kenshiプラグインを非表示"
+
+msgid "Last modified"
+msgstr "最終更新日"
+
+msgid "Load order"
+msgstr "読み込み順"
+
+msgid "Name"
+msgstr "名前"
+
+msgid "No mods match the filters."
+msgstr "フィルターに一致するMODがありません。"
+
+msgid "Save current preset"
+msgstr "現在のプリセットを保存"
+
+msgid "Sort by"
+msgstr "並べ替え"

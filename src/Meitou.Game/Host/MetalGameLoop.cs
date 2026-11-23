@@ -824,7 +824,7 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
             try
             {
                 host.PlayerSquad = host.Population.StartPlayer(host.Session.World, start);
-                host.Session.World.TellReady(fromSave: false);
+                host.Session.World.TellReady(new Simulation.WorldStart(Simulation.WorldStartKind.NewGame));
                 var lead = host.Session.World.Characters.Previous[host.PlayerSquad.Leader.Slot].Position;
                 _startTarget = lead;
                 Console.WriteLine($"metal     player squad: {host.PlayerSquad.Members.Count} characters, leader at {lead.X:0}, {lead.Z:0}");
@@ -1354,6 +1354,7 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
                         population.KeepWild, population.ResidentSchedule) = (host.Config.KeepRoamers, host.Config.OffscreenFights,
                         host.Config.OffscreenHealing, host.Config.CampaignAncestorsOnce, host.Config.KeepWild, host.Config.ResidentSchedule);
                     population.OffscreenOverrides = host.Config.OffscreenOverrides;
+                    population.KeepDowned = host.Config.KeepDowned;
                 }
                 foreach (var production in host.Session.World.Systems.OfType<Meitou.Simulation.Production.ProductionSystem>())
                     production.UnloadedProduction = host.Config.UnloadedProduction;
@@ -3132,6 +3133,8 @@ sealed class MetalGameLoop(GameHost host, Data.Gameplay.NewGameStart? start)
         host.BloodDecals.UpdateBlood();
         host.UpdateTrails();   // no trail renderer here: only the footfalls for the blood prints
         host.Modding.UpdateModHits();
+        host.Modding.UpdateModFrames();
+        host.Modding.UpdateModProjectiles();
         host.Modding.UpdateModFaults();
         if (_characters is not null)
         {

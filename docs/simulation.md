@@ -537,9 +537,9 @@ default residents ([town residents](game/factions-squads-towns.md#town-residents
 (`PopulationStored.cs`): each living member's own cold state (name, look, body, kit, bounties, crime marks) with its place,
 cleared of path, AI, carry, treatment, combat and stealth state, plus the squad's home building, shop, purse and AI package.
 The town then holds squads and makes none of its own; the platoon is made of the same characters when the town's zone is
-active again and leaves with the town's grace. A wild site with a living member of its squads in an active zone does not unload (nor counts its grace) wherever its own zone is, so a chase away from home does not end in a vanish (engine choice for the original's per-platoon unload by its own place); a nest held so makes no new squads. A town unloads with its zones whatever its squads do: one of its squads with a living member in the loaded box of an active zone, or carrying a player character, stays in the world as a loaded pinned platoon that unloads by its own place (`PopulationSystem.KeepLoaded`, [persistent platoons](game/factions-squads-towns.md#1-object-model)). This is the original's model: residents are persistent platoons kept as their
+active again and leaves with the town's grace. A wild site with a living member of its squads in an active zone does not unload (nor counts its grace) wherever its own zone is, so a chase away from home does not end in a vanish (engine choice for the original's per-platoon unload by its own place); a nest held so makes no new squads. A town unloads with its zones whatever its squads do: one of its squads with a living member in the loaded box of an active zone, or carrying a player character, or with a member on screen, stays in the world as a loaded pinned platoon that unloads by its own place (`PopulationSystem.KeepLoaded`, [persistent platoons](game/factions-squads-towns.md#1-object-model)). This is the original's model: residents are persistent platoons kept as their
 characters ([persistent platoons](game/factions-squads-towns.md#1-object-model)). A loaded town also stays while any zone of its coverage list is active, and asks for every zone of its list each frame with the largest camera or player timer among them, a copy that extends nothing, so its zones lapse with the last of those (**Verified**, `FUN_140929b20`, `FUN_140a09380`; [corrected: no permanent hold](game/character-stats.md#corpses); `PopulationSystem.AskTownZones`); the load trigger stays its own zone (s19-d036). Saves write stored squads as the town's platoons (`sqt` 1). Any platoon's
-activation waits for the navmesh gate of its town's zone (a traveller: its own). A town made once (its pools' `started`) makes no residents again; its
+activation waits for the navmesh gate of its town's zone and of each zone of its coverage list, which a town waiting so asks for meanwhile (a traveller: its own zone; engine choice, `PopulationSystem.TownZonesReady`: a resident made where the mesh is not loaded yet stands on the terrain under its building's floor, #1125 World's End's library shopkeeper in the zone beside the town's own). A town made once (its pools' `started`) makes no residents again; its
 badly hurt squads are made afresh within its pools (see "Off-screen tier"). `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
 simulation thread; publish results at boundaries.
 `World.PreparePopulation` queues nearby residents/wild squads, activates existing nearby roaming
@@ -599,7 +599,7 @@ its `Platoon.BaseTown` (a world squad's its platoon's), so one of an older versi
 Tests (the load rule only, with `OffscreenOverrides` off): `PopulationTests.A_town_takes_its_heaviest_qualifying_override_at_each_load_and_makes_its_residents`, `..._whose_residents_were_never_made_...`,
 `TownOverrideSaveTests`.
 
-Seven Faithful/Meitou switches (the fifth, campaign inheritance, under Campaigns below; `PopulationSettings`, live on `PopulationSystem`; Advanced settings (the fifth on the Fixes page), Meitou on by default; `PopulationOffscreen.cs`):
+Eight Faithful/Meitou switches (the fifth, campaign inheritance, under Campaigns below; `PopulationSettings`, live on `PopulationSystem`; Advanced settings (the fifth on the Fixes page), Meitou on by default; `PopulationOffscreen.cs`):
 - **Squads keep their people** (`KeepRoamers`). Meitou: a roaming squad the population made keeps its characters as a `StoredSquad` from the
   first time it leaves, travels on as them and comes back as them (moved along with its stand-in); saves write it as a new platoon (`sqt` 2,
   `persistent` false). Faithful (the original): a platoon that is not a town's own is despawned as it leaves, and a stand-in out of range for
@@ -609,6 +609,10 @@ Seven Faithful/Meitou switches (the fifth, campaign inheritance, under Campaigns
   (not one the unload splits off as a captive), where the original's member-by-member thinning keeps such a member unless he lies out of view
   within 600 of the departed leader ([off-screen world](game/factions-squads-towns.md#off-screen-world)). **Observed** (headless, a reporter's
   save): with the leader sent 20000 away, his two knocked-out squad mates beside the player stay; before, both vanished.
+- **Knocked out stay** (`KeepDowned`). Meitou: a squad that unloads (a town's with its town, or a platoon by its own place) splits off each
+  living member lying knocked out inside the loaded zones into a squad of its own, as the original splits a carried one
+  (`PopulationSystem.LeftDown` in the [split at unload](game/factions-squads-towns.md#1-object-model)), so a guard carried off and put down
+  stays (#1085) and rejoins his squad once up and near it. Faithful (the original): he goes with his squad once no member is on screen.
 - **Fights far away** (`OffscreenFights`). Meitou: every 2 s, an unloaded travelling or wild stand-in (not a town's own, not the player's) met
   by an enemy (`AggroSystem.IsEnemy` either way) within 300 fights the first such in id order that no code mod's rule skips
   ([modding](modding.md) "Off-screen fight rules"; a rule may also name the winner); strength per member able to fight is 10 + the
@@ -700,7 +704,7 @@ Implemented (`PopulationRoaming.cs`):
     (N 20, pool 14) refills an 8-duck squad after its two squads die; drained to 1 with all dead it is wiped out and saved with `ded`, `tod`,
     `pop2` 1.008, `popd2` 20.
   - **Homeless squads** (`PopulationHomeless.cs`; [original rules](game/factions-squads-towns.md#off-screen-world)): every 2 s a squad whose
-    leader patrols (a PATROL goal, in any package: the Border Zone's starving bandits, a town's patrol squads) walks to its patrol point: the leader to the point exactly (`AiSystem.ActPatrol`; the point is `Squad.PatrolPoint`, apart from the squad's home, hashed, not saved), the
+    leader patrols (a PATROL goal, in any package and whatever its mission town: the Border Zone's starving bandits, a town's patrol squads, a fogman nest's Fog Prince squads under their cannibal retreat, #1107) walks to its patrol point: the leader to the point exactly (`AiSystem.ActPatrol`; the point is `Squad.PatrolPoint`, apart from the squad's home, hashed, not saved), the
     others following it; within 100 of it, or once the leader's walk to it is over (also short of it: no way there), the next is drawn (the original's "move ended"); a town drawn with `patrol
     approaches towns` is aimed 200 outside its first gate that is not a ruin with gate code 0 or unknown (unknown = outside, engine choice) or wall
     with `interior` references, so bandits stop outside the Hub ([patrol task](game/factions-squads-towns.md#off-screen-world)).

@@ -166,6 +166,12 @@ msgstr "Ein Trupp, der in die Umgebung deiner Trupps zurückkehrt, ist für die 
 msgid "A swamp turtle butts and bites when it fights. In the game it fights with a sword or club drawn for it, whose moves its body cannot play, so its blows land without any motion."
 msgstr "Eine Sumpfschildkröte rammt und beißt im Kampf. Im Spiel kämpft sie mit einem für sie gezogenen Schwert oder Knüppel, dessen Bewegungen ihr Körper nicht abspielen kann, sodass ihre Schläge ohne jede Bewegung treffen."
 
+msgid "Turret fire is a crime"
+msgstr "Geschützfeuer ist ein Verbrechen"
+
+msgid "Shooting a turret at someone who is not an enemy and not fighting is an assault, as attacking them in person is, and guards who see it put a bounty on you. In the game turret fire is never a crime: the victim's faction only likes you less."
+msgstr "Mit einem Geschütz auf jemanden zu schießen, der kein Feind ist und nicht kämpft, ist ein Angriff wie ein Angriff von Hand, und Wachen, die es sehen, setzen ein Kopfgeld auf dich aus. Im Spiel ist Geschützfeuer nie ein Verbrechen: Die Fraktion des Opfers mag dich nur weniger."
+
 msgid "A town far from your squads is taken over or destroyed as soon as its story calls for it, so the map and the factions show it at once. In the game it changes only when you come near."
 msgstr "Eine Stadt fern deiner Trupps wird übernommen oder zerstört, sobald ihre Geschichte es verlangt, sodass Karte und Fraktionen es sofort zeigen. Im Spiel ändert sie sich erst, wenn du in die Nähe kommst."
 
@@ -4792,3 +4798,53 @@ msgstr "Stärke der adaptiven Belichtung"
 
 msgid "The most deep shade by day is brightened, as a multiple of the game's exposure."
 msgstr "Wie stark tiefer Schatten am Tag höchstens aufgehellt wird, als Vielfaches der Belichtung des Spiels."
+
+msgid "Knocked out stay"
+msgstr "Bewusstlose bleiben"
+
+msgid "A knocked-out character left lying near your squads, such as a guard you carried off and put down, stays when his squad or town unloads far away. In the game he vanishes with them once you look away."
+msgstr "Eine bewusstlose Figur, die nahe deinen Trupps liegt, etwa eine weggetragene und abgelegte Wache, bleibt, wenn ihr Trupp oder ihre Stadt weit weg entladen wird. Im Spiel verschwindet sie mit ihnen, sobald du wegschaust."
+
+#. machine-translated
+msgid "Information panel stays open"
+msgstr "Infofeld bleibt offen"
+
+#. machine-translated
+msgid "The character information panel at the bottom left stays extended or collapsed as you last left it, also after restarting the game. The game starts it collapsed every time."
+msgstr "Das Charakter-Infofeld unten links bleibt ausgeklappt oder eingeklappt, wie du es zuletzt verlassen hast, auch nach einem Neustart des Spiels. Im Spiel ist es bei jedem Start eingeklappt."
+
+#. machine-translated
+msgid "Set hunger (1-300)"
+msgstr "Hunger setzen (1-300)"
+
+#. machine-translated
+msgid "Enter a hunger value from 1 to 300."
+msgstr "Gib einen Hungerwert von 1 bis 300 ein."
+
+#. machine-translated
+msgid "Hunger set to {1}."
+msgstr "Hunger auf {1} gesetzt."
+
+msgid "Date added"
+msgstr "Hinzugefügt am"
+
+msgid "Hide incompatible RE_Kenshi plugins"
+msgstr "Inkompatible RE_Kenshi-Plugins ausblenden"
+
+msgid "Last modified"
+msgstr "Zuletzt geändert"
+
+msgid "Load order"
+msgstr "Ladereihenfolge"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "No mods match the filters."
+msgstr "Keine Mods entsprechen den Filtern."
+
+msgid "Save current preset"
+msgstr "Aktuelle Voreinstellung speichern"
+
+msgid "Sort by"
+msgstr "Sortieren nach"

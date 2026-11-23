@@ -166,6 +166,12 @@ msgstr "분대 주변 지역으로 돌아온 분대는 떠나 있던 시간만�
 msgid "A swamp turtle butts and bites when it fights. In the game it fights with a sword or club drawn for it, whose moves its body cannot play, so its blows land without any motion."
 msgstr "늪 거북은 싸울 때 들이받고 뭅니다. 게임에서는 그를 위해 꺼낸 검이나 곤봉으로 싸우는데, 몸이 그 동작을 재생할 수 없어 공격이 아무 움직임 없이 적중합니다."
 
+msgid "Turret fire is a crime"
+msgstr "포탑 사격은 범죄"
+
+msgid "Shooting a turret at someone who is not an enemy and not fighting is an assault, as attacking them in person is, and guards who see it put a bounty on you. In the game turret fire is never a crime: the victim's faction only likes you less."
+msgstr "적이 아니고 싸우고 있지도 않은 사람을 포탑으로 쏘면 직접 공격한 것과 같은 폭행이 되며, 이를 본 경비병이 현상금을 겁니다. 원래 게임에서는 포탑 사격이 결코 범죄가 아니며, 피해자의 세력 호감도만 떨어집니다."
+
 msgid "A town far from your squads is taken over or destroyed as soon as its story calls for it, so the map and the factions show it at once. In the game it changes only when you come near."
 msgstr "분대에서 멀리 떨어진 마을은 이야기가 요구하는 즉시 점령되거나 파괴되므로 지도와 세력에 바로 나타납니다. 게임에서는 가까이 가야만 바뀝니다."
 
@@ -4790,3 +4796,53 @@ msgstr "적응형 노출 강도"
 
 msgid "The most deep shade by day is brightened, as a multiple of the game's exposure."
 msgstr "낮의 깊은 그늘을 최대 얼마나 밝게 할지(게임 노출의 배수)."
+
+msgid "Knocked out stay"
+msgstr "기절한 자 유지"
+
+msgid "A knocked-out character left lying near your squads, such as a guard you carried off and put down, stays when his squad or town unloads far away. In the game he vanishes with them once you look away."
+msgstr "분대 근처에 쓰러져 있는 기절한 캐릭터(데려가서 내려놓은 경비병 등)는 멀리서 그 분대나 마을이 언로드되어도 남습니다. 게임에서는 시선을 돌리면 그들과 함께 사라집니다."
+
+#. machine-translated
+msgid "Information panel stays open"
+msgstr "정보 패널 열림 유지"
+
+#. machine-translated
+msgid "The character information panel at the bottom left stays extended or collapsed as you last left it, also after restarting the game. The game starts it collapsed every time."
+msgstr "왼쪽 아래의 캐릭터 정보 패널이 마지막으로 둔 대로 펼쳐지거나 접힌 상태를 유지합니다. 게임을 다시 시작한 뒤에도 마찬가지입니다. 게임에서는 매번 접힌 상태로 시작합니다."
+
+#. machine-translated
+msgid "Set hunger (1-300)"
+msgstr "허기 설정 (1-300)"
+
+#. machine-translated
+msgid "Enter a hunger value from 1 to 300."
+msgstr "1에서 300 사이의 허기 수치를 입력하세요."
+
+#. machine-translated
+msgid "Hunger set to {1}."
+msgstr "허기를 {1}(으)로 설정했습니다."
+
+msgid "Date added"
+msgstr "추가 날짜"
+
+msgid "Hide incompatible RE_Kenshi plugins"
+msgstr "호환되지 않는 RE_Kenshi 플러그인 숨기기"
+
+msgid "Last modified"
+msgstr "마지막 수정 날짜"
+
+msgid "Load order"
+msgstr "로드 순서"
+
+msgid "Name"
+msgstr "이름"
+
+msgid "No mods match the filters."
+msgstr "필터에 맞는 모드가 없습니다."
+
+msgid "Save current preset"
+msgstr "현재 프리셋 저장"
+
+msgid "Sort by"
+msgstr "정렬 기준"

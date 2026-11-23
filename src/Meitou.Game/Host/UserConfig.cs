@@ -394,6 +394,11 @@ sealed class UserConfig
     /// </summary>
     public bool ResidentSchedule { get; set; } = true;
     /// <summary>
+    /// A knocked-out character left lying near the player's squads stays when his squad or town unloads, split off as a carried one is (Advanced
+    /// settings; Faithful off: he goes with them once out of view, as the game does; #1085).
+    /// </summary>
+    public bool KeepDowned { get; set; } = true;
+    /// <summary>
     /// A town away from the player's squads takes its override version (taken over, destroyed) as soon as the story allows (Advanced settings;
     /// Faithful off: only when the player comes near, as the game does).
     /// </summary>
@@ -502,6 +507,11 @@ sealed class UserConfig
     /// </summary>
     public bool FixAnimalMoves { get; set; } = true;
     /// <summary>
+    /// A player gunner's turret harpoon that hits its target is an Assault, as an unprovoked attack is (Fixes settings; off: no crime, as the game
+    /// does; docs/game/economy.md "Turret fire").
+    /// </summary>
+    public bool FixTurretAssault { get; set; } = true;
+    /// <summary>
     /// A bench with its table behind is sat facing away from it (Fixes settings; off: towards the world origin, as the game does;
     /// docs/game/ai-tasks.md "Town goals").
     /// </summary>
@@ -550,6 +560,15 @@ sealed class UserConfig
     /// read at start; <c>HeightmapRepair</c>, docs/formats/terrain.md "Holes and needles").
     /// </summary>
     public bool FixGround { get; set; } = true;
+    /// <summary>
+    /// The information panel opens extended or collapsed as it was last left (<see cref="InfoPanelExtended"/>), also after a restart (Fixes
+    /// settings; off: collapsed at every start, as the game does; docs/game/ui-screens.md "Information panel").
+    /// </summary>
+    public bool KeepInfoPanel { get; set; } = true;
+    /// <summary>
+    /// The information panel was last left extended (its ^ button), written at every press; read at start while <see cref="KeepInfoPanel"/> is on.
+    /// </summary>
+    public bool InfoPanelExtended { get; set; }
     /// <summary>
     /// The strategy camera's turn and tilt rate in degrees per second per unit of input (Controls settings): the original's <c>mouse speed pan</c> /
     /// <c>mouse speed tilt</c> (slider 2 … 50, default 6), one value for both here.

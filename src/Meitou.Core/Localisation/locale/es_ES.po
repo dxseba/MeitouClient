@@ -166,6 +166,12 @@ msgstr "Un escuadrón que vuelve a la zona de tus escuadrones se ha curado duran
 msgid "A swamp turtle butts and bites when it fights. In the game it fights with a sword or club drawn for it, whose moves its body cannot play, so its blows land without any motion."
 msgstr "Una tortuga del pantano embiste y muerde cuando lucha. En el juego lucha con una espada o un garrote desenvainado para ella, cuyos movimientos su cuerpo no puede reproducir, así que sus golpes impactan sin ningún movimiento."
 
+msgid "Turret fire is a crime"
+msgstr "Disparar torretas es delito"
+
+msgid "Shooting a turret at someone who is not an enemy and not fighting is an assault, as attacking them in person is, and guards who see it put a bounty on you. In the game turret fire is never a crime: the victim's faction only likes you less."
+msgstr "Disparar con una torreta a alguien que no es enemigo y no está luchando es una agresión, como atacarle en persona, y los guardias que lo vean pondrán precio a tu cabeza. En el juego disparar torretas nunca es delito: la facción de la víctima solo te aprecia menos."
+
 msgid "A town far from your squads is taken over or destroyed as soon as its story calls for it, so the map and the factions show it at once. In the game it changes only when you come near."
 msgstr "Una ciudad lejos de tus escuadrones es tomada o destruida en cuanto su historia lo pide, así que el mapa y las facciones lo muestran enseguida. En el juego solo cambia cuando te acercas."
 
@@ -4792,3 +4798,53 @@ msgstr "Intensidad de la exposición adaptativa"
 
 msgid "The most deep shade by day is brightened, as a multiple of the game's exposure."
 msgstr "Cuánto se aclara como máximo la sombra profunda de día, como múltiplo de la exposición del juego."
+
+msgid "Knocked out stay"
+msgstr "Los inconscientes se quedan"
+
+msgid "A knocked-out character left lying near your squads, such as a guard you carried off and put down, stays when his squad or town unloads far away. In the game he vanishes with them once you look away."
+msgstr "Un personaje inconsciente tendido cerca de tus escuadrones, como un guardia que te llevaste y dejaste en el suelo, se queda cuando su escuadrón o su ciudad se descargan lejos. En el juego desaparece con ellos en cuanto apartas la vista."
+
+#. machine-translated
+msgid "Information panel stays open"
+msgstr "El panel de información sigue abierto"
+
+#. machine-translated
+msgid "The character information panel at the bottom left stays extended or collapsed as you last left it, also after restarting the game. The game starts it collapsed every time."
+msgstr "El panel de información del personaje, abajo a la izquierda, sigue desplegado o plegado como lo dejaste, también tras reiniciar el juego. En el juego empieza plegado cada vez."
+
+#. machine-translated
+msgid "Set hunger (1-300)"
+msgstr "Ajustar hambre (1-300)"
+
+#. machine-translated
+msgid "Enter a hunger value from 1 to 300."
+msgstr "Introduce un valor de hambre entre 1 y 300."
+
+#. machine-translated
+msgid "Hunger set to {1}."
+msgstr "Hambre ajustada a {1}."
+
+msgid "Date added"
+msgstr "Fecha de incorporación"
+
+msgid "Hide incompatible RE_Kenshi plugins"
+msgstr "Ocultar plugins de RE_Kenshi incompatibles"
+
+msgid "Last modified"
+msgstr "Última modificación"
+
+msgid "Load order"
+msgstr "Orden de carga"
+
+msgid "Name"
+msgstr "Nombre"
+
+msgid "No mods match the filters."
+msgstr "Ningún mod coincide con los filtros."
+
+msgid "Save current preset"
+msgstr "Guardar preajuste actual"
+
+msgid "Sort by"
+msgstr "Ordenar por"

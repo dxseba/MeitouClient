@@ -296,6 +296,12 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             || Picking.ShownInteriorHit?.Invoke(ray.Origin, ray.Direction, distance) is not null;
 
     /// <summary>
+    /// Whether a character or an object the ray meets at <paramref name="distance"/> is out of the pointer's reach: <see cref="Hidden"/>, or the
+    /// terrain or a building without rooms stands before it (<see cref="WorldPicking.Blocked"/>).
+    /// </summary>
+    internal bool Obscured((Vector3 Origin, Vector3 Direction) ray, float distance) => Hidden(ray, distance) || Picking.Blocked(ray, distance);
+
+    /// <summary>
     /// The HUD's height at the bottom of the screen, pixels.
     /// </summary>
     public float HudBottom => 48;
@@ -466,9 +472,10 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// </summary>
     RgbaImage? _uiAtlas;
     /// <summary>
-    /// The stats panel's labels (MARTIAL ARTS, STRENGTH, ...): the grey of the orders buttons' text, not Main (docs/game/ui-screens.md).
+    /// The stats panel's labels (MARTIAL ARTS, STRENGTH, ...): the ink of the painted-text template, grey in the base game and a UI mod's colour
+    /// when it recolours that template (docs/game/ui-screens.md).
     /// </summary>
-    internal static readonly string StatLabelColour = "0.4 0.380392 0.356863";
+    internal string StatLabelColour => MyGuiColours.TemplateInk(UiResources, "Kenshi_TextboxPaintedText");
 
     /// <summary>
     /// The game's Kenshi_UI.png, decoded once and shared by the title menu, tooltips and settings; null when missing or unreadable.
@@ -911,7 +918,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         // A right press on a squad bar portrait held 0.25 s opens the member's context menu; a quicker release over it selects the member and
         // focuses the camera on it, as the double click (FUN_140413d80, FUN_140415630, docs/game/ui-input.md "Squad bar portraits").
         if (button == MouseButton.Right && PortraitBar.SquadBarMemberAt(p) is { } member) return PortraitRightDown(p, member, shift);
-        if (button == MouseButton.Middle && UiVisible && WorldMap.MapPointerDown(p)) return true;
+        if (button == MouseButton.Middle && UiVisible && WorldMap.MapPointerDown(p, MouseButton.Middle)) return true;
         if (button == MouseButton.Right && !OverHud(p)) return WorldRightDown(p, shift, ctrl, alt);
         return OverHud(p);
     }
@@ -1007,10 +1014,27 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (kind is WorldPicking.Picked.Site or WorldPicking.Picked.None && Build.SitePress(p)) return;
         if (Ray(p) is { } ray && Picking.MoveHit(ray.Origin, ray.Direction) is { } hit)
         {
-            Move(hit, shift);
-            MoveMarker.PlaceMarker(hit);
-            (Steering, _steerTarget, _steerTick) = (!shift, hit, Session.World.Tick);
+            void MoveThere()
+            {
+                Move(hit, shift);
+                MoveMarker.PlaceMarker(hit);
+                (Steering, _steerTarget, _steerTick) = (!shift, hit, Session.World.Tick);
+            }
+
+            if (!GroundMenuPress(p, hit, MoveThere)) MoveThere();
         }
+    }
+
+    /// <summary>
+    /// A right press on the ground the code mods give rows for (<see cref="ModTargetVerbs"/>, <see cref="UiMenuTargetKind.WorldPoint"/>): held, a
+    /// menu of their rows opens; released quickly, <paramref name="move"/> runs as without them. False (nothing started) without such rows.
+    /// </summary>
+    bool GroundMenuPress(Vector2 p, Vector3 hit, Action move)
+    {
+        if (!_uiHost.HasTargetMenuVerbs) return false;
+
+        var target = new UiMenuTarget(UiMenuTargetKind.WorldPoint, "", hit);
+        return ContextMenuWindow.ContextPressOn(p, at => ContextMenuWindow.Menu("", at, [.. ModTargetVerbs(target)]), move);
     }
 
     /// <summary>
@@ -1151,6 +1175,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         Mouse = p;
         if (CharacterEditor.EditorPointerMove(p)) return;
         if (ScrollBars.ScrollThumbMove(p)) return;
+        if (UiVisible && _uiHost.PointerMove(p)) return;
         if (WorldMap.MapPointerMove(p)) return;
         if (UiVisible && FaithfulScreens.PointerMove(p)) return;
         if (_dragFrom is { } from && !Dragging && Vector2.Distance(from, p) >= DragThreshold) Dragging = true;
@@ -1178,6 +1203,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             ItemsWindow.PointerUp(p, shift);
             InventoryWindows.InventoryPointerUp(p);
             OrdersPanel.JobDragEnd(p);
+            _uiHost.PointerUp(p);
             SquadWindows.SquadPointerUp(p, shift);
             CharactersWindow.PointerUp();
             FaithfulScreens.PointerUp();

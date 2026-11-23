@@ -634,6 +634,11 @@ sealed class GamePages(SettingsMenu menu)
             + "In the game it fights with a sword or club drawn for it, whose moves its body cannot play, so its blows land without any motion.",
             Toggle: new("Swamp turtle attacks", () => menu.Config.FixAnimalMoves,
                 v => { menu.Config.FixAnimalMoves = v; menu.AnimalMovesChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
+        result.Add(new("Turret fire is a crime",
+            "Shooting a turret at someone who is not an enemy and not fighting is an assault, as attacking them in person is, and guards who see it "
+            + "put a bounty on you. In the game turret fire is never a crime: the victim's faction only likes you less.",
+            Toggle: new("Turret fire is a crime", () => menu.Config.FixTurretAssault,
+                v => { menu.Config.FixTurretAssault = v; menu.TurretAssaultChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
         result.Add(new("Bench facing",
             "A character on a bench with the table behind it sits facing away from the table. "
             + "The game mirrors the bench's look point through the middle of the world map, so the sitter faces an unrelated direction.",
@@ -678,6 +683,11 @@ sealed class GamePages(SettingsMenu menu)
             "A character that turned its head toward what it was talking to or watching looks ahead again once it stops looking. "
             + "In the game the head stays turned until the next thing it looks at.",
             Toggle: new("Head turns back", () => menu.Config.FixHeadTurnBack, v => menu.Config.FixHeadTurnBack = v, Remaster: true, OnOff: true)));
+        result.Add(new("Information panel stays open",
+            "The character information panel at the bottom left stays extended or collapsed as you last left it, also after restarting the game. "
+            + "The game starts it collapsed every time.",
+            Toggle: new("Information panel stays open", () => menu.Config.KeepInfoPanel, v => menu.Config.KeepInfoPanel = v, Remaster: true,
+                OnOff: true)));
         result.Add(GroundRow());
         result.Insert(0, menu.PageSidesEntry(result, "All fixes", "Every bug on this page as the game ships it, or every fix.", "fix"));
     }
@@ -766,6 +776,11 @@ sealed class GamePages(SettingsMenu menu)
             + "and are there again when you come back. In the game they are removed and new ones are made.",
             Toggle: new("Wild squads stay", () => menu.Config.KeepWild,
                 v => { menu.Config.KeepWild = v; menu.OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
+        result.Add(new("Knocked out stay",
+            "A knocked-out character left lying near your squads, such as a guard you carried off and put down, stays when his squad or town "
+            + "unloads far away. In the game he vanishes with them once you look away.",
+            Toggle: new("Knocked out stay", () => menu.Config.KeepDowned,
+                v => { menu.Config.KeepDowned = v; menu.OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
         result.Add(new("Towns keep their schedule",
             "Townspeople you come back to after an hour or more are where their day puts them: in bed at night, at the counter, at their posts and "
             + "seats. "

@@ -290,7 +290,9 @@ HUD text size: `Kenshi_StandardFont_Medium` (the MyGUI default font, `core_setti
 em (**Verified**, `kenshi_fonts.xml`). The base game draws HUD text at that size at 1080 p (**Observed**: user screenshots; Meitou's
 former 16 px floor came out 10-15 % wider). Meitou uses it as the in-game minimum and for the HUD panel and body-part lines.
 HUD text colours (**Observed**, ink sampled from a base-game screenshot): StatsText labels (MARTIAL ARTS ...) are grey ~#69625e,
-taken as the skins' `0.4 0.380392 0.356863` (#66615b, also the orders buttons' text); the jobs hint is ~#483b30, which is
+the `TextColour` `0.4 0.380392 0.356863` (#66615b, also the orders buttons' text) of `Kenshi_TextboxPaintedText`, the template whose font
+(`Kenshi_PaintedTextFont_Medium`) they use (**Verified**, `kenshi_templates.xml`); Meitou takes these labels, and the Stats window's attribute
+rows, from that template so a UI mod that recolours it applies; the jobs hint is ~#483b30, which is
 Secondary at the `JobsPanelInfo` EditBox's `Alpha` 0.5 (**Verified** property, `Kenshi_MainPanel.layout`): MyGUI multiplies a
 widget's alpha into its children (`InheritsAlpha`, default true), and the text is drawn by the EditBox template's client.
 **Verified** (`Kenshi_MainPanel.layout`): `OrdersChaseButton` is captioned JOBS; Meitou binds it
@@ -463,7 +465,8 @@ to Jobs; the saved `chase mode` flag is that switch (**Verified**, [perma-jobs](
   and is unreachable. The row is skipped for robot races (race +0x7c, KenshiLib 1ce4a16, Observed). The parts come in the
   medical part array's order ([part order](character-stats.md#part-order), **Verified**): head, torso, arms, legs, left before right.
 - Information panel: `ExtendingPanel` starts collapsed, its bottom moved onto the panel's bottom (behind the Overlapped `StatsPanel`), and slides over
-  0.5 s to its layout place when `ExtendedStatsButton` is pressed (**Verified**). `BountyPanel` shows only for one selected character
+  0.5 s to its layout place when `ExtendedStatsButton` is pressed (**Verified**). Meitou fix (Fixes page `Information panel stays open`, on by default;
+  `UserConfig.KeepInfoPanel`): it starts as last left, the state kept in the config at each press. `BountyPanel` shows only for one selected character
   (`MainBarGUI` `FUN_1407211b0`, **Verified**) that is Diplomatic Status, has a bounty (`FUN_140853740` 1 or more), a slave state, leads a war campaign, has a pending crime
   (`+0x148`), the escaped flag or the bare kidnap victim flag (`+0xe9`, carried or not). Meitou: `TooltipRuntime.ShowsBountyPanel`.
 - Status rows (`FUN_1405d4260`, **Observed**; Meitou puts the slave rows ahead of the bounty rows): a character in slave state 1 / 2 / 3
