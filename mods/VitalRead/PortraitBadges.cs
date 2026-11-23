@@ -1,114 +1,94 @@
 using System.Numerics;
-using System.Reflection;
-using HarmonyLib;
 using Meitou.Data.Ui;
+using Meitou.Game.Ui;
 using Meitou.Modding;
 using Meitou.Simulation;
 
 namespace Meitou.VitalRead;
 
 /// <summary>
-/// Draws the badges: a postfix on the portrait bar's private <c>PortraitBar.AddSquadCells</c> adds, per marked member, an icon and a text box in
-/// corners of its portrait image (the original parents both to the cell's <c>portraitimage</c>), clipped to the page as the cell is (the cell at
-/// <c>page.X + i % columns x size</c>, <c>page.Y + i / columns x size - SquadBarScroll</c>).
+/// Draws the badges: screen controls on each squad bar portrait (<see cref="UiScreens.Portraits"/>, anchored to its picture and clipped to it and
+/// the bar's page, as the original parents both to the cell's <c>portraitimage</c>) add, per marked member, an icon and a text box in corners of
+/// the picture.
 /// </summary>
-static class PortraitBadges
+sealed class PortraitBadges(BadgeIcons icons) : IUiExtension
 {
-    /// <summary>
-    /// The portrait image inside a cell of the 136 px layout (<c>PortraitBar.AddSquadCells</c>: x 6, y 6, 124 by 123).
-    /// </summary>
-    const float LayoutSize = 136, ImageX = 6, ImageY = 6, ImageWidth = 124, ImageHeight = 123;
-
     /// <summary>
     /// An automatic icon's share of the portrait image's width (Meitou's choice; the original's automatic size is not known).
     /// </summary>
     const float AutoIconShare = 0.3f;
 
-    static FieldInfo s_scroll = null!, s_player = null!;
-    static PropertyInfo s_uiScale = null!;
-    static BadgeIcons s_icons = null!;
+    /// <summary>
+    /// The interface's scale, kept from the last frame (the badges' sizes and margins are in unscaled pixels).
+    /// </summary>
+    static volatile float s_uiScale = 1;
+
+    /// <summary>
+    /// The text style per corner (its alignment), as registered.
+    /// </summary>
+    readonly Dictionary<Corner, string> _styles = [];
+
+    public string Id => "vitalread";
 
     public static void Install(ModContext context)
     {
-        var bar = Required(AccessTools.TypeByName("Meitou.Game.Ui.PortraitBar"), "PortraitBar");
-        var player = Required(AccessTools.TypeByName("Meitou.Game.PlayerInterface"), "PlayerInterface");
-
-        s_scroll = Required(AccessTools.Field(bar, "SquadBarScroll"), "PortraitBar.SquadBarScroll");
-        s_player = Required(AccessTools.GetDeclaredFields(bar).FirstOrDefault(f => f.FieldType == player), "PortraitBar.player");
-        s_uiScale = Required(AccessTools.Property(player, "UiScale"), "PlayerInterface.UiScale");
-        s_icons = new BadgeIcons(context.Folder);
-        BadgeIcons.Bind(player);
-
-        var cells = Required(AccessTools.Method(bar, "AddSquadCells"), "PortraitBar.AddSquadCells");
-        context.Harmony.Patch(cells, postfix: new HarmonyMethod(typeof(PortraitBadges), nameof(Added)));
+        context.AddFrame(frame => s_uiScale = frame.UiScale);
+        context.AddUi(new PortraitBadges(new BadgeIcons(context.Folder)));
     }
 
-    static T Required<T>(T? found, string name) where T : class => found ?? throw new MissingMemberException("Vital Read badges: " + name);
+    public void Register(UiRegistration registration)
+    {
+        foreach (var corner in Enum.GetValues<Corner>())
+            _styles[corner] = registration.RegisterStyle("text-" + corner, new UiStyle { TextAlign = Align(corner) });
 
-    #pragma warning disable IDE1006 // Harmony binds __instance by name
-    static void Added(object __instance, List<UiControl> controls, IReadOnlyList<CharacterSnapshot> members, UiRect page, float size, int columns)
-    #pragma warning restore IDE1006
+        registration.AddScreenControls(UiScreens.Hud, UiScreens.Portraits, UiAnchorPlacement.Inside, Build);
+    }
+
+    UiNode? Build(UiScreenContext context)
     {
         var settings = VitalReadMod.Settings;
-        if (!settings.Enabled || !settings.ShowText && !settings.ShowIcons || VitalReadMod.Running is not { } system) return;
+        if (!settings.Enabled || !settings.ShowText && !settings.ShowIcons || VitalReadMod.Running is not { } system) return null;
+        if (context.Character is not { } member || StateOf(member, system.Facts) is not (var state and not VitalState.None)) return null;
 
-        float scroll = (float)s_scroll.GetValue(__instance)!;
-        object player = s_player.GetValue(__instance)!;
-        float scale = (float)s_uiScale.GetValue(player)!;
-        var facts = system.Facts;
-        for (int i = 0; i < members.Count; i++)
-        {
-            float top = page.Y + i / columns * size - scroll;
-            if (top + size <= page.Y || top >= page.Y + page.Height) continue;
-
-            var image = ImageOf(page.X + i % columns * size, top, size);
-            if (StateOf(members[i], facts) is var state and not VitalState.None) AddBadge(controls, player, i, state, image, page, scale);
-        }
-    }
-
-    static UiRect ImageOf(float left, float top, float size)
-    {
-        float k = size / LayoutSize;
-        return new UiRect(left + ImageX * k, top + ImageY * k, ImageWidth * k, ImageHeight * k);
+        var root = new UiNode("badge") { Pickable = false };
+        var image = new UiRect(0, 0, context.Anchor.Width, context.Anchor.Height);
+        float scale = s_uiScale;
+        var margin = new Vector2(settings.MarginX, settings.MarginY) * scale;
+        if (settings.ShowIcons && Icon(state, image, scale, margin) is { } icon) root.Children.Add(icon);
+        if (settings.ShowText) root.Children.Add(Text(state, image, scale, margin));
+        return root;
     }
 
     static VitalState StateOf(CharacterSnapshot member, IReadOnlyDictionary<CharacterId, VitalFacts> facts) =>
         member.Body is { } body ? VitalRules.Of(body, facts.GetValueOrDefault(member.Id)) : VitalState.None;
 
-    static void AddBadge(List<UiControl> controls, object player, int i, VitalState state, UiRect image, UiRect page, float scale)
+    UiNode? Icon(VitalState state, UiRect image, float scale, Vector2 margin)
     {
-        var settings = VitalReadMod.Settings;
-        var margin = new Vector2(settings.MarginX, settings.MarginY) * scale;
-        if (settings.ShowIcons && Icon(player, i, state, image, page, scale, margin) is { } icon) controls.Add(icon);
-        if (settings.ShowText) controls.Add(Text(i, state, image, page, scale, margin));
-    }
-
-    static UiControl? Icon(object player, int i, VitalState state, UiRect image, UiRect page, float scale, Vector2 margin)
-    {
-        if (s_icons.Image(player, state) is not { } properties) return null;
+        if (icons.Image(state) is not { } source) return null;
 
         var settings = VitalReadMod.Settings;
         float side = settings.IconSize > 0 ? settings.IconSize * scale : image.Width * AutoIconShare;
         var box = Clamp(Place(image, new Vector2(side), margin, settings.IconAnchor), image);
-        return new UiControl($"vitalread-icon-{i}", "ImageBox", box, "", "", "", true, properties, Vector4.Zero, Pickable: false, Clip: page);
+        return new UiNode("icon", UiNodeKind.Image) { Placement = At(box), Image = source.File, ImageCrop = source.Crop };
     }
 
-    static UiControl Text(int i, VitalState state, UiRect image, UiRect page, float scale, Vector2 margin)
+    UiNode Text(VitalState state, UiRect image, float scale, Vector2 margin)
     {
         var settings = VitalReadMod.Settings;
         float text = settings.TextSize * scale;
-        var box = new Vector2(image.Width * 0.6f, text * 1.4f);
-        var properties = new Dictionary<string, string>
-        {
-            ["FontName"] = "Kenshi_StandardFont_Medium",
-            ["TextAlign"] = Align(settings.TextAnchor),
-            ["TextShadow"] = "true",
-        };
-
+        var box = Place(image, new Vector2(image.Width * 0.6f, text * 1.4f), margin, settings.TextAnchor);
         var colour = settings.Coloured ? Colour(state) : Vector4.One;
-        return new UiControl($"vitalread-{i}", "TextBox", Place(image, box, margin, settings.TextAnchor), Caption(state), "", "", true, properties,
-            Vector4.Zero, colour, Pickable: false, TextScale: text / 16, Clip: page);
+        return new UiNode("text", UiNodeKind.Label)
+        {
+            Placement = At(box),
+            Style = _styles[settings.TextAnchor],
+            Text = Caption(state),
+            TextColour = colour,
+            TextScale = Math.Clamp(text / 16, 0.05f, UiHost.MaxTextScale),
+        };
     }
+
+    static UiPlacement At(UiRect box) => new(box.Width, box.Height, box.X, box.Y);
 
     /// <summary>
     /// <paramref name="box"/> in <paramref name="corner"/> of <paramref name="area"/>, moved inward by <paramref name="margin"/> (negative: outward).

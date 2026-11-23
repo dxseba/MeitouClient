@@ -1,8 +1,8 @@
 # Vital Read (port)
 
-Port of *Vital Read* (workshop 3813852230, the MCM fork): a state badge (icon and short text) on each squad-bar portrait. A Harmony postfix on the
-private `PortraitBar.AddSquadCells` adds a non-pickable `ImageBox` and `TextBox` in corners of each marked cell's portrait image, clipped to the page
-and following the bar's scroll. `VitalSystem`, a tick system, publishes each player character's dying, coma, limb and bed facts every 5 ticks.
+Port of *Vital Read* (workshop 3813852230, the MCM fork): a state badge (icon and short text) on each squad-bar portrait. Screen controls on the
+HUD's `*portraits` anchor (one build per portrait shown, anchored to its picture and clipped to it and the bar's page) add a non-pickable image
+and label in corners of each marked member's picture. `VitalSystem`, a tick system, publishes each player character's dying, coma, limb and bed facts every 5 ticks.
 
 ## Facts
 
@@ -25,7 +25,8 @@ and following the bar's scroll. `VitalSystem`, a tick system, publishes each pla
 - **Icons**: the defaults are `Kenshi_UI.png` crops (unconscious `45 122 32 32`, playing dead `80 126 38 27`, from the game) and the original's
   own PNGs (`gui/gfx/heart_64px_opt.png`, `death_64px_opt.png`, `starving_64px_opt.png`, `broken-arm_64px_opt.png`, `broken-leg_64px_opt.png`,
   `repair-wrench_64.png`, `bed-plus_64.png`). Looked up as the original does: the path under the mod folder, then the bare name in its `icons/`,
-  `gui/gfx/` and folder, then the game's resources. **Verified** (original config and README). The port does not ship those PNGs: a state
+  `gui/gfx/` and folder, then the game's resources. **Verified** (original config and README). The port's last step is the game's own
+`data/gui/gfx` (where `Kenshi_UI.png` is); other mods' `gui/gfx` folders, which Kenshi also registers, are not searched. The port does not ship those PNGs: a state
   without its file shows text only.
 - **Observed** (2026-11-18): an earlier text-only build loaded. Everything here is unverified in play (placement, icon loading, each trigger).
 
@@ -34,3 +35,4 @@ and following the bar's scroll. `VitalSystem`, a tick system, publishes each pla
 - The original's own icon art (not redistributable from here); drop its `gui/gfx` PNGs into this mod's `gui/gfx` to get them.
 - Per-state texture, size and crop overrides (`<state>IconTexture`, `IconSizePx`, `IconCoord*` in `mod-config.json`).
 - Debug logging and the probe hotkeys (Ctrl+Alt+F3..F12).
+- The text's shadow: a mod node's style has no shadow (the earlier build drew one through the bar's own control).
