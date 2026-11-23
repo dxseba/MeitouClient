@@ -10,10 +10,15 @@ namespace Meitou.SpeedMenu;
 /// </summary>
 public sealed class SpeedMenuMod : IMod
 {
+    /// <summary>
+    /// The running world's speed system, for the frame callback; null before a world starts.
+    /// </summary>
+    internal static volatile SpeedSystem? Speeds;
+
     public void Initialize(ModContext context)
     {
-        context.AddSystem("speeds", _ => new SpeedSystem(), SystemAnchor.End);
-        HudAdapter.Install(context);
+        context.AddSystem("speeds", _ => Speeds = new SpeedSystem(), SystemAnchor.End);
+        context.AddFrame(SpeedRows.Frame);
         context.AddUi(new SpeedMenuUi(DiamondImage(context.Folder)));
         context.Log("Speed menu initialized");
     }
