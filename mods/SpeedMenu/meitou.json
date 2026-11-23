@@ -1,6 +1,7 @@
 {
   "id": "dxseba.speedmenu",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["SpeedMenu.dll"],
-  "entry": "Meitou.SpeedMenu.SpeedMenuMod"
+  "entry": "Meitou.SpeedMenu.SpeedMenuMod",
+  "gameVersion": ">=0.22.2"
 }

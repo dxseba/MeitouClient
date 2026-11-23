@@ -1,6 +1,7 @@
 {
   "id": "dxseba.wantedmap",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["WantedMap.dll"],
-  "entry": "Meitou.WantedMap.WantedMapMod"
+  "entry": "Meitou.WantedMap.WantedMapMod",
+  "gameVersion": ">=0.22.2"
 }

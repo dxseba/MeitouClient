@@ -1,6 +1,7 @@
 {
   "id": "dxseba.weapondodgeguard",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["WeaponDodgeGuard.dll"],
-  "entry": "Meitou.WeaponDodgeGuard.WeaponDodgeGuardMod"
+  "entry": "Meitou.WeaponDodgeGuard.WeaponDodgeGuardMod",
+  "gameVersion": ">=0.22.2"
 }

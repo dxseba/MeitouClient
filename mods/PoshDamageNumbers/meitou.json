@@ -1,6 +1,7 @@
 {
   "id": "dxseba.poshdamagenumbers",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["PoshDamageNumbers.dll"],
-  "entry": "Meitou.PoshDamageNumbers.PoshDamageNumbersMod"
+  "entry": "Meitou.PoshDamageNumbers.PoshDamageNumbersMod",
+  "gameVersion": ">=0.22.2"
 }

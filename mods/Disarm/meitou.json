@@ -1,6 +1,7 @@
 {
   "id": "dxseba.disarm",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["Disarm.dll"],
-  "entry": "Meitou.Disarm.DisarmMod"
+  "entry": "Meitou.Disarm.DisarmMod",
+  "gameVersion": ">=0.22.2"
 }

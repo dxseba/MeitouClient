@@ -1,6 +1,7 @@
 {
   "id": "dxseba.squadautonomy",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["SquadAutonomy.dll"],
-  "entry": "Meitou.SquadAutonomy.SquadAutonomyMod"
+  "entry": "Meitou.SquadAutonomy.SquadAutonomyMod",
+  "gameVersion": ">=0.22.2"
 }

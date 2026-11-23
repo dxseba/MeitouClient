@@ -1,6 +1,7 @@
 {
   "id": "dxseba.stacksort",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["StackSort.dll"],
-  "entry": "Meitou.StackSort.StackSortMod"
+  "entry": "Meitou.StackSort.StackSortMod",
+  "gameVersion": ">=0.22.2"
 }

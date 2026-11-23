@@ -1,6 +1,7 @@
 {
   "id": "dxseba.fixshoppingwages",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["FixShoppingWages.dll"],
-  "entry": "Meitou.FixShoppingWages.FixShoppingWagesMod"
+  "entry": "Meitou.FixShoppingWages.FixShoppingWagesMod",
+  "gameVersion": ">=0.22.2"
 }

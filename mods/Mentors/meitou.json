@@ -1,6 +1,7 @@
 {
   "id": "dxseba.mentors",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["Mentors.dll"],
-  "entry": "Meitou.Mentors.MentorsMod"
+  "entry": "Meitou.Mentors.MentorsMod",
+  "gameVersion": ">=0.22.2"
 }

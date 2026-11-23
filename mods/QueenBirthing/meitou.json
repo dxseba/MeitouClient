@@ -1,6 +1,7 @@
 {
   "id": "dxseba.queenbirthing",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["QueenBirthing.dll"],
-  "entry": "Meitou.QueenBirthing.QueenBirthingMod"
+  "entry": "Meitou.QueenBirthing.QueenBirthingMod",
+  "gameVersion": ">=0.22.2"
 }

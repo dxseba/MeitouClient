@@ -1,6 +1,7 @@
 {
   "id": "dxseba.betterlooting",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["BetterLooting.dll"],
-  "entry": "Meitou.BetterLooting.BetterLootingMod"
+  "entry": "Meitou.BetterLooting.BetterLootingMod",
+  "gameVersion": ">=0.22.2"
 }

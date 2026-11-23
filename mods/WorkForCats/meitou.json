@@ -2,5 +2,6 @@
   "id": "dxseba.workforcats",
   "apiVersion": 3,
   "assemblies": ["WorkForCats.dll"],
-  "entry": "Meitou.WorkForCats.WorkForCatsMod"
+  "entry": "Meitou.WorkForCats.WorkForCatsMod",
+  "gameVersion": ">=0.22.2"
 }

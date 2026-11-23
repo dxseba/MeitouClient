@@ -1,6 +1,7 @@
 {
   "id": "dxseba.kenshiaffixes",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["KenshiAffixes.dll"],
-  "entry": "Meitou.KenshiAffixes.KenshiAffixesMod"
+  "entry": "Meitou.KenshiAffixes.KenshiAffixesMod",
+  "gameVersion": ">=0.22.2"
 }

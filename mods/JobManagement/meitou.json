@@ -1,6 +1,7 @@
 {
   "id": "dxseba.jobmanagement",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["JobManagement.dll"],
-  "entry": "Meitou.JobManagement.JobManagementMod"
+  "entry": "Meitou.JobManagement.JobManagementMod",
+  "gameVersion": ">=0.22.2"
 }

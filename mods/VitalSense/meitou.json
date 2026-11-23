@@ -1,6 +1,7 @@
 {
   "id": "dxseba.vitalsense",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["VitalSense.dll"],
-  "entry": "Meitou.VitalSense.VitalSenseMod"
+  "entry": "Meitou.VitalSense.VitalSenseMod",
+  "gameVersion": ">=0.22.2"
 }

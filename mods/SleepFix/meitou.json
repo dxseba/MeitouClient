@@ -1,6 +1,7 @@
 {
   "id": "dxseba.sleepfix",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["SleepFix.dll"],
-  "entry": "Meitou.SleepFix.SleepFixMod"
+  "entry": "Meitou.SleepFix.SleepFixMod",
+  "gameVersion": ">=0.22.2"
 }

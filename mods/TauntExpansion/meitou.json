@@ -1,6 +1,7 @@
 {
   "id": "dxseba.tauntexpansion",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["TauntExpansion.dll"],
-  "entry": "Meitou.TauntExpansion.TauntExpansionMod"
+  "entry": "Meitou.TauntExpansion.TauntExpansionMod",
+  "gameVersion": ">=0.22.2"
 }

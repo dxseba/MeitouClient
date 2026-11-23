@@ -1,6 +1,7 @@
 {
   "id": "dxseba.metabolictraversal",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["MetabolicTraversal.dll"],
-  "entry": "Meitou.MetabolicTraversal.MetabolicTraversalMod"
+  "entry": "Meitou.MetabolicTraversal.MetabolicTraversalMod",
+  "gameVersion": ">=0.22.2"
 }

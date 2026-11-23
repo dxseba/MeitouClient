@@ -1,6 +1,7 @@
 {
   "id": "dxseba.limitedstats",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["LimitedStats.dll"],
-  "entry": "Meitou.LimitedStats.LimitedStatsMod"
+  "entry": "Meitou.LimitedStats.LimitedStatsMod",
+  "gameVersion": ">=0.22.2"
 }

@@ -1,6 +1,7 @@
 {
   "id": "dxseba.buildingsearchbar",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["BuildingSearchBar.dll"],
-  "entry": "Meitou.BuildingSearchBar.BuildingSearchBarMod"
+  "entry": "Meitou.BuildingSearchBar.BuildingSearchBarMod",
+  "gameVersion": ">=0.22.2"
 }

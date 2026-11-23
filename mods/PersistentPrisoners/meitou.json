@@ -1,6 +1,7 @@
 {
   "id": "dxseba.persistentprisoners",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["PersistentPrisoners.dll"],
-  "entry": "Meitou.PersistentPrisoners.PersistentPrisonersMod"
+  "entry": "Meitou.PersistentPrisoners.PersistentPrisonersMod",
+  "gameVersion": ">=0.22.2"
 }

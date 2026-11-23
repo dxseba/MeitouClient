@@ -1,6 +1,7 @@
 {
   "id": "dxseba.extrainventorysections",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["ExtraInventorySections.dll"],
-  "entry": "Meitou.ExtraInventorySections.ExtraInventorySectionsMod"
+  "entry": "Meitou.ExtraInventorySections.ExtraInventorySectionsMod",
+  "gameVersion": ">=0.22.2"
 }

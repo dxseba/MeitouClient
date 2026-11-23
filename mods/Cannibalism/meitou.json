@@ -2,5 +2,6 @@
   "id": "dxseba.cannibalism",
   "apiVersion": 3,
   "assemblies": ["Cannibalism.dll"],
-  "entry": "Meitou.Cannibalism.CannibalismMod"
+  "entry": "Meitou.Cannibalism.CannibalismMod",
+  "gameVersion": ">=0.22.2"
 }

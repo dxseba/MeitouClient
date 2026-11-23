@@ -1,6 +1,7 @@
 {
   "id": "dxseba.equipmentdurability",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["EquipmentDurability.dll"],
-  "entry": "Meitou.EquipmentDurability.EquipmentDurabilityMod"
+  "entry": "Meitou.EquipmentDurability.EquipmentDurabilityMod",
+  "gameVersion": ">=0.22.2"
 }

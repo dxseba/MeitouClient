@@ -1,6 +1,7 @@
 {
   "id": "dxseba.levelupnotify",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["LevelUpNotify.dll"],
-  "entry": "Meitou.LevelUpNotify.LevelUpNotifyMod"
+  "entry": "Meitou.LevelUpNotify.LevelUpNotifyMod",
+  "gameVersion": ">=0.22.2"
 }

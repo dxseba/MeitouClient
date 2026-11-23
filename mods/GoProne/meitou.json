@@ -1,6 +1,7 @@
 {
   "id": "dxseba.goprone",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["GoProne.dll"],
-  "entry": "Meitou.GoProne.GoProneMod"
+  "entry": "Meitou.GoProne.GoProneMod",
+  "gameVersion": ">=0.22.2"
 }

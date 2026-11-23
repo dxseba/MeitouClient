@@ -1,6 +1,7 @@
 {
   "id": "dxseba.areaguard",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["AreaGuard.dll"],
-  "entry": "Meitou.AreaGuard.AreaGuardMod"
+  "entry": "Meitou.AreaGuard.AreaGuardMod",
+  "gameVersion": ">=0.22.2"
 }

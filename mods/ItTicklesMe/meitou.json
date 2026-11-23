@@ -1,6 +1,7 @@
 {
   "id": "dxseba.itticklesme",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["ItTicklesMe.dll"],
-  "entry": "Meitou.ItTicklesMe.ItTicklesMeMod"
+  "entry": "Meitou.ItTicklesMe.ItTicklesMeMod",
+  "gameVersion": ">=0.22.2"
 }

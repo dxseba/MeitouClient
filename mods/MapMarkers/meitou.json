@@ -1,6 +1,7 @@
 {
   "id": "dxseba.mapmarkers",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["MapMarkers.dll"],
-  "entry": "Meitou.MapMarkers.MapMarkersMod"
+  "entry": "Meitou.MapMarkers.MapMarkersMod",
+  "gameVersion": ">=0.22.2"
 }

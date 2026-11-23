@@ -1,6 +1,7 @@
 {
   "id": "dxseba.kenshicompact",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["KenshiCompact.dll"],
-  "entry": "Meitou.KenshiCompact.KenshiCompactMod"
+  "entry": "Meitou.KenshiCompact.KenshiCompactMod",
+  "gameVersion": ">=0.22.2"
 }

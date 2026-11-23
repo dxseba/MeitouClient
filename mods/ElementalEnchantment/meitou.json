@@ -1,6 +1,7 @@
 {
   "id": "dxseba.elementalenchantment",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["ElementalEnchantment.dll"],
-  "entry": "Meitou.ElementalEnchantment.ElementalEnchantmentMod"
+  "entry": "Meitou.ElementalEnchantment.ElementalEnchantmentMod",
+  "gameVersion": ">=0.22.2"
 }

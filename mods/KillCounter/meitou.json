@@ -1,6 +1,7 @@
 {
   "id": "dxseba.killcounter",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["KillCounter.dll"],
-  "entry": "Meitou.KillCounter.KillCounterMod"
+  "entry": "Meitou.KillCounter.KillCounterMod",
+  "gameVersion": ">=0.22.2"
 }

@@ -1,6 +1,7 @@
 {
   "id": "dxseba.sparring",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["Sparring.dll"],
-  "entry": "Meitou.Sparring.SparringMod"
+  "entry": "Meitou.Sparring.SparringMod",
+  "gameVersion": ">=0.22.2"
 }

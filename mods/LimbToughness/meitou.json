@@ -1,6 +1,7 @@
 {
   "id": "dxseba.limbtoughness",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["LimbToughness.dll"],
-  "entry": "Meitou.LimbToughness.LimbToughnessMod"
+  "entry": "Meitou.LimbToughness.LimbToughnessMod",
+  "gameVersion": ">=0.22.2"
 }

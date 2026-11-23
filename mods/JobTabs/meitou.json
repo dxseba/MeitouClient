@@ -1,6 +1,7 @@
 {
   "id": "dxseba.jobtabs",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["JobTabs.dll"],
-  "entry": "Meitou.JobTabs.JobTabsMod"
+  "entry": "Meitou.JobTabs.JobTabsMod",
+  "gameVersion": ">=0.22.2"
 }

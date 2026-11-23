@@ -1,6 +1,7 @@
 {
   "id": "dxseba.vitalread",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "assemblies": ["VitalRead.dll"],
-  "entry": "Meitou.VitalRead.VitalReadMod"
+  "entry": "Meitou.VitalRead.VitalReadMod",
+  "gameVersion": ">=0.22.2"
 }
