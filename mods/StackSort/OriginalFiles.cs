@@ -94,17 +94,47 @@ sealed class OriginalFiles
     /// <summary>
     /// <c>top_targets</c>, 1-10 (default 5).
     /// </summary>
-    public int TopTargets =>
-        int.TryParse(_config.GetValueOrDefault("top_targets"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) && n is >= 1 and <= 10
+    public int TopTargets => Number("top_targets", 1, 10, 5);
+
+    /// <summary>
+    /// The button strip's geometry in pixels: <c>arrow_button_width</c> (30), <c>dim_button_width</c> (40), <c>sort_button_width</c> (180),
+    /// <c>button_gap</c> (2) and <c>body_x_offset</c> (-40), each in the cfg's range.
+    /// </summary>
+    public StripGeometry Strip => new(Number("arrow_button_width", 10, 200, 30), Number("dim_button_width", 10, 200, 40),
+        Number("sort_button_width", 40, 600, 180), Number("button_gap", 0, 50, 2), Number("body_x_offset", -500, 500, -40));
+
+    /// <summary>
+    /// A whole number of the cfg in [<paramref name="min"/>, <paramref name="max"/>]; <paramref name="fallback"/> when absent or out of range
+    /// (the original ignores such a value).
+    /// </summary>
+    int Number(string key, int min, int max, int fallback) =>
+        int.TryParse(_config.GetValueOrDefault(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) && n >= min && n <= max
             ? n
-            : 5;
+            : fallback;
+
+    /// <summary>
+    /// The sort button's caption for layout <paramref name="n"/> (1-based).
+    /// </summary>
+    public string SortCaption(int n) => _captions["SORT_BUTTON"].Replace("{n}", n.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
+    /// <summary>
+    /// The goal button's caption.
+    /// </summary>
+    public string GoalCaption(Goal goal) => _captions[goal == Goal.Height ? "DIM_H" : "DIM_W"];
 
     /// <summary>
     /// The sort button's caption for layout <paramref name="n"/> (1-based) and the goal letter.
     /// </summary>
-    public string Caption(int n, Goal goal)
-    {
-        string sort = _captions["SORT_BUTTON"].Replace("{n}", n.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
-        return $"{sort} {_captions[goal == Goal.Height ? "DIM_H" : "DIM_W"]}";
-    }
+    public string Caption(int n, Goal goal) => $"{SortCaption(n)} {GoalCaption(goal)}";
+}
+
+/// <summary>
+/// The original's button strip geometry (<see cref="OriginalFiles.Strip"/>), in pixels.
+/// </summary>
+readonly record struct StripGeometry(int Arrow, int Dim, int Sort, int Gap, int BodyOffset)
+{
+    /// <summary>
+    /// The strip's width: two arrows, the sort and goal buttons and three gaps.
+    /// </summary>
+    public int Width => 2 * Arrow + Sort + Dim + 3 * Gap;
 }

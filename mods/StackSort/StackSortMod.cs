@@ -1,14 +1,15 @@
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Meitou.Modding;
+using Meitou.Simulation;
 using Meitou.Simulation.Items;
 
 namespace Meitou.StackSort;
 
 /// <summary>
-/// Replaces the inventory window's ARRANGE with StackSort: like items grouped, split stacks merged, the free space in one block. The original's four
-/// controls (<c>&lt; StackSort N H/W &gt;</c>, right-click undo) cannot be added to the game's button, so they ride on it: a click applies the best
-/// layout and further clicks cycle the five best, Shift+click switches the goal between Height and Width, Ctrl+click undoes the sort.
+/// Replaces the inventory window's ARRANGE with StackSort's strip <c>&lt; StackSort [n] H/W &gt;</c> (screen controls over the button): like items
+/// grouped, split stacks merged, the free space in one block. The sort button applies the best layout and cycles the best few, the arrows step
+/// through them, H/W switches the goal, and Ctrl+click on the sort button undoes the sort (the original's right click).
 /// </summary>
 public sealed class StackSortMod : IMod
 {
@@ -19,7 +20,12 @@ public sealed class StackSortMod : IMod
     /// </summary>
     internal static OriginalFiles Original { get; private set; } = null!;
 
-    /// <summary>The window ARRANGE commands said with a modifier held, read on the tick thread.</summary>
+    /// <summary>
+    /// Whether Ctrl was held at the last frame (read by the sort button's click on the host's thread).
+    /// </summary>
+    internal static volatile bool CtrlHeld;
+
+    /// <summary>The strip's ARRANGE commands and what each asks, read on the tick thread; one without an entry (the game's button) is Next.</summary>
     static readonly ConditionalWeakTable<ArrangeInventory, StrongBox<ArrangeMode>> Modes = new();
 
     public void Initialize(ModContext context)
@@ -30,29 +36,41 @@ public sealed class StackSortMod : IMod
         Settings.TopTargets = Original.TopTargets;
         context.AddSettings(Settings);
         context.Harmony.Patch(ArrangeMethod(), prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeArrange)));
-        PatchWindowButton(context);
+        context.Harmony.Patch(ApplyMethod(), prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeApply)));
+        context.AddFrame(frame => CtrlHeld = frame.Ctrl);
+        context.AddUi(new StackSortUi(Original.Strip));
         context.Log("StackSort initialized");
     }
 
+    /// <summary>
+    /// The game's ARRANGE command for a strip button, tagged with what it asks. It is the game's own command so that it applies in the paused
+    /// interface step too (a mod's command waits for the next tick).
+    /// </summary>
+    internal static ArrangeInventory Order(CharacterId character, bool bag, ArrangeMode mode, long tick)
+    {
+        var arrange = new ArrangeInventory(character, bag) { Tick = tick };
+        Modes.AddOrUpdate(arrange, new(mode));
+        return arrange;
+    }
+
+    /// <summary>
+    /// The public whole-inventory arrange other callers use (a machine's storage, putting a held item back); no hook covers it.
+    /// </summary>
     static System.Reflection.MethodInfo ArrangeMethod() =>
         AccessTools.Method(typeof(InventoryCommands), nameof(InventoryCommands.Arrange), [typeof(Inventory)])
             ?? throw new MissingMethodException(nameof(InventoryCommands), "Arrange");
 
-    /// <summary>The interface's <c>Say</c> tags an ARRANGE with its modifier; <c>PlayerSystem.ApplyActionCommand</c> runs it through the cycle.</summary>
-    static void PatchWindowButton(ModContext context)
-    {
-        var player = AccessTools.TypeByName("Meitou.Game.PlayerInterface") ?? throw new TypeLoadException("Meitou.Game.PlayerInterface");
-        var say = AccessTools.Method(player, "Say") ?? throw new MissingMethodException(player.FullName, "Say");
-        var apply = AccessTools.Method(typeof(Meitou.Simulation.Player.PlayerSystem), "ApplyActionCommand")
+    /// <summary>
+    /// The player system's private command step, where <see cref="ArrangeInventory"/> is applied (while paused too); no hook takes it over.
+    /// </summary>
+    static System.Reflection.MethodInfo ApplyMethod() =>
+        AccessTools.Method(typeof(Meitou.Simulation.Player.PlayerSystem), "ApplyActionCommand")
             ?? throw new MissingMethodException("PlayerSystem", "ApplyActionCommand");
 
-        context.Harmony.Patch(say, prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeSay)));
-        context.Harmony.Patch(apply, prefix: new HarmonyMethod(typeof(StackSortMod), nameof(BeforeApply)));
-    }
-
-    #pragma warning disable IDE1006 // Harmony binds __result / __instance by name
-    /// <summary>Other callers of the whole-inventory arrange (a machine's storage, putting a held item back): the best layout for the setting's goal.</summary>
+    #pragma warning disable IDE1006 // Harmony binds __result by name
+    /// <summary>Other callers of the whole-inventory arrange: the best layout for the setting's goal.</summary>
     static bool BeforeArrange(Inventory root, ref bool __result)
+    #pragma warning restore IDE1006
     {
         if (!Settings.Enabled || !Packer.Pack(root, null, Settings.WidthGoal ? Goal.Width : Goal.Height, Settings.Consolidate)) return true;
 
@@ -60,29 +78,22 @@ public sealed class StackSortMod : IMod
         return false;
     }
 
-    static void BeforeSay(object __instance, Meitou.Simulation.SimCommand command)
-    {
-        if (command is not ArrangeInventory arrange) return;
-
-        var t = Traverse.Create(__instance);
-        var mode = t.Field("CtrlHeld").GetValue<bool>() ? ArrangeMode.Undo
-            : t.Property("SlowModifier").GetValue<bool>() ? ArrangeMode.SwitchGoal
-            : ArrangeMode.Next;
-        Modes.AddOrUpdate(arrange, new(mode));
-    }
-
-    static bool BeforeApply(Meitou.Simulation.World world, Meitou.Simulation.SimCommand command)
-    #pragma warning restore IDE1006
+    /// <summary>An ARRANGE of a character window runs through the layout cycle.</summary>
+    static bool BeforeApply(World world, SimCommand command)
     {
         if (!Settings.Enabled || command is not ArrangeInventory arrange) return true;
 
         var mode = Modes.TryGetValue(arrange, out var box) ? box.Value : ArrangeMode.Next;
-        LayoutCycle.Run(world, arrange, mode);
+        LayoutCycle.Run(world, arrange.Character, arrange.Bag, mode);
         return false;
     }
 }
 
-public enum ArrangeMode { Next, SwitchGoal, Undo }
+/// <summary>
+/// What a strip button asks: the next layout (the sort button and <c>&gt;</c>), the previous one (<c>&lt;</c>), the other goal (H/W), or the layout
+/// before the first sort (Ctrl+click on the sort button).
+/// </summary>
+public enum ArrangeMode { Next, Previous, SwitchGoal, Undo }
 
 /// <summary>
 /// The mod's settings; the last three take their defaults from the installed original's StackSort.cfg.
@@ -90,9 +101,9 @@ public enum ArrangeMode { Next, SwitchGoal, Undo }
 public sealed class StackSortSettings
 {
     /// <summary>
-    /// Whether ARRANGE runs StackSort.
+    /// Whether the strip replaces ARRANGE.
     /// </summary>
-    [Setting("StackSort on Arrange", Hint = "Click: best layout, again to cycle the best ones. Shift+click: Height/Width goal. Ctrl+click: undo. Off: vanilla.")]
+    [Setting("StackSort on Arrange", Hint = "Sort: best layout, again to cycle; < >: step; H/W: goal; Ctrl+click Sort: undo. Off: vanilla.")]
     public bool Enabled { get; set; } = true;
 
     /// <summary>

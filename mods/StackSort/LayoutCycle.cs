@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Meitou.Simulation;
 using Meitou.Simulation.Items;
 
@@ -5,7 +6,8 @@ namespace Meitou.StackSort;
 
 /// <summary>
 /// The window ARRANGE's state per character and grid: the layouts offered for the current goal, which one is shown, and the layout before the first
-/// click (for undo). A cycle is dropped once the grid changes by other means (its signature no longer matches).
+/// click (for undo). A cycle is dropped once the grid changes by other means (its signature no longer matches). The shown layout's number and the
+/// goal are published for the strip's captions.
 /// </summary>
 static class LayoutCycle
 {
@@ -21,17 +23,24 @@ static class LayoutCycle
     static readonly Dictionary<(CharacterId Character, bool Bag), Cycle> Cycles = [];
     static Goal? s_goal;
 
-    public static void Run(World world, ArrangeInventory arrange, ArrangeMode mode)
+    /// <summary>The shown layout's number (1-based) per character and grid, for the strip (read on the host's thread).</summary>
+    public static readonly ConcurrentDictionary<(CharacterId Character, bool Bag), int> Shown = new();
+
+    /// <summary>The goal the next sort targets, for the strip.</summary>
+    public static Goal Current => CurrentGoal;
+
+    public static void Run(World world, CharacterId character, bool bag, ArrangeMode mode)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(arrange.Character, out int slot) || table.Cold(slot) is not { IsPlayer: true, Inventory: { } inventory }) return;
+        if (!table.TryResolveNext(character, out int slot) || table.Cold(slot) is not { IsPlayer: true, Inventory: { } inventory }) return;
 
-        var key = (arrange.Character, arrange.Bag);
-        var grids = Packer.Grids(inventory, arrange.Bag);
+        var key = (character, bag);
+        var grids = Packer.Grids(inventory, bag);
         var cycle = Cycles.GetValueOrDefault(key) is { } c && c.After == Packer.Signature(grids) ? c : null;
+        if (cycle is null) Shown.TryRemove(key, out _);
 
         if (mode == ArrangeMode.Undo) Undo(world, key, cycle);
-        else Arrange(world, key, inventory, arrange.Bag, cycle, mode == ArrangeMode.SwitchGoal);
+        else Arrange(world, key, inventory, bag, cycle, mode);
     }
 
     static Goal CurrentGoal => s_goal ?? (StackSortMod.Settings.WidthGoal ? Goal.Width : Goal.Height);
@@ -46,20 +55,31 @@ static class LayoutCycle
 
         Packer.Restore(cycle.Undo);
         Cycles.Remove(key);
+        Shown.TryRemove(key, out _);
         world.Post("StackSort: sort undone.");
     }
 
-    static void Arrange(World world, (CharacterId, bool) key, Inventory inventory, bool bag, Cycle? cycle, bool switchGoal)
+    /// <summary>
+    /// The next (or with <see cref="ArrangeMode.Previous"/> the previous) layout of the cycle, or a new cycle when none runs for the goal;
+    /// <see cref="ArrangeMode.SwitchGoal"/> switches the goal first.
+    /// </summary>
+    static void Arrange(World world, (CharacterId, bool) key, Inventory inventory, bool bag, Cycle? cycle, ArrangeMode mode)
     {
-        if (switchGoal) s_goal = CurrentGoal == Goal.Height ? Goal.Width : Goal.Height;
+        if (mode == ArrangeMode.SwitchGoal) s_goal = CurrentGoal == Goal.Height ? Goal.Width : Goal.Height;
 
-        if (cycle is not null && cycle.Goal == CurrentGoal) cycle.Index = (cycle.Index + 1) % cycle.Layouts.Count;
+        int step = mode == ArrangeMode.Previous ? -1 : 1;
+        if (cycle is not null && cycle.Goal == CurrentGoal)
+        {
+            int count = cycle.Layouts.Count;
+            cycle.Index = (cycle.Index + step + count) % count;
+        }
         else cycle = Start(world, key, inventory, bag, cycle);
 
         if (cycle is null) return;
 
         Packer.Restore(cycle.Layouts[cycle.Index]);
         cycle.After = Packer.Signature(Packer.Grids(inventory, bag));
+        Shown[key] = cycle.Index + 1;
         world.Post(StackSortMod.Original.Caption(cycle.Index + 1, cycle.Goal));
     }
 
@@ -75,6 +95,7 @@ static class LayoutCycle
         if (layouts.Count == 0)
         {
             Cycles.Remove(key);
+            Shown.TryRemove(key, out _);
             if (!InventoryCommands.Arrange(inventory, bag)) world.Post("Cannot arrange inventory: the items do not fit.");
             return null;
         }
