@@ -9,7 +9,7 @@ Port of dafitime's *Disarm* (workshop 3759461630; rules from its GPL-3.0 source,
   aimed at the target again when it moves more than 5 or the walk ends). The roll happens once: within 18; within 28 once the actor is caught
   (chance 0) or has come no nearer for 3 s; within 30 after 5 s. It gives up after 15 s without progress, and is cancelled by another order
   (an order in hand that is not this walk). Success drops (or destroys) the hip and back weapons (then `CharacterRefresh.Refresh`) and gives Stealth XP 15 (event gain, on
-  every success). Failure is the engine's caught-stealing reaction (`CrimeSystem.Roll` with chance 0, private, by reflection): the target wakes, a
+  every success). Failure is the engine's caught-stealing reaction (`CrimeSystem.StealRoll` with chance 0): the target wakes, a
   pending Theft, the stole-from-me memory.
 - **Kick**: a row on a loose ground item's hold menu (`UiRegistration.AddMenuVerbs`, kind `GroundItem`), after the game's Pick Up (also the
   quick click). The actor (never an animal) walks over; the item moves *Kick distance* + 0..6 along the actor-item line, stopping before

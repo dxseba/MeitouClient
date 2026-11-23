@@ -1,7 +1,5 @@
 using System.Collections.Frozen;
 using System.Numerics;
-using System.Reflection;
-using HarmonyLib;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
@@ -41,11 +39,6 @@ sealed partial class DisarmSystem(DisarmSettings settings, PopulationData data, 
     const float StealthXp = 15;
 
     static readonly string[] WeaponSections = ["hip", "back"];
-    /// <summary>
-    /// The engine's caught-stealing roll (<c>CrimeSystem.Roll</c>, private: no public API rolls it with a chance of 0).
-    /// </summary>
-    static readonly MethodInfo? CaughtRoll = AccessTools.Method(typeof(CrimeSystem), "Roll");
-
     /// <summary>
     /// One actor walking to its target: when it started, the nearest it came, since when it made no progress, where its walk was aimed.
     /// </summary>
@@ -216,13 +209,13 @@ sealed partial class DisarmSystem(DisarmSettings settings, PopulationData data, 
         world.Post($"{cold.Name} has been disarmed.");
     }
 
-    /// <summary>The engine's caught-stealing reaction on the target, through <c>CrimeSystem</c>'s steal roll with a chance of 0.</summary>
+    /// <summary>The engine's caught-stealing reaction on the target, through <c>CrimeSystem.StealRoll</c> with a chance of 0.</summary>
     static void Caught(World world, int actor, int target)
     {
         var table = world.Characters;
         var targetId = table.IdOf(target);
-        if (world.Systems.OfType<CrimeSystem>().FirstOrDefault() is { } crime && CaughtRoll is not null)
-            CaughtRoll.Invoke(crime, [world, actor, target, 0f, table.Cold(target)!.Faction, targetId, Rng.Key(targetId), null]);
+        if (world.Systems.OfType<CrimeSystem>().FirstOrDefault() is { } crime)
+            crime.StealRoll(world, table.IdOf(actor), targetId, 0, table.Cold(target)!.Faction, targetId);
         else
             world.Post($"{table.Cold(actor)?.Name} was caught trying to disarm {table.Cold(target)?.Name}.");
     }
