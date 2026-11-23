@@ -1,12 +1,13 @@
 using Meitou.Modding;
+using Meitou.Data.Gameplay.Combat;
 using Meitou.Simulation;
 
 namespace Meitou.WeaponDodgeGuard;
 
 /// <summary>
 /// Port of Weapon Dodge &amp; Guard (Tata-Gari, workshop 3767056805, GPLv3): a fighter holding a weapon that blocks may dodge first, with the
-/// unarmed dodge chance (the game's own formula) scaled and clamped, then guard as usual. A postfix on the engine's defence choice
-/// (<c>CombatSystem.ChooseDefence</c>, the original's <c>CharStats::chooseBlock</c> hook) replaces its standing block with a dodge technique.
+/// unarmed dodge chance (the game's own formula) scaled and clamped, then guard as usual. A defence filter (<see cref="DodgeFilter"/>, the
+/// original's <c>CharStats::chooseBlock</c> hook) replaces the game's standing block with a dodge technique.
 /// </summary>
 public sealed class WeaponDodgeGuardMod : IMod
 {
@@ -18,7 +19,8 @@ public sealed class WeaponDodgeGuardMod : IMod
     {
         context.AddSettings(Settings);
         Purpose = context.RngPurpose;
-        DodgeHook.Install(context);
+        var constants = CombatConstants.FromDatabase(context.Data);   // the combat system's own (CombatDatabase.Constants)
+        context.AddSystem("weapon-dodge-guard", _ => new DodgeFilter(constants, Purpose), SystemAnchor.End);
         context.Log("Weapon Dodge & Guard initialized");
     }
 }

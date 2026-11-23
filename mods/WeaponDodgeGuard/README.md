@@ -1,8 +1,8 @@
 # Weapon Dodge & Guard (port)
 
 Port of *Weapon Dodge & Guard* v1.2.0-rc1 (Tata-Gari, workshop 3767056805; GPLv3, [source](https://github.com/Tata-Gari/RE_Kenshi_Plugins_Source)).
-A Harmony postfix on the engine's defence choice (`CombatSystem.ChooseDefence`, the original hooks `CharStats::chooseBlock`) lets an armed
-fighter dodge before it guards. Deterministic (`Rng.Hash` of the blow's key and tick).
+An `ICombatDefenceFilter` on the engine's defence choice (the original hooks `CharStats::chooseBlock`) lets an armed fighter dodge before it
+guards. Deterministic (`Rng.Hash` of the defender's key and the tick). No Harmony patches or reflection.
 
 ## Facts
 
@@ -19,7 +19,7 @@ fighter dodge before it guards. Deterministic (`Rng.Hash` of the blow's key and 
 - **Defaults** (shipped `WeaponDodgeGuard.ini`): Mode 1, ChanceScale 1.0, MinimumChance 0, MaximumChance 95, AdaptivePriority 0,
   AnimationMode 1, AllowInDefensiveMode 1, RequireNormalProneState 1, DodgeCooldownMs 0. **Verified**. The allow and block lists are text
   settings.
-- The postfix stays: no hook changes the defence choice (`ICombatDefenceObserver` only reports it, `ICombatHitFilter` runs after it). The
+- The filter answers the game's pick unchanged unless it is a standing block it turns into a dodge; techniques are `CombatSystem.Techniques`. The
   chance uses the database's `CombatConstants`, the ones the combat system is built with.
 - XP: the engine's own dodge and block XP apply (the original grants dodge XP on a weapon dodge and defence XP on a guard). **Observed**
   (description).
@@ -27,6 +27,6 @@ fighter dodge before it guards. Deterministic (`Rng.Hash` of the blow's key and 
 
 ## Missing
 
-- The cooldown runs on game time and is neither saved nor hashed (the original's runs on the wall clock); off by default.
+- The cooldown runs on game time, kept per defender in the filter, and is neither saved nor hashed (the original's runs on the wall clock); off by default.
 - Gear bonuses on the attacker's skill and the defender's martial arts (the engine's are internal).
 - The logging options (`Verbose`, `LogSelections`, `LogDecisions`, `LogDiscoveredTechniques`, `LogSelectedAnimation`, `MaxLines`).

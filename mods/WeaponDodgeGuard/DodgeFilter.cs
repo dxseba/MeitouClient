@@ -1,10 +1,6 @@
 using System.Collections.Concurrent;
-using System.Reflection;
-using System.Runtime.CompilerServices;
-using HarmonyLib;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Gameplay.Combat;
-using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Combat;
@@ -13,60 +9,57 @@ using Meitou.Simulation.Player;
 namespace Meitou.WeaponDodgeGuard;
 
 /// <summary>
-/// The dodge before the guard (the original's <c>chooseBlock</c> hook, <b>Verified</b> original DLL (decompiled)): only an armed fighter whose
-/// vanilla pick is a standing block, standing normally (with Require standing), not in defensive mode (unless allowed), past its cooldown and (with
-/// Adaptive priority) not better at guarding rolls the unarmed dodge chance, scaled by Chance scale and clamped to the minimum and maximum; on
-/// success its block becomes a dodge technique (<see cref="DodgeTechniques"/>), else the guard stands.
+/// The dodge before the guard (the original's <c>chooseBlock</c> hook, <b>Verified</b> original DLL (decompiled)), as an
+/// <see cref="ICombatDefenceFilter"/>: only an armed fighter whose pick is a standing block, standing normally (with Require standing), not in
+/// defensive mode (unless allowed), past its cooldown and (with Adaptive priority) not better at guarding rolls the unarmed dodge chance, scaled by
+/// Chance scale and clamped to the minimum and maximum; on success its block becomes a dodge technique (<see cref="DodgeTechniques"/>), else the
+/// guard stands. Any thread: reads the defender and attacker as the tick settled them; the cooldown is per defender, written from its own asks.
 /// </summary>
-static class DodgeHook
+sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose) : ICombatDefenceFilter
 {
-    static CombatConstants s_constants = CombatConstants.BaseGame;
-    static PropertyInfo? s_attacker;
+    /// <summary>
+    /// The last weapon-dodge tick per defender (for the cooldown).
+    /// </summary>
+    readonly ConcurrentDictionary<CharacterId, long> _lastDodge = new();
 
     /// <summary>
-    /// Each world's last weapon-dodge tick per defender (for the cooldown); written only from the defender's own defence choice.
+    /// The world's combat system, for its techniques (found on the first ask; every thread finds the same one).
     /// </summary>
-    static readonly ConditionalWeakTable<World, ConcurrentDictionary<CharacterId, long>> LastDodge = [];
+    CombatSystem? _combat;
 
-    /// <summary>
-    /// No hook lets a mod change the defence choice (<c>ICombatDefenceObserver</c> reports it, <c>ICombatHitFilter</c> runs after it), so this
-    /// stays a postfix on the private <c>CombatSystem.ChooseDefence</c>, reading the attacker from its private <c>IncomingBlow</c> argument.
-    /// </summary>
-    public static void Install(ModContext context)
+    public int Defence(World world, in DefenceChoiceAsk ask)
     {
-        var choose = AccessTools.Method(typeof(CombatSystem), "ChooseDefence")
-            ?? throw new MissingMethodException(nameof(CombatSystem), "ChooseDefence");
+        if (!WeaponDodgeGuardMod.Settings.Enabled || ask.Stumbling || CombatOf(world) is not { } combat) return ask.Technique;
+        if (!StandingBlock(combat, ask.Technique) || Dodge(world, combat, ask) is not { } pick) return ask.Technique;
 
-        // The combat system's constants are the database's (CombatDatabase.Constants).
-        s_constants = CombatConstants.FromDatabase(context.Data);
-        var blow = AccessTools.Inner(typeof(CombatSystem), "IncomingBlow") ?? throw new TypeLoadException("CombatSystem.IncomingBlow");
-        s_attacker = AccessTools.Property(blow, "Attacker") ?? throw new MissingMemberException(blow.FullName, "Attacker");
-        context.Harmony.Patch(choose, postfix: new HarmonyMethod(typeof(DodgeHook), nameof(AfterChoose)));
+        if (WeaponDodgeGuardMod.Settings.CooldownMs > 0) _lastDodge[ask.Defender] = world.Tick;
+        return pick;
     }
 
-    #pragma warning disable IDE1006 // Harmony binds __instance / __args / __result by name
-    static void AfterChoose(
-        CombatSystem __instance, World world, int i, CharacterCold cold, ulong key, int now, bool stumbling, object[] __args, ref int __result)
-    #pragma warning restore IDE1006
+    /// <summary>
+    /// The dodge technique the defender takes up instead of its guard, or null when the gate or the roll keeps the guard.
+    /// </summary>
+    int? Dodge(World world, CombatSystem combat, in DefenceChoiceAsk ask)
     {
-        if (!WeaponDodgeGuardMod.Settings.Enabled || stumbling || !StandingBlock(__instance, __result)) return;
-        if (cold.Fighter is not { CanBlock: true } fighter || cold.Medical is not { } medical || !Eligible(cold, medical)) return;
-        if (s_attacker?.GetValue(__args[5]) is not int attackerSlot || world.Characters.Cold(attackerSlot) is not { } attacker) return;
+        var table = world.Characters;
+        if (!table.IsAlive(ask.Defender) || table.Cold(ask.Defender.Slot) is not { Fighter: { CanBlock: true } fighter, Medical: { } medical } cold)
+        {
+            return null;
+        }
 
-        var id = world.Characters.IdOf(i);
-        if (CoolingDown(world, id)) return;
+        if (!Eligible(cold, medical) || CoolingDown(world, ask.Defender)) return null;
+        if (!table.IsAlive(ask.Attacker) || table.Cold(ask.Attacker.Slot) is not { } attacker) return null;
 
         float dodge = EffectiveDodge(cold, fighter, medical);
-        if (WeaponDodgeGuardMod.Settings.Adaptive && dodge < EffectiveMeleeDefence(cold, fighter)) return;
+        if (WeaponDodgeGuardMod.Settings.Adaptive && dodge < EffectiveMeleeDefence(cold, fighter)) return null;
 
-        ulong roll = Rng.Hash(world.Seed, key, WeaponDodgeGuardMod.Purpose, (ulong)(uint)now);
-        if (Rng.Float(roll) * 100 >= Chance(dodge, attacker)) return;
+        ulong roll = Rng.Hash(world.Seed, Rng.Key(ask.Defender), purpose, (ulong)(uint)ask.Tick);
+        if (Rng.Float(roll) * 100 >= Chance(dodge, attacker)) return null;
 
-        if (DodgeTechniques.Pick(__instance.Techniques, dodge, Rng.Float(Rng.Mix(roll))) is not { } pick) return;
-
-        __result = pick;
-        if (WeaponDodgeGuardMod.Settings.CooldownMs > 0) Dodges(world)[id] = world.Tick;
+        return DodgeTechniques.Pick(combat.Techniques, dodge, Rng.Float(Rng.Mix(roll)));
     }
+
+    CombatSystem? CombatOf(World world) => _combat ??= world.Systems.OfType<CombatSystem>().FirstOrDefault();
 
     /// <summary>
     /// The vanilla pick is a block that is not a dodge and not prone (a dodge or no reaction is kept).
@@ -82,15 +75,13 @@ static class DodgeHook
         return settings.AllowInDefensiveMode || !Orders.Has(cold, CharacterOrders.Block);
     }
 
-    static ConcurrentDictionary<CharacterId, long> Dodges(World world) => LastDodge.GetValue(world, _ => new());
-
     /// <summary>
     /// <c>DodgeCooldownMs</c> after the defender's last weapon dodge (game time here: the original's clock is the wall's).
     /// </summary>
-    static bool CoolingDown(World world, CharacterId id)
+    bool CoolingDown(World world, CharacterId id)
     {
         int ms = WeaponDodgeGuardMod.Settings.CooldownMs;
-        if (ms <= 0 || !Dodges(world).TryGetValue(id, out long last)) return false;
+        if (ms <= 0 || !_lastDodge.TryGetValue(id, out long last)) return false;
 
         return (world.Tick - last) * world.TickSeconds * 1000 < ms;
     }
@@ -99,10 +90,10 @@ static class DodgeHook
     /// The scaled chance: the vanilla dodge chance against the attacker's skill, held to [0, 100], times Chance scale, held to the minimum and
     /// maximum.
     /// </summary>
-    static float Chance(float dodge, CharacterCold attacker)
+    float Chance(float dodge, CharacterCold attacker)
     {
         var settings = WeaponDodgeGuardMod.Settings;
-        float vanilla = Math.Clamp(DefenceFormulas.BlockChance(dodge, AttackSkill(attacker), s_constants, 0, 95), 0, 100);
+        float vanilla = Math.Clamp(DefenceFormulas.BlockChance(dodge, AttackSkill(attacker), constants, 0, 95), 0, 100);
         float scaled = settings.ChanceScale * vanilla;
         return scaled < settings.MinimumChance ? settings.MinimumChance : Math.Min(scaled, settings.MaximumChance);
     }
