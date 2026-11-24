@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.uncapdefence",
+  "apiVersion": 2,
+  "assemblies": ["UncapDefence.dll"],
+  "entry": "Meitou.UncapDefence.UncapDefenceMod",
+  "gameVersion": ">=0.22.2"
+}
