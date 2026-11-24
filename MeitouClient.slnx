@@ -43,6 +43,21 @@
     <Project Path="mods/ElementalEnchantment/Meitou.ElementalEnchantment.csproj" />
     <Project Path="mods/Sparring/Meitou.Sparring.csproj" />
     <Project Path="mods/AreaGuard/Meitou.AreaGuard.csproj" />
+    <Project Path="mods/AttackSpeedUncapped/Meitou.AttackSpeedUncapped.csproj" />
+    <Project Path="mods/AutoPauseOnLoad/Meitou.AutoPauseOnLoad.csproj" />
+    <Project Path="mods/BodyMorphCap/Meitou.BodyMorphCap.csproj" />
+    <Project Path="mods/BowMod/Meitou.BowMod.csproj" />
+    <Project Path="mods/ColoredStats/Meitou.ColoredStats.csproj" />
+    <Project Path="mods/ContainerHighlight/Meitou.ContainerHighlight.csproj" />
+    <Project Path="mods/GateFix/Meitou.GateFix.csproj" />
+    <Project Path="mods/GuardBreakBash/Meitou.GuardBreakBash.csproj" />
+    <Project Path="mods/GunManufactureSounds/Meitou.GunManufactureSounds.csproj" />
+    <Project Path="mods/KathunLightsabers/Meitou.KathunLightsabers.csproj" />
+    <Project Path="mods/MedicSplintRigging/Meitou.MedicSplintRigging.csproj" />
+    <Project Path="mods/MedkitMerge/Meitou.MedkitMerge.csproj" />
+    <Project Path="mods/OrganHarvesting/Meitou.OrganHarvesting.csproj" />
+    <Project Path="mods/Struggle/Meitou.Struggle.csproj" />
+    <Project Path="mods/UncapDefence/Meitou.UncapDefence.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
