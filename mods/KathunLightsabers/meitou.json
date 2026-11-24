@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.kathunlightsabers",
+  "apiVersion": 2,
+  "assemblies": ["KathunLightsabers.dll"],
+  "entry": "Meitou.KathunLightsabers.KathunLightsabersMod",
+  "gameVersion": ">=0.22.2"
+}
