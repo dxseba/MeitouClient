@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.gearcomparealt",
+  "apiVersion": 2,
+  "assemblies": ["GearCompareAlt.dll"],
+  "entry": "Meitou.GearCompareAlt.GearCompareAltMod",
+  "gameVersion": ">=0.22.2"
+}
