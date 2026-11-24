@@ -18,7 +18,10 @@ Port of *Sparring 切磋* (workshop 3776308916, an RE_Kenshi plugin; its `.mod` 
   0.5 with another attack target; `isEnemy` true only within the pair and false between a sparring character and anyone else, `isAlly` the
   reverse; own-faction relation changes and the campaign notice of a player-on-player attack blocked; spars dropped on load.
 - **Observed** (by reading the engine): no relation change or crime, as both are one faction. The end timings are this port's: the original
-  counts character updates (60, 30, 120, 90). `isProbablyDying` is a stand-in (blood at or under 0, or a vital part's flesh + bandage under 0).
+  counts character updates (60, 30, 120, 90). **Verified** (kenshi_x64.exe 1.0.68 `MedicalSystem::isProbablyDying` at RVA 0x884A70
+  disassembled): it is true when a vital part's flesh plus its bandaged pool is under 0, nothing else; the port tests exactly that.
 - *Blunt blows while sparring* (off) is this port's addition. A spar is not saved, as the original drops them on load.
-- **Missing**: standing orders 5 and 6 (aggressive, defensive) have no reader in the engine; the per-update re-aim at the partner is the attack
-  order. Not checked in game.
+- Standing orders 5 and 6 (aggressive, defensive), which the original turns on: they write AI +0x2b8, which nothing in the game reads
+  (**Observed**, [combat](../../docs/game/combat.md) "Standing orders"), so there is nothing to port. The per-update re-aim at the partner is the
+  attack order.
+- **Missing**: nothing known. Not checked in game.

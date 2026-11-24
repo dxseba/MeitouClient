@@ -306,14 +306,15 @@ sealed class SparSystem(SparringSettings settings, PopulationData population) : 
     #region Healing
 
     /// <summary>
-    /// The stand-in for the original's <c>isProbablyDying</c>: blood at or under 0, or a vital part's flesh with its bandage under 0.
+    /// The game's <c>MedicalSystem::isProbablyDying</c> (<b>Verified</b>, kenshi_x64.exe 1.0.68 disassembled): a vital part whose flesh plus
+    /// bandaged pool is under 0.
     /// </summary>
     static bool ProbablyDying(World world, CharacterId id)
     {
         var table = world.Characters;
         if (!table.TryResolveNext(id, out int slot) || table.Cold(slot)?.Medical is not { Dead: false } medical) return false;
 
-        return medical.Blood <= 0 || medical.Parts.Any(p => p.IsVital && p.Flesh + p.Bandage < 0);
+        return medical.Parts.Any(p => p.IsVital && p.Flesh + p.Bandage < 0);
     }
 
     /// <summary>
