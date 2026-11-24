@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.autopauseonload",
+  "apiVersion": 2,
+  "assemblies": ["AutoPauseOnLoad.dll"],
+  "entry": "Meitou.AutoPauseOnLoad.AutoPauseOnLoadMod",
+  "gameVersion": ">=0.22.2"
+}
