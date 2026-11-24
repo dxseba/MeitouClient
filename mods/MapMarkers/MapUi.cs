@@ -63,20 +63,21 @@ sealed class MapUi : IUiExtension
 sealed record MapActions(string Toggle, string Type, string Delete, string Close, string Swatch, string Label, string Drag);
 
 /// <summary>
-/// The registered looks: the markers by kind (normal and selected), the buttons, the editor's panel and texts, the swatches, and the hover label's
+/// The registered looks: the markers, the buttons, the editor's panel and texts, the swatches, and the hover label's
 /// strip, registered as the settings' colour first asks for one (the settings may change while the game runs).
 /// </summary>
 sealed class MapStyles
 {
-    const string Font = "Kenshi_StandardFont_Medium", ButtonSkin = "Kenshi_Button1Skin", PanelSkin = "Kenshi_GenericTextBoxFlatSkin";
+    public const string Font = "Kenshi_StandardFont_Medium";
+
+    const string ButtonSkin = "Kenshi_Button1Skin", PanelSkin = "Kenshi_GenericTextBoxFlatSkin";
 
     public static readonly Vector4 Ink = new(.86f, .82f, .71f, 1);
     static readonly Vector4 HoverInk = new(.32f, .22f, .16f, 1), PanelBack = new(.10f, .09f, .08f, .94f);
-    static readonly Vector4 GlyphInk = new(.06f, .06f, .06f, 1), SwatchFrame = new(.05f, .05f, .05f, 1), BoxBack = new(.04f, .04f, .04f, .9f);
+    static readonly Vector4 SwatchFrame = new(.05f, .05f, .05f, 1), BoxBack = new(.04f, .04f, .04f, .9f);
 
     readonly UiRegistration _registration;
     readonly Dictionary<Vector4, string> _strips = [];
-    readonly string[] _markers = new string[20], _types = new string[10];
     readonly string[] _swatches = new string[MarkerKinds.Swatches.Length];
 
     public string Button { get; }
@@ -86,39 +87,24 @@ sealed class MapStyles
     public string Frame { get; }
     public string Box { get; }
 
+    /// <summary>
+    /// A marker: the original's <c>Kenshi_Button1</c> with its glyph, tinted with the kind's colour on the node (<see cref="UiNode.Tint"/>).
+    /// </summary>
+    public string Marker { get; }
+
     public MapStyles(UiRegistration r)
     {
         _registration = r;
         Button = r.RegisterStyle("button", new() { Skin = ButtonSkin, Text = Ink, Hover = HoverInk, TextAlign = "Center", FontName = Font });
+        Marker = r.RegisterStyle("marker", new() { Skin = ButtonSkin, Text = Ink, TextAlign = "Center", FontName = Font });
         Panel = r.RegisterStyle("panel", new() { Skin = PanelSkin, Background = PanelBack });
         Text = r.RegisterStyle("text", new() { Text = Ink, FontName = Font });
         Hint = r.RegisterStyle("hint", new() { Text = Ink * new Vector4(1, 1, 1, .8f), FontName = Font, TextAlign = "Left Top" });
         Frame = r.RegisterStyle("swatch-frame", new() { Background = SwatchFrame });
         Box = r.RegisterStyle("label-box", new() { Background = BoxBack, Text = Ink, FontName = Font, Skin = "Kenshi_EditBox" });
-        RegisterKinds(r);
         for (int i = 1; i < _swatches.Length; i++)
             _swatches[i] = r.RegisterStyle($"swatch-{i}", new() { Background = MapOverlay.Rgba(MarkerKinds.SwatchRgba(i)) });
     }
-
-    void RegisterKinds(UiRegistration r)
-    {
-        foreach (var kind in Enum.GetValues<MarkerKind>())
-        {
-            int k = (int)kind;
-            for (int s = 0; s < 2; s++)
-            {
-                var back = MarkerKinds.Colour(kind, s == 1) * new Vector4(1, 1, 1, s == 1 ? 1 : .92f);
-                _markers[k * 2 + s] = r.RegisterStyle($"marker-{k}-{s}", new() { Background = back, Text = GlyphInk, TextAlign = "Center" });
-            }
-
-            var ink = MarkerKinds.Colour(kind, true);
-            _types[k] = r.RegisterStyle($"type-{k}", new() { Skin = ButtonSkin, Text = ink, Hover = HoverInk, TextAlign = "Center", FontName = Font });
-        }
-    }
-
-    public string Marker(MarkerKind kind, bool selected) => _markers[(int)kind * 2 + (selected ? 1 : 0)];
-
-    public string Type(MarkerKind kind) => _types[(int)kind];
 
     public string Swatch(int i) => _swatches[i];
 

@@ -28,7 +28,7 @@ public sealed class MapMarkersSettings
     [Setting("Default marker type", Hint = "The type a middle click gives a new marker.")]
     public MarkerKind DefaultType { get; set; } = MarkerKind.Note;
 
-    [Setting("Detailed log",
+    [Setting("Debug logging",
         Hint = "debug_logging: hover and editor diagnostics in the mod log (Ctrl+Alt+F8 switches it; Ctrl+Alt+F7 logs one snapshot).")]
     public bool DebugLogging { get; set; }
 

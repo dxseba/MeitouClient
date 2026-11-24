@@ -32,7 +32,7 @@ static class MapOverlay
 
         var hovered = MapState.MarkerAt(layout, MapState.Pointer, markers);
         MapDiagnostics.Hovered(hovered);
-        if (MapMarkersMod.Settings.ShowHoverLabels && hovered is not null) AddHoverLabel(root, layout, hovered, styles);
+        if (MapMarkersMod.Settings.ShowHoverLabels && hovered is not null) AddHoverLabel(root, layout, hovered, styles, context.Frame);
         if (MapState.Selected is { } selected) AddEditor(root, layout, selected, styles, actions);
 
         return root;
@@ -41,7 +41,10 @@ static class MapOverlay
     /// <summary>A child of a node laid out over <paramref name="origin"/>, at the screen rectangle <paramref name="at"/>.</summary>
     static UiPlacement Place(UiRect origin, UiRect at) => new(at.Width, at.Height, at.X - origin.X, at.Y - origin.Y);
 
-    /// <summary>A square in the kind's colour with its glyph (the original's tinted button), slightly see-through unless selected.</summary>
+    /// <summary>
+    /// The original's marker: a <c>Kenshi_Button1</c> square with the kind's glyph, the whole widget coloured with the kind's colour
+    /// (<c>setColour</c>; here <see cref="UiNode.Tint"/>), slightly see-through unless selected (<c>setAlpha</c>).
+    /// </summary>
     static void AddMarker(UiNode root, MapLayout layout, Marker marker, MapStyles styles)
     {
         bool selected = MapState.IsSelected(marker);
@@ -50,17 +53,20 @@ static class MapOverlay
 
         root.Children.Add(new UiNode("marker-" + marker.Id.ToString(CultureInfo.InvariantCulture), UiNodeKind.Button)
         {
-            Placement = Place(layout.Image, box), Style = styles.Marker(marker.Kind, selected), Text = MarkerKinds.Glyph(marker.Kind),
-            Pickable = false, TextScale = layout.Ui,
+            Placement = Place(layout.Image, box), Style = styles.Marker, Text = MarkerKinds.Glyph(marker.Kind), Pickable = false,
+            TextScale = layout.Ui, Tint = MarkerKinds.Colour(marker.Kind, selected) * new Vector4(1, 1, 1, selected ? 1 : .92f),
         });
     }
 
-    /// <summary>"Kind: label" on a dark strip above the marker, kept inside the viewport (30 high, 40 to 480 wide: the fork measures the text).</summary>
-    static void AddHoverLabel(UiNode root, MapLayout layout, Marker marker, MapStyles styles)
+    /// <summary>
+    /// "Kind: label" on a dark strip above the marker, kept inside the viewport (<b>Verified</b>, original DLL (decompiled): 30 high, the
+    /// caption's measured width + 22, 40 to 480; the character estimate when the measure gives nothing).
+    /// </summary>
+    static void AddHoverLabel(UiNode root, MapLayout layout, Marker marker, MapStyles styles, UiFrameContext frame)
     {
         string caption = MarkerKinds.HoverCaption(marker);
         var box = layout.Box(marker, MapState.IsSelected(marker));
-        float ui = layout.Ui, width = LabelWidth(caption) * ui, height = 30 * ui, view = layout.Viewport.X + layout.Viewport.Width;
+        float ui = layout.Ui, width = LabelWidth(caption, frame, ui) * ui, height = 30 * ui, view = layout.Viewport.X + layout.Viewport.Width;
         float x = Math.Clamp(box.X + box.Width / 2 - width / 2, layout.Viewport.X, Math.Max(layout.Viewport.X, view - width));
         float y = Math.Max(layout.Viewport.Y, box.Y - height - ui);
         var (text, back) = MapMarkersMod.Settings.HoverColours();
@@ -74,8 +80,15 @@ static class MapOverlay
         });
     }
 
+    /// <summary>The strip's width at UI scale 1: the caption measured as drawn + 22, else the estimate; 40 to 480.</summary>
+    static float LabelWidth(string caption, UiFrameContext frame, float ui)
+    {
+        float measured = frame.Measure(caption, MapStyles.Font, ui).X / ui;
+        return measured >= 1 ? Math.Clamp(measured + 22, 40, 480) : EstimatedWidth(caption);
+    }
+
     /// <summary>The original's width estimate for a caption: per character 4 (space), 6 (lower case), 7 (capitals, digits, ! + $) or 5.</summary>
-    static float LabelWidth(string caption)
+    static float EstimatedWidth(string caption)
     {
         float width = 0;
         foreach (char c in MarkerKinds.WithoutTags(caption))
@@ -84,19 +97,29 @@ static class MapOverlay
         return Math.Clamp(width + 2 * 8 + 4, 40, 480);
     }
 
-    /// <summary>The footer's Markers: On/Off, level with the zoom buttons (laid out just left of the zoom-in button) at the map viewport's left.</summary>
+    /// <summary>
+    /// The footer's Markers: On/Off, level with the zoom buttons (laid out just left of the zoom-in button) at the map viewport's left; as wide
+    /// as the wider of its two captions measured + 36, at least 108 (<b>Verified</b>, original DLL (decompiled)).
+    /// </summary>
     public static UiNode? Toggle(UiScreenContext context, MapStyles styles, MapActions actions)
     {
         if (!MapMarkersMod.Settings.Enabled || context.Map is not { } view) return null;
 
-        float ui = view.UiScale, width = ToggleWidth * ui, height = ToggleHeight * ui;
+        float ui = view.UiScale, width = ToggleWidthOf(context.Frame, ui) * ui, height = ToggleHeight * ui;
         var parent = context.Anchor with { X = context.Anchor.X - context.Anchor.Width };
         var at = new UiRect(view.Viewport.X + ToggleMargin * ui, parent.Y + (parent.Height - height) / 2, width, height);
-        string caption = MapMarkersMod.Settings.MarkersVisible ? "Markers: On" : "Markers: Off";
+        string caption = MapMarkersMod.Tr(MapMarkersMod.Settings.MarkersVisible ? "Markers: On" : "Markers: Off");
         return new UiNode("toggle", UiNodeKind.Button)
         {
             Placement = Place(parent, at), Style = styles.Button, Text = caption, Action = actions.Toggle, TextScale = ui,
         };
+    }
+
+    static float ToggleWidthOf(UiFrameContext frame, float ui)
+    {
+        float on = frame.Measure(MapMarkersMod.Tr("Markers: On"), MapStyles.Font, ui).X;
+        float off = frame.Measure(MapMarkersMod.Tr("Markers: Off"), MapStyles.Font, ui).X;
+        return MathF.Max(MathF.Max(on, off) / ui + 36, ToggleWidth);
     }
 
     #region Editor
@@ -122,8 +145,12 @@ static class MapOverlay
         });
         c.Add(Node("header", UiNodeKind.Label, At(16, 16, 442, 18), styles.Text, MarkerKinds.Header(marker)));
         c.Add(Node("close", UiNodeKind.Button, At(470, 13, 24, 24), styles.Button, "x", actions.Close));
-        string type = "Type: " + MarkerKinds.Name(marker.Kind);
-        c.Add(Node("type", UiNodeKind.Button, At(16, 42, 346, 24), styles.Type(marker.Kind), type, actions.Type));
+        string type = MapMarkersMod.Tr("Type:") + " " + MarkerKinds.Name(marker.Kind);
+        c.Add(new UiNode("type", UiNodeKind.Button)
+        {
+            Placement = At(16, 42, 346, 24), Style = styles.Button, Text = type, Action = actions.Type, TextScale = ui,
+            Tint = MarkerKinds.Colour(marker.Kind, true),
+        });
         c.Add(Node("delete", UiNodeKind.Button, At(374, 42, 120, 24), styles.Button, "Delete", actions.Delete));
         c.Add(Node("label-title", UiNodeKind.Label, At(16, 74, 80, 24), styles.Text, "Label"));
         c.Add(new UiNode("label", UiNodeKind.TextBox)

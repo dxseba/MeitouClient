@@ -102,7 +102,8 @@ static class MarkerKinds
 
     public static string Glyph(MarkerKind kind) => Glyphs[Index(kind)];
 
-    public static string Name(MarkerKind kind) => Names[Index(kind)];
+    /// <summary>The kind's name in the game's language (the original's catalogue, else English).</summary>
+    public static string Name(MarkerKind kind) => MapMarkersMod.Tr(Names[Index(kind)]);
 
     public static Vector4 Colour(MarkerKind kind, bool selected) => (selected ? Selected : Normal)[Index(kind)];
 
@@ -120,7 +121,7 @@ static class MarkerKinds
 
     /// <summary>"Marker N: label", or "Marker N" without a label (the editor's header).</summary>
     public static string Header(Marker marker) =>
-        marker.Label.Length == 0 ? $"Marker {marker.Id}" : $"Marker {marker.Id}: {marker.Label}";
+        marker.Label.Length == 0 ? $"{MapMarkersMod.Tr("Marker")} {marker.Id}" : $"{MapMarkersMod.Tr("Marker")} {marker.Id}: {marker.Label}";
 
     /// <summary>
     /// A label as the original keeps it: tabs and line breaks become spaces, other control characters go, square and curly brackets become round
