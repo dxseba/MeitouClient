@@ -20,9 +20,9 @@ public sealed class PersistentPrisonersMod : IMod
 
     public void Initialize(ModContext context)
     {
-        context.AddSettings(Settings);
-        context.AddSystem("prisoners", _ => Running = new PrisonerSystem(Settings, context.Population, context.Data), SystemAnchor.End);
-        Window = new PrisonerWindow();
+        var group = context.AddSettings(Settings);
+        context.AddSystem("prisoners", _ => Running = new PrisonerSystem(Settings, context.Population, context.Data, context.Log), SystemAnchor.End);
+        Window = new PrisonerWindow(group, OriginalLayout.Widths(context), context.Log);
         context.AddUi(Window);
 
         // The original's Ctrl+Shift+P, as a chord: it is taken before photo mode's P.
@@ -42,4 +42,7 @@ public sealed class PrisonerSettings
 
     [Setting("Minimum Nu", Hint = "MinimumNu (1 - 300): with starvation off, the game feeds caged NPCs towards this.", Min = 1, Max = 300)]
     public int MinimumNutrition { get; set; } = 100;
+
+    [Setting("Diagnostic logging", Hint = "Diagnostics: write the occupants found and the protection added or removed to the mod log.")]
+    public bool Diagnostics { get; set; }
 }

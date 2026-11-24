@@ -19,7 +19,8 @@ sealed record PrisonerRow(string Name, string Faction, string Cage, int Nu, stri
 /// keeps a platoon holding a caged prisoner and a caged corpse whose zone unloads (<see cref="IRemovalVeto"/>, any thread), sets the hunger floor the original's
 /// <c>getMagicHungerSetting</c> hook gives, and publishes the overview every 30th tick.
 /// </summary>
-sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population, GameDatabase data) : IRemovalVeto, IModSaveData
+sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population, GameDatabase data, Action<string> log)
+    : IRemovalVeto, IModSaveData
 {
     const int Version = 2;
 
@@ -31,8 +32,11 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
     readonly Dictionary<CharacterId, float> _fed = [];
     volatile FrozenSet<string> _frozen = FrozenSet<string>.Empty;
 
-    /// <summary>The overview rows; refreshed while the world runs.</summary>
-    public volatile IReadOnlyList<PrisonerRow> Rows = [];
+    /// <summary>The caged occupants (id to name and whether dead) as last logged, for the diagnostics; empty while they are off.</summary>
+    readonly Dictionary<CharacterCold, (string Name, bool Dead)> _logged = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>The overview rows; null until the first gathering ("Gathering prisoners ...").</summary>
+    public volatile IReadOnlyList<PrisonerRow>? Rows;
 
     public void SlowWorld(World world)
     {
@@ -41,6 +45,7 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
         LearnCages(world);
         Feed(world);
         Rows = Overview(world);
+        Diagnose(world);
     }
 
     #region Cages and the keep test
@@ -208,6 +213,59 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
 
         return "Unknown location";
     }
+
+    #endregion
+
+    #region Diagnostics
+
+    /// <summary>
+    /// The original's diagnostic logging ("PP [diagnostic]: " lines): each occupant of a player cage found, its protection added (a living
+    /// prisoner's squad, a corpse) and removed when it leaves the cage. Port: diffed every 30th tick, only while the setting is on.
+    /// </summary>
+    void Diagnose(World world)
+    {
+        if (!settings.Diagnostics)
+        {
+            _logged.Clear();
+            return;
+        }
+
+        var now = Occupants(world);
+        foreach (var (cold, (name, dead)) in now)
+        {
+            if (_logged.TryGetValue(cold, out var was) && was.Dead == dead) continue;
+
+            if (!_logged.ContainsKey(cold)) Diagnostic("Occupant detected: " + name);
+            if (settings.Protect) Diagnostic((dead ? "Caged corpse protected: " : "Captive protection added: ") + name);
+        }
+
+        foreach (var (_, (name, _)) in _logged.Where(e => !now.ContainsKey(e.Key))) Diagnostic("Captive protection removed: " + name);
+
+        _logged.Clear();
+        foreach (var (cold, entry) in now) _logged[cold] = entry;
+    }
+
+    /// <summary>The non-player occupants of player cages, loaded (in slot order) and stored (in platoon order), keyed by their record.</summary>
+    Dictionary<CharacterCold, (string Name, bool Dead)> Occupants(World world)
+    {
+        var found = new Dictionary<CharacterCold, (string, bool)>(ReferenceEqualityComparer.Instance);
+        var table = world.Characters;
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (table.Next[slot].Alive && table.Cold(slot) is { IsPlayer: false } cold && InPlayerCage(cold)) found[cold] = Entry(cold);
+        }
+
+        foreach (var m in world.Platoons.All.SelectMany(p => p.Stored?.Members ?? []))
+        {
+            if (!m.Cold.IsPlayer && InPlayerCage(m.Cold)) found[m.Cold] = Entry(m.Cold);
+        }
+
+        return found;
+    }
+
+    static (string Name, bool Dead) Entry(CharacterCold cold) => (cold.Name, cold.Medical?.Dead ?? cold.DiedTick >= 0);
+
+    void Diagnostic(string text) => log("PP [diagnostic]: " + text);
 
     #endregion
 

@@ -20,10 +20,20 @@ Port of *PersistentPrisoners* 0.2.8 (workshop 3798215878, GPL-3.0-or-later, RE_K
   conditions Dead, Dying, Unconscious, Alive, Starving (Nu below 100 for a race that hungers) and the "/ Starving" pairs; statuses Player squad,
   Player / Unloaded, Unloaded, Protected; "Unknown" faction, "Unknown location"; the unloaded and feeding hints (**Verified**, DLL strings).
   Port: the player's own characters held anywhere are listed too; location is the nearest town within 3000.
+- **Settings row** (**Verified**, DLL strings and languages.ini [en]): under the overview, "Settings", the "Allow starvation: ON/OFF" toggle,
+  "Minimum Nu:" box "(1 - 300)", "Diagnostic logging" and Apply ("Minimum Nu must be a whole number from 1 to 300." / "Saved. Settings are now
+  active."); port: Apply sets the Mod settings page's own values (kept as that page keeps them) and logs "PP: Settings saved. ...". Until the
+  first gathering the counts line reads "Gathering prisoners ...".
+- **Diagnostic logging** (`Diagnostics`, off): "PP [diagnostic]: " lines in the mod log: an occupant of a player cage found, its protection
+  added (captive) or a caged corpse protected, its protection removed when it leaves (port: diffed every 30th tick, its own wording).
+- **Column widths** (**Observed**, 0.2.8's languages.ini): `[en]` `width.name` ... `width.status` 18/19/15/5/13/18/12, percent of the list;
+  read at start from the installed original (its `.local.ini` winning), else the port's own; `font.height` 0 there (the default font).
+- **"Checking"** (**Verified**, DLL): the status of a loaded non-player occupant whose protection flag is not set yet; the port decides protection
+  when the game asks (`IRemovalVeto`), so it has no such state and never shows it.
 - **Unknown**: the original's Dying test (`MedicalSystem::isProbablyDying`, or two medical fields); the port shows Dying for no blood while
   bleeding. Not checked in game. **Observed** (2026-11-19, headless sandbox fight): an earlier build ran 3000 ticks without a fault.
 
 ## Missing
 
-- The in-window settings (Apply, shortcut capture, diagnostic logging): settings are on the Mod settings page; translations for the nine game
-  languages and the `languages.ini` widths and font height; the "Checking" status.
+- The settings row's shortcut capture and language rows: a mod cannot rebind its key action (Controls page) and there is no per-mod
+  translation API, so the nine languages, their widths and font heights are missing (engine gaps).
