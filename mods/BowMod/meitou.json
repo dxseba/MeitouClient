@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.bowmod",
+  "apiVersion": 2,
+  "assemblies": ["BowMod.dll"],
+  "entry": "Meitou.BowMod.BowModMod",
+  "gameVersion": ">=0.22.2"
+}
