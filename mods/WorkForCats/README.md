@@ -38,8 +38,9 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
 - **Window text**: "Get a job" / "Quit job"; "N cats/hour" (whole cats), employed here " | m/60 min" and " (waiting)" while not working.
   **Verified** (original source). Russian when the game's locale id (`ModContext.Language`) is `ru`, `ru_RU` or `ru-RU`, the original's test:
   the port does not carry those texts, it reads them at runtime from the installed original's shipped `Source/WorkForCats.cpp` (each English
-  caption paired with the Russian of the same `russian ? ... : ...` choice) and uses them only when all five are found (`Captions`), else
-  English. **Observed** (the pairing checked against the installed source with an equivalent script); not seen in a Russian game.
+  caption paired with the Russian of the same `russian ? ... : ...` choice) and adds them in memory as the mod's translations
+  (`ModContext.AddTranslations(language, messages)`) only when all five are found (`Captions`), else English; the button shows through them by
+  itself, the rate line through `context.Tr`. **Observed** (the pairing checked against the installed source with an equivalent script); not seen in a Russian game.
 - **Hunger while working**: the original's employee runs the native operate action, which takes the functionality's `hunger rate` as the
   hunger situation factor (docs/game/character-stats.md). Meitou's employee stands on the job's idle task (factor 0.8 idle, else 1), so an
   `INeedRateFilter` swaps that for the workplace's rate while it stands still at the work clip out of combat (rates published by the work

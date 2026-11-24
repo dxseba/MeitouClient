@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,7 +9,8 @@ namespace Meitou.WorkForCats;
 /// The window's captions in the game's language. The original picks Russian ones when the game's locale id is <c>ru</c>, <c>ru_RU</c> or
 /// <c>ru-RU</c> (<b>Verified</b>, its <c>WorkForCats.cpp</c>), else English; it has no catalogue. The port does not carry the Russian texts: it
 /// reads them at runtime from the installed original's shipped source (<c>Source/WorkForCats.cpp</c>, its required item), each English caption
-/// paired with the Russian one of the same <c>russian ? ... : ...</c> choice, and uses them only when every caption it shows is found. Set once in
+/// paired with the Russian one of the same <c>russian ? ... : ...</c> choice, and adds them in memory as the mod's translations only when every
+/// caption it shows is found. The button shows through them by itself; the composed rate line through <see cref="Of"/>. Set once in
 /// <c>Initialize</c>; read from any thread.
 /// </summary>
 static partial class Captions
@@ -23,18 +23,19 @@ static partial class Captions
 
     static readonly string[] Shown = [GetJob, QuitJob, PerHour, OfHour, Waiting];
 
-    static FrozenDictionary<string, string> s_texts = FrozenDictionary<string, string>.Empty;
+    static ModContext? s_context;
 
     /// <summary>
-    /// <paramref name="english"/> in the game's language (itself when no translation was read).
+    /// <paramref name="english"/> in the game's language through the mod's translations (itself when none was read).
     /// </summary>
-    public static string Of(string english) => s_texts.GetValueOrDefault(english, english);
+    public static string Of(string english) => s_context?.Tr(english) ?? english;
 
     /// <summary>
     /// Reads the Russian captions when the game runs in Russian; logs why when they cannot be used.
     /// </summary>
     public static void Load(ModContext context)
     {
+        s_context = context;
         if (!Russian(context.Language)) return;
 
         if (OriginalFolder.Find(context) is not { } folder) return;
@@ -43,7 +44,7 @@ static partial class Captions
         try
         {
             var pairs = Pairs(File.ReadAllText(file, Encoding.UTF8));
-            if (Shown.All(pairs.ContainsKey)) s_texts = pairs.ToFrozenDictionary(StringComparer.Ordinal);
+            if (Shown.All(pairs.ContainsKey)) context.AddTranslations(context.Language, pairs);
             else context.Log($"the Russian captions were not all found in {file}: English is shown");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
