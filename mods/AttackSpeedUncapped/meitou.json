@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.attackspeeduncapped",
+  "apiVersion": 2,
+  "assemblies": ["AttackSpeedUncapped.dll"],
+  "entry": "Meitou.AttackSpeedUncapped.AttackSpeedUncappedMod",
+  "gameVersion": ">=0.22.2"
+}
