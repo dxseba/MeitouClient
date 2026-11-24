@@ -26,57 +26,133 @@ public enum CombatSwitches
 }
 
 /// <summary>
-/// What the desire filter knows of a member of an autonomous squad with a plan, as of the system's last schedule: its squad's switches, whether
-/// it is off work (the original's <c>isRestTime</c>), and whether its squad leader lies in a bed.
+/// A squad's rest rules (the original's Basic category; defaults Rest Until Healed When Wounded on, Rest Health Threshold 50, Healed Health
+/// Threshold 90, Allow Sleep Outside Work Hours off).
 /// </summary>
-readonly record struct MemberRule(CombatSwitches Switches, bool OffWork, bool LeaderInBed);
+public sealed record RestRules(bool UntilHealed = true, int RestHealth = 50, int HealedHealth = 90, bool SleepOffWork = false)
+{
+    /// <summary>The original's defaults.</summary>
+    public static readonly RestRules Default = new();
+}
 
 /// <summary>
-/// The original's task score hook (<c>Tasker::score</c>, its shipped source) as a chooser desire filter on the goals of an autonomous squad's
-/// members (list goals only; the original leaves perma jobs alone):
+/// A member's own state as of the system's last schedule: player orders queued (<c>hasOrders</c>), inside a building, asleep (lying in a bed), a
+/// melee attacker close by (the stand-in for <c>isLiterallyUnderMeleeAttackRightNowForSure</c>), its current goal, an organic race, its rested
+/// level (medical <c>restedState</c>), its organic first aid need and the one for its race's kit, and the game hours since it last lay in a bed.
+/// </summary>
+readonly record struct MemberState(bool HasOrders, bool Inside, bool Asleep, bool Threatened, TaskType? Goal, bool Organic, float Rested,
+    float AidNeed, float KitNeed, double HoursSinceSlept);
+
+/// <summary>
+/// What the desire filter knows of a member of an autonomous squad with a plan, as of the system's last schedule: its squad's switches and rest
+/// rules, whether it is off work (the original's <c>isRestTime</c>), whether its squad leader lies in a bed or relaxes in town (its current goal
+/// <c>RELAX_IN_TOWN_PACKAGE</c>), whether it leads the squad itself, and its own state.
+/// </summary>
+readonly record struct MemberRule(CombatSwitches Switches, RestRules Rest, bool OffWork, bool LeaderInBed, bool LeaderRelaxing, bool IsLeader,
+    MemberState Self);
+
+/// <summary>
+/// The original's score hooks (its shipped source and DLL) as a chooser desire filter on an autonomous squad's members. <c>Tasker::score</c>, on
+/// list goals only (it leaves perma jobs alone):
 /// <list type="bullet">
-/// <item>Stay in home and sit around: x0.0001 at work.</item>
+/// <item>Stay in home and sit around: 0 while it has player orders; x0.0001 at work.</item>
 /// <item>Man a turret (on a building too): 0 with Man Turrets off or off work.</item>
-/// <item>Bodyguard and follow the squad leader: 0 while the leader lies in a bed.</item>
+/// <item>Bodyguard and follow the squad leader: 0 while the leader lies in a bed or relaxes in town.</item>
 /// <item>The gate, the guard nodes of the home building and the home town, territorial aggression, attack enemies and the mines: 0 off work;
 /// territorial aggression and attack enemies 0 with Attack Enemies off.</item>
-/// <item>Protect allies (staying in town too) and protect the own squad: 0 with Protect Allies off.</item>
-/// <item>Medic and robot repair jobs: 0 with Do Medic off.</item>
+/// <item>Protect allies (staying in town too) and protect the own squad: 0 with Protect Allies off, and while it sleeps with no melee attacker
+/// on it.</item>
+/// <item>Medic and robot repair jobs: 0 with Do Medic off, else twice its own first aid need for its race's kit.</item>
+/// <item>Patrolling the town: 0 off work inside a building, unless it is already its goal.</item>
+/// <item>Relaxing in town: 1 for a member whose leader relaxes in town.</item>
 /// <item>Find and rescue (if there are beds, the leader): 0 with Rescue off.</item>
 /// <item>Acquiring food at the home base and grabbing one food: x10.</item>
 /// </list>
-/// A pure read of the published table, on any thread.
+/// <c>AI::scoreGoToBed</c> (both bed goals) and <c>AI::scoreGetOutOfBed</c> (getting out of bed if it is an emergency), on goals and plan steps:
+/// see <see cref="GoToBed"/> and <see cref="GetOutOfBed"/>. A pure read of the published table, on any thread.
 /// </summary>
 sealed class AutonomyDesire(Func<FrozenDictionary<CharacterId, MemberRule>?> members) : IGoalDesireFilter
 {
+    /// <summary>The first aid need under which a member counts as needing no treatment to rest (the original's 0.1).</summary>
+    const float NoAidNeed = 0.1f;
+
     public float Desire(World world, in GoalDesireAsk ask)
     {
-        if (ask.Kind != GoalDesireKind.Goal || members() is not { } table || !table.TryGetValue(ask.Character, out var rule)) return ask.Desire;
+        if (ask.Kind is not (GoalDesireKind.Goal or GoalDesireKind.PlanStep)) return ask.Desire;
+        if (members() is not { } table || !table.TryGetValue(ask.Character, out var rule)) return ask.Desire;
 
-        return Score(ask.Type, rule, ask.Desire);
+        float score = ask.Type switch
+        {
+            TaskType.GoHomeAndGoToBed or TaskType.GoHomeAndGoToBedSecure => GoToBed(rule),
+            TaskType.GetOutOfBedIfItsEmergency => GetOutOfBed(rule, ask.Desire),
+            _ => ask.Kind == GoalDesireKind.Goal ? Score(ask.Type, rule, ask.Desire) : ask.Desire,
+        };
+        if (score != ask.Desire && AutonomyLog.On(AutonomyLog.Severity.Debug, spam: true))
+            AutonomyLog.Write(AutonomyLog.Severity.Debug, $"score TaskType: {(int)ask.Type} - {ask.Desire} -> {score}", spam: true);
+
+        return score;
     }
 
     /// <summary>
-    /// The original's rule for <paramref name="type"/>.
+    /// The original's <c>Tasker::score</c> rule for <paramref name="type"/>.
     /// </summary>
     static float Score(TaskType type, MemberRule rule, float desire) => type switch
     {
-        TaskType.StayInHome or TaskType.SitAround => rule.OffWork ? desire : desire * 0.0001f,
+        TaskType.StayInHome or TaskType.SitAround => rule.Self.HasOrders ? 0 : rule.OffWork ? desire : desire * 0.0001f,
         TaskType.ManATurret or TaskType.ManATurretOnBuilding => !Has(rule, CombatSwitches.ManTurrets) || rule.OffWork ? 0 : desire,
-        TaskType.Bodyguard or TaskType.FollowSquadleader => rule.LeaderInBed ? 0 : desire,
+        TaskType.Bodyguard or TaskType.FollowSquadleader => rule.LeaderInBed || rule.LeaderRelaxing ? 0 : desire,
         TaskType.TerritorialAggressionButDontLeaveHome or TaskType.AttackEnemies =>
             !Has(rule, CombatSwitches.AttackEnemies) || rule.OffWork ? 0 : desire,
         TaskType.ManTheGate or TaskType.StandAtGuardNodeHomebuildingIndoorsOnly or TaskType.StandAtGuardNodeHomebuilding
             or TaskType.StandAtGuardNodeHometownOutside or TaskType.AutoLabouringMines or TaskType.AutoLabouringMinesPretend =>
             rule.OffWork ? 0 : desire,
         TaskType.ProtectAllies or TaskType.ProtectAlliesStayInTown or TaskType.ProtectOwnSquad =>
-            Has(rule, CombatSwitches.ProtectAllies) ? desire : 0,
-        TaskType.JobMedic or TaskType.JobRepairRobot => Has(rule, CombatSwitches.DoMedic) ? desire : 0,
+            !Has(rule, CombatSwitches.ProtectAllies) || rule.Self.Asleep && !rule.Self.Threatened ? 0 : desire,
+        TaskType.JobMedic or TaskType.JobRepairRobot => Has(rule, CombatSwitches.DoMedic) ? rule.Self.KitNeed * 2 : 0,
+        TaskType.PatrolTown => rule.Self.Goal != TaskType.PatrolTown && rule.OffWork && rule.Self.Inside ? 0 : desire,
+        TaskType.RelaxInTownPackage => !rule.IsLeader && rule.LeaderRelaxing ? 1 : desire,
         TaskType.FindAndRescue or TaskType.FindAndRescueIfTheresBeds or TaskType.FindAndRescueLeader =>
             Has(rule, CombatSwitches.DoRescue) ? desire : 0,
         TaskType.AquireFoodAtHomebase or TaskType.GrabOneFood => desire * 10,
         _ => desire,
     };
+
+    /// <summary>
+    /// The original's <c>scoreGoToBed</c>, which replaces the game's: with Rest Until Healed, an organic member resting below the Healed threshold
+    /// that needs no first aid scores 5 asleep or off work, 20 at or below the Rest threshold; then with Allow Sleep Outside Work Hours, an awake
+    /// member off work scores by the time since it last slept (under 2 h 0, 8 h 0.01, 12 h 0.1, 18 h 0.5, else 1); otherwise 0.
+    /// </summary>
+    static float GoToBed(MemberRule rule)
+    {
+        var self = rule.Self;
+        if (Recovering(rule))
+        {
+            if (self.Asleep || rule.OffWork) return 5;
+            if (self.Rested <= rule.Rest.RestHealth / 100f) return 20;
+        }
+
+        if (!rule.Rest.SleepOffWork || !rule.OffWork || self.Asleep) return 0;
+
+        double minutes = self.HoursSinceSlept * 60;
+        return minutes < 120 ? 0 : minutes < 480 ? 0.01f : minutes < 720 ? 0.1f : minutes < 1080 ? 0.5f : 1;
+    }
+
+    /// <summary>
+    /// The original's <c>scoreGetOutOfBed</c> while the member's goal is a bed goal: 1 under melee attack; 0 while recovering (as in
+    /// <see cref="GoToBed"/>); 1 at work with Allow Sleep Outside Work Hours; otherwise the game's.
+    /// </summary>
+    static float GetOutOfBed(MemberRule rule, float desire)
+    {
+        if (rule.Self.Goal is not (TaskType.GoHomeAndGoToBed or TaskType.GoHomeAndGoToBedSecure)) return desire;
+        if (rule.Self.Threatened) return 1;
+        if (Recovering(rule)) return 0;
+
+        return rule.Rest.SleepOffWork && !rule.OffWork ? 1 : desire;
+    }
+
+    /// <summary>Rest Until Healed applies: an organic member resting below the Healed threshold with no first aid to wait for.</summary>
+    static bool Recovering(MemberRule rule) =>
+        rule.Rest.UntilHealed && rule.Self.Organic && rule.Self.Rested < rule.Rest.HealedHealth / 100f && rule.Self.AidNeed < NoAidNeed;
 
     static bool Has(MemberRule rule, CombatSwitches flag) => (rule.Switches & flag) != 0;
 }

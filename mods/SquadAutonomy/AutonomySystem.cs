@@ -13,11 +13,14 @@ namespace Meitou.SquadAutonomy;
 
 /// <summary>
 /// A squad's plan as the system keeps it (the name finds the squad again after a load). Defaults are the original's: no packages, work
-/// hours 0 to 24, the combat switches' defaults.
+/// hours 0 to 24, the combat switches' and the rest rules' defaults.
 /// </summary>
 sealed record Plan(string SquadName, IReadOnlyList<PlannedPackage> Packages, string? Rest, int StartHour, int EndHour,
-    CombatSwitches Switches = CombatSwitches.Default)
+    CombatSwitches Switches = CombatSwitches.Default, RestRules? Resting = null)
 {
+    /// <summary>The rest rules (the original's defaults when none were set).</summary>
+    public RestRules Rules => Resting ?? RestRules.Default;
+
     /// <summary>
     /// The original's StartWorkTime and EndWorkTime defaults.
     /// </summary>
@@ -48,9 +51,9 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     : IChooserOwner, IWorldReady, IModSaveData
 {
     /// <summary>
-    /// The save format: 3 adds the combat switches, 2 holds the package list with priorities (1: one work package).
+    /// The save format: 4 adds the rest rules, 3 the combat switches, 2 holds the package list with priorities (1: one work package).
     /// </summary>
-    const int Version = 3;
+    const int Version = 4;
 
     /// <summary>
     /// Ticks before a package change that did not show is sent again.
@@ -71,6 +74,11 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     /// The window's orders since the last slow step.
     /// </summary>
     readonly List<SimCommand> _orders = [];
+
+    /// <summary>
+    /// What the score hooks read of each member.
+    /// </summary>
+    readonly MemberStates _states = new();
 
     /// <summary>
     /// Set by a load: the plans follow their squads by name at the next step.
@@ -129,8 +137,11 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         switch (order)
         {
             case SquadPlanOrder plan when world.Squads.Find(plan.SquadId) is { } squad:
-                _plans[plan.SquadId] = new(squad.Name, [.. plan.Packages], plan.Rest, Hour(plan.StartHour), Hour(plan.EndHour), plan.Switches);
+                _plans[plan.SquadId] = new(squad.Name, [.. plan.Packages], plan.Rest, Hour(plan.StartHour), Hour(plan.EndHour), plan.Switches,
+                    Clamp(plan.Resting));
                 _sentAt.Remove(plan.SquadId);
+                AutonomyLog.Write(AutonomyLog.Severity.Info,
+                    $"{squad.Name}: plan set, {plan.Packages.Count} packages, work {plan.StartHour}-{plan.EndHour}");
                 break;
             case SquadHomeOrder home when world.Squads.Find(home.SquadId) is { } squad:
                 Home(world, squad, home.Clear);
@@ -138,6 +149,7 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
             case AutonomySwitchOrder change when world.Squads.Find(change.SquadId) is { } squad:
                 enqueue(new SetSquadAutonomy(squad.Id, change.On, Owner: modId) { Tick = world.Tick + 1 });
                 world.Post(squad.Name + (change.On ? ": Autonomy enable" : ": Autonomy disable"));
+                AutonomyLog.Write(AutonomyLog.Severity.Info, squad.Name + (change.On ? ": Autonomy enable" : ": Autonomy disable"));
                 _sentAt.Remove(squad.Id);
                 break;
         }
@@ -147,6 +159,16 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     /// An hour of the work-hours sliders (0-24).
     /// </summary>
     static int Hour(int hour) => Math.Clamp(hour, 0, 24);
+
+    /// <summary>
+    /// Rest rules with the thresholds kept to 0-100.
+    /// </summary>
+    static RestRules? Clamp(RestRules? rules) =>
+        rules is null ? null : rules with
+        {
+            RestHealth = Math.Clamp(rules.RestHealth, 0, 100),
+            HealedHealth = Math.Clamp(rules.HealedHealth, 0, 100),
+        };
 
     /// <summary>
     /// Sets the squad's home to the inspected building, or clears it, with the original's messages.
@@ -230,6 +252,8 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
 
         enqueue(new SetSquadPackages(squad.Id, packages) { Tick = world.Tick + 1 });
         _sentAt[squad.Id] = world.Tick;
+        string sent = string.Join(", ", packages.Select(p => $"{p.PackageId} ({p.Slot})"));
+        AutonomyLog.Write(AutonomyLog.Severity.Info, $"{squad.Name}: packages {sent}");
     }
 
     /// <summary>
@@ -249,22 +273,29 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     #region Members
 
     /// <summary>
-    /// Each member of an autonomous squad with a plan: its squad's switches, whether the hour is off work, whether the leader lies in a bed.
+    /// Each member of an autonomous squad with a plan: its squad's switches and rest rules, whether the hour is off work, whether the leader lies
+    /// in a bed or relaxes in town, and its own state (<see cref="MemberStates"/>).
     /// </summary>
     FrozenDictionary<CharacterId, MemberRule> Members(World world)
     {
         int hour = Hour(world);
         var table = world.Characters;
         var rules = new Dictionary<CharacterId, MemberRule>();
+        _states.Begin(world);
         foreach (var (id, plan) in _plans.OrderBy(p => p.Key))
         {
             if (world.Squads.Find(id) is not { Autonomous: true } squad) continue;
 
             bool leaderInBed = table.TryResolveNext(squad.Leader, out int slot) && table.Cold(slot) is { InSomething: HeldState.Bed };
-            var rule = new MemberRule(plan.Switches, OffWork(plan, hour), leaderInBed);
-            foreach (var member in squad.Members) rules[member] = rule;
+            bool relaxing = MemberStates.GoalOf(world, squad.Leader) == TaskType.RelaxInTownPackage;
+            foreach (var member in squad.Members)
+            {
+                if (_states.Of(world, member) is { } self)
+                    rules[member] = new(plan.Switches, plan.Rules, OffWork(plan, hour), leaderInBed, relaxing, member == squad.Leader, self);
+            }
         }
 
+        _states.Forget(world);
         return rules.ToFrozenDictionary();
     }
 
@@ -336,6 +367,7 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         writer.Write(Version);
         writer.Write(_plans.Count);
         foreach (var (id, plan) in _plans.OrderBy(p => p.Key)) WritePlan(writer, id, plan);
+        _states.Write(writer);
     }
 
     /// <summary>
@@ -356,13 +388,18 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         writer.Write(plan.StartHour);
         writer.Write(plan.EndHour);
         writer.Write((int)plan.Switches);
+        var rules = plan.Rules;
+        writer.Write(rules.UntilHealed);
+        writer.Write(rules.RestHealth);
+        writer.Write(rules.HealedHealth);
+        writer.Write(rules.SleepOffWork);
     }
 
     public void Read(Stream stream)
     {
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3)) return;
+        if (version is not (1 or 2 or 3 or 4)) return;
 
         _plans.Clear();
         for (int i = reader.ReadInt32(); i > 0; i--)
@@ -371,11 +408,13 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
             _plans[id] = version == 1 ? ReadPlanV1(reader) : ReadPlan(reader, version);
         }
 
+        if (version >= 4) _states.Read(reader);
+
         _rebind = true;
     }
 
     /// <summary>
-    /// A version 2 or 3 plan (2: the default switches).
+    /// A version 2 to 4 plan (2: the default switches; before 4 the default rest rules).
     /// </summary>
     static Plan ReadPlan(BinaryReader reader, int version)
     {
@@ -386,7 +425,8 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         string rest = reader.ReadString();
         int start = reader.ReadInt32(), end = reader.ReadInt32();
         var switches = version >= 3 ? (CombatSwitches)reader.ReadInt32() : CombatSwitches.Default;
-        return new(name, packages, rest == "" ? null : rest, start, end, switches);
+        RestRules? rules = version >= 4 ? new(reader.ReadBoolean(), reader.ReadInt32(), reader.ReadInt32(), reader.ReadBoolean()) : null;
+        return new(name, packages, rest == "" ? null : rest, start, end, switches, rules);
     }
 
     /// <summary>

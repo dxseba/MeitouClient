@@ -32,6 +32,11 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     const int MaxPriority = 5;
 
     /// <summary>
+    /// The button font's height at text scale 1 (<b>Unknown</b>, an estimate), for <see cref="AutonomySettings.BtnFontSize"/>.
+    /// </summary>
+    const float FontPx = 18;
+
+    /// <summary>
     /// The registered style keys.
     /// </summary>
     readonly record struct Styles(string Panel, string Text, string Dim, string Button, string Selected, string Box);
@@ -49,7 +54,12 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     /// <summary>
     /// The click and search actions.
     /// </summary>
-    string _click = "", _searchAction = "";
+    string _click = "", _searchAction = "", _autAction = "", _autStyle = "";
+
+    /// <summary>
+    /// Whether the AUT button's press has moved it (a drag, not a click).
+    /// </summary>
+    bool _dragged;
 
     /// <summary>
     /// Whether the window is open.
@@ -99,6 +109,8 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
             registration.RegisterStyle("box", new() { Background = new(.06f, .05f, .04f, 1), Text = ink, TextPadding = pad }));
         _click = registration.RegisterAction("click", OnClick);
         _searchAction = registration.RegisterAction("search", c => (_search, _page) = (c.Text, 0));
+        _autAction = registration.RegisterAction("aut", OnAutButton);
+        _autStyle = registration.RegisterStyle("aut", new() { Skin = "Kenshi_Button1Skin", TextAlign = "Center" });
         registration.Contribute(UiSlots.Overlay, Build, order: 59);
     }
 
@@ -119,18 +131,58 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     {
         _clicks.Clear();
         var root = new UiNode("aut") { Placement = UiPlacement.Fill, Pickable = false };
-        if (SquadAutonomyMod.Settings.ShowButton)
-        {
-            _clicks["toggle"] = () => _open = !_open;
-            root.Children.Add(new("aut-toggle", UiNodeKind.Button)
-            {
-                Placement = new(44, 26, Left: 530, Top: 44), Text = "AUT", Style = _open ? _styles.Selected : _styles.Button, Action = _click,
-                Argument = "toggle",
-            });
-        }
+        if (SquadAutonomyMod.Settings.ShowButton) root.Children.Add(AutButton(frame.Viewport));
 
         if (_open && SquadAutonomyMod.Running?.View is { } view) root.Children.Add(Window(frame.Viewport, view));
         return root;
+    }
+
+    /// <summary>
+    /// The original's AUT button on the main bar: placed and sized by its settings as shares of the screen, its caption at the font size; it can
+    /// be dragged while its position is not locked.
+    /// </summary>
+    UiNode AutButton(UiRect viewport)
+    {
+        var s = SquadAutonomyMod.Settings;
+        float scale = Math.Clamp(s.BtnFontSize * viewport.Height / 1080 / FontPx, 0.1f, UiHost.MaxTextScale);
+        return new("aut-toggle", UiNodeKind.Button)
+        {
+            Placement = new(s.BtnWidth / 100 * viewport.Width, s.BtnHeight / 100 * viewport.Height, Left: s.BtnLeft * viewport.Width,
+                Top: s.BtnTop * viewport.Height),
+            Text = "AUT", Style = _autStyle, Action = _autAction, Pointer = UiPointerEvents.Drag | UiPointerEvents.Release, TextScale = scale,
+        };
+    }
+
+    /// <summary>
+    /// The AUT button: a click opens or closes the window; a drag, while not locked, moves it and keeps the place (<c>BtnLeft</c>,
+    /// <c>BtnTop</c>).
+    /// </summary>
+    void OnAutButton(UiActionContext c)
+    {
+        var s = SquadAutonomyMod.Settings;
+        if (c.Kind == UiEventKind.Press) _dragged = false;
+        else if (c.Kind == UiEventKind.Drag && !s.LockPosition && c.Delta != System.Numerics.Vector2.Zero) Move(c);
+        else if (c.Kind == UiEventKind.Release && !_dragged) _open = !_open;
+    }
+
+    /// <summary>
+    /// Moves the AUT button by the drag's step, kept on the screen.
+    /// </summary>
+    void Move(UiActionContext c)
+    {
+        _dragged = true;
+        var s = SquadAutonomyMod.Settings;
+        var viewport = c.Frame.Viewport;
+        float left = Math.Clamp(s.BtnLeft + c.Delta.X / viewport.Width, 0, 1);
+        float top = Math.Clamp(s.BtnTop + c.Delta.Y / viewport.Height, 0, 1);
+        if (SquadAutonomyMod.SettingsGroup is not { } group)
+        {
+            (s.BtnLeft, s.BtnTop) = (left, top);
+            return;
+        }
+
+        group.Settings.First(x => x.Key == nameof(AutonomySettings.BtnLeft)).Set(left);
+        group.Settings.First(x => x.Key == nameof(AutonomySettings.BtnTop)).Set(top);
     }
 
     /// <summary>
@@ -183,6 +235,8 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         lines.Add(HourLine(squad, plan, "start", "Start Work Time", plan.StartHour, h => plan with { StartHour = h }, $"Now {view.Hour:00}:00"));
         lines.Add(HourLine(squad, plan, "end", "End Work Time", plan.EndHour, h => plan with { EndHour = h }, ""));
         lines.Add(RestLine(plan));
+        lines.Add(RecoveryLine(squad, plan));
+        lines.Add(ThresholdLine(squad, plan));
         lines.Add(CombatLine(squad, plan));
 
         string hint = !squad.Autonomous ? "Enable Autonomy to let the AI run this squad." : plan.Packages.Count == 0 ? "Add an AI package." : "";
@@ -271,6 +325,44 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         row.Children.Add(Label("aut-rest-v", packages.NameOf(plan.Rest), 360, _styles.Text));
         row.Children.Add(Button("rest.pick", "Choose", 90, () => (_pick, _page, _search) = (Pick.Rest, 0, "")));
         return row;
+    }
+
+    /// <summary>
+    /// The original's Rest Until Healed When Wounded and Allow Sleep Outside Work Hours.
+    /// </summary>
+    UiNode RecoveryLine(SquadRow squad, Plan plan)
+    {
+        var rules = plan.Rules;
+        var row = Row("aut-recovery");
+        row.Children.Add(Label("aut-recovery-l", "Basic", 64, _styles.Dim));
+        row.Children.Add(Button("rest.healed", "Rest Until Healed When Wounded", 230,
+            () => Save(squad, plan with { Resting = rules with { UntilHealed = !rules.UntilHealed } }), selected: rules.UntilHealed));
+        row.Children.Add(Button("rest.sleep", "Allow Sleep Outside Work Hours", 230,
+            () => Save(squad, plan with { Resting = rules with { SleepOffWork = !rules.SleepOffWork } }), selected: rules.SleepOffWork));
+        return row;
+    }
+
+    /// <summary>
+    /// The original's Rest Health Threshold and Healed Health Threshold sliders (0-100) as - and + buttons, in steps of 5.
+    /// </summary>
+    UiNode ThresholdLine(SquadRow squad, Plan plan)
+    {
+        var rules = plan.Rules;
+        var row = Row("aut-thresholds");
+        Threshold(row, squad, plan, "rest", "Rest Health Threshold", rules.RestHealth, v => rules with { RestHealth = v });
+        Threshold(row, squad, plan, "heal", "Healed Health Threshold", rules.HealedHealth, v => rules with { HealedHealth = v });
+        return row;
+    }
+
+    /// <summary>
+    /// One threshold slider of <see cref="ThresholdLine"/>.
+    /// </summary>
+    void Threshold(UiNode row, SquadRow squad, Plan plan, string key, string title, int value, Func<int, RestRules> with)
+    {
+        row.Children.Add(Label($"aut-{key}h-l", title, 170, _styles.Dim));
+        row.Children.Add(Button(key + "h.down", "-", 24, () => Save(squad, plan with { Resting = with(Math.Max(0, value - 5)) }), value > 0));
+        row.Children.Add(Label($"aut-{key}h-v", value.ToString(System.Globalization.CultureInfo.InvariantCulture), 36, _styles.Text));
+        row.Children.Add(Button(key + "h.up", "+", 24, () => Save(squad, plan with { Resting = with(Math.Min(100, value + 5)) }), value < 100));
     }
 
     /// <summary>
@@ -380,7 +472,10 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     /// Sends the squad's plan.
     /// </summary>
     void Save(SquadRow squad, Plan plan) =>
-        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Packages, plan.Rest, plan.StartHour, plan.EndHour, plan.Switches) { Tick = context.Tick });
+        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Packages, plan.Rest, plan.StartHour, plan.EndHour, plan.Switches, plan.Resting)
+        {
+            Tick = context.Tick,
+        });
 
     /// <summary>
     /// Sets or clears the home.

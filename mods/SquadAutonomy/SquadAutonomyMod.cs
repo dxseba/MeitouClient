@@ -18,6 +18,11 @@ public sealed class SquadAutonomyMod : IMod
     internal static readonly AutonomySettings Settings = new();
 
     /// <summary>
+    /// The registered settings, so the AUT button can keep the place it is dragged to.
+    /// </summary>
+    internal static Meitou.Modding.ModSettingsGroup? SettingsGroup;
+
+    /// <summary>
     /// The running world's system, for the window; null before a world starts.
     /// </summary>
     internal static volatile AutonomySystem? Running;
@@ -29,7 +34,8 @@ public sealed class SquadAutonomyMod : IMod
 
     public void Initialize(ModContext context)
     {
-        context.AddSettings(Settings);
+        SettingsGroup = context.AddSettings(Settings);
+        AutonomyLog.Sink = context.Log;
 
         var configs = new List<string> { Path.Combine(context.Folder, "packages.txt") };
         configs.AddRange(OriginalConfigs(context.Folder));
@@ -63,6 +69,64 @@ public sealed class AutonomySettings
     /// </summary>
     [Setting("Show button on Mainbar", Hint = "Show AUT button on the Mainbar.")]
     public bool ShowButton { get; set; } = true;
+
+    /// <summary>
+    /// The original's <c>LockPosition</c> (default true): off, the AUT button can be dragged.
+    /// </summary>
+    [Setting("Lock button position", Hint = "LockPosition: off, drag the AUT button where you want it.", SubGroup = "Button")]
+    public bool LockPosition { get; set; } = true;
+
+    /// <summary>
+    /// The original's <c>BtnLeft</c> (0.69): the button's left edge as a share of the screen width.
+    /// </summary>
+    [Setting("Button left", Hint = "BtnLeft: the AUT button's left edge, a share of the screen width.", Min = 0, Max = 1, Step = 0.001,
+        SubGroup = "Button")]
+    public float BtnLeft { get; set; } = 0.69f;
+
+    /// <summary>
+    /// The original's <c>BtnTop</c> (0.788): the button's top edge as a share of the screen height.
+    /// </summary>
+    [Setting("Button top", Hint = "BtnTop: the AUT button's top edge, a share of the screen height.", Min = 0, Max = 1, Step = 0.001,
+        SubGroup = "Button")]
+    public float BtnTop { get; set; } = 0.788f;
+
+    /// <summary>
+    /// The original's <c>BtnWidth</c> (1.5): the button's width in per cent of the screen width.
+    /// </summary>
+    [Setting("Button width (%)", Hint = "BtnWidth: the AUT button's width, per cent of the screen width.", Min = 0.5, Max = 20, Step = 0.1,
+        SubGroup = "Button")]
+    public float BtnWidth { get; set; } = 1.5f;
+
+    /// <summary>
+    /// The original's <c>BtnHeight</c> (3.58): the button's height in per cent of the screen height.
+    /// </summary>
+    [Setting("Button height (%)", Hint = "BtnHeight: the AUT button's height, per cent of the screen height.", Min = 0.5, Max = 20, Step = 0.01,
+        SubGroup = "Button")]
+    public float BtnHeight { get; set; } = 3.58f;
+
+    /// <summary>
+    /// The original's <c>BtnFontSize</c> (12): the caption's font height in pixels.
+    /// </summary>
+    [Setting("Button font size", Hint = "BtnFontSize: the AUT caption's height in pixels.", Min = 6, Max = 40, SubGroup = "Button")]
+    public int BtnFontSize { get; set; } = 12;
+
+    /// <summary>
+    /// The original's <c>EnableLogging</c> (default false).
+    /// </summary>
+    [Setting("Enable logging", Hint = "EnableLogging: write what the mod does to the mod log.", SubGroup = "Logging")]
+    public bool EnableLogging { get; set; }
+
+    /// <summary>
+    /// The original's <c>LogSeverity</c> (0 none, 1 errors, 2 warnings, 3 info, 4 debug; default 0).
+    /// </summary>
+    [Setting("Log severity", Hint = "LogSeverity: 0 none, 1 errors, 2 warnings, 3 info, 4 debug.", Min = 0, Max = 4, SubGroup = "Logging")]
+    public int LogSeverity { get; set; }
+
+    /// <summary>
+    /// The original's <c>LogSpam</c> (default false).
+    /// </summary>
+    [Setting("Log spam", Hint = "LogSpam: also every AI score the mod changes (many lines).", SubGroup = "Logging")]
+    public bool LogSpam { get; set; }
 }
 
 /// <summary>
@@ -140,10 +204,10 @@ public readonly record struct PlannedPackage(string Id, int Priority);
 
 /// <summary>
 /// The squad's plan: its AI packages by priority, the rest package (this port's: run outside the work hours; null none), the work hours
-/// (0-24; start equal to end: no work time, as the original) and the combat switches.
+/// (0-24; start equal to end: no work time, as the original), the combat switches and the rest rules (null: the original's defaults).
 /// </summary>
 public sealed record SquadPlanOrder(int SquadId, IReadOnlyList<PlannedPackage> Packages, string? Rest, int StartHour, int EndHour,
-    CombatSwitches Switches = CombatSwitches.Default) : SimCommand;
+    CombatSwitches Switches = CombatSwitches.Default, RestRules? Resting = null) : SimCommand;
 
 /// <summary>
 /// The squad's home becomes the building the HUD inspects (none inspected: no change), or none with <paramref name="Clear"/>.
