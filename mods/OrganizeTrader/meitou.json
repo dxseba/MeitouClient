@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.organizetrader",
+  "apiVersion": 2,
+  "assemblies": ["OrganizeTrader.dll"],
+  "entry": "Meitou.OrganizeTrader.OrganizeTraderMod",
+  "gameVersion": ">=0.22.2"
+}
