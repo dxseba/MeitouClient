@@ -18,6 +18,7 @@ public sealed class XpInfoMod : IMod
     public void Initialize(ModContext context)
     {
         var settings = new XpSettings();
+        s_translate = context.Tr;
         context.AddSettings(settings);
         if (settings.VerboseLog) context.Log(Describe(settings));
 
@@ -50,7 +51,12 @@ public sealed class XpInfoMod : IMod
     /// </summary>
     internal static volatile XpWatchSystem? Running;
 
-    internal static string Label(StatsEnumerated stat) => stat switch
+    /// <summary>The game's catalogue lookup for the skill names (unchanged in English).</summary>
+    static Func<string, string> s_translate = text => text;
+
+    internal static string Label(StatsEnumerated stat) => s_translate(EnglishLabel(stat));
+
+    static string EnglishLabel(StatsEnumerated stat) => stat switch
     {
         StatsEnumerated.Thieving => "Thievery",
         StatsEnumerated.FriendlyFire => "Precision Shooting",
@@ -385,12 +391,17 @@ sealed class XpPanelLines(XpSettings settings, XpBoard board) : IUiExtension
         if (!settings.Enabled || !settings.PanelBars || board.Of(context.Id) is not { } progress) return [];
 
         long since = progress.Tick - (long)(settings.RecentSeconds / progress.TickSeconds);
-        return Enumerable.Range(0, progress.Levels.Length)
+        var bars = Enumerable.Range(0, progress.Levels.Length)
             .Where(i => progress.LastGain[i] > 0 && progress.LastGain[i] >= since)
             .OrderByDescending(i => progress.LastGain[i])
             .Take(settings.PanelLines)
-            .Select(i => Line(XpBoard.Watched[i], progress.Levels[i]));
+            .Select(i => Line(XpBoard.Watched[i], progress.Levels[i]))
+            .ToList();
+        return bars.Count == 0 ? [] : [Rule, .. bars];
     }
+
+    /// <summary>The original's divider between the game's stats and the bars.</summary>
+    static readonly UiCharacterLine Rule = new("") { Divider = true };
 
     static UiCharacterLine Line(StatsEnumerated stat, float level)
     {

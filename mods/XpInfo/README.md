@@ -10,7 +10,10 @@ Port of *XP Info - experience gain notifications* (workshop 3795213616, GPLv3).
   any shows, rising for *Seconds* (2.5, Meitou's); a first sighting (spawn, load, recruit) only records. No Harmony.
 - **Panel XP bars** (`AddCharacterPanelLines`): under the stats in the HUD's character panel, up to *Most bars at once* of the skills that gained
   XP within *Keep a bar for* seconds, the most recent first, as many as fit under the stats (the engine leaves out lines past the panel's
-  height, the original's capacity rule), each `Skill  level  N%` over a bar of its progress to the next level.
+  height, the original's capacity rule), each `Skill  level  N%` over a bar of its progress to the next level, below a divider rule
+  (`UiCharacterLine.Divider`) as the original's; the divider counts as a panel line.
+- **Skill names** pass through the game's catalogue (`context.Tr`), so they follow the game's language (port choice; the original's lookup is
+  **Unknown**).
 
 ## Facts
 
@@ -30,5 +33,4 @@ Port of *XP Info - experience gain notifications* (workshop 3795213616, GPLv3).
 
 ## Missing
 
-- The divider line between the game's stats and the bars (engine gap: no divider row for panel lines).
 - With Level Up Notify also on, a level shows twice (each mod announces it, as the originals do together).
