@@ -6,8 +6,8 @@ using Meitou.Simulation;
 namespace Meitou.Cannibalism;
 
 /// <summary>
-/// Port of Cannibalism: an "Eat Alive" row on the right-click menu of an unconscious, caged or racked character. The selected characters walk
-/// over and eat it (<see cref="CannibalismSystem"/>), fed while they bite.
+/// Port of Cannibalism: an "Eat Alive" row on the right-click menu of an unconscious, caged or racked character. The selected characters get the
+/// game's task 220 on it and eat it (<see cref="CannibalismSystem"/>), fed while they bite.
 /// </summary>
 public sealed class CannibalismMod : IMod
 {
@@ -17,7 +17,7 @@ public sealed class CannibalismMod : IMod
     {
         context.AddSettings(Settings);
 
-        context.AddSystem("cannibalism", _ => new CannibalismSystem(Settings, context.Population), SystemAnchor.End);
+        context.AddSystem("cannibalism", _ => new CannibalismSystem(Settings), SystemAnchor.End);
         context.AddUi(new EatAliveMenu());
         context.AddFrame(frame => EatAliveMenu.Shown = frame.Snapshot);
         context.Log("Cannibalism initialized");
@@ -25,8 +25,9 @@ public sealed class CannibalismMod : IMod
 }
 
 /// <summary>
-/// The "Eat Alive" row, through the interface's menu-verb slots: on the character, and on a player-built cage whose occupant qualifies (the
-/// original's <c>BF_CAGE</c> row). Every selected character but the target takes part.
+/// The "Eat Alive" row, through the interface's menu-verb slots: on the character, and on a cage whose occupant qualifies (the original's
+/// <c>BF_CAGE</c> row): a player-built one (<see cref="UiMenuTargetKind.Building"/>) or a town's or camp's
+/// (<see cref="UiMenuTargetKind.Furniture"/>). Every selected character but the target takes part.
 /// </summary>
 sealed class EatAliveMenu : IUiExtension
 {
@@ -61,11 +62,11 @@ sealed class EatAliveMenu : IUiExtension
     }
 
     /// <summary>
-    /// The row on a cage building: its fixture (same id, else the nearest cage spot at the building) holds a character that qualifies.
+    /// The row on a cage: its fixture (same id, else the nearest cage spot at the building) holds a character that qualifies.
     /// </summary>
     static IEnumerable<UiMenuVerb> CageVerbs(UiMenuTargetContext menu)
     {
-        if (menu.Target is not { Kind: UiMenuTargetKind.Building } target || Shown is not { } snapshot) return [];
+        if (menu.Target is not { Kind: UiMenuTargetKind.Building or UiMenuTargetKind.Furniture } target || Shown is not { } snapshot) return [];
 
         var cage = snapshot.Cages.FirstOrDefault(c => c.Id == target.Id)
             ?? snapshot.Cages.Where(c => Vector3.Distance(c.Position, target.Position) <= CageMatch)
@@ -76,9 +77,11 @@ sealed class EatAliveMenu : IUiExtension
         return occupant is null ? [] : Verbs(occupant, menu.Selected, () => menu.Tick, menu.Enqueue);
     }
 
-    /// <summary>A living body that is out cold or held in a cage or torture device, and not carried.</summary>
-    static bool Edible(CharacterSnapshot target) =>
-        target.Body is { Dead: false } body && (body.Unconscious || target.Imprisoned) && target.CarriedBy == CharacterId.None;
+    /// <summary>
+    /// A living body that is out cold or held in a cage or torture device, as the original's row (carried, robots and beds included: the
+    /// game's task 220 decides, and refuses a target it cannot eat).
+    /// </summary>
+    static bool Edible(CharacterSnapshot target) => target.Body is { Dead: false } body && (body.Unconscious || target.Imprisoned);
 }
 
 /// <summary><paramref name="Eaters"/> eat <paramref name="Target"/> alive.</summary>
