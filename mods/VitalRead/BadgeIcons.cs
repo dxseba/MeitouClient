@@ -5,28 +5,12 @@ using Meitou.Game.Ui;
 namespace Meitou.VitalRead;
 
 /// <summary>
-/// The state icons: the original's default texture and crop per state (<c>mod-config.defaults.json</c>), found as the original looks for them and
-/// drawn as image nodes. Its own PNGs are not shipped with the port: a state whose file is not found has no icon.
+/// The state icons: each state's texture, size and crop (<see cref="IconConfig"/>), found as the original looks for them and drawn as image
+/// nodes. The original's own PNGs are not shipped with the port: a state whose file is not found has no icon.
 /// </summary>
-sealed class BadgeIcons(IReadOnlyList<string> folders)
+sealed class BadgeIcons(IReadOnlyList<string> folders, Action<string> log)
 {
-    /// <summary>
-    /// One state's icon: the configured texture and its crop in texture pixels (null: the whole image).
-    /// </summary>
-    readonly record struct Source(string Texture, UiRect? Crop);
-
-    static readonly Dictionary<VitalState, Source> Defaults = new()
-    {
-        [VitalState.Unconscious] = new("Kenshi_UI.png", new UiRect(45, 122, 32, 32)),
-        [VitalState.RecoveryComa] = new("gui/gfx/heart_64px_opt.png", null),
-        [VitalState.Dying] = new("gui/gfx/death_64px_opt.png", null),
-        [VitalState.PlayingDead] = new("Kenshi_UI.png", new UiRect(80, 126, 38, 27)),
-        [VitalState.Starving] = new("gui/gfx/starving_64px_opt.png", null),
-        [VitalState.CrippledArm] = new("gui/gfx/broken-arm_64px_opt.png", null),
-        [VitalState.CrippledLeg] = new("gui/gfx/broken-leg_64px_opt.png", null),
-        [VitalState.Repairing] = new("gui/gfx/repair-wrench_64.png", null),
-        [VitalState.InBed] = new("gui/gfx/bed-plus_64.png", null),
-    };
+    readonly Dictionary<VitalState, IconSource> _sources = IconConfig.Load(folders, log);
 
     /// <summary>
     /// Each state's file once looked for (null: not found).
@@ -39,20 +23,24 @@ sealed class BadgeIcons(IReadOnlyList<string> folders)
     readonly string? _gameGfx = GameInstall.Locate() is { } install ? Path.Combine(install.DataDirectory, "gui", "gfx") : null;
 
     /// <summary>
-    /// <paramref name="state"/>'s icon as an image node's file and crop; null when it has none.
+    /// <paramref name="state"/>'s icon as an image node's file and crop; null when it has none. Without a crop the original shows the top left
+    /// square of the icon's size (0: the picture's width), so the whole of a picture that size.
     /// </summary>
     public (string File, UiImageCrop? Crop)? Image(VitalState state)
     {
-        if (!Defaults.TryGetValue(state, out var source) || File(state, source) is not { } file) return null;
+        if (!_sources.TryGetValue(state, out var source) || File(state, source) is not { } file) return null;
+        if (source.Crop is { } c) return (file, UiImageCrop.Pixels(c.X, c.Y, c.Width, c.Height));
 
-        return (file, source.Crop is { } c ? UiImageCrop.Pixels(c.X, c.Y, c.Width, c.Height) : null);
+        return (file, source.Size > 0 ? UiImageCrop.Pixels(0, 0, source.Size, source.Size) : null);
     }
 
-    string? File(VitalState state, Source source)
+    string? File(VitalState state, IconSource source)
     {
         if (_files.TryGetValue(state, out var known)) return known;
 
-        return _files[state] = Find(source.Texture);
+        string? file = Find(source.Texture);
+        if (VitalReadMod.Settings.DebugLogging) log($"{state} icon '{source.Texture}': {file ?? "not found"}");
+        return _files[state] = file;
     }
 
     /// <summary>
@@ -61,7 +49,8 @@ sealed class BadgeIcons(IReadOnlyList<string> folders)
     /// </summary>
     string? Find(string texture)
     {
-        string name = Path.GetFileName(texture);
+        if (texture.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || Path.GetFileName(texture) is not { Length: > 0 } name) return null;
+
         var candidates = folders.SelectMany(folder => Candidates(folder, texture, name)).ToList();
         if (_gameGfx is not null) candidates.Add(Path.Combine(_gameGfx, name));
 

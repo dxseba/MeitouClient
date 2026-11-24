@@ -79,4 +79,10 @@ public sealed class VitalReadSettings
     /// </summary>
     [Setting("Coloured text", Hint = "Tints each text badge by its state (Meitou's; the original's text is plain).")]
     public bool Coloured { get; set; }
+
+    /// <summary>
+    /// <c>debugLogging</c>, default false: each member's state changes and each icon's file to the mod log, and the probe keys.
+    /// </summary>
+    [Setting("Debug logging", Hint = "Writes state changes and icon lookups to the log, and turns on the probe keys (Ctrl+Alt+F11, Ctrl+Alt+F12).")]
+    public bool DebugLogging { get; set; }
 }

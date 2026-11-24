@@ -26,13 +26,22 @@ and label in corners of each marked member's picture. `VitalSystem`, a tick syst
   own PNGs (`gui/gfx/heart_64px_opt.png`, `death_64px_opt.png`, `starving_64px_opt.png`, `broken-arm_64px_opt.png`, `broken-leg_64px_opt.png`,
   `repair-wrench_64.png`, `bed-plus_64.png`). Looked up as the original does: the path under the mod folder, then the bare name in its `icons/`,
   `gui/gfx/` and folder, then the game's resources. **Verified** (original config and README). The port's last step is the game's own
-`data/gui/gfx` (where `Kenshi_UI.png` is); other mods' `gui/gfx` folders, which Kenshi also registers, are not searched. The port does not ship those PNGs:
+  `data/gui/gfx` (where `Kenshi_UI.png` is); other mods' `gui/gfx` folders, which Kenshi also registers, are not searched. The port does not ship those PNGs:
   after its own folder it looks in the installed original's (its required item; `OriginalFolder`), and a state without its file shows text only.
+- **Per-state icons**: `<state>IconTexture`, `<state>IconSizePx` and `<state>IconCoordLeft` / `Top` / `Width` / `Height` (state prefixes
+  `unconscious`, `recoveryComa`, `dying`, `playingDead`, `starving`, `crippledArm`, `crippledLeg`, `repairing`, `inBed`) are read once from a
+  `mod-config.json` in this mod's folder, else the installed original's (where its Mod Hub saves them), over the defaults; the other keys of that
+  file are this port's settings. With all four coordinates the icon is that crop; without, the top left square of the size (0: the picture's
+  width), as the DLL sets the image coordinates. **Verified** (original DLL (decompiled): the key names and the image-coordinate rule); the
+  JSON reading is Meitou's.
+- **Debug logging** (`debugLogging`, off): each member's state as it changes and each icon's file, to the mod log, and two of the original's
+  ten probe keys, Ctrl+Alt+F11 (selected members) and Ctrl+Alt+F12 (member states), each logging every member's state and published facts; both
+  do nothing while it is off. **Observed** (DLL strings: the key list and the logged field names); the line format is Meitou's.
+- **Text**: plain, no shadow (the DLL imports no text-shadow call). **Observed** (DLL imports).
 - **Observed** (2026-11-18): an earlier text-only build loaded. Everything here is unverified in play (placement, icon loading, each trigger).
 
 ## Missing
 
-- The original's own icon art (not redistributable from here); drop its `gui/gfx` PNGs into this mod's `gui/gfx` to get them.
-- Per-state texture, size and crop overrides (`<state>IconTexture`, `IconSizePx`, `IconCoord*` in `mod-config.json`).
-- Debug logging and the probe hotkeys (Ctrl+Alt+F3..F12).
-- The text's shadow: a mod node's style has no shadow (the earlier build drew one through the bar's own control).
+- The other eight probe keys (Ctrl+Alt+F3 to F10) dump the original's MyGUI widgets (hovered panel, widget chain, portrait tree); Meitou's
+  interface has no such widgets, so they have no counterpart.
+- The medical tests are stand-ins (see Facts), exact only with engine queries for the game's tests (engine gap).

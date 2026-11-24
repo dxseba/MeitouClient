@@ -11,7 +11,7 @@ namespace Meitou.VitalRead;
 /// the bar's page, as the original parents both to the cell's <c>portraitimage</c>) add, per marked member, an icon and a text box in corners of
 /// the picture.
 /// </summary>
-sealed class PortraitBadges(BadgeIcons icons) : IUiExtension
+sealed class PortraitBadges(BadgeIcons icons, StateLog states) : IUiExtension
 {
     /// <summary>
     /// An automatic icon's share of the portrait image's width (Meitou's choice; the original's automatic size is not known).
@@ -34,7 +34,7 @@ sealed class PortraitBadges(BadgeIcons icons) : IUiExtension
     {
         context.AddFrame(frame => s_uiScale = frame.UiScale);
         string[] folders = OriginalFolder.Find(context) is { } original ? [context.Folder, original] : [context.Folder];
-        context.AddUi(new PortraitBadges(new BadgeIcons(folders)));
+        context.AddUi(new PortraitBadges(new BadgeIcons(folders, context.Log), new StateLog(context)));
     }
 
     public void Register(UiRegistration registration)
@@ -49,7 +49,11 @@ sealed class PortraitBadges(BadgeIcons icons) : IUiExtension
     {
         var settings = VitalReadMod.Settings;
         if (!settings.Enabled || !settings.ShowText && !settings.ShowIcons || VitalReadMod.Running is not { } system) return null;
-        if (context.Character is not { } member || StateOf(member, system.Facts) is not (var state and not VitalState.None)) return null;
+        if (context.Character is not { } member) return null;
+
+        var state = StateOf(member, system.Facts);
+        if (settings.DebugLogging) states.Seen(member, state);
+        if (state == VitalState.None) return null;
 
         var root = new UiNode("badge") { Pickable = false };
         var image = new UiRect(0, 0, context.Anchor.Width, context.Anchor.Height);
@@ -60,7 +64,7 @@ sealed class PortraitBadges(BadgeIcons icons) : IUiExtension
         return root;
     }
 
-    static VitalState StateOf(CharacterSnapshot member, IReadOnlyDictionary<CharacterId, VitalFacts> facts) =>
+    internal static VitalState StateOf(CharacterSnapshot member, IReadOnlyDictionary<CharacterId, VitalFacts> facts) =>
         member.Body is { } body ? VitalRules.Of(body, facts.GetValueOrDefault(member.Id)) : VitalState.None;
 
     UiNode? Icon(VitalState state, UiRect image, float scale, Vector2 margin)
@@ -126,7 +130,7 @@ sealed class PortraitBadges(BadgeIcons icons) : IUiExtension
     /// <summary>
     /// The original's text badges (<b>Verified</b>, original DLL strings).
     /// </summary>
-    static string Caption(VitalState state) => state switch
+    internal static string Caption(VitalState state) => state switch
     {
         VitalState.Dying => "DY",
         VitalState.RecoveryComa => "RC",
