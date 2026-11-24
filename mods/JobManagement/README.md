@@ -24,8 +24,8 @@ Port of *Kenshi Job Management (MCM fork)* (workshop 3818460323), a fork of Siri
   (the fork's `NormalizeMouseWheelNotches` fix). Each member has the original's **Jobs: ON / OFF** switch (the orders panel's Jobs toggle for
   that character) and **Clear Queue**, which asks "Remove all N permanent jobs from X?" (Yes / No) before emptying the list. Rows whose target
   is gone say so.
-- **Recipients** (the batch buttons' targets): picking jobs makes their owners the recipients; a member's name (the original's portrait)
-  makes it the only one, Ctrl+click adds or drops it; the **SQUADS** selector under the list (a button per squad, `<` `>` page it) makes a
+- **Recipients** (the batch buttons' targets): picking jobs makes their owners the recipients; a member's live portrait (`UiNode.PortraitOf`,
+  as the squad bar draws it) or name makes it the only one, Ctrl+click adds or drops it; the **SQUADS** selector under the list (a button per squad, `<` `>` page it) makes a
   squad's members the recipients and scrolls to it, Ctrl+click adds the squad or, when all its members already are, drops it. The picked
   squads' groups open and the others close (none picked: the current squad's alone). Recipients are marked; none: "Select at least one
   recipient first.".
@@ -33,9 +33,20 @@ Port of *Kenshi Job Management (MCM fork)* (workshop 3818460323), a fork of Siri
   removes a doubled healing row and prioritizes. **Prioritize Healing**: stable reorder Rescue, Put in Bed, Medic, Robotics, Splint, Engineer (125),
   then the rest. **Remove Invalid Jobs**: removes rows the world last found without a target (below). All three act on the recipients
   (animals skipped; Remove Invalid includes them).
+- **Keys while the window is open** (`AddKeyInput`; closed, they are the game's): Escape closes it (a pending Clear Queue prompt first); Tab
+  opens the next squad's group and scrolls to it, a group Tab opened closing again when it moves on; Ctrl+C copies the picked jobs ("Copied
+  jobs: {count}. Select recipients, then press Ctrl+V."; none picked: "Select one or more jobs before copying."), Ctrl+V gives copies to every
+  recipient, one already holding such a job skipped ("Jobs pasted.", "Skipped duplicate bundles: {count}."; "Copy one or more jobs before
+  pasting.", "Select at least one recipient before pasting."). **Verified** (fork README; decompiled DLL: the Escape and Ctrl+C / Ctrl+V polls
+  and these messages).
+- **Translations**: the installed original's `kenshi_job_management` catalogues (ru_RU, zh_CN; `AddTranslations`): the window's texts that are
+  the fork's English (labels, buttons, headers) show in the game's language; templates with `{count}`-style places through `context.Tr` and
+  filled after.
 - **Stations**: the player's complete machines (`WorldSnapshot.Machines`) by group: turret Defense, farm Farming, bench Crafting, function 3
   Research, 4/14 Refining, 1/27 Mining (a water mine is Storage / Hauling), 7 Training, storage Storage, any other operable machine Other; the rest
-  (generators, lights, beds) are no station. A group's header, "[-] {group}  |  {n} stations  |  {u} unassigned" (u: its stations without
+  (generators, lights, beds) are no station. Also the resource nodes, town machines and town dummies a player character works
+  (`WorldSnapshot.WorkSites`): a rock in Mining (a water node in Storage / Hauling) "Wilderness", a dummy in Training, a town machine by its
+  function, each with the job type its first worker holds there (Assign gives the same), no blockers. A group's header, "[-] {group}  |  {n} stations  |  {u} unassigned" (u: its stations without
   a worker), opens or closes it (all open at first; kept while the game runs). Each line: name, town (else Wilderness), workers with a job
   there / `max operators`, blockers
   DISMANTLING, BROKEN, POWER OFF, NO POWER / LOW POWER (power factor below 0.99), NO WATER. Clicking one lists assigned and available people (name
@@ -60,11 +71,9 @@ Port of *Kenshi Job Management (MCM fork)* (workshop 3818460323), a fork of Siri
 - **Differences**:
   - Mod-side: LOW POWER and NO WATER are additions; closed station groups and squad toggles are not kept across restarts (the fork keeps
     the station groups in its own settings file).
-  - Engine: no portraits (an image node draws a record's portrait, not a live character's; the member's name stands in, also for
-    picking recipients); a selector click does not make the squad the game's current squad (no mod call selects one); no Tab squad cycling (no key that only a mod
-    window open takes); no Ctrl+C / Ctrl+V clipboard (the host's own keys; Move / Copy here stand in); English only (the fork's Russian and
-    Chinese catalogues: no per-mod translation API); the stations list has no natural resource nodes or town buildings (the snapshot lists
-    the player's machines only; jobs on them still show and move).
+  - Engine: a selector click (and Tab) does not make the squad the game's current squad (no mod call selects one), so Tab steps through the
+    squads inside the window and CURRENT SQUAD stays the game's; the fork's hint and message texts with their own wording translate only where
+    the port's English matches the catalogue (static labels, the station headers, the clipboard and drag messages), the rest stays English.
   - Not portable: the per-station pictures (ores, plates, crossbows...): the fork picks them by comparing building record ids in its code, not
     from a table the port could read.
   - The window's size is the setting alone (the fork's 100 follows the screen height); invalid rows on rocks are not detected (Meitou may not

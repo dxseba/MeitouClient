@@ -36,6 +36,10 @@ static class UiKit
     public static UiNode Icon(string id, string path, float size = LineHeight) =>
         new(id, UiNodeKind.Image) { Placement = new(S(size), S(size)), Image = path, Pickable = false };
 
+    /// <summary>A character's live portrait (as the squad bar draws it), <paramref name="size"/> units square; a click runs the action.</summary>
+    public static UiNode Portrait(string id, Meitou.Simulation.CharacterId who, string action, string argument, float size = LineHeight) =>
+        new(id, UiNodeKind.Image) { Placement = new(S(size), S(size)), PortraitOf = who, Action = action, Argument = argument };
+
     public static UiNode Button(string id, string text, float width, string style, string action, string argument, bool enabled = true,
         UiPointerEvents pointer = UiPointerEvents.None) =>
         new(id, UiNodeKind.Button)

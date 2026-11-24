@@ -21,6 +21,9 @@ sealed class OriginalFiles
         if (_folders.Count < 2) context.Log($"the original mod (Workshop {OriginalItem}) is not installed: no station icons");
     }
 
+    /// <summary>The installed original's folder (the first found after this mod's own); null when it is not installed.</summary>
+    public string? Original => _folders.Count > 1 ? _folders[1] : null;
+
     /// <summary>
     /// The first of <paramref name="relative"/>'s spellings found in the folders, in order; null when none is.
     /// </summary>

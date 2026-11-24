@@ -166,7 +166,8 @@ public sealed partial class JobWindow
     }
 
     /// <summary>
-    /// A member's header: its name (a click makes it the recipient, Ctrl+click adds or drops it: the original's portrait click), Move / Copy here
+    /// A member's header: its live portrait and name (a click on either makes it the recipient, Ctrl+click adds or drops it: the original's portrait
+    /// click), Move / Copy here
     /// while jobs of others are picked, the Jobs switch and Clear Queue.
     /// </summary>
     UiNode MemberLine(CharacterSnapshot member, float width)
@@ -175,7 +176,10 @@ public sealed partial class JobWindow
         var row = UiKit.Row($"jm-member.{Key(id)}", UiKit.LineHeight, pickable: true);
         string animal = JobRules.IsAnimal(member) ? " (animal)" : "";
         string text = $"{member.Name}{animal} - {member.Jobs.Count} jobs";
-        row.Children.Add(Button($"name.{Key(id)}", text, 300, () => ClickMember(id), selected: _recipients.Contains(id)));
+        _clicks[$"portrait.{Key(id)}"] = () => ClickMember(id);
+        row.Children.Add(UiKit.Portrait($"jm-portrait.{Key(id)}", id, _clickAction, $"portrait.{Key(id)}"));
+        row.Children.Add(Button($"name.{Key(id)}", text, 300 - UiKit.LineHeight - UiKit.Gap, () => ClickMember(id),
+            selected: _recipients.Contains(id)));
         if (_picks.Count > 0 && _picks.All(p => p.Owner != id))
         {
             var picks = _picks.ToList();

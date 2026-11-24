@@ -8,13 +8,13 @@ namespace Meitou.JobManagement;
 public sealed partial class JobWindow
 {
     /// <summary>What a give step sent: the jobs given (the move's second step takes only these) and how many it left in place.</summary>
-    sealed class Giving
+    sealed class Giving(Func<string, string> tr)
     {
         public List<JobPick> Given { get; } = [];
 
         public int Skipped { get; set; }
 
-        public string Skips => Skipped > 0 ? $" Skipped duplicate bundles: {Skipped.ToString(CultureInfo.InvariantCulture)}." : "";
+        public string Skips => Skipped > 0 ? " " + Fill(tr("Skipped duplicate bundles: {count}."), ("count", Skipped)) : "";
     }
 
     /// <summary>
@@ -26,7 +26,7 @@ public sealed partial class JobWindow
     {
         _picks.Clear();
         RecipientsFromPicks();
-        var giving = new Giving();
+        var giving = new Giving(tr);
         Run(s => GiveStep(s, picks, to, giving, skipRefused), s => copy ? Array.Empty<SimCommand>() : TakeStep(s, giving, to));
     }
 
@@ -85,7 +85,7 @@ public sealed partial class JobWindow
         Run(s =>
         {
             var commands = RemoveHeld(s, picks);
-            Status = $"Removed permanent jobs: {commands.Count.ToString(CultureInfo.InvariantCulture)}.";
+            Status = Fill(Tr("Removed permanent jobs: {count}."), ("count", commands.Count));
             return commands;
         });
     }

@@ -14,7 +14,7 @@ readonly record struct JobPick(CharacterId Owner, int Row, PermaJob Job);
 /// (a mod pause hold) and puts the speed back on close. Edits go out as job commands in steps; each step waits for the snapshot that shows the last one applied.
 /// </summary>
 public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Action<SimCommand> enqueue, StationScanner scanner,
-    Func<ModPauseHold?> holdPause, StationIcons icons, Action<string> log) : IUiExtension
+    Func<ModPauseHold?> holdPause, StationIcons icons, Action<string> log, Func<string, string> tr) : IUiExtension
 {
     enum Tab { Squads, Stations, Messages }
 
@@ -63,6 +63,7 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
         _dragAction = registration.RegisterAction("drag", Drag);
         _wheelAction = registration.RegisterAction("wheel", Wheel);
         registration.Contribute(UiSlots.Overlay, Build, order: 60);
+        registration.AddKeyInput(KeyInput);
     }
 
     /// <summary>

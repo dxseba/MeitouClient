@@ -71,9 +71,10 @@ public sealed partial class JobWindow
     /// </summary>
     UiNode GroupLine(StationCategory category, int count, int unassigned, bool closed, float width)
     {
-        string stations = count == 1 ? "1 station" : $"{count.ToString(CultureInfo.InvariantCulture)} stations";
-        string text = $"{(closed ? "[+]" : "[-]")} {CategoryName(category)}  |  {stations}  |  "
-            + $"{unassigned.ToString(CultureInfo.InvariantCulture)} unassigned";
+        string header = Tr(count == 1 ? "{category}  |  {count} station  |  {unassigned} unassigned"
+            : "{category}  |  {count} stations  |  {unassigned} unassigned");
+        string text = $"{(closed ? "[+]" : "[-]")} " + Fill(header, ("category", Tr(CategoryName(category))), ("count", count),
+            ("unassigned", unassigned));
         var row = UiKit.Row($"jm-groupline.{category}", UiKit.LineHeight);
         float label = width;
         if (icons.Of(category) is { } icon)
@@ -97,7 +98,8 @@ public sealed partial class JobWindow
         int working = station.Assigned.Count(characters.ContainsKey);
         string count = $"{working.ToString(CultureInfo.InvariantCulture)}/{station.MaxWorkers.ToString(CultureInfo.InvariantCulture)}";
         string blockers = station.Blockers.Length > 0 ? " | " + station.Blockers : "";
-        string text = $"{station.Name} | {station.Area} | {count}{blockers}";
+        string area = station.Area.Length > 0 ? $" | {Tr(station.Area)}" : "";
+        string text = $"{station.Name}{area} | {count}{blockers}";
         string site = station.Site;
         return Button($"station.{site}", text, width, () => (_station, _workerScroll) = (site, 0), selected: site == _station);
     }
@@ -132,7 +134,7 @@ public sealed partial class JobWindow
         var lines = new List<UiNode>
         {
             Label("st.name", station.Name, width),
-            Label("st.facts", $"{CategoryName(station.Category)} | {station.Area} | skill: {skill}", width, _styles!.Dim),
+            Label("st.facts", $"{Tr(CategoryName(station.Category))} | {Tr(station.Area)} | skill: {skill}", width, _styles!.Dim),
         };
         if (station.Blockers.Length > 0) lines.Add(Label("st.block", station.Blockers, width, _styles.Warn));
         if (station.Job is null) lines.Add(Label("st.nojob", "This station takes no worker job.", width, _styles.Dim));

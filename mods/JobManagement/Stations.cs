@@ -19,7 +19,10 @@ public sealed record Station(string Site, string Name, string Area, StationCateg
     public bool LowestFirst => Category == StationCategory.Training;
 }
 
-/// <summary>Builds the stations from the snapshot's machines (complete player buildings) and the BUILDING records.</summary>
+/// <summary>
+/// Builds the stations from the snapshot's machines (complete player buildings), the work sites the player works (resource nodes, town machines)
+/// and the BUILDING records.
+/// </summary>
 public sealed class StationScanner(GameDatabase db)
 {
     readonly Dictionary<string, MachineData?> _data = new(StringComparer.Ordinal);
@@ -40,6 +43,7 @@ public sealed class StationScanner(GameDatabase db)
             stations.Add(Make(machine, building, category, workers.GetValueOrDefault(machine.Site) ?? []));
         }
 
+        stations.AddRange(WorkSites(snapshot, workers));
         return [.. stations.OrderBy(s => s.Category).ThenBy(s => s.Name, StringComparer.CurrentCulture).ThenBy(s => s.Area)];
     }
 
@@ -51,6 +55,44 @@ public sealed class StationScanner(GameDatabase db)
         return new(machine.Site, name, area, category, JobOf(machine), SkillOf(category, data), assigned, machine.MaxOperators,
             Blockers(machine, building));
     }
+
+    /// <summary>
+    /// The natural resource nodes and town machines and dummies the player's characters work (<c>WorldSnapshot.WorkSites</c>): each a station
+    /// whose job is the one its first worker holds there, so Assign gives the same.
+    /// </summary>
+    IEnumerable<Station> WorkSites(WorldSnapshot snapshot, Dictionary<string, List<CharacterId>> workers)
+    {
+        var jobs = new Dictionary<string, TaskType>(StringComparer.Ordinal);
+        foreach (var c in snapshot.Characters.Where(c => c.IsPlayer))
+        {
+            foreach (var job in c.Jobs) if (job.Site is { } site) jobs.TryAdd(site, job.Type);
+        }
+
+        foreach (var site in snapshot.WorkSites)
+        {
+            if (site.Kind is not (WorkSiteKind.ResourceNode or WorkSiteKind.TownMachine or WorkSiteKind.TrainingDummy)) continue;
+
+            var data = Data(site.Record);
+            var category = CategoriseSite(site, data);
+            string name = site.Name is { Length: > 0 } n ? n : data?.Name ?? site.Record;
+            string area = site.Kind == WorkSiteKind.ResourceNode ? "Wilderness" : "";
+            yield return new(site.Id, name, area, category, jobs.TryGetValue(site.Id, out var type) ? type : null, SkillOf(category, data),
+                workers.GetValueOrDefault(site.Id) ?? [], data?.MaxOperators ?? 1, "");
+        }
+    }
+
+    /// <summary>A work site's group: a rock is Mining (a water node Storage / Hauling), a dummy Training, a town machine by its function.</summary>
+    static StationCategory CategoriseSite(WorkSiteSnapshot site, MachineData? data) => (site.Kind, data?.Function) switch
+    {
+        (WorkSiteKind.TrainingDummy, _) or (_, MachineData.TrainingFunction) => StationCategory.Training,
+        (WorkSiteKind.ResourceNode, _) or (_, MachineData.MineFunction or MachineData.NaturalMineFunction) =>
+            data?.Resource == MachineData.WaterResource ? StationCategory.Storage : StationCategory.Mining,
+        (_, MachineData.ResearchFunction) => StationCategory.Research,
+        (_, MachineData.RefineryFunction or MachineData.ItemFurnaceFunction) => StationCategory.Refining,
+        _ when data?.IsCrafting == true => StationCategory.Crafting,
+        _ when data?.IsStorage == true => StationCategory.Storage,
+        _ => StationCategory.Other,
+    };
 
     MachineData? Data(string record)
     {
