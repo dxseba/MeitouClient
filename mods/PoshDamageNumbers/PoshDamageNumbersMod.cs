@@ -16,9 +16,28 @@ public sealed class PoshDamageNumbersMod : IMod
 {
     internal static readonly DamageSettings Settings = new();
 
+    /// <summary>The installed original's number and word images; null: text labels.</summary>
+    internal static Atlas? Atlas { get; private set; }
+
+    /// <summary>The game's language, for <c>WordsLanguage</c> auto.</summary>
+    static string s_language = "en_GB";
+
+    /// <summary>
+    /// Whether the words show in Russian (<b>Verified</b>, script <c>wordsInRussian</c>): "ru" or "en" as set, else when the game's language
+    /// starts with "ru".
+    /// </summary>
+    internal static bool RussianWords => Settings.WordsLanguage switch
+    {
+        "ru" => true,
+        "en" => false,
+        _ => s_language.StartsWith("ru", StringComparison.OrdinalIgnoreCase),
+    };
+
     public void Initialize(ModContext context)
     {
+        s_language = context.Language;
         context.AddSettings(Settings);
+        Atlas = Atlas.Load(context);
         context.AddSystem("hits", _ => new HitWatch(Settings, context.Log), SystemAnchor.End);
         context.AddFrame(Floaters.Frame);
         context.AddUi(new NumbersUi());
@@ -41,6 +60,10 @@ public sealed class DamageSettings
 
     [Setting("Show words", Hint = "ShowWords: KNOCKOUT / SEVERED / KILLED.")]
     public bool ShowWords { get; set; } = true;
+
+    [Setting("Words language", Hint = "WordsLanguage: the word images in Russian or English; auto follows the game's language.",
+        Options = ["auto", "en", "ru"])]
+    public string WordsLanguage { get; set; } = "auto";
 
     [Setting("Show healing", Hint = "ShowHealing: green +N when a character heals a lot at once.")]
     public bool ShowHealing { get; set; }
@@ -105,6 +128,9 @@ public sealed class DamageSettings
     [Setting("Characters watched", Hint = "MaxWatched: of the characters on screen near your people, fighters first and then those nearest the "
         + "screen centre, the first 4 x this many get numbers.", Min = 10, Max = 100)]
     public int MaxWatched { get; set; } = 40;
+
+    [Setting("Layer", Hint = "Layer: Back draws the numbers under the game's windows, Popup over them.", Options = ["Back", "Popup"])]
+    public string Layer { get; set; } = "Back";
 
     [Setting("Debug", Hint = "Debug: writes the first 60 numbers and words shown to the mod log.")]
     public bool Debug { get; set; }

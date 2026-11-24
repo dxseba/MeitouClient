@@ -14,6 +14,7 @@ sealed class Floater
     public required Vector3 Colour;
     public required float Size, Life, Rise, Lift, Side, Jitter;
     public required bool Big, IsWord;
+    public Word? Word;
     public float Value, Age;
     public Vector2? Last;
     public float LastBody;
@@ -119,6 +120,7 @@ static class Floaters
     static Floater WordFloater(WordShown w) => new()
     {
         Victim = w.Victim,
+        Word = w.Word,
         Text = w.Word switch { Word.Knockout => "KNOCKOUT", Word.Severed => "SEVERED", _ => "KILLED" },
         Colour = w.Word switch { Word.Knockout => Settings.Ko, Word.Severed => Settings.Limb, _ => Settings.Dead },
         Size = 1.05f, Life = 1.7f * Settings.Duration, Rise = 0.9f * Settings.Rise, Lift = 1.15f, Side = 0, Jitter = (Jitter.NextSingle() - 0.5f) * 0.35f,
@@ -218,7 +220,7 @@ static class Floaters
         float dy = -f.Rise * EaseOutQuad(k) - f.Lift;
         float dx = (f.Side * 0.55f + f.Jitter) * EaseOutCubic(MathF.Min(1, k * 1.25f));
         var colour = Settings.Flash && t < 0.12f ? Vector3.Lerp(Vector3.One, f.Colour, t / 0.12f) : f.Colour;
-        return new(f.Last!.Value, f.LastBody, f.Size, s, new(dx, dy), Shake(f, t), colour, Math.Clamp(alpha, 0, 1), f.Text);
+        return new(f.Last!.Value, f.LastBody, f.Size, s, new(dx, dy), Shake(f, t), colour, Math.Clamp(alpha, 0, 1), f.Text, f.Word);
     }
 
     static Vector2 Shake(Floater f, float t)
@@ -237,5 +239,8 @@ static class Floaters
     #endregion
 }
 
-/// <summary>A floater as laid out this frame: its anchor and the character's height on screen, size, pop, offset, shake, colour, opacity and text.</summary>
-sealed record DrawnFloater(Vector2 At, float Body, float Size, float Pop, Vector2 Offset, Vector2 Shake, Vector3 Colour, float Alpha, string Text);
+/// <summary>
+/// A floater as laid out this frame: its anchor and the character's height on screen, size, pop, offset, shake, colour, opacity, text and word.
+/// </summary>
+sealed record DrawnFloater(Vector2 At, float Body, float Size, float Pop, Vector2 Offset, Vector2 Shake, Vector3 Colour, float Alpha, string Text,
+    Word? Word);

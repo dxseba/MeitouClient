@@ -29,14 +29,24 @@ script (**Verified**, read), implemented anew.
   number have no counterpart).
 - **Healing** (*Show healing*, off; *Healing threshold* 5): flesh regained summed per character over one second of real time, a green
   `#6EE678` "+N" from the threshold. **Colours** are Mod settings (free text `#RRGGBB`, the original's `Colour*` keys; invalid: default).
-- Laid out once a frame (`AddFrame`, projection by `ModFrame.Project`) and drawn in the HUD overlay (`Animated`, `TextScale`,
-  `TextColour`, `Opacity` for the fade: in over 0.05 s, out by easeInQuad from 62% of its life). Turn the game's own damage
-  floaters off to see one set.
-- **Unknown**: not checked in game; the label font's pixel height (taken as 18 at scale 1), so sizes are approximate.
+- **Glyphs** (**Verified**, script `setGlyphs` / `animate` and `dn_glyphs.lua`): digits, `+`, `-` and one image per word (KO, DEAD, LIMB in
+  Russian, `_EN` in English) from `gui/gfx/DamageNumbers_atlas.png` (1024 x 512, white Exo 2 with a dark outline), each tinted with the
+  floater's colour (`setColour`) and faded (`setAlpha`); a row scaled so the "0" glyph (86 px) is the number's height, centred on the anchor,
+  each glyph centred vertically and the next moved back by its `overlap` (15 for digits and signs, 0 for words). Port: read at start from
+  the installed original (its Workshop folder beside this one, else the code-less mod `DamageNumbers`); the table reader takes only the
+  generated `["key"] = { x, y, w, h, overlap }` lines and checks all 18 glyphs lie inside the stated texture size, else the port falls back
+  to text labels (logged). Drawn as image nodes with `ImageCrop`, `Tint` and `Opacity`. Nothing of the original is shipped.
+- **Words language** (*WordsLanguage*, auto; **Verified**, script `wordsInRussian`): `ru` or `en` as set; auto is Russian when the game's
+  language (`settings.cfg` `language=`; port: `ModContext.Language`) starts with `ru`. Without the atlas the words are the English labels.
+- **Layer** (*Layer*, Back; **Verified**, `dn_settings.lua`): the MyGUI layer of the image boxes, `Back` (under the game's windows, over the
+  world) or `Popup` (over them). Port: the overlay root's `UiNode.Layer` (`Back` / `Popup`), applied at once (the original: new widgets).
+- Laid out once a frame (`AddFrame`, projection by `ModFrame.Project`) and drawn in the overlay (`Animated`, `Opacity` for the fade: in
+  over 0.05 s, out by easeInQuad from 62% of its life). Turn the game's own damage floaters off to see one set.
+- The script's own texts table (`dn_settings.lua` `M.texts`) is empty in every language, so there is nothing else to translate.
+  **Verified** (read).
+- **Unknown**: not checked in game; without the atlas, the label font's pixel height (taken as 18 at scale 1), so text sizes are approximate.
 
 ## Missing
 
-- The digit and word images (Exo 2, from its atlas) and with them the Russian words (*WordsLanguage*): the atlas glyphs are white with a dark
-  outline (**Verified**, the installed PNG's pixels read) and the original tints each with `setColour`; a mod image node has no tint
-  (engine gap). The text labels stand in.
-- *Layer* (Back: under the game's windows; Popup: above): the overlay has one layer (engine gap).
+- Nothing known. The original's debug probes (camera, test number, console commands `DamageNumbers.status()` / `test()`) have no
+  counterpart beyond the Debug log.
