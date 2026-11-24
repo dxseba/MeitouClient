@@ -1,4 +1,3 @@
-using System.Text;
 using Meitou.Modding;
 
 namespace Meitou.Mentors;
@@ -8,12 +7,11 @@ namespace Meitou.Mentors;
 /// original's <c>Mentors.dll</c>; nothing of the original ships with the port. The original has no catalogue: each text is one call of a
 /// two-language picker (rdx the Russian, r8 the English UTF-16 string), and the trade and skill label tables hold both (README "Russian"). The
 /// reader keeps the pairs whose call sets both by <c>lea r64, [rip+disp32]</c> under the one picker that takes the training reply, and writes
-/// them with the tables' pairs as a gettext catalogue in the temporary folder, added as the mod's translations; the port's texts go through
+/// them with the tables' pairs, added in memory as the mod's translations (nothing is written); the port's texts go through
 /// <see cref="MentorsMod.Tr"/>.
 /// </summary>
 static class OriginalTexts
 {
-    const string Domain = "mentors";
     const string Reply = "Could you teach me something? [training]";
     const int MaxText = 400;
 
@@ -34,7 +32,8 @@ static class OriginalTexts
         {
             var pe = PeImage.Read(path);
             var pairs = PickerPairs(pe).Concat(OriginalTrades.RussianPairs(pe)).ToList();
-            context.AddTranslations(Domain, WriteCatalogue(context, pairs));
+            var messages = pairs.DistinctBy(p => p.English).Select(p => KeyValuePair.Create(p.English, p.Russian));
+            context.AddTranslations(context.Language, messages);
             context.Log($"original Russian texts read: {pairs.Count}");
         }
         catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException)
@@ -106,21 +105,4 @@ static class OriginalTexts
 
         return pe.Text16(en, MaxText) is { } english ? (english, russian) : null;
     }
-
-    /// <summary>Writes the pairs as <c>locale/&lt;language&gt;/LC_MESSAGES/mentors.po</c> under a temporary folder; returns that folder.</summary>
-    static string WriteCatalogue(ModContext context, List<(string English, string Russian)> pairs)
-    {
-        string root = Path.Combine(Path.GetTempPath(), "Meitou", "dxseba.mentors");
-        string messages = Path.Combine(root, "locale", context.Language, "LC_MESSAGES");
-        Directory.CreateDirectory(messages);
-
-        var po = new StringBuilder("msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=UTF-8\\n\"\n");
-        foreach (var (english, russian) in pairs.DistinctBy(p => p.English).OrderBy(p => p.English, StringComparer.Ordinal))
-            po.Append($"\nmsgid \"{Escape(english)}\"\nmsgstr \"{Escape(russian)}\"\n");
-
-        File.WriteAllText(Path.Combine(messages, Domain + ".po"), po.ToString(), new UTF8Encoding(false));
-        return root;
-    }
-
-    static string Escape(string text) => text.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

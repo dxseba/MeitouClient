@@ -52,8 +52,9 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
   holds its Russian name and covers text at +0 / +0x10; a 33-entry skill label table (32 bytes: u32 stat, u32 0, Russian and English text
   pointers, u32 attribute flag, u32 0) sits just before the trade array. In a Russian game the port reads them from the installed original
   (`OriginalTexts.cs`: the calls whose rdx and r8 are set by `lea [rip+disp32]` since the call before, under the one picker that takes the
-  training reply; the tables through `OriginalTrades.RussianPairs`, labels by stat), writes them as a gettext catalogue in the temporary folder
-  and adds it (`ModContext.AddTranslations`); the window, notices and reply go through it (`MentorsMod.Tr`). **Verified** by a scratch run
+  training reply; the tables through `OriginalTrades.RussianPairs`, labels by stat), and adds them in memory
+  as the mod's translations (`ModContext.AddTranslations(language, messages)`; nothing is written); the window, notices and reply go through
+  them (`MentorsMod.Tr`). **Verified** by a scratch run
   (not in the repo) on the installed 0.5 DLL: 18 picker pairs and 75 table pairs, all Russian. Settings stay English (the original has none).
 
 ## Missing
