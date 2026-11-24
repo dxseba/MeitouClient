@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.struggle",
+  "apiVersion": 2,
+  "assemblies": ["Struggle.dll"],
+  "entry": "Meitou.Struggle.StruggleMod",
+  "gameVersion": ">=0.22.2"
+}
