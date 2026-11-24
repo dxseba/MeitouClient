@@ -12,11 +12,22 @@ public sealed class LevelUpNotifyMod : IMod
     public void Initialize(ModContext context)
     {
         var settings = new LevelUpSettings();
-        context.AddSettings(settings);
+        context.AddSettings(settings).Changed += setting => Preview(setting, settings);
         context.AddSystem("levels", _ => Toasts.Watch(settings), SystemAnchor.End);
         Toasts.Install(context, settings);
         context.AddUi(new ToastUi(settings));
         context.Log("Level Up Notifications initialized");
+    }
+
+    /// <summary>
+    /// The "Show Preview" switch acts as the original's button: on, it asks for the preview toast and turns itself off.
+    /// </summary>
+    static void Preview(ModSetting setting, LevelUpSettings settings)
+    {
+        if (setting.Key != nameof(LevelUpSettings.ShowPreview) || !settings.ShowPreview) return;
+
+        Toasts.RequestPreview();
+        setting.Set(false);
     }
 }
 
@@ -51,7 +62,7 @@ sealed class LevelWatchSystem(LevelUpSettings settings) : ITickSystem
     }
 
     /// <summary>
-    /// The original's rule: a skill at level 1 or more that rose past a multiple of N since the last check (old / N &lt; new / N) notifies once with
+    /// The original's rule on the trained level (its <c>getStat(stat, true)</c>: the raw level without modifiers): a skill at level 1 or more that rose past a multiple of N since the last check (old / N &lt; new / N) notifies once with
     /// its level now, unless muted.
     /// </summary>
     void Check(CharacterId id, string name, Simulation.Bodies.CharacterStats stats)
@@ -62,7 +73,7 @@ sealed class LevelWatchSystem(LevelUpSettings settings) : ITickSystem
 
         for (int i = 0; i < Skills.Watched.Length; i++)
         {
-            int level = (int)MathF.Floor(stats[Skills.Watched[i].Stat]);
+            int level = (int)MathF.Floor(stats.Stored(Skills.Watched[i].Stat));
             if (level <= 0) continue;
 
             bool passed = !first && level > levels[i] && levels[i] / n < level / n;

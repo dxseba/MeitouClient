@@ -5,14 +5,15 @@ using Meitou.Game.Ui;
 namespace Meitou.LevelUpNotify;
 
 /// <summary>
-/// Draws the toasts as the original lays them out: boxes of 600 x 52 (at least 1.8 font heights) with 6 between, stacked oldest first from the
-/// chosen corner, edge or centre at the offset, every size and the font scaled by screen height / 2160 and the UI scale; text in the box's column
+/// Draws the toasts as the original lays them out: boxes of the ini's width x height (600 x 52; at least 1.8 font heights) with its gap (6)
+/// between, stacked oldest first from the chosen corner, edge or centre at the offset, every size and the font scaled by screen height / reference
+/// height (2160; with autoScale) and the UI scale; text in the box's column
 /// alignment, in the ARGB colour, its alpha times the opacity and the fade. Drawn also with the interface hidden unless
 /// <see cref="LevelUpSettings.HideWithGameUi"/>.
 /// </summary>
 public sealed class ToastUi(LevelUpSettings settings) : IUiExtension
 {
-    const float ReferenceHeight = 2160, Width = 600, Height = 52, Spacing = 6, FontBoxes = 1.8f;
+    const float FontBoxes = 1.8f;
 
     /// <summary>The standard font's own height in pixels (20 pt at 50 dpi), what a text scale of 1 draws.</summary>
     const float FontPixels = 20 * 50 / 72f;
@@ -44,10 +45,12 @@ public sealed class ToastUi(LevelUpSettings settings) : IUiExtension
         if (toasts.Count == 0) return root;
 
         int anchor = Math.Max(0, Array.IndexOf(LevelUpSettings.Anchors, settings.Anchor));
-        float scale = frame.Viewport.Height / ReferenceHeight * settings.Scale;
+        float scale = settings.PixelScale(frame.Viewport.Height);
         float font = Math.Max(1, (int)(settings.FontSize * scale));
-        var box = new Vector2(Math.Max(1, (int)(Width * scale)), Math.Max((int)(font * FontBoxes), Math.Max(1, (int)(Height * scale))));
-        float gap = (int)(Spacing * scale);
+        float width = Math.Max(1, (int)(settings.ToastWidth * scale));
+        float height = Math.Max((int)(font * FontBoxes), Math.Max(1, (int)(settings.ToastHeight * scale)));
+        var box = new Vector2(width, height);
+        float gap = (int)(settings.ToastSpacing * scale);
         var origin = Origin(frame.Viewport.Width, frame.Viewport.Height, anchor, box, gap, toasts.Count, scale);
 
         var colour = Colour();

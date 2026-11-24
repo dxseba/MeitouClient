@@ -20,6 +20,21 @@ static class Toasts
     static LevelWatchSystem? s_watch;
     static long s_lastNumber;
 
+    /// <summary>
+    /// The original's preview text (its "Show Preview" button).
+    /// </summary>
+    const string PreviewText = "Preview: Athletics Lv.42";
+
+    /// <summary>
+    /// A preview asked for by the Settings screen, shown at the next frame.
+    /// </summary>
+    static volatile bool s_preview;
+
+    /// <summary>
+    /// Asks for the preview toast; any thread.
+    /// </summary>
+    public static void RequestPreview() => s_preview = true;
+
     /// <summary>Makes the watch system of a new world, the one the toasts follow from then on.</summary>
     public static LevelWatchSystem Watch(LevelUpSettings settings) => s_running = new LevelWatchSystem(settings);
 
@@ -35,6 +50,12 @@ static class Toasts
 
         long now = Stopwatch.GetTimestamp();
         TakeNew(frame, watch, now);
+        if (s_preview)
+        {
+            s_preview = false;
+            Add(PreviewText, now);
+        }
+
         Shown.RemoveAll(t => Age(t, now) >= s_settings.Duration);
     }
 
@@ -54,8 +75,16 @@ static class Toasts
             if (level.Number <= s_lastNumber) continue;
 
             s_lastNumber = level.Number;
-            if (s_settings.WholeSquad || selected == level.Character) Shown.Add(new(level.Text, now));
+            if (s_settings.WholeSquad || selected == level.Character) Add(level.Text, now);
         }
+    }
+
+    /// <summary>
+    /// Shows a toast, dropping the oldest past <see cref="LevelUpSettings.MaxShown"/>.
+    /// </summary>
+    static void Add(string text, long now)
+    {
+        Shown.Add(new(text, now));
 
         int max = Math.Clamp(s_settings.MaxShown, 1, Slots);
         if (Shown.Count > max) Shown.RemoveRange(0, Shown.Count - max);
