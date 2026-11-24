@@ -8,11 +8,13 @@ namespace Meitou.VitalSense;
 public enum Relation : byte { Neutral, Ally, Enemy, Squad }
 
 /// <summary>
-/// Publishes, every 5th tick (the original's 150 ms refresh), the state and total bounty of every character that is down, dead or wanted, and each
-/// faction's standing with the player's. Read in the serial slow phase, shown by the interface; presentation only, neither saved nor hashed.
+/// Publishes, every <see cref="VitalSettings.UpdateMs"/> of game time (the original's <c>update_interval_ms</c>, 150: every 5th tick), the state
+/// and total bounty of every character that is down, dead or wanted, and each faction's standing with the player's. Read in the serial slow phase, shown by the interface; presentation only, neither saved nor hashed.
 /// </summary>
-sealed class VitalSystem(FactionRelations relations, GameConstants? constants) : ITickSystem
+sealed class VitalSystem(FactionRelations relations, GameConstants? constants, Action<string> log) : ITickSystem
 {
+    string _lastDiagnostics = "";
+
     volatile FrozenDictionary<CharacterId, Vital> _vitals = FrozenDictionary<CharacterId, Vital>.Empty;
     volatile FrozenDictionary<int, Relation> _factions = FrozenDictionary<int, Relation>.Empty;
 
@@ -24,7 +26,9 @@ sealed class VitalSystem(FactionRelations relations, GameConstants? constants) :
 
     public void SlowWorld(World world)
     {
-        if (world.Tick % 5 != 0 || !VitalSenseMod.Settings.Enabled) return;
+        var settings = VitalSenseMod.Settings;
+        long every = Math.Max(1, (long)MathF.Round(settings.UpdateMs / 1000f / world.TickSeconds));
+        if (world.Tick % every != 0 || !settings.Enabled) return;
 
         var vitals = new Dictionary<CharacterId, Vital>();
         var factions = new Dictionary<int, Relation>();
@@ -40,6 +44,20 @@ sealed class VitalSystem(FactionRelations relations, GameConstants? constants) :
 
         _vitals = vitals.ToFrozenDictionary();
         _factions = factions.ToFrozenDictionary();
+        if (settings.DebugDiagnostics) Diagnose(vitals.Values);
+    }
+
+    /// <summary>
+    /// <c>debug_log_diagnostics</c>: the update's counts per state and of wanted characters, logged when they change.
+    /// </summary>
+    void Diagnose(IEnumerable<Vital> vitals)
+    {
+        var counts = vitals.GroupBy(v => v.State).OrderBy(g => g.Key).Select(g => $"{g.Key}={g.Count()}");
+        string line = $"targets: {string.Join(", ", counts)}; wanted={vitals.Count(v => v.Bounty > 0)}";
+        if (line == _lastDiagnostics) return;
+
+        _lastDiagnostics = line;
+        log(line);
     }
 
     Vital? Of(CharacterCold cold)

@@ -27,11 +27,6 @@ static class VitalMarkers
     /// </summary>
     const float DownAnchor = 2;
 
-    /// <summary>
-    /// The upper bounds of the bounty tiers (trivial to elite, <c>bounty_tier_*_max</c>); above the last is legendary.
-    /// </summary>
-    static readonly int[] TierMax = [1999, 4999, 9999, 19999, 39999, 74999];
-
     static ModKeyAction? s_key;
 
     /// <summary>
@@ -152,7 +147,9 @@ static class VitalMarkers
     {
         if (bounty <= 0) return -1;
 
-        int tier = Array.FindIndex(TierMax, max => bounty <= max);
-        return tier < 0 ? TierMax.Length : tier;
+        // The upper bounds of the bounty tiers (trivial to elite, bounty_tier_*_max); above the last is legendary.
+        int[] bounds = VitalColours.Bounds();
+        int tier = Array.FindIndex(bounds, max => bounty <= max);
+        return tier < 0 ? bounds.Length : tier;
     }
 }

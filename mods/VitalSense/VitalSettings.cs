@@ -3,6 +3,15 @@ using Meitou.Modding;
 namespace Meitou.VitalSense;
 
 /// <summary>
+/// <c>bounty_symbol_position</c>: <c>before_state_icon</c> or <c>before_state_text</c>.
+/// </summary>
+public enum BountyPosition
+{
+    BeforeStateIcon,
+    BeforeStateText,
+}
+
+/// <summary>
 /// The original's mod-config.json keys that Meitou can honour, same defaults and clamps (Vital Sense <c>mod-config.defaults.json</c>, the DLL's
 /// clamp messages).
 /// </summary>
@@ -124,6 +133,187 @@ public sealed class VitalSettings
 
     [Setting("Dead text size", SubGroup = "Text sizes", Min = 8, Max = 128, Step = 1)]
     public int DeadSize { get; set; } = 18;
+
+    /// <summary>
+    /// <c>update_interval_ms</c> (50 to 2000, 150): how often the states and bounties are read, in game time.
+    /// </summary>
+    [Setting("Update interval (ms)", Hint = "How often the states and bounties are read.", Min = 50, Max = 2000, Step = 10)]
+    public int UpdateMs { get; set; } = 150;
+
+    /// <summary>
+    /// <c>show_bounty_glow</c>: <c>gui/gfx/bounty_glow_64px.png</c> behind the icon of a character with a bounty.
+    /// </summary>
+    [Setting("Bounty glow", Hint = "A glow behind the state icon of a character with a bounty.")]
+    public bool ShowGlow { get; set; } = true;
+
+    /// <summary>
+    /// <c>bounty_symbol</c>, "$".
+    /// </summary>
+    [Setting("Bounty symbol text", SubGroup = "Bounty symbol", MaxLength = 8)]
+    public string BountySymbol { get; set; } = "$";
+
+    /// <summary>
+    /// <c>bounty_symbol_size_px</c> (8 to 128, 18).
+    /// </summary>
+    [Setting("Bounty symbol size", SubGroup = "Bounty symbol", Min = 8, Max = 128, Step = 1)]
+    public int BountySize { get; set; } = 18;
+
+    /// <summary>
+    /// <c>bounty_symbol_position</c>, <c>before_state_icon</c>.
+    /// </summary>
+    [Setting("Bounty symbol position", SubGroup = "Bounty symbol", Hint = "Before the state icon, or between the icon and the state text.")]
+    public BountyPosition BountyAt { get; set; } = BountyPosition.BeforeStateIcon;
+
+    /// <summary>
+    /// The DLL's eight outline text boxes round the state text and the symbol (their colour is Meitou's: black).
+    /// </summary>
+    [Setting("Text outline", Hint = "A dark outline round the state text and the bounty symbol.")]
+    public bool Outline { get; set; } = true;
+
+    [Setting("Unconscious text", SubGroup = "State texts", MaxLength = 16)]
+    public string UnconsciousText { get; set; } = "ZZ";
+
+    [Setting("Recovery coma text", SubGroup = "State texts", MaxLength = 16)]
+    public string RecoveryComaText { get; set; } = "RC";
+
+    [Setting("Dying text", SubGroup = "State texts", MaxLength = 16)]
+    public string DyingText { get; set; } = "DY";
+
+    [Setting("Playing dead text", SubGroup = "State texts", MaxLength = 16)]
+    public string PlayingDeadText { get; set; } = "PD";
+
+    [Setting("Dead text", SubGroup = "State texts", MaxLength = 16)]
+    public string DeadText { get; set; } = "DE";
+
+    /// <summary>
+    /// <c>*_color_hex</c>: #RRGGBB or #RRGGBBAA; an invalid one takes its default.
+    /// </summary>
+    [Setting("Enemy colour", SubGroup = "Colours", Hint = "#RRGGBB or #RRGGBBAA", MaxLength = 9)]
+    public string EnemyColour { get; set; } = "#FF3333";
+
+    [Setting("Ally colour", SubGroup = "Colours", Hint = "#RRGGBB or #RRGGBBAA", MaxLength = 9)]
+    public string AllyColour { get; set; } = "#DEE85A";
+
+    [Setting("Neutral colour", SubGroup = "Colours", Hint = "#RRGGBB or #RRGGBBAA", MaxLength = 9)]
+    public string NeutralColour { get; set; } = "#FFA64D";
+
+    [Setting("Squad colour", SubGroup = "Colours", Hint = "#RRGGBB or #RRGGBBAA", MaxLength = 9)]
+    public string SquadColour { get; set; } = "#40FF40";
+
+    /// <summary>
+    /// <c>bounty_tier_*_max</c>: the upper bounds of the tiers; not strictly ascending, the defaults are used.
+    /// </summary>
+    [Setting("Trivial bounty up to", SubGroup = "Bounty tiers", Min = 1, Max = 10000000, Step = 100)]
+    public int TrivialMax { get; set; } = 1999;
+
+    [Setting("Low bounty up to", SubGroup = "Bounty tiers", Min = 1, Max = 10000000, Step = 100)]
+    public int LowMax { get; set; } = 4999;
+
+    [Setting("Modest bounty up to", SubGroup = "Bounty tiers", Min = 1, Max = 10000000, Step = 100)]
+    public int ModestMax { get; set; } = 9999;
+
+    [Setting("Notable bounty up to", SubGroup = "Bounty tiers", Min = 1, Max = 10000000, Step = 100)]
+    public int NotableMax { get; set; } = 19999;
+
+    [Setting("High-value bounty up to", SubGroup = "Bounty tiers", Min = 1, Max = 10000000, Step = 100)]
+    public int HighValueMax { get; set; } = 39999;
+
+    [Setting("Elite bounty up to", SubGroup = "Bounty tiers", Hint = "Above this: legendary.", Min = 1, Max = 10000000, Step = 100)]
+    public int EliteMax { get; set; } = 74999;
+
+    [Setting("Trivial bounty colour", SubGroup = "Bounty tiers", MaxLength = 9)]
+    public string TrivialColour { get; set; } = "#B0B0B0C8";
+
+    [Setting("Low bounty colour", SubGroup = "Bounty tiers", MaxLength = 9)]
+    public string LowColour { get; set; } = "#C9A57BD4";
+
+    [Setting("Modest bounty colour", SubGroup = "Bounty tiers", MaxLength = 9)]
+    public string ModestColour { get; set; } = "#9FBD69E0";
+
+    [Setting("Notable bounty colour", SubGroup = "Bounty tiers", MaxLength = 9)]
+    public string NotableColour { get; set; } = "#6FA6D9EC";
+
+    [Setting("High-value bounty colour", SubGroup = "Bounty tiers", MaxLength = 9)]
+    public string HighValueColour { get; set; } = "#FFC247F5";
+
+    [Setting("Elite bounty colour", SubGroup = "Bounty tiers", MaxLength = 9)]
+    public string EliteColour { get; set; } = "#FF8A2BFA";
+
+    [Setting("Legendary bounty colour", SubGroup = "Bounty tiers", MaxLength = 9)]
+    public string LegendaryColour { get; set; } = "#E03131FF";
+
+    /// <summary>
+    /// <c>*_icon_texture</c>: a picture under the mod folder (or the original's); empty: the <c>Kenshi_UI.png</c> cell.
+    /// </summary>
+    [Setting("Unconscious icon", SubGroup = "Icons", Hint = "Picture path; empty - the game's own icon.", MaxLength = 260)]
+    public string UnconsciousIcon { get; set; } = "";
+
+    [Setting("Recovery coma icon", SubGroup = "Icons", MaxLength = 260)]
+    public string RecoveryComaIcon { get; set; } = "gui/gfx/heart_64px.png";
+
+    [Setting("Dying icon", SubGroup = "Icons", MaxLength = 260)]
+    public string DyingIcon { get; set; } = "gui/gfx/death_64px.png";
+
+    [Setting("Playing dead icon", SubGroup = "Icons", MaxLength = 260)]
+    public string PlayingDeadIcon { get; set; } = "";
+
+    [Setting("Dead icon", SubGroup = "Icons", MaxLength = 260)]
+    public string DeadIcon { get; set; } = "gui/gfx/grave_64px.png";
+
+    /// <summary>
+    /// <c>*_icon_size_px</c> (8 to 512, 64): the square of the picture shown, from its top left.
+    /// </summary>
+    [Setting("Unconscious icon size", SubGroup = "Icons", Hint = "Pixels of the picture shown, from its top left.", Min = 8, Max = 512, Step = 1)]
+    public int UnconsciousIconSize { get; set; } = 64;
+
+    [Setting("Recovery coma icon size", SubGroup = "Icons", Min = 8, Max = 512, Step = 1)]
+    public int RecoveryComaIconSize { get; set; } = 64;
+
+    [Setting("Dying icon size", SubGroup = "Icons", Min = 8, Max = 512, Step = 1)]
+    public int DyingIconSize { get; set; } = 64;
+
+    [Setting("Playing dead icon size", SubGroup = "Icons", Min = 8, Max = 512, Step = 1)]
+    public int PlayingDeadIconSize { get; set; } = 64;
+
+    [Setting("Dead icon size", SubGroup = "Icons", Min = 8, Max = 512, Step = 1)]
+    public int DeadIconSize { get; set; } = 64;
+
+    /// <summary>
+    /// <c>debug_log_diagnostics</c>: each update's counts to the mod log, when they change.
+    /// </summary>
+    [Setting("Debug diagnostics", SubGroup = "Debug", Hint = "Write additional runtime diagnostics to the log.")]
+    public bool DebugDiagnostics { get; set; }
+
+    /// <summary>
+    /// <c>debug_log_texture_info</c>: each icon's picture as it is found.
+    /// </summary>
+    [Setting("Debug texture info", SubGroup = "Debug", Hint = "Write which picture each icon uses to the log.")]
+    public bool DebugTextures { get; set; }
+
+    /// <summary>
+    /// <paramref name="state"/>'s text.
+    /// </summary>
+    public string Text(VitalState state) => state switch
+    {
+        VitalState.Unconscious => UnconsciousText,
+        VitalState.RecoveryComa => RecoveryComaText,
+        VitalState.Dying => DyingText,
+        VitalState.PlayingDead => PlayingDeadText,
+        VitalState.Dead => DeadText,
+        _ => "",
+    };
+
+    /// <summary>
+    /// <paramref name="state"/>'s icon picture (empty: the atlas cell) and size.
+    /// </summary>
+    public (string Texture, int Size) Icon(VitalState state) => state switch
+    {
+        VitalState.Unconscious => (UnconsciousIcon, UnconsciousIconSize),
+        VitalState.RecoveryComa => (RecoveryComaIcon, RecoveryComaIconSize),
+        VitalState.Dying => (DyingIcon, DyingIconSize),
+        VitalState.PlayingDead => (PlayingDeadIcon, PlayingDeadIconSize),
+        _ => (DeadIcon, DeadIconSize),
+    };
 
     /// <summary>
     /// <paramref name="state"/>'s text size in pixels.

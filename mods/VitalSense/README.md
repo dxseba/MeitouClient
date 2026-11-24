@@ -1,8 +1,8 @@
 # Vital Sense (port)
 
 Port of Emkej's *Vital Sense* (workshop 3813852288, MCM fork): while the Highlight key is held (or always), a marker over each downed or dead
-character near the camera's centre, a `$` coloured by bounty tier, and a body tint. A tick system (`VitalSystem`, every 5th tick, the original's
-150 ms) publishes states, bounties and faction standings; an `AddFrame` callback projects the markers for an overlay `IUiExtension` and renews
+character near the camera's centre, a `$` coloured by bounty tier, and a body tint. A tick system (`VitalSystem`, every *Update interval*, 150 ms of
+game time: every 5th tick) publishes states, bounties and faction standings; an `AddFrame` callback projects the markers for an overlay `IUiExtension` and renews
 the tint (`VitalTint`, the engine's `Tint`, through walls). No Harmony.
 
 ## Facts
@@ -32,15 +32,24 @@ the tint (`VitalTint`, the engine's `Tint`, through walls). No Harmony.
   dead 80 126 38 27. **Verified** (original DLL (decompiled); `data/gui/images/kenshi_images.xml` for the Knockout cell). Pictures are looked
   for under this mod's folder (`icons/`, `gui/gfx/`, root), the installed original's (its required item, `OriginalFolder`; the pictures are not
   shipped), then the game's `data/gui/gfx`.
-- **Row**: `$`, icon, state text (at least 45 by 18 px; text size per state, 18 by default, 8 to 128), the bounty symbol 18 px. The DLL's
-  group order and centring are not fully read; Meitou centres the row on the projected point. **Observed** (decompile, partial).
+- **Row**: the bounty symbol (`bounty_symbol`, "$", 18 px, 8 to 128, a 12 px wide box at 18), the icon (18 px) and the state text (at least 45 by
+  18 px; text size per state, 18 by default, 8 to 128); the symbol before the icon or between icon and text (`bounty_symbol_position`
+  `before_state_icon` / `before_state_text`). Each text has eight outline copies (`*_outline_*` text boxes); their colour is not read
+  (Meitou: black, *Text outline*). **Verified** (DLL strings and widget sizes); the DLL's centring is not fully read, Meitou centres the row.
+- **Bounty glow** (`show_bounty_glow`, on): `gui/gfx/bounty_glow_64px.png`, its 64 px square, as a 24 px image round the 18 px icon (3 px out)
+  of a character with a bounty; drawn only beside an icon. **Verified** (decompile: widget size and texture); its colour is **Unknown**.
+- **Editable**: per-state texts (`*_text`), relation and tier colours (`*_color_hex`, #RRGGBB or #RRGGBBAA, an invalid one its default), tier
+  bounds (`bounty_tier_*_max`, the defaults unless strictly ascending), per-state icon pictures and sizes (`*_icon_texture`, `*_icon_size_px`
+  8 to 512, 64; the picture's top left square of that size; an empty or missing picture the atlas cell), the update interval
+  (`update_interval_ms`, 50 to 2000). **Verified** (the DLL's clamp and validation messages).
+- **Debug** (`debug_log_diagnostics`, `debug_log_texture_info`): each update's counts per state when they change, and each picture lookup, to
+  the mod log. Meitou's line formats.
 - **Key**: the original's `highlight_key` (default ALT, with Ctrl/Shift/Alt requirements; UNBOUND for always on). Meitou: the game's Highlight
-  (Alt), a bindable *Vital Sense highlight* action (no default: mods may not default to Alt), or *Always on*.
-- **Observed**: nothing in play yet (placement, colours, tint, cost at 256 markers).
+  (Alt), a bindable *Vital Sense highlight* action whose binding can be a chord (the modifier requirements), or *Always on*.
+- **Observed**: nothing in play yet (placement, colours, tint, cost at 256 markers with outlines).
 
 ## Missing
 
-- The bounty glow (24 px behind the icon, `bounty_glow_64px`) is not drawn.
-- The DLL colours the atlas glyphs of dying, playing dead and dead with the relation colour; an image node has no tint, so they keep the atlas'.
-- Per-state texts, the bounty symbol's text, size and position (`before_state_text`), editable colours and tiers, the update interval, key
-  modifiers, debug logs.
+- The DLL colours the atlas glyphs of dying, playing dead and dead with the relation colour; an image node has no colour, so they keep the
+  atlas' (engine gap).
+- The update interval runs on game time (the original's on the wall clock), so it slows and speeds with the game.

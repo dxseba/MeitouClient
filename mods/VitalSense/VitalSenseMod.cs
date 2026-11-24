@@ -20,14 +20,14 @@ public sealed class VitalSenseMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        context.AddSystem("vitals", Build, SystemAnchor.End);
+        context.AddSystem("vitals", build => Build(build, context.Log), SystemAnchor.End);
         VitalTint.Install(context);
         VitalMarkers.Install(context);
         string[] folders = OriginalFolder.Find(context) is { } original ? [context.Folder, original] : [context.Folder];
-        context.AddUi(new VitalMarkersUi(new VitalIcons(folders)));
+        context.AddUi(new VitalMarkersUi(new VitalIcons(folders, context.Log)));
         context.Log("Vital Sense initialized");
     }
 
-    static ITickSystem Build(SystemBuildContext build) =>
-        build.Find<AggroSystem>() is { } aggro ? (Running = new VitalSystem(aggro.Relations, build.Find<BodySystem>()?.Constants))! : null!;
+    static ITickSystem Build(SystemBuildContext build, Action<string> log) =>
+        build.Find<AggroSystem>() is { } aggro ? (Running = new VitalSystem(aggro.Relations, build.Find<BodySystem>()?.Constants, log))! : null!;
 }

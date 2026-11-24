@@ -5,38 +5,47 @@ using Meitou.Game.Ui;
 namespace Meitou.VitalSense;
 
 /// <summary>
-/// The state icons (<c>*_icon_texture</c> of <c>mod-config.defaults.json</c>): the original's own picture where one is found, else the
-/// <c>Kenshi_UI.png</c> atlas cell the DLL falls back to. Host thread only.
+/// The state icons (<c>*_icon_texture</c>, <c>*_icon_size_px</c>, from the settings): the configured picture where one is found, its top left
+/// <c>size</c> square shown (the DLL's image coordinates 0, 0, size, size), else the <c>Kenshi_UI.png</c> atlas cell the DLL falls back to; and
+/// the bounty glow picture. Host thread only.
 /// </summary>
-sealed class VitalIcons(IReadOnlyList<string> folders)
+sealed class VitalIcons(IReadOnlyList<string> folders, Action<string> log)
 {
     /// <summary>
-    /// The original's default pictures: recovery coma, dying and dead (unconscious and playing dead default to the atlas).
+    /// The DLL's glow picture (<c>show_bounty_glow</c>).
     /// </summary>
-    static readonly Dictionary<VitalState, string> Pictures = new()
-    {
-        [VitalState.RecoveryComa] = "gui/gfx/heart_64px.png",
-        [VitalState.Dying] = "gui/gfx/death_64px.png",
-        [VitalState.Dead] = "gui/gfx/grave_64px.png",
-    };
+    const string GlowPicture = "gui/gfx/bounty_glow_64px.png";
 
-    readonly Dictionary<VitalState, string?> _files = [];
+    /// <summary>
+    /// Each texture setting once looked for (null: not found).
+    /// </summary>
+    readonly Dictionary<string, string?> _files = new(StringComparer.OrdinalIgnoreCase);
 
     readonly string? _gameGfx = GameInstall.Locate() is { } install ? Path.Combine(install.DataDirectory, "gui", "gfx") : null;
-
-    string? _atlas;
-    bool _atlasLooked;
 
     /// <summary>
     /// <paramref name="state"/>'s icon file and crop; null without one (no install for the atlas).
     /// </summary>
     public (string File, UiImageCrop? Crop)? Of(VitalState state)
     {
-        if (!_files.TryGetValue(state, out var picture)) _files[state] = picture = Pictures.TryGetValue(state, out var p) ? Find(p) : null;
-        if (picture is not null) return (picture, null);
+        var (texture, size) = VitalSenseMod.Settings.Icon(state);
+        if (texture.Length > 0 && Lookup(texture) is { } picture) return (picture, UiImageCrop.Pixels(0, 0, size, size));
 
-        if (!_atlasLooked) (_atlas, _atlasLooked) = (Find("Kenshi_UI.png"), true);
-        return _atlas is { } atlas ? (atlas, AtlasCell(state)) : null;
+        return Lookup("Kenshi_UI.png") is { } atlas ? (atlas, AtlasCell(state)) : null;
+    }
+
+    /// <summary>
+    /// The glow picture, its 64 px square (the DLL's coordinates); null when it is not found.
+    /// </summary>
+    public (string File, UiImageCrop? Crop)? Glow() => Lookup(GlowPicture) is { } file ? (file, UiImageCrop.Pixels(0, 0, 64, 64)) : null;
+
+    string? Lookup(string texture)
+    {
+        if (_files.TryGetValue(texture, out var known)) return known;
+
+        string? file = Find(texture);
+        if (VitalSenseMod.Settings.DebugTextures) log($"texture '{texture}': {file ?? "not found"}");
+        return _files[texture] = file;
     }
 
     /// <summary>
@@ -56,7 +65,8 @@ sealed class VitalIcons(IReadOnlyList<string> folders)
     /// </summary>
     string? Find(string texture)
     {
-        string name = Path.GetFileName(texture);
+        if (texture.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || Path.GetFileName(texture) is not { Length: > 0 } name) return null;
+
         var candidates = folders.SelectMany(folder => Candidates(folder, texture, name)).ToList();
         if (_gameGfx is not null) candidates.Add(Path.Combine(_gameGfx, name));
 

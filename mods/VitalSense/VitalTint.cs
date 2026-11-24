@@ -5,29 +5,6 @@ using Meitou.Simulation;
 namespace Meitou.VitalSense;
 
 /// <summary>
-/// The colours of the original's <c>mod-config.defaults.json</c>.
-/// </summary>
-static class VitalColours
-{
-    /// <summary>
-    /// Neutral, ally, enemy, squad (<see cref="Relation"/> order): <c>neutral_color_hex</c> #FFA64D, <c>ally_color_hex</c> #DEE85A,
-    /// <c>enemy_color_hex</c> #FF3333, <c>squad_color_hex</c> #40FF40.
-    /// </summary>
-    public static readonly Vector4[] Relations = [Hex(0xFFA64DFF), Hex(0xDEE85AFF), Hex(0xFF3333FF), Hex(0x40FF40FF)];
-
-    /// <summary>
-    /// <c>bounty_color_*_hex</c>, trivial to legendary, with their alpha.
-    /// </summary>
-    public static readonly Vector4[] Tiers =
-    [
-        Hex(0xB0B0B0C8), Hex(0xC9A57BD4), Hex(0x9FBD69E0), Hex(0x6FA6D9EC), Hex(0xFFC247F5), Hex(0xFF8A2BFA), Hex(0xE03131FF),
-    ];
-
-    static Vector4 Hex(uint rgba) =>
-        new(((rgba >> 24) & 0xFF) / 255f, ((rgba >> 16) & 0xFF) / 255f, ((rgba >> 8) & 0xFF) / 255f, (rgba & 0xFF) / 255f);
-}
-
-/// <summary>
 /// The character tint, the engine's <c>Tint</c> (the original's <c>coloroverride</c>: the body's albedo blended to the colour by its alpha) while
 /// the markers show, through walls as its <c>overrideDepth</c> when set: the marked characters, the player's conscious ones within the distance
 /// (<c>character_tint_include_squad</c>), in the relation colour, or the bounty tier's colour for one with a bounty (<b>Verified</b>, original DLL
@@ -78,7 +55,7 @@ static class VitalTint
         if (target.Vital.State == VitalState.None && !settings.TintBounty) return;
 
         int tier = VitalMarkers.Tier(target.Vital.Bounty);
-        var colour = tier >= 0 ? VitalColours.Tiers[tier] : VitalColours.Relations[(int)target.Relation];
+        var colour = tier >= 0 ? VitalColours.Tier(tier) : VitalColours.Of(target.Relation);
         Paint(context, target.Character.Id, colour);
     }
 
@@ -90,7 +67,7 @@ static class VitalTint
             if (!c.IsPlayer || !c.Standing || c.Appearance is null || Now.Contains(c.Id)) continue;
             if (VitalMarkers.Flat(c.Position, centre) > settings.MaxDistance) continue;
 
-            Paint(context, c.Id, VitalColours.Relations[(int)Relation.Squad]);
+            Paint(context, c.Id, VitalColours.Of(Relation.Squad));
         }
     }
 
