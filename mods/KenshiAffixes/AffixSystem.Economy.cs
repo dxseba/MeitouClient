@@ -23,7 +23,7 @@ sealed partial class AffixSystem : IItemCreatedObserver, ITradePriceFilter
     public void Created(World world, in ItemCreated created)
     {
         var item = created.Item;
-        if (!settings.Enabled || combat is null || !Wearing.Eligible(item) || AffixTag.Rolled(item.ModTag) || AffixTag.Plain(item.ModTag)) return;
+        if (!settings.Enabled || combat is null || !Rollable(item) || AffixTag.Rolled(item.ModTag) || AffixTag.Plain(item.ModTag)) return;
         if (Meitou(world, item) || Rolling.BaselineOf(item, combat) is not { } baseline) return;
 
         if (SourceLevel(world, created, item) is { } level) Roll(world, item, baseline, level, CreationKey(world, created));
@@ -37,11 +37,14 @@ sealed partial class AffixSystem : IItemCreatedObserver, ITradePriceFilter
         {
             ItemCreatedKind.SpawnEquipment => NpcKitLevel(world, created.Character, item),
             ItemCreatedKind.ShopStock when settings.AutoShops && world.Squads.Find(created.Squad)?.Faction != world.Player.Faction => quality,
-            ItemCreatedKind.Loot when settings.AutoContainers => Math.Max(quality, MathF.Floor(0.7f * DefaultSiteStrength + 0.3f * quality + 0.5f)),
+            ItemCreatedKind.Loot when settings.AutoContainers => LootLevel(quality),
             ItemCreatedKind.Crafted when settings.AutoCrafting => CraftLevel(world, created.Character, item, quality),
             _ => null,
         };
     }
+
+    /// <summary>The original's loot level: max(quality level, round(0.7 x site strength + 0.3 x quality level)), the strength its default.</summary>
+    static float LootLevel(int quality) => Math.Max(quality, MathF.Floor(0.7f * DefaultSiteStrength + 0.3f * quality + 0.5f));
 
     /// <summary>A fresh NPC's equipped gear at its level; a fixed NPC's is left to its profile (the sweep), the player's gear stays plain.</summary>
     float? NpcKitLevel(World world, CharacterId id, ItemInstance item)

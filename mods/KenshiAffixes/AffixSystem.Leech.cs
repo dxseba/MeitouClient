@@ -12,14 +12,14 @@ namespace Meitou.KenshiAffixes;
 /// </summary>
 sealed partial class AffixSystem
 {
-    readonly Dictionary<(CharacterId Attacker, CharacterId Victim, int Sequence, int Blow), (float[] Before, float Leech)> _leeches = [];
-    readonly List<(CharacterId Attacker, float Budget)> _heals = [];
+    readonly Dictionary<(CharacterId Attacker, CharacterId Victim, int Sequence, int Blow), (float[] Before, CombatLine Line)> _leeches = [];
+    readonly List<(CharacterId Attacker, float Dealt, CombatLine Line)> _heals = [];
 
-    void NoteLeech(World world, in PendingHit hit, float leech)
+    void NoteLeech(World world, in PendingHit hit, CombatLine line)
     {
         if (!world.Characters.TryResolveNext(hit.Victim, out int v) || world.Characters.Cold(v)?.Medical is not { } medical) return;
 
-        _leeches[(hit.Attacker, hit.Victim, hit.Sequence, hit.Blow)] = ([.. medical.Parts.Select(Effective)], leech);
+        _leeches[(hit.Attacker, hit.Victim, hit.Sequence, hit.Blow)] = ([.. medical.Parts.Select(Effective)], line);
     }
 
     public void HitResolved(World world, in CombatHit hit)
@@ -29,7 +29,7 @@ sealed partial class AffixSystem
 
         float dealt = 0;
         for (int i = 0; i < noted.Before.Length && i < medical.Parts.Count; i++) dealt += Math.Max(0, noted.Before[i] - Effective(medical.Parts[i]));
-        if (dealt > 0) _heals.Add((hit.Attacker, dealt * noted.Leech));
+        _heals.Add((hit.Attacker, dealt, noted.Line));
     }
 
     static float Effective(HealthPart p) => Math.Clamp(p.Flesh - p.Stun + p.Rig, 0, Math.Max(0, p.MaxHp));
@@ -39,18 +39,22 @@ sealed partial class AffixSystem
     /// <summary>The heals of this tick's blows; a blow blocked or dodged after its filter leaves its note, dropped here.</summary>
     void Heal(World world)
     {
-        foreach (var (attacker, budget) in _heals)
+        foreach (var (attacker, dealt, line) in _heals)
         {
             var table = world.Characters;
-            if (table.TryResolveNext(attacker, out int a) && table.Cold(a)?.Medical is { Dead: false } medical) HealStun(medical, budget);
+            float healed = dealt > 0 && table.TryResolveNext(attacker, out int a) && table.Cold(a)?.Medical is { Dead: false } medical
+                ? HealStun(medical, dealt * line.Leech) : 0;
+            LogCombat(line, dealt, healed);
         }
 
         _heals.Clear();
         _leeches.Clear();
     }
 
-    static void HealStun(MedicalState medical, float budget)
+    /// <summary>Heals up to <paramref name="budget"/> of recoverable stun; returns what it healed.</summary>
+    static float HealStun(MedicalState medical, float budget)
     {
+        float spent = 0;
         while (budget > 0.00001f)
         {
             HealthPart? worst = null;
@@ -63,11 +67,14 @@ sealed partial class AffixSystem
                 if (float.IsFinite(missing) && missing > most) (worst, most) = (part, missing);
             }
 
-            if (worst is null) return;
+            if (worst is null) break;
 
             float used = Math.Min(budget, most);
             worst.Stun -= used;
             budget -= used;
+            spent += used;
         }
+
+        return spent;
     }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation;
@@ -76,14 +77,29 @@ sealed partial class AffixSystem
         var p = Scaled(hit.Packet, weaponAffixes);
 
         var (chance, bonus, leech) = CombatBonuses(weaponAffixes, attacker.Inventory);
-        if (chance > 0 && CritRoll(world, hit) < chance)
-        {
-            float m = CritBase + bonus;
-            p = p with { Cut = p.Cut * m, Blunt = p.Blunt * m, Pierce = p.Pierce * m, Stun = p.Stun * m };
-        }
+        float multiplier = chance > 0 && CritRoll(world, hit) < chance ? CritBase + bonus : 1;
+        if (multiplier > 1)
+            p = p with { Cut = p.Cut * multiplier, Blunt = p.Blunt * multiplier, Pierce = p.Pierce * multiplier, Stun = p.Stun * multiplier };
 
         hit.Packet = p;
-        if (leech > 0) NoteLeech(world, hit, leech);
+        var line = new CombatLine(multiplier, chance, leech);
+        if (leech > 0) NoteLeech(world, hit, line);
+        else if (chance > 0) LogCombat(line, 0, 0);
+    }
+
+    /// <summary>A hit's critical and leech figures for the original's <c>CombatLog</c> line.</summary>
+    readonly record struct CombatLine(float Multiplier, float Chance, float Leech);
+
+    int _combatLines;
+
+    /// <summary>The original's <c>CombatLog</c> line ("COMBAT crit= mult= chance= leech= dealt= healed="), at most 10,000 a session.</summary>
+    void LogCombat(CombatLine line, float dealt, float healed)
+    {
+        if (!settings.CombatLog || _combatLines >= 10000) return;
+
+        _combatLines++;
+        log(string.Create(CultureInfo.InvariantCulture,
+            $"COMBAT crit={(line.Multiplier > 1 ? 1 : 0)} mult={line.Multiplier} chance={line.Chance} leech={line.Leech} dealt={dealt} healed={healed}"));
     }
 
     /// <summary>Keen, Crushing and Serrated: the weapon's cut, blunt and bleed multipliers x (1 + v).</summary>

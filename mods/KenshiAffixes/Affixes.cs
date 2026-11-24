@@ -89,7 +89,7 @@ static class AffixTable
 /// </summary>
 static class AffixTag
 {
-    const string Key = "affix", LevelKey = "ilvl", ProfileKey = "aprof", PlainKey = "aplain";
+    const string Key = "affix", LevelKey = "ilvl", ProfileKey = "aprof", PlainKey = "aplain", TestKey = "atest";
 
     public static bool Rolled(string tag) => ItemTag.Get(tag, Key) is not null;
 
@@ -133,6 +133,11 @@ static class AffixTag
     }
 
     public static void MarkPlain(ItemInstance item) => item.ModTag = ItemTag.Put(item.ModTag, PlainKey, "1");
+
+    /// <summary>A test roll (the original's test button): the tooltip shows "[TEST] "; the plain mark goes.</summary>
+    public static void MarkTest(ItemInstance item) => item.ModTag = ItemTag.Remove(ItemTag.Put(item.ModTag, TestKey, "1"), PlainKey);
+
+    public static bool Test(string tag) => ItemTag.Get(tag, TestKey) is not null;
 }
 
 /// <summary>Which items take affixes and where a character wears them.</summary>

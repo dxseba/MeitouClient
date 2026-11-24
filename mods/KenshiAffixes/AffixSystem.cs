@@ -10,7 +10,7 @@ namespace Meitou.KenshiAffixes;
 /// stat affixes of each character's equipped gear as stat modifiers (every 30th tick; not saved, so set again after a load); weapon damage and
 /// critical hits as a hit filter, the armour resistance affixes as an armour filter, and Leeching as a heal of the attacker's stun.
 /// </summary>
-sealed partial class AffixSystem(AffixSettings settings, RngPurpose purpose, CombatDatabase? combat, Profiles profiles)
+sealed partial class AffixSystem(AffixSettings settings, RngPurpose purpose, CombatDatabase? combat, Profiles profiles, Action<string> log)
     : ICombatHitFilter, IArmourFilter, ICombatHitObserver
 {
     readonly List<ShowAffixesOrder> _shows = [];
@@ -20,6 +20,7 @@ sealed partial class AffixSystem(AffixSettings settings, RngPurpose purpose, Com
         foreach (var command in commands)
         {
             if (command is ShowAffixesOrder show) _shows.Add(show);
+            else if (command is TestRollOrder or InspectLootOrder) _orders.Add(command);
         }
     }
 
@@ -27,6 +28,7 @@ sealed partial class AffixSystem(AffixSettings settings, RngPurpose purpose, Com
     {
         foreach (var show in _shows) Show(world, show.Character);
         _shows.Clear();
+        Orders(world);
 
         if (world.Tick % 60 == 0 && settings.Enabled && combat is not null) RollAll(world);
         if (world.Tick % 30 == 0) ApplyAll(world);

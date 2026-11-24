@@ -3,6 +3,7 @@ using System.Numerics;
 using Meitou.Game.Ui;
 using Meitou.Modding;
 using Meitou.Simulation;
+using Meitou.Simulation.Items;
 
 namespace Meitou.KenshiAffixes;
 
@@ -15,11 +16,16 @@ public sealed class KenshiAffixesMod : IMod
 {
     internal static readonly AffixSettings Settings = new();
 
+    /// <summary>The original's Chinese halves, when read (<see cref="AffixSettings.ChineseNames"/>).</summary>
+    internal static OriginalTexts Texts = OriginalTexts.None;
+
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
         var profiles = Profiles.Load(context);
-        context.AddSystem("affixes", build => new AffixSystem(Settings, context.RngPurpose, build.Data.Combat, profiles), SystemAnchor.End);
+        Texts = profiles.Texts;
+        context.AddSystem("affixes", build => new AffixSystem(Settings, context.RngPurpose, build.Data.Combat, profiles, context.Log),
+            SystemAnchor.End);
         context.AddUi(new AffixMenu());
         context.AddUi(new AffixTooltip());
         context.Log("Kenshi Affixes initialized");
@@ -59,6 +65,18 @@ public sealed class AffixSettings
 
     [Setting("Shop level per band", Hint = "Item levels added per quality band (ShopLevelPerBand).", Min = 0, Max = 20)]
     public int ShopLevelPerBand { get; set; } = 16;
+
+    [Setting("Chinese names", Hint = "Show the original's bilingual texts (Chinese / English), read from the installed original; off: English only.")]
+    public bool ChineseNames { get; set; } = true;
+
+    [Setting("Test roll", Hint = "TestButton: a character menu row rolls its equipped gear once, at least at the test level (development).")]
+    public bool TestButton { get; set; }
+
+    [Setting("Test level", Hint = "TestMinimumLevel: the lowest source level of a test roll.", Min = 1, Max = 100)]
+    public int TestMinimumLevel { get; set; } = 50;
+
+    [Setting("Combat log", Hint = "CombatLog: one mod log line per melee hit with a critical or leech affix (at most 10,000).")]
+    public bool CombatLog { get; set; }
 }
 
 /// <summary>The "Show affixes" row on any living character the player can see.</summary>
@@ -73,13 +91,17 @@ sealed class AffixMenu : IUiExtension
         if (!KenshiAffixesMod.Settings.Enabled || menu.Target.Body is not { Dead: false }) return [];
 
         var target = menu.Target.Id;
-        return [new UiMenuVerb("Show affixes", () => menu.Enqueue(new ShowAffixesOrder(target) { Tick = menu.Tick }))];
+        var show = new UiMenuVerb("Show affixes", () => menu.Enqueue(new ShowAffixesOrder(target) { Tick = menu.Tick }));
+        if (!KenshiAffixesMod.Settings.TestButton) return [show];
+
+        return [show, new UiMenuVerb("Roll selected gear (once)", () => menu.Enqueue(new TestRollOrder(target) { Tick = menu.Tick }))];
     }
 }
 
 /// <summary>
-/// The original's tooltip block on rolled gear: "Affixes [FIXED] iLvl 50 / T3" (the tier (iLvl - 1) / 20 + 1), "No affixes (rolled once)" for an
-/// empty roll, "Affix value +x%" with prices on, then each affix with its effect; the header and affixes in the item level's rank colour.
+/// The original's tooltip block on rolled gear: "Affixes [FIXED] iLvl 50 / T3" (the tier (iLvl - 1) / 20 + 1; "[TEST] " for a test roll), "No
+/// affixes (rolled once)" for an empty roll, "Affix value +x%" with prices on, then each affix with its effect; the header and affixes in the item
+/// level's rank colour; with Chinese names, the original's bilingual texts. An unrolled container item's first tooltip asks for its loot roll.
 /// </summary>
 sealed class AffixTooltip : IUiExtension
 {
@@ -87,26 +109,48 @@ sealed class AffixTooltip : IUiExtension
 
     public void Register(UiRegistration registration) => registration.AddItemTooltipLines(Lines);
 
+    static OriginalTexts Texts => KenshiAffixesMod.Settings.ChineseNames ? KenshiAffixesMod.Texts : OriginalTexts.None;
+
     static IEnumerable<UiItemTooltipLine> Lines(UiItemTooltipContext item)
     {
-        if (!KenshiAffixesMod.Settings.Enabled || AffixTag.Level(item.ModTag) is not { } level) return [];
+        if (!KenshiAffixesMod.Settings.Enabled) return [];
+        if (AffixTag.Level(item.ModTag) is not { } level)
+        {
+            AskLoot(item);
+            return [];
+        }
 
         var settings = KenshiAffixesMod.Settings;
+        var texts = Texts;
         var rank = new UiLineStyle(Label: Rank(level));
-        string flag = AffixTag.Profile(item.ModTag) is null ? "" : "[FIXED] ";
         string tier = string.Create(CultureInfo.InvariantCulture, $"iLvl {level} / T{(level - 1) / 20 + 1}");
-        var lines = new List<UiItemTooltipLine> { new("Affixes " + flag + tier) { Style = rank } };
+        var lines = new List<UiItemTooltipLine> { new(texts.Ui("HEADER", "Affixes ") + Flag(item.ModTag, texts) + tier) { Style = rank } };
 
         var affixes = AffixTag.Read(item.ModTag);
-        if (affixes.Count == 0) lines.Add(new("No affixes (rolled once)"));
+        if (affixes.Count == 0) lines.Add(new(texts.Ui("NONE", "No affixes (rolled once)")));
         if (settings.AffixPrices && affixes.Count > 0)
         {
             double premium = (AffixSystem.ValueMultiplier(item.ModTag, settings.ValueBasePercent, settings.ValueLevelPercent) - 1) * 100;
-            lines.Add(new("Affix value +" + premium.ToString("0.0", CultureInfo.InvariantCulture) + "%"));
+            lines.Add(new(texts.Ui("VALUE", "Affix value +") + premium.ToString("0.0", CultureInfo.InvariantCulture) + "%"));
         }
 
-        lines.AddRange(affixes.Select(a => new UiItemTooltipLine(a.Text, a.Kind.Effect) { Style = rank }));
+        lines.AddRange(affixes.Select(a => new UiItemTooltipLine(Label(a, texts), texts.Effect(a.Kind)) { Style = rank }));
         return lines;
+    }
+
+    static string Flag(string tag, OriginalTexts texts) =>
+        AffixTag.Test(tag) ? texts.Ui("TEST", "[TEST] ") : AffixTag.Profile(tag) is null ? "" : texts.Ui("FIXED", "[FIXED] ");
+
+    static string Label(Affix affix, OriginalTexts texts) =>
+        (affix.Kind.Op == AffixOp.Combat ? texts.Ui("RARE", "[RARE] ") : "") + texts.Name(affix.Kind) + " " + affix.ValueText;
+
+    /// <summary>A container's unrolled gear seen for the first time: its loot roll is queued (the system checks the container and the item).</summary>
+    static void AskLoot(UiItemTooltipContext item)
+    {
+        if (!item.First || !KenshiAffixesMod.Settings.AutoContainers || item.Owner is not { Holder: ItemHolder.Site } owner || item.Index < 0) return;
+        if (!ItemTag.Ours(item.ModTag) || AffixTag.Plain(item.ModTag)) return;
+
+        item.Enqueue(new InspectLootOrder(owner.Site, item.Index, item.Record) { Tick = item.Tick });
     }
 
     /// <summary>The original's rank colours by item level (#999999 below 15 up to #FF6262 from 90).</summary>
@@ -123,6 +167,15 @@ sealed class AffixTooltip : IUiExtension
 
     static Vector4 Rgb(uint rgb) => new(((rgb >> 16) & 0xff) / 255f, ((rgb >> 8) & 0xff) / 255f, (rgb & 0xff) / 255f, 1);
 }
+
+/// <summary>The original's test button: rolls <paramref name="Character"/>'s equipped gear once (<see cref="AffixSettings.TestButton"/>).</summary>
+public sealed record TestRollOrder(CharacterId Character) : SimCommand;
+
+/// <summary>
+/// A container's item shown in a tooltip before it was rolled (the original rolls container loot on its first view): <paramref name="Index"/> in
+/// the container at <paramref name="Site"/>, which must still hold a <paramref name="Record"/> there.
+/// </summary>
+public sealed record InspectLootOrder(string Site, int Index, string Record) : SimCommand;
 
 /// <summary>Posts the affixes of <paramref name="Character"/>'s equipped gear.</summary>
 public sealed record ShowAffixesOrder(CharacterId Character) : SimCommand;

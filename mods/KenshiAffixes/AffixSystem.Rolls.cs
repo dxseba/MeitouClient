@@ -42,7 +42,7 @@ sealed partial class AffixSystem
         for (int i = 0; i < inventory.Items.Count; i++)
         {
             var item = inventory.Items[i];
-            if (!Wearing.Eligible(item) || !Wearing.Equipped(item) || Meitou(world, item) || AffixTag.Plain(item.ModTag)) continue;
+            if (!Rollable(item) || !Wearing.Equipped(item) || Meitou(world, item) || AffixTag.Plain(item.ModTag)) continue;
             if (Rolling.BaselineOf(item, combat!) is not { } baseline) continue;
 
             if (profiles.Npc(cold.RecordId, baseline.Armour) is not { } fixedNpc || AffixTag.Profile(item.ModTag) is not null) continue;
@@ -78,7 +78,7 @@ sealed partial class AffixSystem
         for (int i = 0; i < stock.Items.Count; i++)
         {
             var item = stock.Items[i];
-            if (!Wearing.Eligible(item) || Meitou(world, item) || AffixTag.Rolled(item.ModTag) || AffixTag.Plain(item.ModTag)) continue;
+            if (!Rollable(item) || Meitou(world, item) || AffixTag.Rolled(item.ModTag) || AffixTag.Plain(item.ModTag)) continue;
             if (Rolling.BaselineOf(item, combat!) is not { } baseline) continue;
 
             int level = Rolling.ShopLevel(Rolling.Band(item), settings.ShopBaseLevel, settings.ShopLevelPerBand);
@@ -93,15 +93,21 @@ sealed partial class AffixSystem
         AffixTag.Write(item, ilvl, affixes);
     }
 
+    /// <summary>A gear item this mod may roll: eligible and not in the ini's <c>[ExcludeTemplates]</c>.</summary>
+    bool Rollable(ItemInstance item) => Wearing.Eligible(item) && !profiles.Excluded(item.Record);
+
     /// <summary>
-    /// A Meitou weapon (its material is the Meitou model) whose template the original lists gets that level-100 profile, replacing any other roll;
-    /// true when the item has one.
+    /// A Meitou weapon (its material is the Meitou model) gets its level-100 profile (its template's list, or the style of a template the original
+    /// does not list, each with the fill-in), replacing any other roll; true when the item has one.
     /// </summary>
     bool Meitou(World world, ItemInstance item)
     {
-        if (item.Type != FcsRecordType.Weapon || item.MaterialId != Profiles.MeitouMaterial || profiles.Meitou(item.Record) is not { } priorities)
-            return false;
-        if (AffixTag.Profile(item.ModTag) == Profiles.MeitouProfile || Rolling.BaselineOf(item, combat!) is not { } baseline) return true;
+        if (item.Type != FcsRecordType.Weapon || item.MaterialId != Profiles.MeitouMaterial || profiles.Excluded(item.Record)) return false;
+        if (AffixTag.Profile(item.ModTag) == Profiles.MeitouProfile) return true;
+        if (Rolling.BaselineOf(item, combat!) is not { } baseline) return false;
+
+        bool blunt = baseline[AffixField.BluntDamage] > baseline[AffixField.CutDamage];
+        if (profiles.Meitou(item.Record, blunt) is not { } priorities) return false;
 
         var (ilvl, affixes) = Rolling.Fixed(baseline, 5, 100, priorities);
         AffixTag.Write(item, ilvl, affixes, Profiles.MeitouProfile);
