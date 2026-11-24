@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.containerhighlight",
+  "apiVersion": 2,
+  "assemblies": ["ContainerHighlight.dll"],
+  "entry": "Meitou.ContainerHighlight.ContainerHighlightMod",
+  "gameVersion": ">=0.22.2"
+}
