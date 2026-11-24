@@ -58,13 +58,26 @@ sealed partial class DisarmSystem(DisarmSettings settings, PopulationData data, 
     /// <summary>The chance of each player character on each nearby target, rebuilt in the slow phase; safe to read from the interface thread.</summary>
     public FrozenDictionary<(CharacterId Actor, CharacterId Target), int> Chances => _chances;
 
+    volatile CharacterId[] _pending = [];
+
+    /// <summary>The actors walking to a disarm now (for Escape's cancel); safe to read from the interface thread.</summary>
+    public IReadOnlyList<CharacterId> Pending => _pending;
+
+    volatile int _playerFaction = -1;
+
+    /// <summary>The player's faction (for the theft tint of Pick Up); safe to read from the interface thread.</summary>
+    public int PlayerFaction => _playerFaction;
+
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         foreach (var command in commands)
         {
             if (command is DisarmOrder order) Queue(order);
             else if (command is KickOrder kick) QueueKick(kick);
+            else if (command is CancelDisarmOrder cancel) Cancel(world, cancel);
         }
+
+        Publish(world);
     }
 
     /// <summary>Runs every tick: the approaches every 5th, the knockout watch and rearm every 15th, the published chances every 10th.</summary>
@@ -93,12 +106,34 @@ sealed partial class DisarmSystem(DisarmSettings settings, PopulationData data, 
         _approaches.Add(new(order.Actor, order.Target, order.Tick));
     }
 
+    /// <summary>
+    /// Escape: the original drops its pending disarm and clears the actor's goals, so the walk stops (the game's Stop for that actor).
+    /// </summary>
+    void Cancel(World world, CancelDisarmOrder cancel)
+    {
+        var actors = _approaches.Where(a => cancel.Actors.Contains(a.Actor)).Select(a => a.Actor).ToList();
+        if (actors.Count == 0) return;
+
+        _approaches.RemoveAll(a => actors.Contains(a.Actor));
+        enqueue(new StopCommand(actors) { Tick = world.Tick + 1 });
+    }
+
+    /// <summary>Publishes the pending actors and the player's faction for the interface.</summary>
+    void Publish(World world)
+    {
+        _playerFaction = world.Player.Faction;
+        if (_pending.Length != _approaches.Count || !_approaches.Select(a => a.Actor).SequenceEqual(_pending))
+            _pending = [.. _approaches.Select(a => a.Actor)];
+    }
+
     void Approach(World world)
     {
         foreach (var approach in _approaches.ToArray())
         {
             if (Step(world, approach)) _approaches.Remove(approach);
         }
+
+        Publish(world);
     }
 
     /// <summary>
