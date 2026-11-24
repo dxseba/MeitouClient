@@ -25,9 +25,10 @@ sealed record TabView(int Active, string[][] Jobs);
 /// <summary>
 /// Switches job lists in the serial slow step: the character's jobs (<c>CharacterCold.Jobs</c>) are kept in the active tab and the chosen tab's put
 /// in their place, then its next decision is asked for. Tabs are keyed by the lasting character id and saved with the world; the first selected
-/// player characters' tabs are published every 5th tick (and after a switch) for the buttons.
+/// player characters' tabs are published every 5th tick (and after a switch) for the buttons. Each character's tabs are also kept under the
+/// original's keys in its orders record (<see cref="OriginalSave"/>), and read from them for a character the sidecar does not know.
 /// </summary>
-sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
+sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData, IWorldReady
 {
     const int Version = 2;
 
@@ -52,24 +53,26 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
 
     public void SlowWorld(World world)
     {
-        bool changed = _orders.Count > 0;
+        bool switched = _orders.Count > 0, changed = false;
         foreach (var order in _orders)
         {
-            foreach (var id in world.Player.Selection.ToList()) Switch(world, id, order.Tab);
+            foreach (var id in world.Player.Selection.ToList()) changed |= Switch(world, id, order.Tab);
         }
 
         _orders.Clear();
-        if (changed || world.Tick % 5 == 0) _views = Publish(world);
+        if (changed) world.PostInterfaceSound("General_Click");   // the original clicks only when a list changed
+        if (switched || world.Tick % 5 == 0) _views = Publish(world);
     }
 
-    void Switch(World world, CharacterId id, int tab)
+    /// <summary>Switches one selected player character; true when its list changed.</summary>
+    bool Switch(World world, CharacterId id, int tab)
     {
         var table = world.Characters;
-        if (tab < 0 || tab >= _count || !table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true } cold) return;
+        if (tab < 0 || tab >= _count || !table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true } cold) return false;
 
         var lasting = world.LastingIds.GetOrGive(id).Value;
         if (!_tabs.TryGetValue(lasting, out var tabs)) _tabs[lasting] = tabs = new Tabs(_count);
-        if (tabs.Active == tab || tab >= tabs.Lists.Length) return;   // the count was raised since: it applies at the next start
+        if (tabs.Active == tab || tab >= tabs.Lists.Length) return false;   // the count was raised since: it applies at the next start
 
         var keep = tabs.Lists[tabs.Active];
         keep.Clear();
@@ -80,16 +83,33 @@ sealed class JobTabsSystem(JobTabsSettings settings) : ITickSystem, IModSaveData
         tabs.Lists[tab].Clear();
         tabs.Active = tab;
         DecisionSystem.Request(cold);
+        OriginalSave.Write(world, id, tabs, job => JobName(world, job));
+        return true;
+    }
+
+    /// <summary>
+    /// After a load or a new game: a player character with tabs in the sidecar gets the original's keys written; one without, whose save holds
+    /// the original's keys (a save from the original game), takes its tabs from them.
+    /// </summary>
+    public void Ready(World world, bool fromSave)
+    {
+        var table = world.Characters;
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (table.Cold(slot) is not { IsPlayer: true } cold) continue;
+
+            var id = table.IdOf(slot);
+            if (!cold.LastingId.IsNone && _tabs.TryGetValue(cold.LastingId.Value, out var tabs))
+                OriginalSave.Write(world, id, tabs, job => JobName(world, job));
+            else if (fromSave && OriginalSave.Read(world, id, _count) is { } read)
+                _tabs[world.LastingIds.GetOrGive(id).Value] = read;
+        }
     }
 
     static KeptJob Keep(World world, PermaJob job) =>
         new(job, job.Character.IsNone || !PermaJobs.PerTarget(job.Type) ? 0 : world.LastingIds.GetOrGive(job.Character).Value);
 
-    /// <summary>
-    /// A kept job back in the list: a job per target names its target as it is in this world (character ids are new for every world).
-    /// </summary>
-    static PermaJob Restore(World world, KeptJob kept) =>
-        kept.Target == 0 ? kept.Job : kept.Job with { Character = world.LastingIds.Find(new LastingId(kept.Target)) };
+    static PermaJob Restore(World world, KeptJob kept) => OriginalSave.Restore(world, kept);
 
     Dictionary<CharacterId, TabView> Publish(World world)
     {

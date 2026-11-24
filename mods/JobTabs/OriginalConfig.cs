@@ -49,7 +49,7 @@ static class OriginalConfig
         string value = text[(equals + 1)..].Trim();
 
         if (key == "tabCount") TabCount(context, settings, value);
-        else if (key == "activeStyle") ActiveStyle(context, value);
+        else if (key == "activeStyle") ActiveStyle(context, settings, value);
         else context.Log($"{FileName}: unknown key '{key}', ignored");
     }
 
@@ -70,12 +70,11 @@ static class OriginalConfig
         settings.Count = count;
     }
 
-    /// <summary>
-    /// The style is read for its warnings only: the port has one look, the job panel button's lit state (no per-button skin in the engine).
-    /// </summary>
-    static void ActiveStyle(ModContext context, string value)
+    /// <summary>The active tab's look, <c>frame</c> or <c>dot</c>; another value is logged and keeps <c>frame</c>.</summary>
+    static void ActiveStyle(ModContext context, JobTabsSettings settings, string value)
     {
-        if (value == "dot") context.Log($"{FileName}: activeStyle=dot is drawn as the lit button (the port has no dot style)");
-        else if (value != "frame") context.Log($"{FileName}: activeStyle={value} is not frame or dot, using frame");
+        if (value == "dot") settings.Style = TabStyle.Dot;
+        else if (value == "frame") settings.Style = TabStyle.Frame;
+        else context.Log($"{FileName}: activeStyle={value} is not frame or dot, using frame");
     }
 }
