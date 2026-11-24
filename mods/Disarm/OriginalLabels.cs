@@ -1,4 +1,3 @@
-using System.Text;
 using Meitou.Content;
 using Meitou.Modding;
 
@@ -10,14 +9,13 @@ namespace Meitou.Disarm;
 /// call of a nine-language picker whose arguments are string addresses, English first, then de, es, fr, pt, ru, ja, ko, zh (README "Labels").
 /// The reader follows each call's argument set-up (<c>lea r64, [rip+disp32]</c> into rdx, r8, r9 or a register stored to the stack slots
 /// rsp+0x20 to rsp+0x48) and keeps a label only when all nine are valid UTF-8 strings and every label shares one picker. The texts of the game's
-/// language become a gettext catalogue in the temporary folder, added as the mod's translations (they never enter the port's folder).
+/// language are added in memory as the mod's translations (nothing is written; they never enter the port's folder).
 /// </summary>
 static class OriginalLabels
 {
     const string OriginalItem = "3759461630";
     const string OriginalName = "Disarm";
     const string DllName = "Disarm.dll";
-    const string Domain = "disarm";
 
     /// <summary>The picker's languages in argument order (the original's locale ids).</summary>
     static readonly string[] Languages = ["en", "de", "es", "fr", "pt", "ru", "ja", "ko", "zh"];
@@ -49,8 +47,7 @@ static class OriginalLabels
         try
         {
             var texts = Read(path, language);
-            string folder = WriteCatalogue(context, texts);
-            context.AddTranslations(Domain, folder);
+            context.AddTranslations(context.Language, texts);
             context.Log($"original labels read: {texts.Count} for {context.Language}");
         }
         catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException)
@@ -150,23 +147,6 @@ static class OriginalLabels
 
         return 1;
     }
-
-    /// <summary>Writes the texts as <c>locale/&lt;language&gt;/LC_MESSAGES/disarm.po</c> under a temporary folder; returns that folder.</summary>
-    static string WriteCatalogue(ModContext context, Dictionary<string, string> texts)
-    {
-        string root = Path.Combine(Path.GetTempPath(), "Meitou", "dxseba.disarm");
-        string messages = Path.Combine(root, "locale", context.Language, "LC_MESSAGES");
-        Directory.CreateDirectory(messages);
-
-        var po = new StringBuilder("msgid \"\"\nmsgstr \"Content-Type: text/plain; charset=UTF-8\\n\"\n");
-        foreach (var (english, text) in texts.OrderBy(t => t.Key, StringComparer.Ordinal))
-            po.Append($"\nmsgid \"{Escape(english)}\"\nmsgstr \"{Escape(text)}\"\n");
-
-        File.WriteAllText(Path.Combine(messages, Domain + ".po"), po.ToString(), new UTF8Encoding(false));
-        return root;
-    }
-
-    static string Escape(string text) => text.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
     static string? Locate(ModContext context)
     {

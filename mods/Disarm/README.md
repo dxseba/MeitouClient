@@ -31,8 +31,8 @@ Port of dafitime's *Disarm* (workshop 3759461630; rules from its GPL-3.0 source,
 - **Labels**: the original holds Disarm, Kick, Pickup and its settings' labels in nine languages in its DLL (no catalogue). At start the port
   reads those of the game's language from the installed original (`OriginalLabels.cs`: each label is one call of a picker taking nine string
   addresses, English, de, es, fr, pt, ru, ja, ko, zh; the reader follows the `lea`/stack stores before each call and keeps only complete,
-  valid sets under one picker), writes them as a gettext catalogue in the temporary folder and adds it (`ModContext.AddTranslations`); the
-  menu rows and settings labels show through it. Without the original, or in English, they stay English. **Verified** by a scratch run (not
+  valid sets under one picker), and adds them in memory as the mod's translations
+  (`ModContext.AddTranslations(language, messages)`; nothing is written); the menu rows and settings labels show through them. Without the original, or in English, they stay English. **Verified** by a scratch run (not
   in the repo) against the installed DLL: 12 labels for each of the eight languages, none equal to its English. The settings labels are the
   original's English ones.
 - **Settings**: the original's ten, under Mod settings. *Allow stolen flag* marks dropped weapons with the target's faction (`StolenMark`).
