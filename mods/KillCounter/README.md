@@ -23,7 +23,10 @@ Port specifics:
   downed victim counted.
 - Saved in the mod's sidecar (version 3: by lasting id). Versions 1 and 2 (by name) go to the player's characters of that name at load.
   Tallies of characters the game no longer keeps are dropped after a load and every ten game minutes.
+- Also written into each character's vanilla STATS record as the original's floats `kills`, `kos`, `limbs` (`world.SaveFields`,
+  `CharacterSaveRecord.Stats`; set in the slow phase when a tally changes, so they enter the state hash), so a save taken to the original
+  keeps the counts. At World ready a character without a tally in the sidecar (a save made by the original) takes them from its STATS
+  record. **Unknown**: not yet run against a save made by the original.
 
 Missing:
 - **Unknown**: the lines in a running stats window (font and size are the attribute rows' painted font at the UI scale, a guess).
-- Not in the vanilla save's STATS record (`kills`/`kos`/`limbs`): a save moved to the original game loses the counts.

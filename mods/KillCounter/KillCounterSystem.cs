@@ -3,6 +3,7 @@ using Meitou.Modding;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Combat;
+using Meitou.Simulation.Saving;
 
 namespace Meitou.KillCounter;
 
@@ -14,10 +15,16 @@ public readonly record struct Tally(int Kills, int Knockouts, int Limbs = 0);
 /// from standing to unconscious gets a knockout (read in the slow phase within <see cref="Window"/> ticks, as the medical step that downs it can
 /// run after the hit);
 /// a stealth knock-out credits the sneaker. Dying while still down to the character that downed it turns that knockout into the kill.
-/// Tallies are keyed by the characters' lasting ids. Presentation only: never changes the world besides giving lasting ids, so it is not hashed.
+/// Tallies are keyed by the characters' lasting ids. Each changed tally is also written into the character's vanilla STATS record as the
+/// original's floats <c>kills</c>, <c>kos</c> and <c>limbs</c> (<see cref="World.SaveFields"/>, set in the serial slow phase, so they enter the
+/// state hash); a character without a tally in the mod's own data takes them from the loaded save (one made by the original) at World ready.
+/// Besides that and the lasting ids it never changes the world.
 /// </summary>
 public sealed class KillCounterSystem : ICombatHitObserver, ICharacterDeathObserver, IWorldReady, IModSaveData
 {
+    /// <summary>The original's STATS record keys of the three counts.</summary>
+    const string KillsKey = "kills", KnockoutsKey = "kos", LimbsKey = "limbs";
+
     /// <summary>The ticks after a hit within which its knockout is looked for.</summary>
     const long Window = 30;
 
@@ -41,6 +48,7 @@ public sealed class KillCounterSystem : ICombatHitObserver, ICharacterDeathObser
     readonly Dictionary<CharacterId, int> _stumps = [];
     HashSet<CharacterId> _sneakDown = [], _sneakDownNow = [];
     readonly HashSet<CharacterId> _killed = [];
+    readonly SortedSet<ulong> _unsaved = [];
     volatile FrozenDictionary<ulong, Tally> _published = FrozenDictionary<ulong, Tally>.Empty;
     bool _changed = true;
 
@@ -56,7 +64,9 @@ public sealed class KillCounterSystem : ICombatHitObserver, ICharacterDeathObser
     {
         Current = this;
         AdoptLegacy(world);
+        AdoptSaved(world);
         Prune(world);
+        StoreFields(world);
         Publish();
     }
 
@@ -68,6 +78,8 @@ public sealed class KillCounterSystem : ICombatHitObserver, ICharacterDeathObser
         SettleKnockouts(world);
         CountStumps(world);
         if (world.Tick % PruneTicks == 0) Prune(world);
+
+        StoreFields(world);
         Publish();
     }
 
@@ -236,6 +248,7 @@ public sealed class KillCounterSystem : ICombatHitObserver, ICharacterDeathObser
     {
         var old = _tallies.GetValueOrDefault(who.Value);
         _tallies[who.Value] = new(old.Kills + delta.Kills, old.Knockouts + delta.Knockouts, old.Limbs + delta.Limbs);
+        _unsaved.Add(who.Value);
         _changed = true;
     }
 
@@ -276,6 +289,56 @@ public sealed class KillCounterSystem : ICombatHitObserver, ICharacterDeathObser
         _legacy.Clear();
     }
 
+    /// <summary>
+    /// The counts a loaded save keeps in a character's STATS record (the original writes them), for each character the mod's own data has no
+    /// tally for.
+    /// </summary>
+    void AdoptSaved(World world)
+    {
+        var table = world.Characters;
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (table.Cold(slot) is not { } cold || !cold.LastingId.IsNone && _tallies.ContainsKey(cold.LastingId.Value)) continue;
+
+            var character = table.IdOf(slot);
+            if (!table.TryResolveNext(character, out _) || Saved(world, character) is not { } tally) continue;
+
+            var id = world.LastingIds.GetOrGive(character);
+            if (!id.IsNone) Add(id, tally);
+        }
+    }
+
+    /// <summary>The three counts of <paramref name="character"/>'s STATS record; null when it has none of them.</summary>
+    static Tally? Saved(World world, CharacterId character)
+    {
+        var fields = world.SaveFields;
+        float? kills = fields.Float(character, CharacterSaveRecord.Stats, KillsKey);
+        float? knockouts = fields.Float(character, CharacterSaveRecord.Stats, KnockoutsKey);
+        float? limbs = fields.Float(character, CharacterSaveRecord.Stats, LimbsKey);
+        if (kills is null && knockouts is null && limbs is null) return null;
+
+        return new(Count(kills), Count(knockouts), Count(limbs));
+    }
+
+    static int Count(float? value) => value is { } v && v > 0 ? (int)MathF.Round(v) : 0;
+
+    /// <summary>Writes the changed tallies into their characters' STATS records (the original's keys); a character gone is skipped.</summary>
+    void StoreFields(World world)
+    {
+        foreach (ulong id in _unsaved)
+        {
+            var character = world.LastingIds.Find(new LastingId(id));
+            if (character.IsNone || !world.Characters.TryResolveNext(character, out _)) continue;
+
+            var tally = _tallies.GetValueOrDefault(id);
+            world.SaveFields.SetFloat(character, CharacterSaveRecord.Stats, KillsKey, tally.Kills);
+            world.SaveFields.SetFloat(character, CharacterSaveRecord.Stats, KnockoutsKey, tally.Knockouts);
+            world.SaveFields.SetFloat(character, CharacterSaveRecord.Stats, LimbsKey, tally.Limbs);
+        }
+
+        _unsaved.Clear();
+    }
+
     public void Write(Stream stream)
     {
         using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true);
@@ -298,11 +361,14 @@ public sealed class KillCounterSystem : ICombatHitObserver, ICharacterDeathObser
 
         _tallies.Clear();
         _legacy.Clear();
+        _unsaved.Clear();
         for (int count = reader.ReadInt32(), i = 0; i < count; i++)
         {
             if (version == 3) _tallies[reader.ReadUInt64()] = new(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
             else _legacy[reader.ReadString()] = new(reader.ReadInt32(), reader.ReadInt32(), version == 2 ? reader.ReadInt32() : 0);
         }
+
+        _unsaved.UnionWith(_tallies.Keys);
         _changed = true;
     }
 }
