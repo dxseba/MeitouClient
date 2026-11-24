@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.shopcounterrestock",
+  "apiVersion": 3,
+  "assemblies": ["ShopCounterRestock.dll"],
+  "entry": "Meitou.ShopCounterRestock.ShopCounterRestockMod",
+  "gameVersion": ">=0.22.2"
+}
