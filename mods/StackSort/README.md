@@ -24,25 +24,34 @@ per target (rows kept free at the bottom for Height, columns at the right for Wi
   `=`, names an unknown key or holds a value that does not parse or lies outside its range is logged and ignored, and once a game runs the
   player is told how many (`WARN_CONFIG` from the language file, as the original's one-time message). **Verified** (original cfg comments
   and DLL: the keys, ranges, the -1 of the search budget keys, the one-time `showPlayerAMessage` with the count); the lines are this port's.
-- **Search** (`Search/`, rebuilt from the decompiled `Packer::Search::PackAnnealed` as facts): per target, restarted
-  late-acceptance hill climbing over item orders, each decoded top row first (least waste against same-record contact) and scored by the
-  largest empty rectangle (area squared, a bonus when at least the target tall), the free space's concentration, stranded cells and the
-  clustering of like and related items (same record type, item function, food crop / trade item flags); then path relinking between elite
-  orders and equal-footprint swaps. The Width goal searches the transposed grid. The targets 1 .. size - 1 are swept warm-started, those not
-  already ideal refined, and ranked by score for the cycle. Budgets are the original's iteration counts (first pass 16 x 4000, plateau 1500;
-  refine 24 x 8000, history 200, plateau 2000; `first_pass_*` / `refine_*` cfg keys, -1 compiled); no wall clock. Seeds come from the item
-  count and target, so a grid always gets the same layouts. **Verified** (decompile): the formulas, weights, move mix, budgets, seeds, sweep,
-  refine rule and ranking. **Observed** (scratch program over 5 synthetic grids, both goals): runs repeat exactly; the search's rectangle
-  holds all or all but 2 free cells where the old heuristic's held 75-96 %, with more like items touching; 0.2-2.3 s per grid and goal on 4
-  workers. The heuristic (six candidates: three sort keys, rows or columns) remains the fallback when no target is complete.
+- **Search** (`Search/`, rebuilt from the decompiled `Packer::Search::PackAnnealed` as facts, StackSort.md in the research notes): per
+  target, a constructive maximal-rectangles layout first (also used to reserve the widest block of the kept rows the items still fit
+  around), then restarted late-acceptance hill climbing over item orders, each decoded by the original's skyline with a list of wasted
+  rectangles (smallest fitting hole first, else the spot resting highest, then least 3 x shut-in cells - same-record contact, then
+  leftmost), scored by the largest empty rectangle (area squared, a bonus when at least the target tall), the free space's concentration,
+  stranded cells and the clustering of like and related items (same record type, item function, food crop / trade item flags, measured by
+  the original's contact rule). Moves: swap, shift, and the hole move (the first item in order that fits the box around a random stranded
+  cell goes to the front). Then path relinking between elite orders (refinement only), a comparison with the constructive packer when a
+  block was reserved, and three polish passes that keep the covered cells: reorder stacks of up to 5 like-width items, swap an item with a
+  block filling a same-size window, swap same-footprint items. The Width goal searches the transposed grid. Targets 1 .. size - 1 are swept
+  warm-started (a target whose block is smaller than an earlier answer's rectangle takes the constructive layout alone), those not already
+  ideal refined (at most 64), and ranked by score for the cycle. Budgets are the original's iteration counts (first pass 16 x 4000, plateau
+  1500; refine 24 x 8000, history 200, plateau 2000; `first_pass_*` / `refine_*` cfg keys, -1 compiled); no wall clock. One generator,
+  seeded from the item count and target, makes every draw in the original's order, so a grid always gets the same layouts. **Verified**
+  (decompile, read): the decoder, packer, contact, metrics, score, grouping, move and draw order, hole move, elites, relinking, polish
+  passes, sweep, shortcut, refine rule and ranking; the original's caches, pruning bounds and incremental decoding change no result and are
+  left out. **Observed** (scratch programs): the decoder matches an independent column-top reading of the same facts on 2000 random cases;
+  every layout is valid; runs repeat exactly; over 5 synthetic grids the rectangle holds all or all but 2 free cells (the old heuristic's
+  75-96 %), 0.2-1.8 s per grid and goal on 4 workers. Not run against the original DLL. The heuristic (six candidates) remains the fallback
+  when no target is complete or a grid exceeds the original's limits (126 cells a side, 255 items).
 - **Precompute**: the search reads a copy of the grid (merged on the copy with *Merge stacks*), never the live inventory. While a strip is
   drawn, its grid is swept in the background once unchanged for `mutation_debounce_ms` (150, as steps of the tick length), at most
   `resnapshots_per_frame` (3) grids started per step, `num_workers` (4) sweeps at once and threads per refinement; a press uses the result,
-  waits for a running sweep or computes it, so timing never changes a layout. Every other arrange searches with `sync_restarts` x `sync_iters`
-  (4 x 1000) and no refinement (grids over 400 cells or 80 items: the heuristic).
-- **Missing**: bit-identical layouts. The decoder scans every free spot instead of the original's skyline with a waste list, the hole move's
-  item choice is this port's (the decompile's is not read out), and two strip-regrouping passes and a comparison with a second packer
-  after a reserved block are not ported (their details are not read out). A press before its sweep is done waits (up to about 2 s on 4 workers)
-  where the original searches the shown target alone; that keeps the layout independent of timing.
+  waits for a running sweep or computes it. Every other arrange searches with `sync_restarts` x `sync_iters` (4 x 1000, elites on as the
+  original's synchronous search) and no refinement (grids over 400 cells or 80 items: the heuristic).
+- **Missing**: the press timing, by choice. The original, pressed before its background job has stored the shown target, searches that
+  target alone with the sync budget, so its layout then depends on how fast the workers ran; this port waits for the sweep (up to about 2 s
+  on 4 workers), so a grid always gets the same layout. Layouts match the original's only as far as the facts were read right: nothing here
+  was run against the original DLL.
 - **Observed** (2026-11-18, windowed sandbox, user play, earlier version on ARRANGE itself): ARRANGE grouped like items; cycling, the goal switch
   and undo work. The strip is not checked in game.

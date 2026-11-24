@@ -1,87 +1,95 @@
 namespace Meitou.StackSort.Search;
 
 /// <summary>
-/// The score's grouping term (StackSort.md "Score"): touching items of one record form clusters, each worth L x isqrt(L) for its total
-/// shared edge length L; touching items of different but related records (<see cref="Affinity"/>) form affinity clusters, each worth
-/// s x isqrt(isqrt(s)) for s = sum of affinity x shared edge / 100, of which <see cref="SearchParams.AffinityShare"/> percent counts.
+/// The score's grouping term (StackSort.md "Grouping"): placed items of one record joined by a positive <see cref="Placement.Contact"/> form
+/// clusters, each worth L x isqrt(L) for its summed contact L; items of different but related records (<see cref="Affinity"/>) form affinity
+/// clusters, each worth s x isqrt(isqrt(s)) for s = sum of affinity x contact / 100, of which <see cref="SearchParams.AffinityShare"/> percent
+/// counts. Layouts of fewer than 2 or more than 256 placements score 0.
 /// </summary>
 static class Grouping
 {
-    public static long Of(LayoutDecoder d, SearchParams p)
-    {
-        int n = d.Problem.Items.Length;
-        var same = new UnionFind(n);
-        var related = new UnionFind(n);
-        var seen = new int[n];
-        for (int i = 0; i < n; i++)
-        {
-            if (d.X[i] >= 0) JoinNeighbours(d, i, seen, same, related);
-        }
+    /// <summary>
+    /// The neighbour list cap of the polish passes' adjacency (24 per placement).
+    /// </summary>
+    const int MaxNeighbours = 24;
 
-        long clusters = same.Sum(w => Cluster(w, p.ClusterExponent));
-        long affinity = related.Sum(w => AffinityCluster(w / 100));
-        return clusters + p.AffinityShare * affinity / 100;
+    /// <summary>
+    /// The term of a layout, every touching pair found from the cell owners (<paramref name="owner"/>: placement index per cell, -1 free).
+    /// </summary>
+    public static long Of(PackProblem p, IReadOnlyList<Placement> placements, short[] owner, SearchParams prm)
+    {
+        if (!Counted(placements.Count)) return 0;
+
+        var sets = new Sets(placements.Count);
+        for (int a = 0; a < placements.Count; a++) Sides(p, placements, owner, a, sets);
+        return sets.Worth(prm);
     }
 
     /// <summary>
-    /// Joins item <paramref name="i"/> with each touching item of a higher index, once each (<paramref name="seen"/> holds i + 1 for those
-    /// already joined).
+    /// The term over listed touching pairs (an <see cref="Adjacency"/>).
     /// </summary>
-    static void JoinNeighbours(LayoutDecoder d, int i, int[] seen, UnionFind same, UnionFind related)
+    public static long Of(PackProblem p, IReadOnlyList<Placement> placements, List<(int A, int B, int Contact)> pairs, SearchParams prm)
     {
-        var it = d.Problem.Items[i];
-        int x = d.X[i], y = d.Y[i];
-        for (int c = x; c < x + it.Width; c++)
-        {
-            Touch(d, c, y - 1, i, seen, same, related);
-            Touch(d, c, y + it.Height, i, seen, same, related);
-        }
-        for (int r = y; r < y + it.Height; r++)
-        {
-            Touch(d, x - 1, r, i, seen, same, related);
-            Touch(d, x + it.Width, r, i, seen, same, related);
-        }
-    }
+        if (!Counted(placements.Count)) return 0;
 
-    static void Touch(LayoutDecoder d, int x, int y, int i, int[] seen, UnionFind same, UnionFind related)
-    {
-        if (x < 0 || y < 0 || x >= d.Problem.Width || y >= d.Problem.Height) return;
-
-        int j = d.Owner(x, y);
-        if (j <= i || seen[j] == i + 1) return;
-
-        seen[j] = i + 1;
-        Join(d, i, j, same, related);
-    }
-
-    static void Join(LayoutDecoder d, int i, int j, UnionFind same, UnionFind related)
-    {
-        var a = d.Problem.Items[i];
-        var b = d.Problem.Items[j];
-        int contact = SharedEdge(d, i, j);
-        if (a.Group >= 0 && a.Group == b.Group)
-        {
-            same.Union(i, j, contact);
-            return;
-        }
-
-        int affinity = Affinity(a, b);
-        if (affinity > 0) related.Union(i, j, affinity * contact);
+        var sets = new Sets(placements.Count);
+        foreach (var (a, b, contact) in pairs) sets.Join(p, placements, a, b, contact);
+        return sets.Worth(prm);
     }
 
     /// <summary>
-    /// The length of the edge two touching items share.
+    /// The touching pairs (a before b, by placement index) with a positive contact, at most 24 per placement (a pair is left out once either
+    /// side has 24), as the polish passes see them.
     /// </summary>
-    static int SharedEdge(LayoutDecoder d, int i, int j)
+    public static List<(int A, int B, int Contact)> Adjacency(IReadOnlyList<Placement> placements)
     {
-        var (a, b) = (d.Problem.Items[i], d.Problem.Items[j]);
-        int ax = d.X[i], ay = d.Y[i], bx = d.X[j], by = d.Y[j];
-        if (ax + a.Width == bx || bx + b.Width == ax) return Overlap(ay, a.Height, by, b.Height);
-        if (ay + a.Height == by || by + b.Height == ay) return Overlap(ax, a.Width, bx, b.Width);
-        return 0;
+        var pairs = new List<(int, int, int)>();
+        var count = new int[placements.Count];
+        for (int a = 0; a < placements.Count; a++)
+        {
+            for (int b = a + 1; b < placements.Count; b++)
+            {
+                int contact = Placement.Contact(placements[a], placements[b]);
+                if (contact <= 0 || count[a] >= MaxNeighbours || count[b] >= MaxNeighbours) continue;
+
+                pairs.Add((a, b, contact));
+                count[a]++;
+                count[b]++;
+            }
+        }
+        return pairs;
     }
 
-    static int Overlap(int a, int la, int b, int lb) => Math.Max(0, Math.Min(a + la, b + lb) - Math.Max(a, b));
+    static bool Counted(int placed) => placed is >= 2 and <= 256;
+
+    /// <summary>
+    /// Joins placement <paramref name="a"/> with each later placement along its top, bottom, left and right side.
+    /// </summary>
+    static void Sides(PackProblem p, IReadOnlyList<Placement> placements, short[] owner, int a, Sets sets)
+    {
+        var pa = placements[a];
+        int width = p.Width;
+        if (pa.Y > 0) Scan(p, placements, owner, a, (pa.Y - 1) * width + pa.X, 1, pa.W, sets);
+        if (pa.Bottom < p.Height) Scan(p, placements, owner, a, pa.Bottom * width + pa.X, 1, pa.W, sets);
+        if (pa.X > 0) Scan(p, placements, owner, a, pa.Y * width + pa.X - 1, width, pa.H, sets);
+        if (pa.Right < width) Scan(p, placements, owner, a, pa.Y * width + pa.Right, width, pa.H, sets);
+    }
+
+    static void Scan(PackProblem p, IReadOnlyList<Placement> placements, short[] owner, int a, int cell, int step, int count, Sets sets)
+    {
+        int last = -1;
+        for (int k = 0; k < count; k++, cell += step)
+        {
+            int b = owner[cell];
+            if (b < 0 || b == last) continue;
+
+            last = b;
+            if (b <= a) continue;
+
+            int contact = Placement.Contact(placements[a], placements[b]);
+            if (contact > 0) sets.Join(p, placements, a, b, contact);
+        }
+    }
 
     /// <summary>
     /// How related two items of different records are, percent: the highest of the same record type 50 (plain items excepted), the same
@@ -129,6 +137,38 @@ static class Grouping
         while (r * r > v) r--;
         while ((r + 1) * (r + 1) <= v) r++;
         return r;
+    }
+
+    /// <summary>
+    /// The two cluster sets of one layout: same record, and related records.
+    /// </summary>
+    sealed class Sets(int n)
+    {
+        readonly UnionFind _same = new(n);
+        readonly UnionFind _related = new(n);
+
+        public void Join(PackProblem p, IReadOnlyList<Placement> placements, int a, int b, int contact)
+        {
+            var ia = p.Items[placements[a].Item];
+            var ib = p.Items[placements[b].Item];
+            if (ia.Group >= 0 && ia.Group == ib.Group)
+            {
+                _same.Union(a, b, contact);
+                return;
+            }
+
+            int affinity = Affinity(ia, ib);
+            if (affinity > 0) _related.Union(a, b, (long)affinity * contact);
+        }
+
+        public long Worth(SearchParams p)
+        {
+            long clusters = _same.Sum(w => Cluster(w, p.ClusterExponent));
+            if (p.AffinityShare <= 0) return clusters;
+
+            long affinity = _related.Sum(w => AffinityCluster(w / 100));
+            return clusters + p.AffinityShare * affinity / 100;
+        }
     }
 
     /// <summary>

@@ -1,31 +1,29 @@
 namespace Meitou.StackSort.Search;
 
 /// <summary>
-/// The search's moves on an item order (StackSort.md "Moves"): a swap, a shift (take one item out and insert it elsewhere), a turn (the game
-/// never turns an item, so this is a swap too) and a hole move; and the restarts' shuffle of the base order's runs.
+/// The search's random stream and moves on an item order (StackSort.md "Moves" and "Random stream"): a roll of 0-99 picks a swap, a shift
+/// (take one item out and insert it elsewhere), a turn (the game never turns an item, so this swaps) or a hole move; and the restarts'
+/// shuffle of the base order's runs. Every draw is the generator's next value modulo the range.
 /// </summary>
 sealed partial class Annealer
 {
-    /// <summary>
-    /// The best layout's grid, for the hole move.
-    /// </summary>
-    readonly LayoutDecoder _holes;
+    uint _seed;
 
     /// <summary>
-    /// Whether the best layout changed since <see cref="_holeCells"/> was taken.
+    /// The generator: x = x * 1664525 + 1013904223 (mod 2^32).
     /// </summary>
-    bool _holesStale = true;
+    uint Next() => _seed = _seed * 1664525u + 1013904223u;
 
-    /// <summary>
-    /// The best layout's stranded cells: free inner cells outside its largest empty rectangle.
-    /// </summary>
-    readonly List<int> _holeCells = [];
+    int Draw(int range) => (int)(Next() % (uint)range);
 
     void Move(int[] order)
     {
-        int roll = Below(100);
-        if (roll < _p.SwapBelow || roll >= _p.ShiftBelow && roll < _p.TurnBelow) Swap(order);
+        int roll = Draw(100);
+        if (!_p.HoleMoves && roll >= _p.TurnBelow) roll = Draw(Math.Max(_p.SwapBelow, 1));
+
+        if (roll < _p.SwapBelow) Swap(order);
         else if (roll < _p.ShiftBelow) Shift(order);
+        else if (roll < _p.TurnBelow) Swap(order);
         else if (!HoleMove(order)) Swap(order);
     }
 
@@ -35,10 +33,10 @@ sealed partial class Annealer
     /// </summary>
     int First(int n)
     {
-        if (_p.Bias < 1 || _p.UniformPercent > 99 || Below(100) < _p.UniformPercent) return Below(n);
+        if (_p.Bias < 1 || _p.UniformPercent > 99 || Draw(100) < _p.UniformPercent) return Draw(n);
 
         int pick = 0;
-        for (int d = Math.Max(1, _p.Bias / 4); d > 0; d--) pick = Math.Max(pick, Below(n));
+        for (int d = Math.Max(1, _p.Bias / 4); d > 0; d--) pick = Math.Max(pick, Draw(n));
         return pick;
     }
 
@@ -47,7 +45,7 @@ sealed partial class Annealer
     /// </summary>
     int Second(int n, int first)
     {
-        int j = Below(n - 1);
+        int j = Draw(n - 1);
         return j >= first ? j + 1 : j;
     }
 
@@ -72,7 +70,7 @@ sealed partial class Annealer
     }
 
     /// <summary>
-    /// Shuffles the runs of one record in <paramref name="order"/> (Fisher-Yates over the runs; a run keeps its items' order).
+    /// Shuffles the runs of one record in <paramref name="order"/> (Fisher-Yates over the runs from the last; a run keeps its items' order).
     /// </summary>
     void ShuffleRuns(int[] order)
     {
@@ -89,7 +87,7 @@ sealed partial class Annealer
 
         for (int i = runs.Count - 1; i > 0; i--)
         {
-            int j = Below(i + 1);
+            int j = Draw(i + 1);
             (runs[i], runs[j]) = (runs[j], runs[i]);
         }
         runs.SelectMany(r => r).ToArray().CopyTo(order, 0);

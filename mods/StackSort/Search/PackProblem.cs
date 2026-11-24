@@ -43,9 +43,10 @@ sealed class PackProblem(int width, int height, PackItem[] items, string[] recor
     public int FreeArea => Width * Height - Items.Sum(i => i.Width * i.Height);
 
     /// <summary>
-    /// Whether the search can run: grids up to 64 cells a side (a row is one 64-bit mask), as the original's 64-target cap.
+    /// Whether the search can run: as the original's check, 1-126 cells a side and fewer than 256 items (a cell stores a placement in a byte).
     /// </summary>
-    public bool Searchable => Width is > 0 and <= 64 && Height is > 0 and <= 64 && Items.All(i => i.Width > 0 && i.Height > 0);
+    public bool Searchable =>
+        Width is > 0 and < 127 && Height is > 0 and < 127 && Items.Length < 256 && Items.All(i => i.Width > 0 && i.Height > 0);
 
     /// <summary>
     /// The same problem turned on its diagonal: the Width goal is the Height goal of this (the original's <c>PackAnnealed</c> swaps every

@@ -1,9 +1,9 @@
 namespace Meitou.StackSort.Search;
 
 /// <summary>
-/// After the restarts (StackSort.md "Search"): path relinking between the elite orders (each new best and each restart's last order, up to
-/// <see cref="SearchParams.Elites"/>, the worst replaced when full), then a polish that swaps items of the same footprint while the grouping
-/// term grows.
+/// The elite orders and path relinking (StackSort.md "Elites"): when <see cref="SearchParams.UseElites"/> is on (the refinement and the
+/// synchronous search; the first pass has it off), each new best and each restart's last order join up to <see cref="SearchParams.Elites"/>
+/// elites (when full, the first worst is replaced by a better one); after the restarts every ordered pair of elites is relinked.
 /// </summary>
 sealed partial class Annealer
 {
@@ -26,8 +26,7 @@ sealed partial class Annealer
     }
 
     /// <summary>
-    /// For each ordered pair of elites, walks from the first toward the second: at each position where they differ, swaps in the guide's item
-    /// and scores the order, keeping any new best.
+    /// For each ordered pair of elites, walks from the first toward the second.
     /// </summary>
     void Relink()
     {
@@ -42,6 +41,10 @@ sealed partial class Annealer
         }
     }
 
+    /// <summary>
+    /// At each position where the orders differ, swaps in the guide's item from further on and scores the order, keeping a new best; stops
+    /// when the guide's item is not further on.
+    /// </summary>
     void Walk(int[] order, int[] guide)
     {
         for (int k = 0; k < order.Length; k++)
@@ -52,55 +55,8 @@ sealed partial class Annealer
             if (m < 0) return;
 
             (order[k], order[m]) = (order[m], order[k]);
-            if (Score(order) > _best.Score) _best = Evaluate(order);
+            long score = ScoreOf(order);
+            if (score > _best.Score) SetBest(order, score);
         }
-    }
-
-    /// <summary>
-    /// Swaps the cells of two placed items of the same footprint and different records while that raises the grouping term (the geometry, and
-    /// so the rest of the score, stays), pass after pass until none does.
-    /// </summary>
-    SearchResult Polish(SearchResult best)
-    {
-        var (x, y) = ((int[])best.Layout.X.Clone(), (int[])best.Layout.Y.Clone());
-        _holes.Load(x, y);
-        long grouping = Grouping.Of(_holes, _p);
-        bool improved = true;
-        for (int pass = 0; improved && pass < 16; pass++)
-        {
-            improved = false;
-            foreach (var (i, j) in SameFootprints(x))
-            {
-                Exchange(x, y, i, j);
-                _holes.Load(x, y);
-                long next = Grouping.Of(_holes, _p);
-                if (next > grouping) (grouping, improved) = (next, true);
-                else Exchange(x, y, i, j);
-            }
-        }
-
-        _holes.Load(x, y);
-        var metrics = LayoutMetrics.Of(_holes, _p);
-        long score = metrics.Score(_target, _p);
-        return score > best.Score ? best with { Layout = new PackLayout(x, y), Metrics = metrics, Score = score } : best;
-    }
-
-    IEnumerable<(int, int)> SameFootprints(int[] x)
-    {
-        var items = _problem.Items;
-        for (int i = 0; i < items.Length; i++)
-        {
-            for (int j = i + 1; j < items.Length; j++)
-            {
-                if (x[i] < 0 || x[j] < 0 || items[i].Group == items[j].Group) continue;
-                if (items[i].Width == items[j].Width && items[i].Height == items[j].Height) yield return (i, j);
-            }
-        }
-    }
-
-    static void Exchange(int[] x, int[] y, int i, int j)
-    {
-        (x[i], x[j]) = (x[j], x[i]);
-        (y[i], y[j]) = (y[j], y[i]);
     }
 }

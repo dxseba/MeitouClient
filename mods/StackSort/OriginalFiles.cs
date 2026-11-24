@@ -136,6 +136,7 @@ sealed class OriginalFiles
             {
                 Restarts = Number("refine_restarts", 1, 256, 24), Iterations = Number("refine_iters", 100, 1_000_000, 8000),
                 History = Number("refine_lahc_history", 1, 100_000, 200), Plateau = Number("refine_plateau", 1, 1_000_000, 2000),
+                UseElites = true,
             };
             return new(first, refine, Number("refine_item_threshold", 1, 1000, 20), Workers);
         }
@@ -146,7 +147,7 @@ sealed class OriginalFiles
     /// result to wait for, is searched with it and no refinement.
     /// </summary>
     public SweepBudget SyncBudget =>
-        new(SearchParams.FirstPass with { Restarts = Number("sync_restarts", 1, 8, 4), Iterations = Number("sync_iters", 100, 2000, 1000) },
+        new(SearchParams.Sync with { Restarts = Number("sync_restarts", 1, 8, 4), Iterations = Number("sync_iters", 100, 2000, 1000) },
             null, Workers: Workers);
 
     /// <summary>

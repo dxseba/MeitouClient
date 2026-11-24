@@ -78,7 +78,7 @@ sealed record SearchParams
     public int AffinityShare { get; init; } = 50;
 
     /// <summary>
-    /// The placement rule's weight of cells wasted under an item against its same-record contact (3).
+    /// The decoder's weight of free cells an item shuts in above it, against its same-record contact (3).
     /// </summary>
     public int WasteWeight { get; init; } = 3;
 
@@ -88,9 +88,24 @@ sealed record SearchParams
     public int Elites { get; init; } = 8;
 
     /// <summary>
+    /// Whether elites are kept and relinked: off in the original's first pass, on in its refinement and synchronous search.
+    /// </summary>
+    public bool UseElites { get; init; } = true;
+
+    /// <summary>
+    /// Whether the move roll's top band is a hole move (on); off, that band is redrawn as a swap.
+    /// </summary>
+    public bool HoleMoves { get; init; } = true;
+
+    /// <summary>
+    /// Whether an easy cold start stops after two restarts (on).
+    /// </summary>
+    public bool EasyStop { get; init; } = true;
+
+    /// <summary>
     /// The first pass's compiled budget.
     /// </summary>
-    public static SearchParams FirstPass { get; } = new();
+    public static SearchParams FirstPass { get; } = new() { UseElites = false };
 
     /// <summary>
     /// The refinement's compiled budget (24 x 8000, history 200, plateau 2000).
