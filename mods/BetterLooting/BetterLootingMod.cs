@@ -30,9 +30,13 @@ public sealed class BetterLootingMod : IMod
     public void Initialize(ModContext context)
     {
         s_log = context.Log;
-        context.AddSettings(Settings);
+
+        // Setting labels and the key's label in the game's language, from the installed original's better_looting catalogues.
+        if (OriginalFolder.Find(context) is { } original) context.AddTranslations("better_looting", original);
+
+        Settings.Group = context.AddSettings(Settings);
         context.AddSystem("looting", build => new LootSystem(build.Data), SystemAnchor.End);
-        context.AddKeyAction("loot", "Loot nearby bodies (Alt: store items)", Pressed, Key.O);
+        context.AddKeyAction("loot", "Looting key", Pressed, Key.O);   // with Alt: the deposit
         context.Log("Better Looting initialized");
     }
 

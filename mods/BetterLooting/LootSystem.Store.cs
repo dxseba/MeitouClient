@@ -37,7 +37,8 @@ sealed partial class LootSystem
 
         var used = new HashSet<Machine>();
         var carried = Ordered(Carried(world, owner));
-        int units = carried.Sum(c => Store(c, Tiered(stores, c.Item), used));
+        var id = world.Characters.IdOf(lead);
+        int units = carried.Sum(c => StoreBack(id, c, stores, used));
         int left = carried.Count(c => c.Owner.Items.Contains(c.Item));
         BetterLootingMod.Trace(() => $"deposit by {owner.Name}: {units} item(s) put away, {left} left (no room)");
         world.Post(units > 0
@@ -67,12 +68,32 @@ sealed partial class LootSystem
         return list;
     }
 
+    /// <summary>One item into storage, the one it was looted from first; its units leave the remembered takes.</summary>
+    int StoreBack(CharacterId looter, LootCandidate candidate, List<Machine> stores, HashSet<Machine> used)
+    {
+        string record = candidate.Item.Record;
+        string? origin = OriginOf(looter, record);
+        if (origin is not null && !stores.Any(m => m.Site == origin))
+        {
+            BetterLootingMod.Trace(() => $"STORE_ALL ORIGIN_REJECT item={record} origin={origin} outside the radius or no longer valid");
+            origin = null;
+        }
+
+        int units = Store(candidate, Tiered(stores, candidate.Item, origin), used, origin);
+        if (units > 0) ReleaseOrigin(looter, record, units);
+        return units;
+    }
+
     /// <summary>
-    /// The stores in the order the original's deposit picks them for an item: those limited to it (an ore box for ore, a weapon rack for a weapon)
+    /// The stores in the order the original's deposit picks them for an item: the one it was looted from (<paramref name="origin"/>), then those
+    /// limited to it (an ore box for ore, a weapon rack for a weapon)
     /// before the general ones, each tier nearest first (the list comes sorted by distance).
     /// </summary>
-    static List<Machine> Tiered(List<Machine> stores, ItemInstance item) =>
-        [.. stores.Where(m => Specialised(m.Data, item)), .. stores.Where(m => !Specialised(m.Data, item))];
+    static List<Machine> Tiered(List<Machine> stores, ItemInstance item, string? origin)
+    {
+        var rest = stores.Where(m => m.Site != origin).ToList();
+        return [.. stores.Where(m => m.Site == origin), .. rest.Where(m => Specialised(m.Data, item)), .. rest.Where(m => !Specialised(m.Data, item))];
+    }
 
     /// <summary>
     /// A storage whose filter names the item's record, or that takes only a record type other than ITEM.
@@ -81,7 +102,7 @@ sealed partial class LootSystem
         data.StorageLimit.Contains(item.Record) || data.ItemTypeLimit != Meitou.Data.Fcs.FcsRecordType.Item && data.ItemTypeLimit == item.Type;
 
     /// <summary>One item into the nearest storages whose filter takes it, until it is gone; the units moved.</summary>
-    static int Store(LootCandidate candidate, List<Machine> stores, HashSet<Machine> used)
+    static int Store(LootCandidate candidate, List<Machine> stores, HashSet<Machine> used, string? origin)
     {
         var item = candidate.Item;
         int units = 0;
@@ -92,14 +113,16 @@ sealed partial class LootSystem
             int moved = InventoryCommands.MoveUnits(candidate.Owner, item, 0, store.Storage!);
             units += moved;
             if (moved > 0) used.Add(store);
-            BetterLootingMod.Trace(() => $"STORE_ALL MOVE item={item.Record} tier={(Specialised(store.Data, item) ? "RESOURCE" : "GENERAL")} " +
-                $"destination={store.Site} moved={moved}");
+            BetterLootingMod.Trace(() => $"STORE_ALL MOVE item={item.Record} tier={Tier(store, item, origin)} destination={store.Site} moved={moved}");
             if (!candidate.Owner.Items.Contains(item)) break;
         }
 
         if (candidate.Owner.Items.Contains(item)) BetterLootingMod.Trace(() => $"STORE_ALL NO_DESTINATION item={item.Record} remaining={item.Quantity}");
         return units;
     }
+
+    static string Tier(Machine store, ItemInstance item, string? origin) =>
+        store.Site == origin ? "ORIGIN" : Specialised(store.Data, item) ? "RESOURCE" : "GENERAL";
 
     /// <summary>Queues pick-up orders for the nearest ground items that pass the rules; how many.</summary>
     int QueueGround(World world, int lead, CharacterCold looter)

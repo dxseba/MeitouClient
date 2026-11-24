@@ -6,8 +6,10 @@ using Meitou.Simulation.Items;
 
 namespace Meitou.BetterLooting;
 
-/// <summary>A place to loot: its inventory, the body's slot (-1 for storage) and its distance from the looter.</summary>
-readonly record struct LootSource(Inventory Inventory, int Body, float Distance);
+/// <summary>
+/// A place to loot: its inventory, the body's slot (-1 for storage), its distance from the looter and, for a storage machine, its site.
+/// </summary>
+readonly record struct LootSource(Inventory Inventory, int Body, float Distance, string? Site = null);
 
 /// <summary>The looting key: the bodies round the lead, nearest first, then the ground.</summary>
 sealed partial class LootSystem
@@ -78,7 +80,7 @@ sealed partial class LootSystem
     {
         foreach (var machine in world.Machines.All)
         {
-            if (PlayerStorage(world, machine, at) is { } distance) list.Add(new(machine.Storage!, -1, distance));
+            if (PlayerStorage(world, machine, at) is { } distance) list.Add(new(machine.Storage!, -1, distance, machine.Site));
         }
 
         foreach (var fixture in world.Fixtures.All)
@@ -105,6 +107,8 @@ sealed partial class LootSystem
         {
             bool equipment = InventoryCommands.IsEquipmentSection(candidate.Item.Section);
             int moved = TakeOne(world, looter, candidate, mark);
+            if (moved > 0 && candidate.Item.ItemFunction != LootTransfer.MoneyFunction)
+                Remember(table.IdOf(lead), looter, candidate.Item.Record, source.Site, moved);
             units += moved;
             worn |= moved > 0 && equipment;
         }

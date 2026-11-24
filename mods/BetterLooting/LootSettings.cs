@@ -2,8 +2,11 @@ using Meitou.Modding;
 
 namespace Meitou.BetterLooting;
 
-/// <summary>The original's BetterLooting.ini rules and the fork's extras, same defaults (BetterLootingRules.h <c>g_betterLootingRules</c>).</summary>
-public sealed class LootSettings
+/// <summary>
+/// The original's BetterLooting.ini rules and the fork's extras, same defaults (BetterLootingRules.h <c>g_betterLootingRules</c>); labels as the
+/// original's catalogue names them, so its translations apply.
+/// </summary>
+public sealed partial class LootSettings
 {
     [Setting("Better Looting", Hint = "The looting key (Controls page) with the inventory open: loot nearby bodies. With Alt: store your items nearby.")]
     public bool Enabled { get; set; } = true;
@@ -21,7 +24,7 @@ public sealed class LootSettings
         Step = 50)]
     public float MinValuePerKg { get; set; } = 300;
 
-    [Setting("Allow stolen", Hint = "Also take items that are, or would become, stolen goods.")]
+    [Setting("Allow stolen items", Hint = "Also take items that are, or would become, stolen goods.")]
     public bool AllowStolen { get; set; }
 
     [Setting("Best items first", Hint = "Take the most valuable per kilogram first.")]
@@ -33,50 +36,50 @@ public sealed class LootSettings
     [Setting("Protect player storage", Hint = "Never loot your own storage buildings and containers.")]
     public bool ProtectPlayerStorage { get; set; } = true;
 
-    [Setting("Ground pickup", Hint = "Also queue pick-up orders for up to 32 qualifying items on the ground, nearest first.")]
+    [Setting("Pick up ground items", Hint = "Also queue pick-up orders for up to 32 qualifying items on the ground, nearest first.")]
     public bool GroundPickup { get; set; }
 
     [Setting("Always take these items", Hint = "Names or record ids split by ; or | (name: or id: to say which); they skip the category and price rules.",
         MaxLength = ModSetting.MaxTextLength)]
     public string RequiredItems { get; set; } = "";
 
-    [Setting("Weapons")]
+    [Setting("Weapons", SubGroup = "Categories")]
     public bool Weapons { get; set; } = true;
 
-    [Setting("Armour")]
+    [Setting("Armour", SubGroup = "Categories")]
     public bool Armour { get; set; } = true;
 
-    [Setting("Food")]
+    [Setting("Food", SubGroup = "Categories")]
     public bool Food { get; set; } = true;
 
-    [Setting("Medicine")]
+    [Setting("Medicine", SubGroup = "Categories")]
     public bool Medicine { get; set; } = true;
 
-    [Setting("Tools")]
+    [Setting("Tools", SubGroup = "Categories")]
     public bool Tools { get; set; } = true;
 
-    [Setting("Materials")]
+    [Setting("Materials and resources", SubGroup = "Categories")]
     public bool Materials { get; set; } = true;
 
-    [Setting("Blueprints")]
+    [Setting("Blueprints", SubGroup = "Categories")]
     public bool Blueprints { get; set; } = true;
 
-    [Setting("Ammo")]
+    [Setting("Ammo", SubGroup = "Categories")]
     public bool Ammo { get; set; } = true;
 
-    [Setting("Robotics")]
+    [Setting("Robotics", SubGroup = "Categories")]
     public bool Robotics { get; set; } = true;
 
-    [Setting("Books")]
+    [Setting("Books", SubGroup = "Categories")]
     public bool Books { get; set; } = true;
 
-    [Setting("Narcotics")]
+    [Setting("Narcotics", SubGroup = "Categories")]
     public bool Narcotics { get; set; }
 
-    [Setting("Severed limbs")]
+    [Setting("Severed limbs", SubGroup = "Categories")]
     public bool SeveredLimbs { get; set; }
 
-    [Setting("Other")]
+    [Setting("Other", SubGroup = "Categories")]
     public bool Other { get; set; } = true;
 
     [Setting("Debug logging", Hint = "Write every looting step to the mod log.", SubGroup = "Advanced")]
