@@ -22,6 +22,17 @@ public sealed class JobSettings
     [Setting("Show JM button", Hint = "A JM button under the time panel opens the window.")]
     public bool ShowButton { get; set; } = true;
 
+    public const int MinScale = 70, MaxScale = 200;
+
+    /// <summary>The fork's <c>UiScale</c>: the whole window's size (text, buttons, lists), taken when the window opens.</summary>
+    [Setting("Window size (%)", Hint = "The whole window's size: text, buttons and lists (70-200). Applies the next time the window opens.",
+        Min = MinScale, Max = MaxScale, Step = 5)]
+    public int UiScale { get; set; } = 100;
+
+    /// <summary>The fork's <c>Debug</c>: each change the window makes, and its outcome, in the mod log.</summary>
+    [Setting("Debug logging", Hint = "Write each job change the window makes, and its result, to the mod log.")]
+    public bool Debug { get; set; }
+
     [Setting("Stations: Crafting", Hint = "Show crafting benches in the Stations tab.")]
     public bool Crafting { get; set; } = true;
 
@@ -62,6 +73,13 @@ public sealed class JobSettings
         StationCategory.Defense => Defense,
         _ => Other,
     };
+
+    /// <summary>The original's Reset Default: the first five groups and Other shown, Training, Storage and Defense hidden.</summary>
+    public void ResetFilters()
+    {
+        (Crafting, Refining, Farming, Mining, Research, Other) = (true, true, true, true, true, true);
+        (Training, Storage, Defense) = (false, false, false);
+    }
 
     /// <summary>Flips <paramref name="category"/>'s filter (the window's own filter buttons; kept for the session).</summary>
     public void Toggle(StationCategory category)

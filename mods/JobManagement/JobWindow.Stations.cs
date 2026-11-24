@@ -10,6 +10,9 @@ namespace Meitou.JobManagement;
 public sealed partial class JobWindow
 {
     int _stationScroll, _workerScroll;
+
+    /// <summary>The closed station groups (the original's Collapsed_<n>; none by default).</summary>
+    readonly HashSet<StationCategory> _closedGroups = [];
     string? _station;
 
     UiNode StationTab(WorldSnapshot snapshot, float width, float height)
@@ -32,10 +35,11 @@ public sealed partial class JobWindow
         foreach (var category in Enum.GetValues<StationCategory>())
         {
             bool on = settings.Shows(category);
-            row.Children.Add(Button($"filter.{category}", (on ? "[x] " : "[ ] ") + ShortName(category), 104, () => settings.Toggle(category),
+            row.Children.Add(Button($"filter.{category}", (on ? "[x] " : "[ ] ") + ShortName(category), 92, () => settings.Toggle(category),
                 selected: on));
         }
 
+        row.Children.Add(Button("filter.reset", "Reset Default", 104, settings.ResetFilters));
         return row;
     }
 
@@ -45,8 +49,10 @@ public sealed partial class JobWindow
         var lines = new List<UiNode>();
         foreach (var group in stations.GroupBy(s => s.Category))
         {
-            lines.Add(Label($"group.{group.Key}", $"{CategoryName(group.Key)} ({group.Count()})", width, _styles!.Dim));
-            foreach (var station in group) lines.Add(StationLine(station, characters, width));
+            int unassigned = group.Count(s => !s.Assigned.Any(characters.ContainsKey));
+            bool closed = _closedGroups.Contains(group.Key);
+            lines.Add(GroupLine(group.Key, group.Count(), unassigned, closed, width));
+            if (!closed) lines.AddRange(group.Select(station => StationLine(station, characters, width)));
         }
 
         if (lines.Count == 0) lines.Add(Label("nostations", "No stations in the shown groups.", width));
@@ -57,6 +63,33 @@ public sealed partial class JobWindow
         column.Children.Add(list);
         column.Children.Add(ScrollBar("stations", lines.Count, visible, _stationScroll, s => _stationScroll = s, width));
         return column;
+    }
+
+    /// <summary>
+    /// A group's header, the original's "[-] {group}  |  {n} stations  |  {u} unassigned" ([+] while closed) after its picture (when installed):
+    /// a click opens or closes the group.
+    /// </summary>
+    UiNode GroupLine(StationCategory category, int count, int unassigned, bool closed, float width)
+    {
+        string stations = count == 1 ? "1 station" : $"{count.ToString(CultureInfo.InvariantCulture)} stations";
+        string text = $"{(closed ? "[+]" : "[-]")} {CategoryName(category)}  |  {stations}  |  "
+            + $"{unassigned.ToString(CultureInfo.InvariantCulture)} unassigned";
+        var row = UiKit.Row($"jm-groupline.{category}", UiKit.LineHeight);
+        float label = width;
+        if (icons.Of(category) is { } icon)
+        {
+            row.Children.Add(UiKit.Icon($"jm-groupicon.{category}", icon));
+            label -= UiKit.LineHeight + UiKit.Gap;
+        }
+
+        row.Children.Add(Button($"group.{category}", text, label, () => ToggleGroup(category)));
+        return row;
+    }
+
+    /// <summary>Opens or closes a station group (kept while the game runs; the original also keeps it in its settings file).</summary>
+    void ToggleGroup(StationCategory category)
+    {
+        if (!_closedGroups.Remove(category)) _closedGroups.Add(category);
     }
 
     UiNode StationLine(Station station, Dictionary<CharacterId, CharacterSnapshot> characters, float width)

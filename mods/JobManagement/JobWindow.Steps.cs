@@ -17,7 +17,7 @@ public sealed partial class JobWindow
     {
         if (Busy)
         {
-            _status = "Still applying the last change...";
+            Status = "Still applying the last change...";
             return;
         }
 
@@ -48,7 +48,7 @@ public sealed partial class JobWindow
             {
                 _steps.Clear();
                 _retries = 0;
-                _status = "The game did not take the change; nothing more was done.";
+                Status = "The game did not take the change; nothing more was done.";
                 return;
             }
 
@@ -67,6 +67,7 @@ public sealed partial class JobWindow
         if (commands.Count == 0) return;
 
         foreach (var command in commands) enqueue(command);
+        Trace(commands);
         Wait(snapshot);
     }
 
@@ -74,7 +75,7 @@ public sealed partial class JobWindow
     List<SimCommand> Abort(string status)
     {
         _abort = true;
-        _status = status;
+        Status = status;
         return [];
     }
 
@@ -99,31 +100,47 @@ public sealed partial class JobWindow
         if (settings.ShowButton)
         {
             _clicks["toggle"] = Toggle;
-            root.Children.Add(new("jm-toggle", UiNodeKind.Button)
+            var toggle = new UiNode("jm-toggle", UiNodeKind.Button)
             {
-                Placement = new(40, 26, Left: 486, Top: 44), Text = "JM", Style = _open ? _styles!.Selected : _styles!.Button,
-                Action = _clickAction, Argument = "toggle",
-            });
+                Placement = new(40, 26, Left: 486, Top: 44), Text = icons.Hud is null ? "JM" : "",
+                Style = _open ? _styles!.Selected : _styles!.Button, Action = _clickAction, Argument = "toggle",
+            };
+            if (icons.Hud is { } hud)
+            {
+                var picture = new UiNode("jm-toggleicon", UiNodeKind.Image) { Placement = new(22, 22, Left: 9, Top: 2), Image = hud, Pickable = false };
+                toggle.Children.Add(picture);
+            }
+
+            root.Children.Add(toggle);
         }
 
         if (_open && _snapshot is { } snapshot) root.Children.Add(Window(frame.Viewport, snapshot));
         return root;
     }
 
+    /// <summary>The window, sized in its own units (<see cref="UiKit.Scale"/>) to fit the screen.</summary>
     UiNode Window(UiRect view, WorldSnapshot snapshot)
     {
-        float width = Math.Min(1000, view.Width - 32), height = Math.Min(660, view.Height - 150);
+        float scale = UiKit.Scale;
+        float width = Math.Min(1000, (view.Width - 32) / scale), height = Math.Min(660, (view.Height - 150) / scale);
         var window = new UiNode("jm-window")
         {
-            Placement = new(width, height, Left: (view.Width - width) / 2, Top: 80), Style = _styles!.Panel, Flow = UiFlow.Column,
-            Padding = 8, Gap = UiKit.Gap,
+            Placement = new(width * scale, height * scale, Left: (view.Width - width * scale) / 2, Top: 80), Style = _styles!.Panel,
+            Flow = UiFlow.Column, Padding = 8 * scale, Gap = UiKit.S(UiKit.Gap),
         };
 
         float inner = width - 16, body = height - 16 - UiKit.RowHeight - UiKit.Gap;
         window.Children.Add(Header(inner));
-        window.Children.Add(_tab == Tab.Squads ? SquadTab(snapshot, inner, body) : StationTab(snapshot, inner, body));
+        window.Children.Add(Body(snapshot, inner, body));
         return window;
     }
+
+    UiNode Body(WorldSnapshot snapshot, float width, float height) => _tab switch
+    {
+        Tab.Squads => SquadTab(snapshot, width, height),
+        Tab.Stations => StationTab(snapshot, width, height),
+        _ => MessageLog(width, height),
+    };
 
     UiNode Header(float width)
     {
@@ -132,8 +149,10 @@ public sealed partial class JobWindow
         row.Children.Add(Button("tab.squads", "Squad Jobs", 110, () => _tab = Tab.Squads, selected: _tab == Tab.Squads));
         row.Children.Add(Button("tab.stations", "Stations", 110, () => _tab = Tab.Stations, selected: _tab == Tab.Stations));
 
-        string status = Busy ? "Applying..." : _status;
-        row.Children.Add(Label("status", status, Math.Max(40, width - 170 - 220 - 70 - 4 * UiKit.Gap), _styles!.Dim));
+        row.Children.Add(Button("tab.log", "Messages", 90, () => _tab = Tab.Messages, selected: _tab == Tab.Messages));
+
+        string status = Busy ? "Applying..." : Status;
+        row.Children.Add(Label("status", status, Math.Max(40, width - 170 - 310 - 70 - 5 * UiKit.Gap), _styles!.Dim));
         row.Children.Add(Button("close", "Close", 70, Close));
         return row;
     }

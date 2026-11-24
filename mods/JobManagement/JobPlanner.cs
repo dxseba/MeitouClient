@@ -27,12 +27,37 @@ public static class JobPlanner
         return commands;
     }
 
+    /// <summary>
+    /// Moves the unit holding <paramref name="row"/> to where the unit holding <paramref name="target"/> stands (a drag within one list): up, it
+    /// goes before that unit; down, after it.
+    /// </summary>
+    public static List<SimCommand> MoveUnit(CharacterId who, IReadOnlyList<PermaJob> jobs, int row, int target, long tick)
+    {
+        var units = JobRules.Units(jobs);
+        int from = JobRules.UnitOf(units, row), to = JobRules.UnitOf(units, target);
+        if (from < 0 || to < 0 || from == to) return [];
+
+        // Moving down is the units down to the target moving up past this one.
+        var (start, length, before) = to < from
+            ? (units[from].Start, units[from].Length, units[to].Start)
+            : (units[from].End, units[to].End - units[from].End, units[from].Start);
+        return [.. Enumerable.Range(0, length).Select(k => (SimCommand)new MoveJob(who, start + k, before + k) { Tick = tick })];
+    }
+
     /// <summary>Removes the unit holding <paramref name="row"/>, its last row first.</summary>
     public static List<SimCommand> Remove(CharacterId who, IReadOnlyList<PermaJob> jobs, int row, long tick)
     {
         var units = JobRules.Units(jobs);
         int unit = JobRules.UnitOf(units, row);
         return unit < 0 ? [] : RemoveRows(who, Enumerable.Range(units[unit].Start, units[unit].Length), tick);
+    }
+
+    /// <summary>Removes the units holding <paramref name="rows"/> (each job with its companion), last row first.</summary>
+    public static List<SimCommand> RemoveUnits(CharacterId who, IReadOnlyList<PermaJob> jobs, IEnumerable<int> rows, long tick)
+    {
+        var units = JobRules.Units(jobs);
+        var all = rows.Select(r => JobRules.UnitOf(units, r)).Where(u => u >= 0).SelectMany(u => Enumerable.Range(units[u].Start, units[u].Length));
+        return RemoveRows(who, all, tick);
     }
 
     /// <summary>Empties the list, last row first.</summary>

@@ -5,28 +5,44 @@ namespace Meitou.JobManagement;
 /// <summary>The window's registered style ids.</summary>
 sealed record Styles(string Panel, string Text, string Dim, string Warn, string Button, string Selected);
 
-/// <summary>Small builders for the window's nodes: rows of fixed-width labels and buttons.</summary>
+/// <summary>
+/// Small builders for the window's nodes: rows of fixed-width labels and buttons. Sizes are given in the window's own units and drawn times
+/// <see cref="Scale"/> (the fork's <c>UiScale</c>), the text too.
+/// </summary>
 static class UiKit
 {
     public const float LineHeight = 22, RowHeight = 26, Gap = 4;
 
+    /// <summary>The window's size factor (<see cref="JobSettings.UiScale"/> / 100), taken when the window opens; host thread only.</summary>
+    public static float Scale { get; set; } = 1;
+
+    /// <summary>A size in the window's units, in pixels.</summary>
+    public static float S(float units) => units * Scale;
+
+    static UiLength S(UiLength length) => length with { Pixels = S(length.Pixels) };
+
     /// <summary>A transparent row that places its children side by side (<paramref name="pickable"/>: it is a drop target for the pointer).</summary>
     public static UiNode Row(string id, float height = RowHeight, bool pickable = false) =>
-        new(id) { Placement = new(UiLength.Fill, height), Flow = UiFlow.Row, Gap = Gap, Pickable = pickable };
+        new(id) { Placement = new(UiLength.Fill, S(height)), Flow = UiFlow.Row, Gap = S(Gap), Pickable = pickable };
 
     /// <summary>A transparent column of <paramref name="width"/> x <paramref name="height"/>.</summary>
     public static UiNode Column(string id, UiLength width, UiLength height, float gap = 2) =>
-        new(id) { Placement = new(width, height), Flow = UiFlow.Column, Gap = gap, Pickable = false };
+        new(id) { Placement = new(S(width), S(height)), Flow = UiFlow.Column, Gap = S(gap), Pickable = false };
 
     public static UiNode Label(string id, string text, float width, string style) =>
-        new(id, UiNodeKind.Label) { Placement = new(width, LineHeight), Text = text, Style = style };
+        new(id, UiNodeKind.Label) { Placement = new(S(width), S(LineHeight)), Text = text, Style = style, TextScale = Scale };
+
+    /// <summary>A picture of <paramref name="size"/> units square from <paramref name="path"/>.</summary>
+    public static UiNode Icon(string id, string path, float size = LineHeight) =>
+        new(id, UiNodeKind.Image) { Placement = new(S(size), S(size)), Image = path, Pickable = false };
 
     public static UiNode Button(string id, string text, float width, string style, string action, string argument, bool enabled = true,
         UiPointerEvents pointer = UiPointerEvents.None) =>
         new(id, UiNodeKind.Button)
         {
-            Placement = new(width, LineHeight),
+            Placement = new(S(width), S(LineHeight)),
             Text = text,
+            TextScale = Scale,
             Style = style,
             Action = enabled ? action : "",
             Argument = argument,
@@ -38,7 +54,8 @@ static class UiKit
     public static UiNode List(string id, UiLength width, UiLength height, string wheel, string argument) =>
         new(id)
         {
-            Placement = new(width, height), Flow = UiFlow.Column, Gap = 2, Pointer = UiPointerEvents.Wheel, Action = wheel, Argument = argument,
+            Placement = new(S(width), S(height)), Flow = UiFlow.Column, Gap = S(2), Pointer = UiPointerEvents.Wheel, Action = wheel,
+            Argument = argument,
         };
 
     /// <summary>The lines from <paramref name="scroll"/> that fit, the scroll clamped to the list.</summary>

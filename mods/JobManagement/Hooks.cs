@@ -15,7 +15,7 @@ static class Hooks
 
     public static void Install(ModContext context)
     {
-        context.AddFrame(frame => JobManagementMod.Window.Frame(frame.Snapshot));
+        context.AddFrame(frame => JobManagementMod.Window.Frame(frame.Snapshot, frame.Ctrl));
         AddWindowKey(context);
     }
 

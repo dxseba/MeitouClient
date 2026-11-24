@@ -17,7 +17,7 @@ public sealed class JobManagementMod : IMod
         context.AddSettings(Settings);
         context.AddSystem("jobboard", _ => new JobBoardSystem(), SystemAnchor.End);
         Window = new JobWindow(Settings, () => context.Tick, context.Enqueue, new StationScanner(context.Data),
-            context.Interface.HoldPause);
+            context.Interface.HoldPause, new StationIcons(new OriginalFiles(context)), context.Log);
         Hooks.Install(context);
         context.AddUi(Window);
         context.Log("Job Management initialized");

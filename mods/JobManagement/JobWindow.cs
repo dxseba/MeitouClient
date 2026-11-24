@@ -14,9 +14,9 @@ readonly record struct JobPick(CharacterId Owner, int Row, PermaJob Job);
 /// (a mod pause hold) and puts the speed back on close. Edits go out as job commands in steps; each step waits for the snapshot that shows the last one applied.
 /// </summary>
 public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Action<SimCommand> enqueue, StationScanner scanner,
-    Func<ModPauseHold?> holdPause) : IUiExtension
+    Func<ModPauseHold?> holdPause, StationIcons icons, Action<string> log) : IUiExtension
 {
-    enum Tab { Squads, Stations }
+    enum Tab { Squads, Stations, Messages }
 
     const int MaxWaitFrames = 60, MaxRetries = 5;
 
@@ -30,7 +30,9 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     ModPauseHold? _hold;
     bool _open;
     Tab _tab;
-    string _status = "";
+
+    /// <summary>Ctrl as the last frame saw it: a click with it held adds to the picked jobs.</summary>
+    bool _ctrl;
 
     WorldSnapshot? _waitFor;
     int _waitFrames, _retries;
@@ -67,9 +69,10 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     /// Once per frame on the host's thread (<c>AddFrame</c>), with the snapshot on screen: follows the running world (its board system, told
     /// ready) and runs the next due step.
     /// </summary>
-    public void Frame(WorldSnapshot snapshot)
+    public void Frame(WorldSnapshot snapshot, bool ctrl)
     {
         _snapshot = snapshot;
+        _ctrl = ctrl;
         if (JobBoardSystem.Running is not { } board) return;
 
         if (!ReferenceEquals(board, _board)) Reset(board);
@@ -84,20 +87,21 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
 
     void Open()
     {
-        if (_board is null || _snapshot is not { } snapshot || !settings.Enabled) return;
+        if (_board is null || _snapshot is null || !settings.Enabled) return;
 
         _open = true;
+        UiKit.Scale = Math.Clamp(settings.UiScale, JobSettings.MinScale, JobSettings.MaxScale) / 100f;
         _hold = holdPause();
-        _status = "";
-        OpenSquads(snapshot);
+        Status = "";
+        if (_tab == Tab.Messages) _tab = Tab.Squads;
+        OpenSquads();
     }
 
     /// <summary>Closes the window; the speed comes back unless the player changed it while the window was open.</summary>
     void Close()
     {
         _open = false;
-        _pick = null;
-        _drag = null;
+        ClearSelection();
         ReleasePause();
     }
 
@@ -112,8 +116,7 @@ public sealed partial class JobWindow(JobSettings settings, Func<long> tick, Act
     void Reset(JobBoardSystem board)
     {
         _open = false;
-        _pick = null;
-        _drag = null;
+        ClearSelection();
         ReleasePause();
         _steps.Clear();
         _waitFor = null;
