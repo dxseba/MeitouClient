@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.bodymorphcap",
+  "apiVersion": 2,
+  "assemblies": ["BodyMorphCap.dll"],
+  "entry": "Meitou.BodyMorphCap.BodyMorphCapMod",
+  "gameVersion": ">=0.22.2"
+}
