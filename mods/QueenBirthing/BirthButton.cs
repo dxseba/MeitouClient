@@ -65,7 +65,7 @@ sealed class BirthButton(IReadOnlyList<BirthKind> kinds) : IUiExtension
     public void Register(UiRegistration registration)
     {
         _button = registration.RegisterStyle("button", new() { Skin = "Kenshi_Button1Skin", TextAlign = "Center" });
-        _panel = registration.RegisterStyle("panel", new() { Skin = "Kenshi_GenericTextBoxFlatSkin" });
+        _panel = registration.RegisterStyle("panel", new() { Skin = "Kenshi_FloatingPanelSkin" });
         _press = registration.RegisterAction("birth", Press);
         _choose = registration.RegisterAction("kind", Choose);
         registration.AddScreenControls("inventory", "ArrangeButton", UiAnchorPlacement.Left, Build);

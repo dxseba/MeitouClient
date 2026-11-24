@@ -37,7 +37,7 @@ public sealed class QueenBirthingMod : IMod
         context.AddSettings(Settings);
 
         var kinds = Kinds(context);
-        context.AddSystem("birthing", _ => new BirthSystem(Settings, kinds), SystemAnchor.End);
+        context.AddSystem("birthing", _ => new BirthSystem(Settings, kinds, context.Log), SystemAnchor.End);
         var button = new BirthButton(kinds);
         context.AddUi(button);
         context.AddFrame(button.Frame);

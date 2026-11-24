@@ -11,7 +11,7 @@ namespace Meitou.QueenBirthing;
 /// (<c>PopulationSystem.SpawnIntoPlayerSquad</c>), then the queen pays the hunger and is knocked out, and the newborn gets its hunger and knock-out
 /// (the original's constants). Publishes the player's queens and their hunger every 30th tick for the menu.
 /// </summary>
-sealed class BirthSystem(BirthSettings settings, IReadOnlyList<BirthKind> kinds) : ITickSystem
+sealed class BirthSystem(BirthSettings settings, IReadOnlyList<BirthKind> kinds, Action<string> log) : ITickSystem
 {
     /// <summary>
     /// The original's <c>QUEEN_KNOCKOUT_TIME</c>, <c>DRONE_KNOCKOUT_TIME</c> (seconds) and <c>DRONE_HUNGER</c> (raw hunger the newborn starts at).
@@ -91,12 +91,14 @@ sealed class BirthSystem(BirthSettings settings, IReadOnlyList<BirthKind> kinds)
         if (Spawn(world, queen.SquadId, table.Next[slot].Position, template) is not { } newborn)
         {
             world.Post($"{queen.Name} cannot give birth here.");
+            log($"QueenBirth: no newborn from {template} (no walkable point, or the squad or faction is full)");
             return;
         }
 
         medical.Hunger -= kind.Cost;
         medical.KnockOut(QueenKnockout);
         SettleNewborn(world, newborn);
+        log($"QueenBirth: spawned from {template} with hunger {NewbornHunger} and knocked out for {NewbornKnockout} seconds");
         world.Post($"{queen.Name} gave birth to a {kind.Label}.");
     }
 
