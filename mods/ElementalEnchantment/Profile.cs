@@ -79,20 +79,46 @@ sealed class Profile
     }
 
     /// <summary>
-    /// The recalibrator: a different aptitude result (another favoured element, or rare to ordinary and back), and ability for one without it.
+    /// The recalibrator, as the original's: a character without ability gains it with a fresh aptitude (favoured one of five, rare 1 in 100), its
+    /// main element the favoured one (any of five when rare) and no secondary, its experience kept; a rare character becomes ordinary with any of
+    /// the five favoured; an ordinary one becomes rare 1 time in 100, else favours one of the four other elements.
     /// </summary>
     public void Recalibrate(ulong seed)
     {
-        for (ulong i = 0; ; i++)
+        ulong h = Rng.Mix(seed);
+        bool rare = Rng.Mix(h) % 100 == 0;
+        if (!Able)
         {
-            ulong h = Rng.Mix(seed + i);
-            bool rare = Rng.Mix(h) % 100 == 0;
-            var favoured = Elements.All[(int)(h % 5)];
-            if (rare == Rare && (rare || favoured == Favoured)) continue;
-
-            (Rare, Favoured, Able) = (rare, favoured, true);
+            Grant(h, rare);
             return;
         }
+
+        if (Rare)
+        {
+            (Rare, Favoured) = (false, Elements.All[(int)(h % 5)]);
+            return;
+        }
+
+        if (rare)
+        {
+            Rare = true;
+            return;
+        }
+
+        int current = Array.IndexOf(Elements.All, Favoured);
+        int pick = (int)(h % 4);
+        Favoured = Elements.All[pick >= current ? pick + 1 : pick];
+    }
+
+    /// <summary>
+    /// Elemental ability for a character without it: a fresh aptitude, the favoured element as the main one (a rare character's any of five), no
+    /// secondary.
+    /// </summary>
+    void Grant(ulong h, bool rare)
+    {
+        (Able, Rare, Favoured) = (true, rare, Elements.All[(int)(h % 5)]);
+        Main = rare ? Elements.All[(int)(Rng.Mix(h ^ 0x5EED) % 5)] : Favoured;
+        Second = Element.None;
     }
 
     /// <summary>

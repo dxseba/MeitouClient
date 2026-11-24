@@ -10,7 +10,8 @@ namespace Meitou.ElementalEnchantment;
 /// bursts its main element's impact (<c>EE_Impact_*</c>) and its secondary's on the victim for up to a second; with *Device combat effects* on, a
 /// ward-wearer's hit shows the ward's effect (<c>EE_Device*</c>) at its pelvis. Base-game stand-ins in the element's colour without the original
 /// mod's particles. Each landed hit flares the attacker's blade and hand particles (<see cref="WeaponAura.Flare"/>). A bolt an enchanted
-/// character shoots carries its main element's bolt system (<c>EE_Bolt_*</c>, fire's <c>SB_Prototype_HandFire</c>) until it lands or goes
+/// character shoots carries its main element's bolt system (<c>EE_Bolt_*</c>, fire's <c>SB_Prototype_HandFire</c>), and the secondary's too
+/// once it counts, until it lands or goes
 /// (<see cref="ModContext.AddProjectileFeed"/>, <see cref="EffectAnchor.Projectile"/>).
 /// </summary>
 sealed class ElementEffects(ModContext context, EnchantSettings settings, WeaponAura aura)
@@ -21,9 +22,9 @@ sealed class ElementEffects(ModContext context, EnchantSettings settings, Weapon
     const float BoltSeconds = 10f;
 
     /// <summary>
-    /// The bolt effects playing, by bolt id.
+    /// The bolt effects playing, by bolt id (the main element's, then the secondary's).
     /// </summary>
-    readonly Dictionary<int, string> _bolts = [];
+    readonly Dictionary<int, List<string>> _bolts = [];
 
     /// <summary>EFFECT <c>small- sparks1</c> (system <c>kenshi_sparks</c>).</summary>
     const string Sparks = "5463-nodes_furniture1_otto.mod";
@@ -68,7 +69,8 @@ sealed class ElementEffects(ModContext context, EnchantSettings settings, Weapon
     }
 
     /// <summary>
-    /// The bolts' changes: a bolt fired by an enchanted character takes its main element's bolt system; a landed or gone one loses it.
+    /// The bolts' changes: a bolt fired by an enchanted character takes its main element's bolt system and the counting secondary's (the
+    /// original attaches both, by no setting or level); a landed or gone one loses them.
     /// </summary>
     public void Projectiles(IReadOnlyList<ProjectileEvent> events)
     {
@@ -81,8 +83,12 @@ sealed class ElementEffects(ModContext context, EnchantSettings settings, Weapon
                 continue;
             }
 
-            if (settings.Enabled && view is not null && view.TryGetValue(e.Shooter, out var shown) && shown is { Able: true, Main: not Element.None })
-                Bolt(e.Id, shown.Main);
+            if (!settings.Enabled || view is null || !view.TryGetValue(e.Shooter, out var shown)) continue;
+            if (shown is not { Able: true, Main: not Element.None }) continue;
+
+            var enchant = shown.Enchant;
+            Bolt(e.Id, enchant.Main);
+            if (enchant.Second is not Element.None && enchant.Second != enchant.Main) Bolt(e.Id, enchant.Second);
         }
     }
 
@@ -96,15 +102,20 @@ sealed class ElementEffects(ModContext context, EnchantSettings settings, Weapon
         bool kept = context.HasEffect(original)
             ? context.KeepEffect(original, anchor, BoltSeconds)
             : context.KeepEffect(original = WeaponAura.Particles(element), anchor, BoltSeconds, WeaponAura.Colour(element));
-        if (kept) _bolts[id] = original;
+        if (!kept) return;
+
+        if (!_bolts.TryGetValue(id, out var effects)) _bolts[id] = effects = [];
+        effects.Add(original);
     }
 
     /// <summary>
-    /// Ends a bolt's system.
+    /// Ends a bolt's systems.
     /// </summary>
     void Unbolt(int id)
     {
-        if (_bolts.Remove(id, out var effect)) context.StopEffect(effect, EffectAnchor.Projectile(id));
+        if (!_bolts.Remove(id, out var effects)) return;
+
+        foreach (var effect in effects) context.StopEffect(effect, EffectAnchor.Projectile(id));
     }
 
     /// <summary>

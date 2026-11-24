@@ -155,8 +155,8 @@ sealed class ElementSystem(EnchantSettings settings, ModSkill skill)
     #region Recalibrator
 
     /// <summary>
-    /// The aptitude recalibrator's right click (not in a bag): one is used up and the aptitude rerolled to a different result; a character
-    /// without elemental ability gains it.
+    /// The aptitude recalibrator's right click (not in a bag): one is used up and the aptitude rerolled (<see cref="Profile.Recalibrate"/>); a
+    /// character without elemental ability gains it.
     /// </summary>
     public bool Recalibrate(ItemUse use)
     {
@@ -174,6 +174,11 @@ sealed class ElementSystem(EnchantSettings settings, ModSkill skill)
     #endregion
 
     #region Combat
+
+    /// <summary>
+    /// The inventory section of the belt slot (AttachSlot 14), where a ward is worn.
+    /// </summary>
+    const string BeltSection = "belt";
 
     public void HitResolved(World world, in CombatHit hit)
     {
@@ -253,7 +258,8 @@ sealed class ElementSystem(EnchantSettings settings, ModSkill skill)
     }
 
     /// <summary>
-    /// The element of the ward the character wears (in a worn slot, not its main grid or bag); none without one.
+    /// The element of the ward the character wears in its belt slot (the original reads the item of <c>getSectionOfType(ATTACH_BELT)</c>); none
+    /// without one.
     /// </summary>
     static Element WardOf(CharacterCold? cold)
     {
@@ -261,7 +267,7 @@ sealed class ElementSystem(EnchantSettings settings, ModSkill skill)
 
         foreach (var item in inventory.Items)
         {
-            if (InventoryCommands.IsEquipmentSection(item.Section) && EnchantData.Wards.TryGetValue(item.Record, out var element)) return element;
+            if (item.Section == BeltSection && EnchantData.Wards.TryGetValue(item.Record, out var element)) return element;
         }
 
         return Element.None;
