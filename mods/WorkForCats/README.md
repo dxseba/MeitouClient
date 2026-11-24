@@ -35,14 +35,21 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
   source). Meitou: `XpService.Continuous` at amount 1.
 - **Window text**: "Get a job" / "Quit job"; "N cats/hour" (whole cats), employed here " | m/60 min" and " (waiting)" while not working.
   **Verified** (original source; it also has the Russian captions).
+- **Hunger while working**: the original's employee runs the native operate action, which takes the functionality's `hunger rate` as the
+  hunger situation factor (docs/game/character-stats.md). Meitou's employee stands on the job's idle task (factor 0.8 idle, else 1), so an
+  `INeedRateFilter` swaps that for the workplace's rate while it stands still at the work clip out of combat (rates published by the work
+  sweep). **Verified** (original source: native `OPERATE_MACHINERY`; the factor rule as the engine's docs).
+- **Access check**: before each walk the job needs a free operator slot (the original's `isFreeSlot` before an approach; Meitou:
+  `AiSystem.WorkSlots(site).Free`, as at the hire); an employee already standing at the station keeps working. **Verified** (original source).
 - **Observed** (2026-11-18): builds. Play is **Unknown**: not run in game.
 
 ## Missing
 
-- Holding an operator slot for the employee: `WorkSlots` is read only, so an NPC may take the station after the hire.
+- Holding an operator slot for the employee: `WorkSlots` is read only, so an NPC may take the station after the hire (engine gap).
+- Russian captions: the original picks them by the game's locale, which a Meitou mod cannot read, and its texts are its own (engine gap:
+  locale or per-mod translations).
 - The panel shows only in the windows the engine opens for a building (its own machine windows); whether an NPC town's bench opens one is not
   checked.
-- Russian captions.
-- The original's approach (to within 3 units of the building's position marker, retries after 0.5 or 2 s) is Meitou's walk to the use range,
-  with a 60 s wait after three short walks.
-- No functionality hunger rate while working, no access check before the walk.
+- The approach: the original walks to within 3 units of the building's position marker and then hands over to the native operate order (retries
+  after 0.5 or 2 s); Meitou walks to the use range, with a 60 s wait after three short walks, since its employee does not run the native
+  operate action (that would make products and take the game's own XP).

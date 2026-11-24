@@ -179,6 +179,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
     void Sweep(World world)
     {
         var table = world.Characters;
+        var working = new Dictionary<CharacterId, float>();
         for (int slot = 0; slot < table.HighWater; slot++)
         {
             if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true } cold) continue;
@@ -192,10 +193,14 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
 
             var employee = EmployeeOf(world, slot, site);
             employee.Name = cold.Name;
-            if (Working(world, slot, cold, employee) is { } place) Earn(world, cold, employee, place);
+            if (Working(world, slot, cold, employee) is not { } place) continue;
+
+            Earn(world, cold, employee, place);
+            working[id] = place.HungerRate;
         }
 
         foreach (var id in _employees.Keys.Where(id => !table.TryResolveNext(id, out _)).ToList()) _employees.Remove(id);
+        PublishHunger(working);
     }
 
     /// <summary>

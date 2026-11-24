@@ -9,10 +9,11 @@ namespace Meitou.WorkForCats;
 
 /// <summary>
 /// A workplace a character can be employed at: its building key, name, position, how near the worker stands (its functionality's
-/// <c>use range</c>), the work clip and functionality, the skill it trains and pays by, the owning faction and whether that is the player's.
+/// <c>use range</c>), the work clip and functionality, the skill it trains and pays by, the owning faction and whether that is the player's, and the
+/// functionality's <c>hunger rate</c>.
 /// </summary>
 internal sealed record Workplace(string Key, string Name, Vector3 Position, float Range, string Clip, string? Functionality, StatsEnumerated Stat,
-    int Owner, bool Own);
+    int Owner, bool Own, float HungerRate = 1);
 
 /// <summary>
 /// A building key's workplace, and why it offers no employment (null: it does).
@@ -54,7 +55,7 @@ internal sealed class WorkplaceFinder(PopulationData data)
 
         bool own = found.Owner >= 0 && found.Owner == world.Player.Faction;
         var place = new Workplace(key, machine.Name, found.Position, machine.UseRange, machine.Animation, machine.Functionality,
-            (StatsEnumerated)machine.Stat, found.Owner, own);
+            (StatsEnumerated)machine.Stat, found.Owner, own, machine.HungerRate);
         return new Lookup(place, Refusal(machine, found, own, rules));
     }
 

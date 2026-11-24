@@ -34,8 +34,10 @@ internal sealed class WorkJob(WorkSystem system) : IJobSource, ITaskHandler
         if (cold.Medical is { Incapacitated: true } || !cold.CarriedBy.IsNone || !cold.Carrying.IsNone) return DecisionCheck.No("cannot work now");
         if (system.Eligible(world, site) is not { } place) return DecisionCheck.No("the workplace no longer employs");
         if (system.Waiting(world, slot)) return DecisionCheck.No("could not reach the workplace");
+        if (Continues(world, slot, cold, k, place)) return DecisionCheck.Runs;
 
-        return Continues(world, slot, cold, k, place) ? DecisionCheck.Runs : DecisionCheck.Run;
+        // The original's access check before each approach (isFreeSlot): a station whose every slot is held takes no new walk.
+        return system.StationFull(site) ? DecisionCheck.No("every station here is taken") : DecisionCheck.Run;
     }
 
     public void Start(World world, int slot, int k)
