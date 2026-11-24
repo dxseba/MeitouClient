@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.itemmarkers",
+  "apiVersion": 2,
+  "assemblies": ["ItemMarkers.dll"],
+  "entry": "Meitou.ItemMarkers.ItemMarkersMod",
+  "gameVersion": ">=0.22.2"
+}
