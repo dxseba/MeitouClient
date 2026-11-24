@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.medicsplintrigging",
+  "apiVersion": 2,
+  "assemblies": ["MedicSplintRigging.dll"],
+  "entry": "Meitou.MedicSplintRigging.MedicSplintRiggingMod",
+  "gameVersion": ">=0.22.2"
+}
