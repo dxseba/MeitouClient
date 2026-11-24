@@ -15,14 +15,19 @@ Port of *Map markers* (MCM fork, workshop 3813852161) of Emkej8's mod (GPL-3.0 s
   374,42; Label box 108,74 386 wide (port: each change kept at once, trailing spaces trimmed as the editor closes; a marker just added with the middle
   button gets the typing focus, `UiNode.Focus`; Enter commits and deselects, `UiEventKind.Submit`); Colour row at y 107:
   "-" and ten 22 px swatches 28 apart from x 108 (frame 0.05 grey; port: its own ten colours, white first, the fork's palette is its author's and not copied); a swatch replaces the label's leading `#RRGGBB` tag (7 characters, not `##`) and commits, "-" drops it; the
-  hint "MMB new marker | LMB move | Enter save" / "Del or the button - delete | RMB deselect" at 16,142). Port: sizes times the UI scale. Dragging the panel (a screen-control drag) moves the editor for
-  the session, held inside the map's viewport.
+  hint "MMB new marker | LMB move | Enter save" / "Del or the button - delete | RMB deselect" at 16,142). Port: sizes times the UI scale. Dragging the panel (a screen-control drag) moves the editor,
+  held inside the map's viewport, and keeps the place across sessions (the original's `editor_position_customized`, `editor_left`, `editor_top`;
+  port: the drag's offset in pixels, hidden settings kept with the player's settings).
   Markers under the editor are hidden, as in the original. **Hover label**: "Type: label" in `#F5F5F5` on `#1A1A1AF2` above the marker, at
   most 480 px wide (the fork measures the text; the port estimates it, tags left out).
 - **Footer**: "Markers: On/Off" at the map's left, level with the zoom buttons.
 - **Saved per save** in the mod's sidecar (`IModSaveData`, system `markers`, version 1) and, as the original, in `<save>/Map-markers.json`
   written beside every save the game writes (`AddSaveWritten`). A loaded or imported save's `Map-markers.json` (the original's or the port's)
   replaces the sidecar's markers (`IWorldReady`, `world.Start.SaveFolder`), so saves move between the original and the port.
+- **Diagnostics** (**Verified**, the original's README and DLL strings): Ctrl+Alt+F7 logs one snapshot of the overlay (`overlay_diagnostics`),
+  Ctrl+Alt+F8 switches the detailed log (`debug_logging`, also a setting; `toggle_footer_diagnostics`). Port: key actions on the Controls page;
+  the snapshot has the settings, marker count, selection, editor offset, map image, viewport, UI scale and editor box; the detailed log ("PROBE"
+  lines) follows the hovered marker and the editor's placing, in the port's own words.
 - **Settings** (Mod settings): Enabled, Markers visible, Close editor on map close, Show hover labels, Hover label text / background colour
   (free text, `#RRGGBB` or `#RRGGBBAA`, the original's `hover_label_*_color_hex`; invalid: its default), Default marker type (labels and
   hints the MCM fork's, **Verified** DLL strings; the fork's MCM page has no Markers visible, which is its footer button).
@@ -34,8 +39,10 @@ Port of *Map markers* (MCM fork, workshop 3813852161) of Emkej8's mod (GPL-3.0 s
 
 ## Missing
 
-- The editor's dragged place is not remembered across sessions (the original's `editor_left`/`editor_top` in its config).
-- Markers are flat coloured squares with a dark glyph, not the tinted button skin; the footer button's width is fixed, not measured.
-- No diagnostics hotkeys (Ctrl+Alt+F7/F8) or Debug logging setting; no Russian or Chinese text.
+- Markers are flat coloured squares with a dark glyph, not the tinted button skin (no skin tint for mod controls); the footer button's width is
+  fixed and the hover label's estimated, not measured (no text measuring for mods) (engine gaps).
+- No Russian or Chinese text: its `locale/*.mo` catalogues need a per-mod translation API (engine gap).
+- The label swatches' palette is the port's own (the fork's is its author's).
 
-**Unknown**: not run in game (the screen controls, the footer button beside the zoom buttons, the JSON exchange with the original). Builds.
+**Unknown**: not run in game (the screen controls, the footer button beside the zoom buttons, the JSON exchange with the original, the editor's
+kept place, the diagnostics keys). Builds.

@@ -28,6 +28,25 @@ public sealed class MapMarkersSettings
     [Setting("Default marker type", Hint = "The type a middle click gives a new marker.")]
     public MarkerKind DefaultType { get; set; } = MarkerKind.Note;
 
+    [Setting("Detailed log",
+        Hint = "debug_logging: hover and editor diagnostics in the mod log (Ctrl+Alt+F8 switches it; Ctrl+Alt+F7 logs one snapshot).")]
+    public bool DebugLogging { get; set; }
+
+    /// <summary>Never true: hides the editor's remembered place (below) on the settings page.</summary>
+    public bool Never => false;
+
+    /// <summary>The original's <c>editor_position_customized</c>: the player dragged the editor (kept until the next drag).</summary>
+    [Setting("Editor moved", VisibleWhen = nameof(Never))]
+    public bool EditorPositionCustomized { get; set; }
+
+    /// <summary>The original's <c>editor_left</c> (port: the drag's offset from the editor's place, pixels).</summary>
+    [Setting("Editor left", VisibleWhen = nameof(Never), Min = -100000, Max = 100000, Step = 1)]
+    public float EditorLeft { get; set; }
+
+    /// <summary>The original's <c>editor_top</c> (port: the drag's offset from the editor's place, pixels).</summary>
+    [Setting("Editor top", VisibleWhen = nameof(Never), Min = -100000, Max = 100000, Step = 1)]
+    public float EditorTop { get; set; }
+
     /// <summary>The hover label's text and strip colours (the original's <c>hover_label_*_color_hex</c>: an invalid one is its default).</summary>
     public (Vector4 Text, Vector4 Back) HoverColours() => (Parse(HoverTextColour, 0xF5F5F5FF), Parse(HoverBackgroundColour, 0x1A1A1AF2));
 

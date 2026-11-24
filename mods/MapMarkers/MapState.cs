@@ -31,13 +31,33 @@ static class MapState
     /// <summary>Whether the editor's label box asks for the keys: the selected marker was just added with the middle button.</summary>
     public static bool FocusLabel => s_focus != 0 && s_focus == s_selected;
 
-    /// <summary>How far the player dragged the editor from its place, pixels (kept for the session, held inside the map's viewport).</summary>
+    /// <summary>
+    /// How far the player dragged the editor from its place, pixels (held inside the map's viewport); kept across sessions in the settings, as
+    /// the original's <c>editor_left</c> / <c>editor_top</c>.
+    /// </summary>
     public static Vector2 EditorMoved { get; private set; }
 
-    /// <summary>A drag of the editor's panel moves it by the pointer's movement.</summary>
+    /// <summary>The editor's remembered place at start.</summary>
+    public static void RestoreEditor()
+    {
+        if (Settings.EditorPositionCustomized) EditorMoved = new(Settings.EditorLeft, Settings.EditorTop);
+    }
+
+    /// <summary>A drag of the editor's panel moves it by the pointer's movement and keeps the place (in the settings).</summary>
     public static void DragEditor(Meitou.Game.Ui.UiEventKind kind, Vector2 delta)
     {
-        if (kind == Meitou.Game.Ui.UiEventKind.Drag) EditorMoved += delta;
+        if (kind == Meitou.Game.Ui.UiEventKind.Release)
+        {
+            MapDiagnostics.Detail(FormattableString.Invariant($"editor_placed left={EditorMoved.X:0} top={EditorMoved.Y:0}"));
+            return;
+        }
+
+        if (kind != Meitou.Game.Ui.UiEventKind.Drag) return;
+
+        EditorMoved += delta;
+        MapMarkersMod.Keep(nameof(MapMarkersSettings.EditorLeft), EditorMoved.X);
+        MapMarkersMod.Keep(nameof(MapMarkersSettings.EditorTop), EditorMoved.Y);
+        MapMarkersMod.Keep(nameof(MapMarkersSettings.EditorPositionCustomized), true);
     }
 
     /// <summary>Markers draw and take clicks: the mod is on and the markers are shown.</summary>

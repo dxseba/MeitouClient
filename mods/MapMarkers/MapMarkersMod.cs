@@ -1,3 +1,4 @@
+using Meitou.Game.Host.Input;
 using Meitou.Modding;
 using Meitou.Simulation;
 
@@ -14,13 +15,27 @@ public sealed class MapMarkersMod : IMod
     /// <summary>The running world's markers; null before a world starts. Each new game or load makes a fresh book (filled by its save).</summary>
     internal static volatile MarkerBook? Running;
 
+    static ModSettingsGroup? s_group;
+    static ModContext? s_context;
+
+    /// <summary>Sets a setting as the settings page does, so it is kept with the player's settings (host thread).</summary>
+    internal static void Keep(string key, object value) => s_group?.Settings.First(s => s.Key == key).Set(value);
+
+    /// <summary>A line in the mod log (the original's diagnostics).</summary>
+    internal static void Log(string text) => s_context?.Log(text);
+
     public void Initialize(ModContext context)
     {
-        context.AddSettings(Settings);
+        s_context = context;
+        s_group = context.AddSettings(Settings);
+        MapState.RestoreEditor();
         context.AddSystem("markers", _ => Running = new MarkerBook(context.Log), SystemAnchor.End);
         context.AddUi(new MapUi());
         context.AddFrame(frame => MapState.Pointer = frame.Pointer);
         context.AddSaveWritten(folder => Running?.WriteFile(folder));
+        var chord = KeyModifiers.Ctrl | KeyModifiers.Alt;
+        context.AddKeyAction("snapshot", "Map markers: diagnostics snapshot", _ => MapDiagnostics.Snapshot("hotkey"), Binding.Of(Key.F7).With(chord));
+        context.AddKeyAction("probe", "Map markers: detailed log", _ => MapDiagnostics.Toggle("hotkey"), Binding.Of(Key.F8).With(chord));
         context.Log("Map markers initialized");
     }
 }

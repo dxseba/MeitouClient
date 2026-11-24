@@ -25,12 +25,14 @@ static class MapOverlay
         if (!MapMarkersMod.Settings.Enabled || context.Map is not { } view || !MapState.Active || MapState.Book is not { } book) return null;
 
         var layout = MapLayout.Of(view);
+        MapDiagnostics.Layout = layout;
         var root = new UiNode("map", UiNodeKind.Panel) { Pickable = false };
         var markers = book.Snapshot();
         foreach (var marker in markers) AddMarker(root, layout, marker, styles);
 
-        if (MapMarkersMod.Settings.ShowHoverLabels && MapState.MarkerAt(layout, MapState.Pointer, markers) is { } hovered)
-            AddHoverLabel(root, layout, hovered, styles);
+        var hovered = MapState.MarkerAt(layout, MapState.Pointer, markers);
+        MapDiagnostics.Hovered(hovered);
+        if (MapMarkersMod.Settings.ShowHoverLabels && hovered is not null) AddHoverLabel(root, layout, hovered, styles);
         if (MapState.Selected is { } selected) AddEditor(root, layout, selected, styles, actions);
 
         return root;
@@ -116,7 +118,7 @@ static class MapOverlay
         var c = root.Children;
         c.Add(new UiNode("editor", UiNodeKind.Panel)
         {
-            Placement = Place(layout.Image, e), Style = styles.Panel, Pointer = UiPointerEvents.Drag, Action = actions.Drag,
+            Placement = Place(layout.Image, e), Style = styles.Panel, Pointer = UiPointerEvents.Drag | UiPointerEvents.Release, Action = actions.Drag,
         });
         c.Add(Node("header", UiNodeKind.Label, At(16, 16, 442, 18), styles.Text, MarkerKinds.Header(marker)));
         c.Add(Node("close", UiNodeKind.Button, At(470, 13, 24, 24), styles.Button, "x", actions.Close));
