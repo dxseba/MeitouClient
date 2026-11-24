@@ -53,6 +53,7 @@ sealed class StateLog
         var facts = all.GetValueOrDefault(member.Id);
         return $"  {member.Name}: {Name(PortraitBadges.StateOf(member, all))}"
             + $" dying={facts.Dying} recovery_coma={facts.RecoveryComa} crippled_leg={facts.LegCrippled} crippled_arm={facts.ArmCrippled}"
+            + $" starving={facts.Starving}"
             + $" bed_function={facts.Bed}";
     }
 

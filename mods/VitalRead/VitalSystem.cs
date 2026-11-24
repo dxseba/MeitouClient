@@ -44,58 +44,30 @@ sealed class VitalSystem(VitalReadSettings settings, PopulationData data) : ITic
     VitalFacts FactsOf(World world, CharacterCold cold, MedicalState medical)
     {
         bool dying = DyingTerms(cold, medical);
-        bool leg = medical.Crawling || medical.LegsMessedUp;
+        bool leg = medical.Crawling && !medical.CanKick;
         bool arm = !medical.BothArmsWork;
-        return new(dying && !medical.PlayingDead, RecoveryComa(medical, dying), leg, arm, BedFunction(world, cold));
+        return new(dying && !medical.PlayingDead, RecoveryComa(medical, dying), leg, arm, medical.ReallyHungry, BedFunction(world, cold));
     }
 
     /// <summary>
-    /// The original's dying terms (the game's own "Dying" status, the fork's v2): blood-loss trauma (<see cref="MedicalState.BloodKo"/>), probably
-    /// dying (stand-in: the health word's Dying, <see cref="HealthWordDying"/>) or blood at or under the KO point (<c>pointOfNoReturn</c>).
+    /// The original's dying terms (the game's own "Dying" status, the fork's v2): blood-loss trauma (<see cref="MedicalState.BloodKo"/>),
+    /// <c>isProbablyDying</c> (<see cref="MedicalState.ProbablyDying"/>) or blood at or under the KO point (<c>pointOfNoReturn</c>).
     /// </summary>
     bool DyingTerms(CharacterCold cold, MedicalState medical)
     {
-        float? ko = KoPoint(cold);
-        bool pastNoReturn = ko is { } point && medical.Blood <= point;
-        return medical.BloodKo || pastNoReturn || HealthWordDying(medical, ko);
+        bool pastNoReturn = KoPoint(cold) is { } point && medical.Blood <= point;
+        return medical.BloodKo || medical.ProbablyDying || pastNoReturn;
     }
 
     /// <summary>
-    /// The original's recovery coma: the coma flag, no way to get up now, no KO timer left, none of the dying terms and no bleeding. It does not
-    /// need the unconscious flag.
+    /// The original's recovery coma: the coma flag, <c>!canGetUpWakeUp</c>, no KO timer left, none of the dying terms and no bleeding (its extra
+    /// blood loss has no counterpart). It does not need the unconscious flag.
     /// </summary>
-    static bool RecoveryComa(MedicalState medical, bool dying)
-    {
-        bool canGetUp = medical.Unconscious && medical.WakesWithin(0);
-        return medical.Coma && !canGetUp && medical.KoTimer <= 0 && !dying && medical.Bleeding <= 0;
-    }
+    static bool RecoveryComa(MedicalState medical, bool dying) =>
+        medical.Coma && !medical.CanGetUpWakeUp && medical.KoTimer <= 0 && !dying && medical.Bleeding <= 0;
 
     float? KoPoint(CharacterCold cold) =>
         cold.Stats is { } stats ? MedicalState.KoPoint(data.Bodies.Constants, stats.ScaledToughness) : null;
-
-    /// <summary>
-    /// The health word's Dying (docs/game/ui-screens.md "Health word choice", h flesh, d bandage, s stun, m maximum): blood at or under 0 with a
-    /// destroyed non-vital part, or a vital part under 0 and not at or above the KO point (none known counts as under).
-    /// </summary>
-    static bool HealthWordDying(MedicalState medical, float? ko)
-    {
-        int worst = 0;
-        foreach (var part in medical.Parts)
-        {
-            float healed = part.Flesh + part.Bandage;
-            if (healed - part.Stun <= -part.MaxHp)
-            {
-                if (!part.IsVital && worst == 0) worst = 1;
-            }
-            else if (healed < 0)
-            {
-                bool belowKo = !(ko is { } point && healed >= point);
-                worst = Math.Max(worst, part.IsVital && belowKo ? 3 : 2);
-            }
-        }
-
-        return worst == 3 || worst == 1 && medical.Blood <= 0;
-    }
 
     /// <summary>
     /// The function of the bed the character lies in (<c>inSomething == IN_BED</c>, the building's function), 0 when none.

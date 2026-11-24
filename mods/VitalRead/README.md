@@ -11,17 +11,18 @@ and label in corners of each marked member's picture. `VitalSystem`, a tick syst
   kind and its label table).
 - **Repair bed / bed**: lying in a bed whose building function is 25 (`BF_SKELETON_BED`) / 6 (`BF_BED`), any race. **Verified** (as above).
 - **Dying**: not dead or playing dead, and blood-loss trauma, `isProbablyDying`, or blood at or under the KO point (`pointOfNoReturn`); no
-  unconscious test. **Verified** (as above; fork README v2). Meitou: `MedicalState.BloodKo`, `MedicalState.KoPoint`, and the health word's Dying
-  standing in for `isProbablyDying`, whose rule is not known.
+  unconscious test. **Verified** (as above; fork README v2). Meitou: `MedicalState.BloodKo`, `KoPoint` and `ProbablyDying`.
 - **Recovery coma**: the coma flag, `!canGetUpWakeUp`, no KO timer, no bleeding or extra blood loss, none of the dying terms; no unconscious
-  test. **Verified** (as above). Meitou: `canGetUpWakeUp` as unconscious and `WakesWithin(0)`; extra blood loss has no counterpart.
+  test. **Verified** (as above). Meitou: `MedicalState.CanGetUpWakeUp`; extra blood loss has no counterpart.
 - **Unconscious**: the medical unconscious flag (or its virtual, or state 4). **Verified** (as above).
-- **Crippled leg** `isCrippled && !canIkick` (Meitou: `Crawling || LegsMessedUp`); **crippled arm** `!isLeftArmOk || !isRightArmOk` (Meitou:
-  `BothArmsWork`); **starving** `isReallyHungry` (Meitou: hunger below 1). **Verified** (as above) for the tests; the Meitou stand-ins are
-  **Observed** equivalents only.
-- **Settings** and defaults (`mod-config.defaults.json`; labels from its en_GB catalog): Enabled on, Show icons on, Show text on, Icon size 20 (0
-  automatic), Text size 18, Icon corner bottom left, Text corner top right, Horizontal / Vertical margin 0 (shared by icon and text). **Verified**.
-  Ranges, the automatic icon size (0.3 of the portrait) and *Coloured text* (off) are Meitou's.
+- **Crippled leg** `isCrippled && !canIkick` (Meitou: `Crawling && !CanKick`); **crippled arm** `!isLeftArmOk || !isRightArmOk` (Meitou:
+  `BothArmsWork`); **starving** `isReallyHungry` (Meitou: `ReallyHungry`). **Verified** (as above); the engine's reads are named after these
+  tests (docs/modding.md "Medical reads").
+- **Settings** and defaults (`mod-config.defaults.json`): Enabled on, Show icons on, Show text on, Icon size 20 (0 automatic), Text size 18,
+  Icon corner bottom left, Text corner top right, Overlay X / Y margin 0 (shared by icon and text). **Verified**. Labels, hints and corner
+  choices are the msgids of its gettext catalogues (`vital_read`: en_GB, ru_RU, zh_CN), read from the installed original
+  (`AddTranslations`), so they show in the game's language. **Verified** (catalogue msgids read). Ranges, the automatic icon size (0.3 of
+  the portrait) and *Coloured text* (off, English) are Meitou's.
 - **Icons**: the defaults are `Kenshi_UI.png` crops (unconscious `45 122 32 32`, playing dead `80 126 38 27`, from the game) and the original's
   own PNGs (`gui/gfx/heart_64px_opt.png`, `death_64px_opt.png`, `starving_64px_opt.png`, `broken-arm_64px_opt.png`, `broken-leg_64px_opt.png`,
   `repair-wrench_64.png`, `bed-plus_64.png`). Looked up as the original does: the path under the mod folder, then the bare name in its `icons/`,
@@ -44,4 +45,3 @@ and label in corners of each marked member's picture. `VitalSystem`, a tick syst
 
 - The other eight probe keys (Ctrl+Alt+F3 to F10) dump the original's MyGUI widgets (hovered panel, widget chain, portrait tree); Meitou's
   interface has no such widgets, so they have no counterpart.
-- The medical tests are stand-ins (see Facts), exact only with engine queries for the game's tests (engine gap).

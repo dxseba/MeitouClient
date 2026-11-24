@@ -16,9 +16,18 @@ public sealed class VitalReadMod : IMod
 
     public void Initialize(ModContext context)
     {
+        AddTranslations(context);
         context.AddSettings(Settings);
         context.AddSystem("vitals", _ => Running = new VitalSystem(Settings, context.Population), SystemAnchor.End);
         PortraitBadges.Install(context);
         context.Log("Vital Read initialized");
+    }
+
+    /// <summary>
+    /// The original's gettext catalogues (<c>vital_read</c>: en_GB, ru_RU, zh_CN), read from the installed original, for the settings' texts.
+    /// </summary>
+    static void AddTranslations(ModContext context)
+    {
+        if (OriginalFolder.Find(context) is { } original) context.AddTranslations("vital_read", original);
     }
 }

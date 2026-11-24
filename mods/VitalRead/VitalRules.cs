@@ -24,10 +24,11 @@ public enum VitalState
 /// </summary>
 /// <param name="Dying">The original's dying test, its terms folded in the tick (<see cref="VitalSystem"/>).</param>
 /// <param name="RecoveryComa">The original's recovery-coma test (<see cref="VitalSystem"/>).</param>
-/// <param name="LegCrippled">A crippled leg (stand-in for <c>isCrippled &amp;&amp; !canIkick</c>).</param>
+/// <param name="LegCrippled">A crippled leg (<c>isCrippled &amp;&amp; !canIkick</c>).</param>
 /// <param name="ArmCrippled">Either arm not working (<c>!isLeftArmOk || !isRightArmOk</c>).</param>
+/// <param name="Starving"><c>isReallyHungry</c> (<see cref="Meitou.Simulation.Bodies.MedicalState.ReallyHungry"/>).</param>
 /// <param name="Bed">The function of the bed the character lies in (6 a bed, 25 a repair bed, 0 none or another).</param>
-public readonly record struct VitalFacts(bool Dying, bool RecoveryComa, bool LegCrippled, bool ArmCrippled, int Bed);
+public readonly record struct VitalFacts(bool Dying, bool RecoveryComa, bool LegCrippled, bool ArmCrippled, bool Starving, int Bed);
 
 /// <summary>
 /// The state rules: the first match of dead (no badge), repair bed, bed, playing dead, dying, recovery coma, unconscious, crippled leg, crippled
@@ -49,7 +50,7 @@ static class VitalRules
     {
         if (body.Dead) return VitalState.None;
 
-        return Beds(facts) ?? Down(body, facts) ?? Hurt(body, facts);
+        return Beds(facts) ?? Down(body, facts) ?? Hurt(facts);
     }
 
     /// <summary>
@@ -76,14 +77,13 @@ static class VitalRules
     }
 
     /// <summary>
-    /// A crippled leg, a crippled arm, starving (stand-in for <c>isReallyHungry</c>: the health word's hunger below 1). A crippled arm hides
-    /// starving.
+    /// A crippled leg, a crippled arm, starving (<c>isReallyHungry</c>). A crippled arm hides starving.
     /// </summary>
-    static VitalState Hurt(BodyStatus body, VitalFacts facts)
+    static VitalState Hurt(VitalFacts facts)
     {
         if (facts.LegCrippled) return VitalState.CrippledLeg;
         if (facts.ArmCrippled) return VitalState.CrippledArm;
 
-        return body.Hunger < 1 ? VitalState.Starving : VitalState.None;
+        return facts.Starving ? VitalState.Starving : VitalState.None;
     }
 }
