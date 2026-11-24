@@ -26,33 +26,72 @@ enum Word { Knockout, Severed, Killed }
 /// animals), KILLED at its death. Only characters that concern you: your people, those within Fight range of one of them (10 world units a
 /// metre) and those that fought them in the last 10 seconds (a hit between them, the original's "fighting your people" mark).
 /// </summary>
-sealed class HitWatch(DamageSettings settings) : IHealthChangeObserver, ICombatHitObserver, ICharacterDeathObserver
+sealed class HitWatch(DamageSettings settings, Action<string> log) : IHealthChangeObserver, ICombatHitObserver, ICharacterDeathObserver
 {
-    const float UnitsPerMetre = 10, UnknownRatio = 0.2f, EngagedSeconds = 10;
-    const int Pruned = 30 * 60;
+    const float UnitsPerMetre = 10, UnknownRatio = 0.2f, EngagedSeconds = 10, SampleSeconds = 0.05f;
+    const int Pruned = 30 * 60, DebugLines = 60;
 
     /// <summary>Waiting for the host, oldest first.</summary>
     public static readonly ConcurrentQueue<Shown> Queue = new();
 
+    /// <summary>The characters fighting your people now (the "fighting your people" mark), for the host's watch list.</summary>
+    public static volatile IReadOnlySet<CharacterId> Engaged = new HashSet<CharacterId>();
+
     readonly List<Vector2> _squad = [];
     readonly HashSet<(CharacterId, int)> _severed = [];
-    readonly HashSet<CharacterId> _deadShown = [], _unconscious = [];
+    readonly HashSet<CharacterId> _deadShown = [];
+    readonly Dictionary<CharacterId, bool> _knockedOut = [];
     readonly Dictionary<CharacterId, long> _engaged = [];
     readonly Dictionary<int, float> _hits = [];
     CharacterId _pending = CharacterId.None;
     float _healed;
     long _squadTick = -1;
+    bool _engagedChanged;
+    int _debugLeft = DebugLines;
 
     /// <summary>Tells the last character of the previous tick, and now and then forgets characters gone from the world.</summary>
     public void SlowWorld(World world)
     {
         Flush(world);
-        if (world.Tick % Pruned != 0) return;
+        int sample = Math.Max(1, (int)MathF.Round(SampleSeconds / world.TickSeconds));
+        if (world.Tick % sample == 0) ReadKnockouts(world);
+        if (world.Tick % Pruned == 0) Prune(world);
+        if (_engagedChanged) Engaged = _engaged.Keys.ToHashSet();
+        _engagedChanged = false;
+    }
 
+    void Prune(World world)
+    {
         _deadShown.RemoveWhere(id => !world.Characters.IsAlive(id));
-        _unconscious.RemoveWhere(id => !world.Characters.IsAlive(id));
         _severed.RemoveWhere(s => !world.Characters.IsAlive(s.Item1));
         foreach (var id in _engaged.Where(e => e.Value < world.Tick).Select(e => e.Key).ToList()) _engaged.Remove(id);
+        _engagedChanged = true;
+    }
+
+    /// <summary>
+    /// The original's state reading (<b>Verified</b>, <c>checkWords</c>, 20 times a second): KNOCKOUT when a watched character is found newly
+    /// unconscious, whatever put it out (a hit, a fall, a drug); the first reading of a character is only a baseline. Characters that no longer
+    /// concern you are forgotten, so they get a new baseline when they come back.
+    /// </summary>
+    void ReadKnockouts(World world)
+    {
+        var table = world.Characters;
+        bool words = settings.Enabled && settings.ShowWords;
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (!table.Next[slot].Alive || table.Cold(slot) is not { Medical: { } medical } cold) continue;
+
+            var id = table.IdOf(slot);
+            if (!words || !Concerns(world, id, cold, table.Next[slot].Position))
+            {
+                _knockedOut.Remove(id);
+                continue;
+            }
+
+            bool ko = medical.Unconscious && !medical.Dead;
+            if (_knockedOut.TryGetValue(id, out bool was) && ko && !was) Enqueue(new WordShown(id, Word.Knockout));
+            _knockedOut[id] = ko;
+        }
     }
 
     public void HealthChanged(World world, in HealthChange change)
@@ -76,8 +115,8 @@ sealed class HitWatch(DamageSettings settings) : IHealthChangeObserver, ICombatH
     public void HitResolved(World world, in CombatHit hit)
     {
         long until = world.Tick + (long)(EngagedSeconds / world.TickSeconds);
-        if (IsPlayer(world, hit.Victim)) _engaged[hit.Attacker] = until;
-        if (IsPlayer(world, hit.Attacker)) _engaged[hit.Victim] = until;
+        if (IsPlayer(world, hit.Victim)) Engage(hit.Attacker, until);
+        if (IsPlayer(world, hit.Attacker)) Engage(hit.Victim, until);
     }
 
     public void Died(World world, in CharacterDeath death)
@@ -86,6 +125,12 @@ sealed class HitWatch(DamageSettings settings) : IHealthChangeObserver, ICombatH
         if (!world.Characters.TryResolveNext(death.Victim, out int slot) || world.Characters.Cold(slot) is not { } cold) return;
 
         if (Concerns(world, death.Victim, cold, world.Characters.Next[slot].Position)) Enqueue(new WordShown(death.Victim, Word.Killed));
+    }
+
+    void Engage(CharacterId id, long until)
+    {
+        _engagedChanged |= !_engaged.ContainsKey(id);
+        _engaged[id] = until;
     }
 
     /// <summary>What the pending character's changes of this tick show.</summary>
@@ -128,8 +173,6 @@ sealed class HitWatch(DamageSettings settings) : IHealthChangeObserver, ICombatH
 
     void Words(CharacterId id, CharacterCold cold, MedicalState medical)
     {
-        if (medical.Unconscious && !medical.Dead && _unconscious.Add(id)) Enqueue(new WordShown(id, Word.Knockout));
-        if (!medical.Unconscious) _unconscious.Remove(id);
         if (cold.Animal is not null) return;
 
         foreach (int part in _hits.Keys)
@@ -139,8 +182,14 @@ sealed class HitWatch(DamageSettings settings) : IHealthChangeObserver, ICombatH
         }
     }
 
-    static void Enqueue(Shown shown)
+    void Enqueue(Shown shown)
     {
+        if (settings.Debug && _debugLeft > 0)
+        {
+            _debugLeft--;
+            log("debug: " + shown);
+        }
+
         Queue.Enqueue(shown);
         while (Queue.Count > 512) Queue.TryDequeue(out _);
     }

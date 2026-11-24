@@ -19,7 +19,7 @@ public sealed class PoshDamageNumbersMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
-        context.AddSystem("hits", _ => new HitWatch(Settings), SystemAnchor.End);
+        context.AddSystem("hits", _ => new HitWatch(Settings, context.Log), SystemAnchor.End);
         context.AddFrame(Floaters.Frame);
         context.AddUi(new NumbersUi());
         context.Log("Posh Damage Numbers initialized");
@@ -101,6 +101,13 @@ public sealed class DamageSettings
 
     [Setting("Numbers on screen", Hint = "MaxActive: numbers on screen at once (the oldest is recycled).", Min = 10, Max = 150)]
     public int MaxActive { get; set; } = 60;
+
+    [Setting("Characters watched", Hint = "MaxWatched: of the characters on screen near your people, fighters first and then those nearest the "
+        + "screen centre, the first 4 x this many get numbers.", Min = 10, Max = 100)]
+    public int MaxWatched { get; set; } = 40;
+
+    [Setting("Debug", Hint = "Debug: writes the first 60 numbers and words shown to the mod log.")]
+    public bool Debug { get; set; }
 
     internal Vector3 Light => Rgb(ColourLight, 0xFFF5DB);
     internal Vector3 Medium => Rgb(ColourMedium, 0xFFD140);

@@ -18,8 +18,15 @@ script (**Verified**, read), implemented anew.
   fading from 62% of its life. Height = clamp(character height on screen x *NumberSize* (0.3), *MinNumberPx* (22), *MaxNumberPx* (50)) at
   1080p, times its size; at most *MaxActive* (60), the oldest recycled.
 - **Words**: KNOCKOUT `#96BFFF`, SEVERED `#FF593D` (once per part, never on animals), KILLED `#D91A1A`; 1.7 s, rise 0.9, starting 1.15 above,
-  no sideways drift. Port: KNOCKOUT when a health change finds the character newly unconscious, SEVERED when a changed part is a stump,
-  KILLED from the deaths observer (any cause).
+  no sideways drift. KNOCKOUT (**Verified**, script `checkWords`): the watched characters' state is read 20 times a second and a character
+  newly unconscious gets the word, whatever put it out; its first reading is only a baseline. Port: the same reading every 0.05 s of game time
+  in the slow step. SEVERED when a changed part is a stump, KILLED from the deaths observer (any cause).
+- **Watch list** (*MaxWatched*, 40; **Verified**, script `rescan`, every 0.5 s): of the characters that concern you and are on screen (or were
+  hit in the last 6 s), those hit while on screen first, then the rest by distance from the screen centre, then those out of view; only the
+  first 4 x *MaxWatched* get numbers. Port: the same on the host each half second of real time; the original reads those past *MaxWatched*
+  only every fifth sample (their quick hits merge), the port reads them all at once (**Observed** difference, display only).
+- **Debug** (off): the first 60 numbers and words shown go to the mod log (the original's 60-line debug budget; its camera probes and test
+  number have no counterpart).
 - **Healing** (*Show healing*, off; *Healing threshold* 5): flesh regained summed per character over one second of real time, a green
   `#6EE678` "+N" from the threshold. **Colours** are Mod settings (free text `#RRGGBB`, the original's `Colour*` keys; invalid: default).
 - Laid out once a frame (`AddFrame`, projection by `ModFrame.Project`) and drawn in the HUD overlay (`Animated`, `TextScale`,
@@ -29,5 +36,7 @@ script (**Verified**, read), implemented anew.
 
 ## Missing
 
-- The digit images and Exo 2 font, Russian words (*WordsLanguage*), *MaxWatched* / *Layer* / *Debug*; KNOCKOUT from a fall unconscious
-  without a health change.
+- The digit and word images (Exo 2, from its atlas) and with them the Russian words (*WordsLanguage*): the atlas glyphs are white with a dark
+  outline (**Verified**, the installed PNG's pixels read) and the original tints each with `setColour`; a mod image node has no tint
+  (engine gap). The text labels stand in.
+- *Layer* (Back: under the game's windows; Popup: above): the overlay has one layer (engine gap).

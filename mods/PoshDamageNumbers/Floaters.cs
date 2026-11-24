@@ -49,6 +49,8 @@ static class Floaters
     {
         while (HitWatch.Queue.TryDequeue(out var shown))
         {
+            if (!Watchlist.Reads(shown.Victim)) continue;
+
             if (shown is DamageShown d) Damage(d);
             else if (shown is HealShown h) Heal(h);
             else if (shown is WordShown w) Spawn(WordFloater(w));
@@ -150,6 +152,7 @@ static class Floaters
         double now = Clock.Elapsed.TotalSeconds;
         float dt = (float)Math.Clamp(now - s_lastFrame, 0, 0.25);
         s_lastFrame = now;
+        Watchlist.Scan(frame, Settings);
         Take();
         EndHealing(now);
         if (!Settings.Enabled)
