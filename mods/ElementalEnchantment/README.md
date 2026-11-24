@@ -84,8 +84,7 @@ particles load when that mod is enabled beside this one.
     zh_CN, es_ES, pt_BR, de_DE, ru_RU, fr_FR). The reader (`PluginTexts`) finds every pointer to `en_GB` in the data sections, takes the
     row width from the next locale-code pointer and accepts a table only with distinct locale codes and valid UTF-8 texts. A scratch
     program against the installed DLL found three tables (window texts, two settings groups: 54 texts in Russian, Chinese and German).
-    The game language's texts are written at each start as a gettext catalogue in the user's temporary folder (`Meitou/<mod id>`) and
-    added with `AddTranslations`, so the window, the menu row, the panel line and the settings whose English is the plugin's show in that
+    The game language's texts are added in memory at each start (`AddTranslations(language, messages)`; nothing is written), so the window, the menu row, the panel line and the settings whose English is the plugin's show in that
     language. The port's window uses the plugin's English words (MAIN, SUB, effect labels) so they match.
   - The localisation patch (**Verified**, decompile of `ElementalLocalizationPatchTest.dll`): after the game loads
     `Elemental Enchantment.mod` it loads `plugin/raid-language/<game locale>.eepatch` (an FCS data file, v16; **Observed** read by
