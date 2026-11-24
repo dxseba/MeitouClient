@@ -11,7 +11,8 @@ namespace Meitou.FixShoppingWages;
 /// the money an NPC shopper pays from), the purse never pushed past <see cref="WageSettings.MaxSavingsMultiplier"/> x that wage. Members are paid one
 /// after another into their shared purse, each against its own cap, as the original pays each character in turn.
 /// </summary>
-sealed class WageSystem(WageSettings settings, GameDatabase data, RngPurpose purpose, int driedMeat) : ITickSystem
+sealed partial class WageSystem(WageSettings settings, GameDatabase data, RngPurpose purpose, int driedMeat, Action<string> log)
+    : IPausedCommandHandler
 {
     /// <summary>
     /// The game day last seen (<see cref="long.MinValue"/> before the first).
@@ -20,14 +21,31 @@ sealed class WageSystem(WageSettings settings, GameDatabase data, RngPurpose pur
 
     public void SlowWorld(World world)
     {
+        if (settings.Enabled && settings.VerboseDebugLogging) HourlyDiff(world);
+
         long day = (long)Math.Floor(world.GameHours / 24);
         bool newDay = _day != long.MinValue && day != _day;
         _day = day;
         if (!newDay || !settings.Enabled) return;
 
-        int universal = Universal();
-        foreach (var squad in world.Squads.All) PaySquad(world, squad, day, universal);
+        PayAll(world, day);
     }
+
+    void PayAll(World world, long day)
+    {
+        bool verbose = settings.VerboseDebugLogging;
+        if (verbose) log($"[GameWorld] dailyUpdates START: totalDays={day} totalHours={world.GameHours:0.##}");
+
+        int universal = Universal();
+        if (verbose) log($"universal wage {universal} ({UniversalSource()})");
+
+        var count = new PayCount();
+        foreach (var squad in world.Squads.All) PaySquad(world, squad, day, universal, verbose ? count : null);
+
+        if (verbose) log($"[GameWorld] dailyUpdates END: npcCount={count.Npcs} changedCount={count.Changed}");
+    }
+
+    string UniversalSource() => settings.BaseWageOverride ? "override" : driedMeat > 0 ? "Dried Meat average price" : "fallback";
 
     /// <summary>
     /// The wage of those without one of their own: <c>baseWageOverrideValue</c> with the override on, else Dried Meat's average price, else
@@ -35,7 +53,10 @@ sealed class WageSystem(WageSettings settings, GameDatabase data, RngPurpose pur
     /// </summary>
     int Universal() => settings.BaseWageOverride ? settings.BaseWageOverrideValue : driedMeat > 0 ? driedMeat : settings.BaseWageFallback;
 
-    void PaySquad(World world, Squad squad, long day, int universal)
+    /// <summary>
+    /// Pays the squad's living non-player members in turn; <paramref name="count"/> (verbose logging only) counts them and logs each.
+    /// </summary>
+    void PaySquad(World world, Squad squad, long day, int universal, PayCount? count)
     {
         if (squad.Dead) return;
 
@@ -43,10 +64,15 @@ sealed class WageSystem(WageSettings settings, GameDatabase data, RngPurpose pur
         {
             if (!world.Characters.TryResolveNext(id, out int slot) || !world.Characters.Next[slot].Alive) continue;
             if (world.Characters.Cold(slot) is not { IsPlayer: false } cold) continue;
-            if (WageOf(world, cold.RecordId, id, day, universal) is not { } wage) continue;
 
-            long capped = Math.Min(squad.Money + wage, (long)settings.MaxSavingsMultiplier * wage);
-            if (capped > squad.Money) squad.Money = capped;
+            long before = squad.Money;
+            if (WageOf(world, cold.RecordId, id, day, universal) is { } wage)
+            {
+                long capped = Math.Min(squad.Money + wage, (long)settings.MaxSavingsMultiplier * wage);
+                if (capped > squad.Money) squad.Money = capped;
+            }
+
+            if (count is not null) count.Note(log, Describe(cold, id), before, squad.Money);
         }
     }
 
