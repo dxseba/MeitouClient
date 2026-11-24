@@ -14,7 +14,7 @@ public sealed class LimbToughnessMod : IMod
     {
         var settings = new ToughnessSettings();
         context.AddSettings(settings);
-        context.AddSystem("limbs", _ => new LimbSystem(settings, context.Log), SystemAnchor.End);
+        context.AddSystem("limbs", _ => new LimbSystem(settings), SystemAnchor.End);
         context.Log("Limb Toughness initialized");
     }
 }
@@ -37,6 +37,6 @@ public sealed class ToughnessSettings
 
     [Setting("Application mode", Min = 0, Max = 4, Step = 1,
         Hint = "ApplicationMode: 1 setup, 2 init, 3 updateStats, 4 all stored paths (the default); here 1 to 4 all apply when a character is "
-            + "made or loaded and when its Toughness changes. 0 getter-only is not available and acts as 4.")]
+            + "made or loaded and when its Toughness changes. 0 getter-only: the stored maximum stays plain, every read sees the bonus.")]
     public int Mode { get; set; } = 4;
 }

@@ -13,9 +13,10 @@ namespace Meitou.LimbToughness;
 /// hooks on part setup, medical init and load and on Toughness experience; again every 60th tick for what those miss (an animal's growth). The
 /// baseline is the multiplier first seen (kept by part object, so a new world starts afresh), for an animal its size now, as its growth resets
 /// the multiplier. The health is rescaled with the maximum, as the original's (floored). Each raised character's part ratios are saved (by lasting
-/// id), so a load rescales its saved health from the maximum it was saved with.
+/// id), so a load rescales its saved health from the maximum it was saved with. ApplicationMode 0 leaves the stored maximum plain and raises what
+/// every read sees instead (<see cref="IPartMaxFilter"/>, as the original's hook on the <c>maxHealth</c> getter).
 /// </summary>
-sealed class LimbSystem(ToughnessSettings settings, Action<string> log) : ITickSystem, IModSaveData
+sealed class LimbSystem(ToughnessSettings settings) : ITickSystem, IModSaveData, IPartMaxFilter
 {
     const int Version = 1;
 
@@ -35,12 +36,10 @@ sealed class LimbSystem(ToughnessSettings settings, Action<string> log) : ITickS
     float[] _toughness = [];
 
     World? _world;
-    bool _modeLogged;
 
     public void SlowWorld(World world)
     {
         _world = world;
-        LogMode();
 
         if (world.Tick % PruneEvery == 0) Prune(world);
 
@@ -74,12 +73,21 @@ sealed class LimbSystem(ToughnessSettings settings, Action<string> log) : ITickS
         foreach (var id in _saved.Keys.Where(id => !kept.Contains(id)).ToList()) _saved.Remove(id);
     }
 
-    void LogMode()
+    /// <summary>
+    /// ApplicationMode 0: the read maximum floor(stored x factor + 0.5) for a part the bonus applies to, as the original's getter hook; other
+    /// modes (which raise the stored maximum) and excluded parts keep it as stored.
+    /// </summary>
+    public float Max(World world, in PartMaxAsk ask)
     {
-        if (_modeLogged || settings.Mode != 0) return;
+        if (settings.Mode != 0 || !world.Characters.TryResolveNext(ask.Character, out int slot)) return ask.Max;
 
-        _modeLogged = true;
-        log("ApplicationMode 0 (getter-only) is not available: the stored maximum is raised, as in mode 4");
+        if (world.Characters.Cold(slot) is not { Medical: { } medical, Stats: { } stats, Race: { } race } cold) return ask.Max;
+
+        bool excluded = ask.Part >= medical.Parts.Count || (medical.Parts[ask.Part].IsRobotic(race) && !settings.RoboticParts);
+        if (excluded || !Applies(cold, race)) return ask.Max;
+
+        float factor = Factor(stats.ScaledToughness);
+        return factor == 1 ? ask.Max : MathF.Floor(ask.Max * factor + 0.5f);
     }
 
     void Grow(int count)
@@ -94,7 +102,7 @@ sealed class LimbSystem(ToughnessSettings settings, Action<string> log) : ITickS
 
     void Update(World world, CharacterId id, CharacterCold cold, MedicalState medical, RaceData race, float toughness)
     {
-        float factor = Applies(cold, race) ? Factor(toughness) : 1;
+        float factor = settings.Mode != 0 && Applies(cold, race) ? Factor(toughness) : 1;
         float[]? saved = !cold.LastingId.IsNone && _saved.Remove(cold.LastingId, out var ratios) ? ratios : null;
         var parts = medical.Parts;
         for (int i = 0; i < parts.Count; i++)
