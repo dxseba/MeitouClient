@@ -15,8 +15,18 @@ engine's `TargetCandidate.ChooserHasTarget`). Target choice, AI and pathing stay
 - In Meitou the calls with an old target are the fighter's own choice while it fights someone, which `TargetCandidate.ChooserHasTarget`
   reports; the attacker of a protectee, the aggro look and an assault have none. **Observed** (docs/modding.md "Target choice").
 - **Observed** (2026-11-18, windowed sandbox, user play, older formula): enemies favoured the taunting character.
+- `[Logging]`: the original writes one line per `AI::chooseBestAttackTarget` call whenever it is enabled (actor, result, selected, score,
+  candidate count, law enforcer, combat mode, old target valid; with `LogCandidates` each candidate's name, Taunt and Selected flags, at most
+  `MaximumCandidatesPerEntry`, the rest counted as truncated). It skips a call without a taunting candidate (`LogOnlyWhenTauntPresent`), one
+  whose selection equals the actor's last logged one (`LogOnlyChangedSelection`), and one sooner than `MinimumLogIntervalMs` after the actor's
+  last line. Clamps: interval 0 to 60000 (default 500), candidates 1 to 512 (default 32). **Verified** (original DLL (decompiled): ini reads and
+  the hook's logging).
+- The port writes these lines to the mod log under *Logging* in Mod settings, behind its own *Log target choices* switch (off), for the
+  fighter's own choice (`TargetChoiceKind.Fight`). The selection is the first strictly best of this mod's answers (as `ChooseTarget` keeps the
+  first strictly better score; a later mod's filter could still change it), the interval counts game time instead of wall time (deterministic),
+  and the law enforcer and combat mode fields are left out (the ask does not carry them). **Observed** (by reading `CombatSystem.Targets.cs`);
+  the lines are **Unknown** in play.
 
 ## Missing
 
-- The `[Logging]` diagnostics (`LogCandidates`, `LogOnlyWhenTauntPresent`, `LogOnlyChangedSelection`, `MinimumLogIntervalMs`,
-  `MaximumCandidatesPerEntry`): a debug log of each choice, not ported.
+- Nothing the port alone can add: the log's law enforcer and combat mode fields need the target score ask to carry them.
