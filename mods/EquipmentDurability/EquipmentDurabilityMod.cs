@@ -36,13 +36,19 @@ public sealed class EquipmentDurabilityMod : IMod
         }
 
         context.AddSystem("durability",
-            _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log, s => context.PostInterfaceSound(s),
-                verbose),
+            _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log, s => Post(context, s), verbose),
             SystemAnchor.End);
         if (Config.Repair) TakeOriginalSound(context, Config.RepairSound);
         if (Config.Repair) context.AddCombatMove(RepairMove);
         if (Config.Repair) context.AddUi(new RepairMenu());
         if (Config.ShowTooltip) context.AddUi(new DurabilityTooltip());
+    }
+
+    /// <summary>The repair sound on the interface, with its handle (stopped when the repair is cancelled).</summary>
+    static SoundHandle Post(ModContext context, string sound)
+    {
+        context.PostInterfaceSound(sound, out var handle);
+        return handle;
     }
 
     /// <summary>
@@ -164,6 +170,12 @@ sealed class DurabilityTooltip : IUiExtension
 
     public void Register(UiRegistration registration) => registration.AddItemTooltipLines(Lines);
 
+    /// <summary>
+    /// The row the line follows, as the original's (<c>AddTooltipRow</c>: after the "Sell value" row in any of its languages). The engine keys
+    /// that row by its English label whatever the game's language, so <c>TooltipAfterRow</c> (a translated label) is not needed.
+    /// </summary>
+    const string SellValue = "Sell value";
+
     static IEnumerable<UiItemTooltipLine> Lines(UiItemTooltipContext item)
     {
         var config = EquipmentDurabilityMod.Config;
@@ -183,7 +195,7 @@ sealed class DurabilityTooltip : IUiExtension
         string label = config.TooltipLabel == "Durability" ? texts.Label : config.TooltipLabel;
         string shown = dur <= 0 ? texts.Broken : dur.ToString(CultureInfo.InvariantCulture) + " / " + cap.ToString(CultureInfo.InvariantCulture);
         var (effect, tone) = Effect(rules, c, dur, cap, texts);
-        return [new UiItemTooltipLine(label, shown + effect) { Style = Tone(config, tone, dur, cap) }];
+        return [new UiItemTooltipLine(label, shown + effect) { Style = Tone(config, tone, dur, cap), After = SellValue }];
     }
 
     /// <summary>

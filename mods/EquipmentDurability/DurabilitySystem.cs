@@ -17,7 +17,7 @@ namespace Meitou.EquipmentDurability;
 /// its first use, on its first tooltip (<see cref="RollOrder"/>, as the original) and when the world makes it (<see cref="IItemCreatedObserver"/>: loot,
 /// crafted, shop stock and spawn kit, so a trader's stock, which no tooltip command can name, shows a value).
 /// </summary>
-sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Action<string> sound,
+sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Func<string, SoundHandle> sound,
     VerboseLog verbose)
     : ICombatHitObserver, ICombatHitFilter, IArmourFilter, ICombatDefenceObserver, IItemUseObserver, IItemCreatedObserver, ICombatSpeedFilter,
         IStateHashed

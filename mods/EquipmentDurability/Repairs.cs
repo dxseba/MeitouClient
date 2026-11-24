@@ -5,6 +5,7 @@ using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
+using Meitou.Simulation.Combat;
 using Meitou.Simulation.Items;
 using Meitou.Simulation.Population;
 
@@ -21,7 +22,7 @@ public sealed record RepairOrder(CharacterId Repairer, CharacterId Owner, bool A
 /// the same way. Moving (0.75 units), being attacked or going down cancels it and nothing is used up. Times are game seconds. While repairing the
 /// repairer plays the repair animation (<see cref="Move"/>), and the repair sound plays as the work begins or as it is applied.
 /// </summary>
-sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Action<string> sound)
+sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Func<string, SoundHandle> sound)
 {
     #region Jobs
 
@@ -71,6 +72,14 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
         public long WorkStart { get; set; }
 
         public bool Sounded { get; set; }
+
+        /// <summary>The sound posted as the work began (stopped when the repair is cancelled, as the original's).</summary>
+        public SoundHandle Sound { get; set; } = SoundHandle.None;
+
+        /// <summary>The steps of the work the game kept the repair clip off the character (blocked since the last one counted).</summary>
+        public int Restarts { get; set; }
+
+        public bool Blocked { get; set; }
 
         public bool Cross => Repairer != Owner;
     }
@@ -152,10 +161,17 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
             }
 
             _jobs.RemoveAt(i);
-            if (why is not null) log("repair cancelled: " + why + " (nothing used up)");
+            if (why is not null) Cancelled(job, why);
         }
 
         _attacked.Clear();
+    }
+
+    /// <summary>The original's cancel: its sound stops, then the log line.</summary>
+    void Cancelled(Job job, string why)
+    {
+        job.Sound.Stop();
+        log("repair cancelled: " + why + " (nothing used up)");
     }
 
     /// <summary>
@@ -253,18 +269,34 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
         job.Worked += dt;
         if (Vector3.Distance(Position(world, job.Repairer), job.StandAt) > 0.75f) return "the character moved";
         if (job.Cross && dist > config.Reach + 4) return "the squad member moved away";
+        Watch(world, job);
         if (job.Worked < config.RepairSeconds) return null;
 
+        if (job.Restarts > 0) log($"repair: the game interrupted the repair clip {job.Restarts} times");
         Commit(world, job, repairer, owner, rules);
         finished = true;
         return null;
+    }
+
+    /// <summary>
+    /// The original keeps putting its repair clip back while the game's own actions replace it, and does not cancel for that; the port's clip
+    /// is asked for every step, so it plays again once the game lets it (<see cref="CombatSystem.ModMoveBlockOf"/>). Each time the game keeps
+    /// it off is counted and logged (first time and the count at the end), as the original logs its restarts.
+    /// </summary>
+    void Watch(World world, Job job)
+    {
+        if (config.RepairAnimation == "none" || world.Systems.OfType<CombatSystem>().FirstOrDefault() is not { } combat) return;
+
+        bool blocked = combat.ModMoveBlockOf(world, job.Repairer) != ModMoveBlock.None;
+        if (blocked && !job.Blocked && ++job.Restarts == 1) log("repair: the game interrupted the repair clip; it plays again once the game lets it");
+        job.Blocked = blocked;
     }
 
     void Begin(World world, Job job)
     {
         (job.Phase, job.Worked, job.StandAt, job.WorkStart) = (Phase.Work, 0, Position(world, job.Repairer), world.Tick);
         if (!_jobs.Contains(job)) _jobs.Add(job);
-        if (config.SoundAtStart) job.Sounded = Play();
+        if (config.SoundAtStart) job.Sounded = Play(job);
     }
 
     /// <summary>
@@ -272,17 +304,17 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
     /// </summary>
     void Commit(World world, Job job, CharacterCold repairer, CharacterCold owner, Condition rules)
     {
-        if (Repair(world, repairer, owner, job.Armour, rules, commit: true) && !job.Sounded) Play();
+        if (Repair(world, repairer, owner, job.Armour, rules, commit: true) && !job.Sounded) Play(job);
     }
 
     /// <summary>
     /// Posts the repair sound (the original's <c>RepairSound</c> file in the mod folder, on the interface); false when there is none.
     /// </summary>
-    bool Play()
+    bool Play(Job job)
     {
         if (config.RepairSound.Length == 0) return false;
 
-        sound(config.RepairSound);
+        job.Sound = sound(config.RepairSound);
         return true;
     }
 

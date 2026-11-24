@@ -1,10 +1,10 @@
-# Equipment Durability (partial port)
+# Equipment Durability (port)
 
 Port of *Equipment Durability* (workshop 3834344700, "Durability" 1.2.0 by its shipped README), rebuilt from the behaviour of its shipped
 `Durability.cpp` (GPL-3.0) and README; no code was copied.
 
 - **Settings**: `Durability.cfg` in the mod folder, written with the defaults when missing and read at start, with the original's keys and defaults, so
-  the original's cfg works unchanged (`TooltipAfterRow` is read by nothing here).
+  the original's cfg works unchanged (`TooltipAfterRow` is read but not needed: see Tooltip).
 - **Durability**: an integer per weapon, crossbow and armour piece with coverage (not locked armour such as shackles), in `ItemInstance.ModTag` as
   `dur=<n>` of the shared `dxseba;key=value` tag (`ItemTag`; saved and copied with the item). Rolled once in the class's range (`min-max/cap`, the cap
   is the maximum): Katana 15-267/500, Sabre 35-399/700, Hacker 45-445/800, Heavy 98-533/1000, Blunt 25-350/600, Polearm 35-399/700, crossbows
@@ -22,7 +22,10 @@ Port of *Equipment Durability* (workshop 3834344700, "Durability" 1.2.0 by its s
   rebuilt from `RangedFormulas.ReloadTime` and the stats the reload blends).
 - **Tooltip**: `Durability: N / max`, `BROKEN` at 0, then `(-NN% dmg)`, `(+NN% resist)` or `(+N.N s reload)`; texts in English, Portuguese, German,
   French, Russian and Spanish by the game language (the original's table). The value is in `PenaltyColor` (59231a) while a penalty applies or at a
-  quarter of the cap or less, `BonusColor` (a8b774) while the bonus applies (`UiLineStyle`).
+  quarter of the cap or less, `BonusColor` (a8b774) while the bonus applies (`UiLineStyle`). The line sits right after the "Sell value" row
+  (`UiItemTooltipLine.After`), as the original's (**Verified**, source `AddTooltipRow`: the first row whose label holds "sell value" in one of
+  six languages or `TooltipAfterRow`; none: before the description); Meitou keys that row by its English label in every language, so
+  `TooltipAfterRow` (another language's label) has nothing to add.
 - **Rolls**: on first use, on the item's first tooltip (`UiItemTooltipContext.First` queues a roll for the item by `Owner` / `Index`: a
   character's inventory or a container), as the original, and when the world makes the item (`IItemCreatedObserver`: loot, crafted, shop stock,
   spawn kit), so a trader's stock, which no command can name, shows a value too.
@@ -36,15 +39,18 @@ Port of *Equipment Durability* (workshop 3834344700, "Durability" 1.2.0 by its s
   0.4 s, then repairs; it fails after 25 s, 4 s without getting nearer, 4 units past its best, or the member moving off. `RepairSound`
   (`repair.wav`, a 16-bit PCM file in the mod folder, not shipped: at start a missing one is copied from the installed original, its required
   item, since a loose sound plays only from the mod's own folder) plays on the interface as the work begins
-  (`RepairSoundTiming = start`) or as the repair is applied (`end`; an instant repair plays it then).
+  (`RepairSoundTiming = start`) or as the repair is applied (`end`; an instant repair plays it then). A cancelled repair stops the sound it
+  started (`PostInterfaceSound(..., out SoundHandle)`, `Stop()`), as the original's `PlaySound(NULL)` (**Verified**, source).
+- **Animation interrupted** (**Verified**, source `ProcessRepairJobs`): the original does not cancel when the game's own actions replace its clip; it
+  starts the clip again while the repair runs and logs the restarts. Port: the clip is a combat move asked for every step, so it plays again
+  once the game lets it; each time the game keeps it off (`CombatSystem.ModMoveBlockOf` not `None`) is counted and logged (first time and
+  the count as the repair ends). The README's and cfg's "anything that stops the animation cancels" is not what its code does.
 - **Breaking** (`BreakWeapons = 1`): the piece is removed and the owner's fighter and look are made again (`CharacterRefresh.Refresh`, Equipment).
 - **Log**: the settings line at start, repairs, cancels and breaks, as the original's; with `Verbose = 1` also its diagnostics, each capped per
   session as the original's: rolls (60), wear by a hit, block, shot or armour hit (40, and any with 5 or fewer points left), a blow's damage
   change (30) and reload times (12). Its other verbose lines (ignored weapons, worn armour factors, body part hits, tooltip rows, weapon
   sections, menu and item listings) are not written. **Verified** (original source: the caps and conditions); the lines are **Unknown** in play.
-- **Missing** (engine): the tooltip row's place after "Sell value" (`TooltipAfterRow`; mod lines sit after the game's rows, before the
-  description); stopping the sound when a repair is cancelled (a posted sound cannot be stopped); "anything that stops the animation" as a cancel
-  (the clip is a combat move the game's own actions replace; the port's cancels are the original's listed ones).
+- **Missing**: nothing known beyond the Verbose lines above.
 - **Observed** differences: the repair timer runs on game time (the original's on real time, so equal at x1 speed); a shot is counted per bolt loaded
   (the engine reports reloads); armour wear and effects follow melee hits only, as the original's `hitByMeleeAttack` hook.
 - **Verified** against the original's source (read, not copied): ranges, grade tables, formulas, repair rules, texts. **Unknown**: not checked in game.
