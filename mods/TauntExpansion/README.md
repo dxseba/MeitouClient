@@ -24,9 +24,10 @@ engine's `TargetCandidate.ChooserHasTarget`). Target choice, AI and pathing stay
 - The port writes these lines to the mod log under *Logging* in Mod settings, behind its own *Log target choices* switch (off), for the
   fighter's own choice (`TargetChoiceKind.Fight`). The selection is the first strictly best of this mod's answers (as `ChooseTarget` keeps the
   first strictly better score; a later mod's filter could still change it), the interval counts game time instead of wall time (deterministic),
-  and the law enforcer and combat mode fields are left out (the ask does not carry them). **Observed** (by reading `CombatSystem.Targets.cs`);
-  the lines are **Unknown** in play.
+  and the law enforcer and combat mode fields are the ask's `TargetScoreAsk.LawEnforcer` / `CombatMode` (false and true for a fight choice:
+  Meitou scores no law-enforcer term), in the original's field order. **Observed** (by reading `CombatSystem.Targets.cs` and
+  `TargetScoreFilter.cs`); the lines are **Unknown** in play.
 
 ## Missing
 
-- Nothing the port alone can add: the log's law enforcer and combat mode fields need the target score ask to carry them.
+- Nothing. Not checked in game.

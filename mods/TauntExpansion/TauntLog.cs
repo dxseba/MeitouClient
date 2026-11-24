@@ -17,7 +17,8 @@ sealed class TauntLog(TauntSettings settings, Action<string> log)
     /// <summary>
     /// One scored candidate as this mod answered it.
     /// </summary>
-    readonly record struct Scored(long Tick, CharacterId Chooser, CharacterId Target, bool Taunt, bool ChooserHasTarget, float Score);
+    readonly record struct Scored(
+        long Tick, CharacterId Chooser, CharacterId Target, bool Taunt, bool ChooserHasTarget, bool LawEnforcer, bool CombatMode, float Score);
 
     /// <summary>
     /// A chooser's last logged line: its tick and the selection (the original keeps the time and the selected character per actor).
@@ -74,7 +75,9 @@ sealed class TauntLog(TauntSettings settings, Action<string> log)
     {
         if (!_on || ask.Kind != TargetChoiceKind.Fight) return;
 
-        _pending.Enqueue(new Scored(ask.Tick, ask.Chooser, ask.Target, ask.Candidate.Taunt, ask.Candidate.ChooserHasTarget, answer));
+        var candidate = ask.Candidate;
+        _pending.Enqueue(new Scored(
+            ask.Tick, ask.Chooser, ask.Target, candidate.Taunt, candidate.ChooserHasTarget, ask.LawEnforcer, ask.CombatMode, answer));
     }
 
     /// <summary>
@@ -142,7 +145,8 @@ sealed class TauntLog(TauntSettings settings, Action<string> log)
     }
 
     /// <summary>
-    /// The line: the original's fields Meitou knows (actor, result, selected, score, candidate count, old target valid) and, with
+    /// The line: the original's fields in its order (actor, result, selected, score, candidate count, law enforcer, combat mode, old target
+    /// valid; the two flags as the target score ask carries them) and, with
     /// <see cref="TauntSettings.LogCandidates"/>, up to the maximum candidates with their Taunt and Selected flags.
     /// </summary>
     string Line(World world, List<Scored> choice, in Scored selected)
@@ -150,7 +154,8 @@ sealed class TauntLog(TauntSettings settings, Action<string> log)
         var text = new StringBuilder();
         text.Append(CultureInfo.InvariantCulture, $"[TauntExpansion:Target] Actor=\"{Name(world, selected.Chooser)}\" Result=true");
         text.Append(CultureInfo.InvariantCulture, $" Selected=\"{Name(world, selected.Target)}\" Score={selected.Score:0.####}");
-        text.Append(CultureInfo.InvariantCulture, $" CandidateCount={choice.Count} OldTargetValid={Flag(selected.ChooserHasTarget)}");
+        text.Append(CultureInfo.InvariantCulture, $" CandidateCount={choice.Count} LawEnforcer={Flag(selected.LawEnforcer)}");
+        text.Append(CultureInfo.InvariantCulture, $" CombatMode={Flag(selected.CombatMode)} OldTargetValid={Flag(selected.ChooserHasTarget)}");
         if (_candidates) AppendCandidates(world, text, choice, selected.Target);
 
         return text.ToString();
