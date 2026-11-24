@@ -18,6 +18,9 @@ public sealed class BowModMod : IMod, IModDataPhase
         var skill = context.AddSkill(Skill(BowTexts.Ui(context)));
         BowSkill.Patch(context, skill);
         BowSave.Patch(context, skill);
+        BowPane.Patch(context);
+        BowAnimation.Patch(context);
+        BowHand.Patch(context);
         context.Log("BowMod initialized");
     }
 

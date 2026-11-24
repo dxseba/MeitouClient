@@ -78,6 +78,15 @@ static class BowSkill
     }
 #pragma warning restore IDE1006
 
+    /// <summary>The Bows skill (null before <see cref="Patch"/>).</summary>
+    public static ModSkill? Skill => s_skill;
+
+    /// <summary>Whether a CROSSBOW record (by string id) is one of the bows (<c>bowmod bow</c> set).</summary>
+    public static bool IsBowRecord(string? id) => id is not null && s_bows.Contains(id);
+
+    /// <summary>Whether the character's crossbow is a bow, drawn or not.</summary>
+    public static bool HoldsBow(CharacterCold? cold) => IsBowRecord(cold?.Fighter?.Crossbow?.Data.StringId);
+
     /// <summary>Sets a bow holder's stored Crossbows level to its effective Bows level; no swap for anyone else.</summary>
     static Swap Begin(CharacterCold? cold)
     {
