@@ -2,6 +2,7 @@ using Meitou.Data.Gameplay.Ai;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Kidnap;
+using Meitou.Simulation.Player;
 
 namespace Meitou.Cannibalism;
 
@@ -14,6 +15,9 @@ namespace Meitou.Cannibalism;
 /// </summary>
 sealed class CannibalismSystem(CannibalismSettings settings) : ITickSystem
 {
+    /// <summary>The original's widened eat trigger for task 220 (its <c>AI::isWithinChoppingRange</c> hook), given as the order's reach.</summary>
+    const float EatReach = 50;
+
     /// <summary>The largest step, in game hours, of the feeding (a long frame or a fast-forward feeds no more than this).</summary>
     const double MaxStepHours = 0.05;
 
@@ -38,12 +42,16 @@ sealed class CannibalismSystem(CannibalismSettings settings) : ITickSystem
         if (settings.Enabled) Feed(world);
     }
 
-    /// <summary>Gives every eater but the target task 220 on it; the engine's check decides (a target no longer edible is refused there).</summary>
+    /// <summary>
+    /// Gives every eater but the target task 220 on it, starting to eat within <see cref="EatReach"/> as the original; the engine's check decides
+    /// (a target no longer edible is refused there).
+    /// </summary>
     static void Give(World world, EatAliveOrder order)
     {
+        var options = new OrderOptions { Target = order.Target, Reach = EatReach };
         foreach (var eater in order.Eaters)
         {
-            if (eater != order.Target) world.GiveOrder(eater, TaskType.EatTargetAlive, order.Target);
+            if (eater != order.Target) world.GiveOrder(eater, TaskType.EatTargetAlive, options);
         }
     }
 
