@@ -58,6 +58,14 @@
     <Project Path="mods/OrganHarvesting/Meitou.OrganHarvesting.csproj" />
     <Project Path="mods/Struggle/Meitou.Struggle.csproj" />
     <Project Path="mods/UncapDefence/Meitou.UncapDefence.csproj" />
+    <Project Path="mods/AdvancedMedicAi/Meitou.AdvancedMedicAi.csproj" />
+    <Project Path="mods/BestMinimap/Meitou.BestMinimap.csproj" />
+    <Project Path="mods/GearCompareAlt/Meitou.GearCompareAlt.csproj" />
+    <Project Path="mods/HappyFamilies/Meitou.HappyFamilies.csproj" />
+    <Project Path="mods/ItemMarkers/Meitou.ItemMarkers.csproj" />
+    <Project Path="mods/OrganizeCraftingStations/Meitou.OrganizeCraftingStations.csproj" />
+    <Project Path="mods/OrganizeTrader/Meitou.OrganizeTrader.csproj" />
+    <Project Path="mods/ShopCounterRestock/Meitou.ShopCounterRestock.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
