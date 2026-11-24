@@ -30,7 +30,8 @@ the tint (`VitalTint`, the engine's `Tint`, through walls). No Harmony.
   original's `gui/gfx/heart_64px.png`, `death_64px.png`, `grave_64px.png`; a missing picture, and unconscious and playing dead (empty texture),
   fall back to `Kenshi_UI.png` cells: unconscious and recovery coma the Knockout pointer (45 122 32 32), dying and dead 108 49 34 34, playing
   dead 80 126 38 27. **Verified** (original DLL (decompiled); `data/gui/images/kenshi_images.xml` for the Knockout cell). Pictures are looked
-  for under this mod's folder (`icons/`, `gui/gfx/`, root), then the game's `data/gui/gfx`.
+  for under this mod's folder (`icons/`, `gui/gfx/`, root), the installed original's (its required item, `OriginalFolder`; the pictures are not
+  shipped), then the game's `data/gui/gfx`.
 - **Row**: `$`, icon, state text (at least 45 by 18 px; text size per state, 18 by default, 8 to 128), the bounty symbol 18 px. The DLL's
   group order and centring are not fully read; Meitou centres the row on the projected point. **Observed** (decompile, partial).
 - **Key**: the original's `highlight_key` (default ALT, with Ctrl/Shift/Alt requirements; UNBOUND for always on). Meitou: the game's Highlight
@@ -39,8 +40,7 @@ the tint (`VitalTint`, the engine's `Tint`, through walls). No Harmony.
 
 ## Missing
 
-- The original's own pictures (`heart_64px`, `death_64px`, `grave_64px`, `bounty_glow_64px`) are not shipped: put them in this mod's `gui/gfx`.
-  The bounty glow (24 px behind the icon) is not drawn.
+- The bounty glow (24 px behind the icon, `bounty_glow_64px`) is not drawn.
 - The DLL colours the atlas glyphs of dying, playing dead and dead with the relation colour; an image node has no tint, so they keep the atlas'.
 - Per-state texts, the bounty symbol's text, size and position (`before_state_text`), editable colours and tiers, the update interval, key
   modifiers, debug logs.

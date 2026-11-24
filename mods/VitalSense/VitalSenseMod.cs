@@ -23,7 +23,8 @@ public sealed class VitalSenseMod : IMod
         context.AddSystem("vitals", Build, SystemAnchor.End);
         VitalTint.Install(context);
         VitalMarkers.Install(context);
-        context.AddUi(new VitalMarkersUi(new VitalIcons(context.Folder)));
+        string[] folders = OriginalFolder.Find(context) is { } original ? [context.Folder, original] : [context.Folder];
+        context.AddUi(new VitalMarkersUi(new VitalIcons(folders)));
         context.Log("Vital Sense initialized");
     }
 

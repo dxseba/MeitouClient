@@ -8,7 +8,7 @@ namespace Meitou.VitalSense;
 /// The state icons (<c>*_icon_texture</c> of <c>mod-config.defaults.json</c>): the original's own picture where one is found, else the
 /// <c>Kenshi_UI.png</c> atlas cell the DLL falls back to. Host thread only.
 /// </summary>
-sealed class VitalIcons(string folder)
+sealed class VitalIcons(IReadOnlyList<string> folders)
 {
     /// <summary>
     /// The original's default pictures: recovery coma, dying and dead (unconscious and playing dead default to the atlas).
@@ -51,19 +51,18 @@ sealed class VitalIcons(string folder)
     };
 
     /// <summary>
-    /// The path under the mod's folder, the bare name in its <c>icons/</c>, <c>gui/gfx/</c> and folder, then the game's <c>data/gui/gfx</c>.
+    /// In each folder (this mod's, then the installed original's): the path under it, the bare name in its <c>icons/</c>, <c>gui/gfx/</c> and
+    /// itself; then the game's <c>data/gui/gfx</c>.
     /// </summary>
     string? Find(string texture)
     {
         string name = Path.GetFileName(texture);
-        string?[] candidates =
-        [
-            Path.Combine(folder, texture),
-            Path.Combine(folder, "icons", name),
-            Path.Combine(folder, "gui", "gfx", name),
-            Path.Combine(folder, name),
-            _gameGfx is null ? null : Path.Combine(_gameGfx, name),
-        ];
-        return candidates.FirstOrDefault(c => c is not null && File.Exists(c));
+        var candidates = folders.SelectMany(folder => Candidates(folder, texture, name)).ToList();
+        if (_gameGfx is not null) candidates.Add(Path.Combine(_gameGfx, name));
+
+        return candidates.FirstOrDefault(File.Exists);
     }
+
+    static string[] Candidates(string folder, string texture, string name) =>
+        [Path.Combine(folder, texture), Path.Combine(folder, "icons", name), Path.Combine(folder, "gui", "gfx", name), Path.Combine(folder, name)];
 }

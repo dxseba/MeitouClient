@@ -26,8 +26,8 @@ and label in corners of each marked member's picture. `VitalSystem`, a tick syst
   own PNGs (`gui/gfx/heart_64px_opt.png`, `death_64px_opt.png`, `starving_64px_opt.png`, `broken-arm_64px_opt.png`, `broken-leg_64px_opt.png`,
   `repair-wrench_64.png`, `bed-plus_64.png`). Looked up as the original does: the path under the mod folder, then the bare name in its `icons/`,
   `gui/gfx/` and folder, then the game's resources. **Verified** (original config and README). The port's last step is the game's own
-`data/gui/gfx` (where `Kenshi_UI.png` is); other mods' `gui/gfx` folders, which Kenshi also registers, are not searched. The port does not ship those PNGs: a state
-  without its file shows text only.
+`data/gui/gfx` (where `Kenshi_UI.png` is); other mods' `gui/gfx` folders, which Kenshi also registers, are not searched. The port does not ship those PNGs:
+  after its own folder it looks in the installed original's (its required item; `OriginalFolder`), and a state without its file shows text only.
 - **Observed** (2026-11-18): an earlier text-only build loaded. Everything here is unverified in play (placement, icon loading, each trigger).
 
 ## Missing

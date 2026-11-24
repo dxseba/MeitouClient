@@ -34,7 +34,8 @@ Port of *Equipment Durability* (workshop 3834344700, "Durability" 1.2.0 by its s
   (`auto`: the first-aid `medic` clip, or a named ANIMATION; `AddCombatMove` with `CombatMove.Clip`, spread over `RepairSeconds`); moving 0.75 units, being attacked or going
   down cancels it with nothing used up. A squad member's repair walks the repairer within 10 units first (following a member that moves 3), settles
   0.4 s, then repairs; it fails after 25 s, 4 s without getting nearer, 4 units past its best, or the member moving off. `RepairSound`
-  (`repair.wav`, a 16-bit PCM file in the mod folder, not shipped: copy the original's) plays on the interface as the work begins
+  (`repair.wav`, a 16-bit PCM file in the mod folder, not shipped: at start a missing one is copied from the installed original, its required
+  item, since a loose sound plays only from the mod's own folder) plays on the interface as the work begins
   (`RepairSoundTiming = start`) or as the repair is applied (`end`; an instant repair plays it then).
 - **Breaking** (`BreakWeapons = 1`): the piece is removed and the owner's fighter and look are made again (`CharacterRefresh.Refresh`, Equipment).
 - **Missing** (engine): the tooltip row's place after "Sell value" (`TooltipAfterRow`; mod lines sit after the game's rows, before the

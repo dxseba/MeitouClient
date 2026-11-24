@@ -33,7 +33,8 @@ sealed class PortraitBadges(BadgeIcons icons) : IUiExtension
     public static void Install(ModContext context)
     {
         context.AddFrame(frame => s_uiScale = frame.UiScale);
-        context.AddUi(new PortraitBadges(new BadgeIcons(context.Folder)));
+        string[] folders = OriginalFolder.Find(context) is { } original ? [context.Folder, original] : [context.Folder];
+        context.AddUi(new PortraitBadges(new BadgeIcons(folders)));
     }
 
     public void Register(UiRegistration registration)

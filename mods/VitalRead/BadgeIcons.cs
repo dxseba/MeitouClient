@@ -8,7 +8,7 @@ namespace Meitou.VitalRead;
 /// The state icons: the original's default texture and crop per state (<c>mod-config.defaults.json</c>), found as the original looks for them and
 /// drawn as image nodes. Its own PNGs are not shipped with the port: a state whose file is not found has no icon.
 /// </summary>
-sealed class BadgeIcons(string folder)
+sealed class BadgeIcons(IReadOnlyList<string> folders)
 {
     /// <summary>
     /// One state's icon: the configured texture and its crop in texture pixels (null: the whole image).
@@ -56,20 +56,23 @@ sealed class BadgeIcons(string folder)
     }
 
     /// <summary>
-    /// The original's lookup: the path as given (absolute, or under the mod's folder), then the bare name in the mod's <c>icons/</c>,
-    /// <c>gui/gfx/</c> and folder, then the game's <c>data/gui/gfx</c>.
+    /// The original's lookup, in each folder (this mod's, then the installed original's): the path as given (absolute, or under the folder), then
+    /// the bare name in its <c>icons/</c>, <c>gui/gfx/</c> and itself; then the game's <c>data/gui/gfx</c>.
     /// </summary>
     string? Find(string texture)
     {
         string name = Path.GetFileName(texture);
-        string?[] candidates =
-        [
-            Path.IsPathRooted(texture) ? texture : Path.Combine(folder, texture),
-            Path.Combine(folder, "icons", name),
-            Path.Combine(folder, "gui", "gfx", name),
-            Path.Combine(folder, name),
-            _gameGfx is null ? null : Path.Combine(_gameGfx, name),
-        ];
-        return candidates.FirstOrDefault(c => c is not null && System.IO.File.Exists(c));
+        var candidates = folders.SelectMany(folder => Candidates(folder, texture, name)).ToList();
+        if (_gameGfx is not null) candidates.Add(Path.Combine(_gameGfx, name));
+
+        return candidates.FirstOrDefault(System.IO.File.Exists);
     }
+
+    static string[] Candidates(string folder, string texture, string name) =>
+    [
+        Path.IsPathRooted(texture) ? texture : Path.Combine(folder, texture),
+        Path.Combine(folder, "icons", name),
+        Path.Combine(folder, "gui", "gfx", name),
+        Path.Combine(folder, name),
+    ];
 }

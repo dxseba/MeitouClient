@@ -36,6 +36,7 @@ public sealed class EquipmentDurabilityMod : IMod
         context.AddSystem("durability",
             _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log, s => context.PostInterfaceSound(s)),
             SystemAnchor.End);
+        if (Config.Repair) TakeOriginalSound(context, Config.RepairSound);
         if (Config.Repair) context.AddCombatMove(RepairMove);
         if (Config.Repair) context.AddUi(new RepairMenu());
         if (Config.ShowTooltip) context.AddUi(new DurabilityTooltip());
@@ -53,6 +54,26 @@ public sealed class EquipmentDurabilityMod : IMod
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Copies the repair sound from the installed original into this mod's folder when it is missing here, since a loose sound plays only from
+    /// the mod's own folder (docs/modding.md "Sounds"). The file stays the original's: it is the user's copy, never shipped with the port.
+    /// </summary>
+    static void TakeOriginalSound(ModContext context, string sound)
+    {
+        if (sound.Length == 0 || Path.IsPathRooted(sound) || File.Exists(Path.Combine(context.Folder, sound))) return;
+        if (OriginalFolder.Find(context) is not { } original || Path.Combine(original, sound) is var source && !File.Exists(source)) return;
+
+        try
+        {
+            File.Copy(source, Path.Combine(context.Folder, sound));
+            context.Log($"{sound} copied from the original mod");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            context.Log($"{sound} not copied from the original mod: {e.Message}");
+        }
     }
 }
 
