@@ -185,8 +185,8 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
 
     /// <summary>
     /// The original's condition words: Dead, Dying, Unconscious or Alive, with "/ Starving" (or Starving alone) for a race that hungers at Nu below
-    /// 100. Dying: the original asks <c>MedicalSystem::isProbablyDying</c> or a pair of medical fields; the port has no such test and reads no blood
-    /// and still bleeding (<b>Unknown</b> whether that is what the original's fields mean).
+    /// 100. Dying: the original asks <c>MedicalSystem::isProbablyDying</c> (<see cref="MedicalState.ProbablyDying"/>) or a pair of medical fields,
+    /// which the port reads as no blood and still bleeding (<b>Unknown</b> whether that is what those fields mean).
     /// </summary>
     static string Condition(CharacterCold cold, MedicalState? medical, int nu)
     {
@@ -194,7 +194,7 @@ sealed class PrisonerSystem(PrisonerSettings settings, PopulationData population
         if (medical.Dead) return "Dead";
 
         bool starving = cold.Race is { HungerRate: > 0 } && nu < 100;
-        bool dying = medical.Blood <= 0 && medical.Bleeding > 0;
+        bool dying = medical.ProbablyDying || (medical.Blood <= 0 && medical.Bleeding > 0);
         if (dying) return starving ? "Dying / Starving" : "Dying";
         if (medical.Unconscious) return starving ? "Unconscious / Starving" : "Unconscious";
         return starving ? "Starving" : "Alive";

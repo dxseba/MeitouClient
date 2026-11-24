@@ -22,11 +22,12 @@ public sealed class PersistentPrisonersMod : IMod
     {
         var group = context.AddSettings(Settings);
         context.AddSystem("prisoners", _ => Running = new PrisonerSystem(Settings, context.Population, context.Data, context.Log), SystemAnchor.End);
-        Window = new PrisonerWindow(group, OriginalLayout.Widths(context), context.Log);
+        Window = new PrisonerWindow(group, OriginalTexts.Load(context), context.Log);
         context.AddUi(Window);
 
         // The original's Ctrl+Shift+P, as a chord: it is taken before photo mode's P.
-        context.AddKeyAction("overview", "Prisoner overview", _ => Window.Toggle(), Binding.Of(Key.P).With(KeyModifiers.Ctrl | KeyModifiers.Shift));
+        var shortcut = Binding.Of(Key.P).With(KeyModifiers.Ctrl | KeyModifiers.Shift);
+        Window.Action = context.AddKeyAction("overview", "Prisoner overview", _ => Window.Toggle(), shortcut);
         context.Log("PersistentPrisoners initialized");
     }
 }

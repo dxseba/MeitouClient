@@ -15,25 +15,33 @@ Port of *PersistentPrisoners* 0.2.8 (workshop 3798215878, GPL-3.0-or-later, RE_K
   Minimum Nu (1-300, default 100) / 100, so the game's own free food feeds it towards that. Port: `CharacterCold.FedTo`, set every 30 ticks and
   taken back when it no longer applies. Player squad hunger stays native.
 - **Overview** (key action *Prisoner overview*, Ctrl+Shift+P by default as in the original, a chord taken before
-  photo mode's P; rebindable on the Controls page): "Prisoners: N
+  photo mode's P; rebindable on the Controls page or the window's shortcut row): "Prisoners: N
   Corpses: N Unloaded: N", columns Name, Faction, Cage, Nu (hunger x 100), Condition, Location, Status, sortable by a click on a title;
   conditions Dead, Dying, Unconscious, Alive, Starving (Nu below 100 for a race that hungers) and the "/ Starving" pairs; statuses Player squad,
   Player / Unloaded, Unloaded, Protected; "Unknown" faction, "Unknown location"; the unloaded and feeding hints (**Verified**, DLL strings).
   Port: the player's own characters held anywhere are listed too; location is the nearest town within 3000.
 - **Settings row** (**Verified**, DLL strings and languages.ini [en]): under the overview, "Settings", the "Allow starvation: ON/OFF" toggle,
-  "Minimum Nu:" box "(1 - 300)", "Diagnostic logging" and Apply ("Minimum Nu must be a whole number from 1 to 300." / "Saved. Settings are now
-  active."); port: Apply sets the Mod settings page's own values (kept as that page keeps them) and logs "PP: Settings saved. ...". Until the
-  first gathering the counts line reads "Gathering prisoners ...".
+  "Minimum Nu:" box "(1 - 300)", "Diagnostic logging", the shortcut ("{shortcut}  |  Change", a click: "Press a shortcut (Esc: cancel)") and
+  Apply ("Minimum Nu must be a whole number from 1 to 300." / "Saved. Settings are now active."); port: the capture takes the next key with the
+  modifiers held (`AddKeyInput`; a modifier alone waits, Esc cancels), Apply binds it (`ModKeyAction.Rebind`, kept as the Controls page keeps
+  it; refused: "Invalid keyboard shortcut."; none: "Choose a shortcut first.") and sets the Mod settings page's own values, and logs "PP:
+  Settings saved. ...". The shortcut shows the language's Ctrl/Shift/Alt/Tab names joined by "+" (**Observed**, the port's reading of those
+  keys). Until the first gathering the counts line reads "Gathering prisoners ...".
+- **Language** (**Verified**, languages.ini header: the game's startup language, no selector in the window; `settings.language` rows only for
+  older builds): every window text, the column weights and `font.height` come from the installed original's `languages.ini` (its `.local.ini`
+  winning) for `context.Language`: the section of that code ignoring case, else the first of the same language part (`en`, `de` short ids),
+  over `[en]`, over the port's English (`OriginalTexts`; nothing shipped). The section rule is the port's (**Unknown** in the DLL).
 - **Diagnostic logging** (`Diagnostics`, off): "PP [diagnostic]: " lines in the mod log: an occupant of a player cage found, its protection
   added (captive) or a caged corpse protected, its protection removed when it leaves (port: diffed every 30th tick, its own wording).
-- **Column widths** (**Observed**, 0.2.8's languages.ini): `[en]` `width.name` ... `width.status` 18/19/15/5/13/18/12, percent of the list;
-  read at start from the installed original (its `.local.ini` winning), else the port's own; `font.height` 0 there (the default font).
+- **Column widths** (**Verified**, 0.2.8's languages.ini and its comments): `width.name` ... `width.status` weights 1-1000 (18/19/15/5/13/18/12
+  in every section), shares of the list, each column at least 24 px; else the port's own. `font.height` 0 keeps the font size, 10-32 sets the
+  text height (Korean 28): port: text scale = height / the default font's measured line height, rows at least height + 6.
 - **"Checking"** (**Verified**, DLL): the status of a loaded non-player occupant whose protection flag is not set yet; the port decides protection
   when the game asks (`IRemovalVeto`), so it has no such state and never shows it.
-- **Unknown**: the original's Dying test (`MedicalSystem::isProbablyDying`, or two medical fields); the port shows Dying for no blood while
-  bleeding. Not checked in game. **Observed** (2026-11-19, headless sandbox fight): an earlier build ran 3000 ticks without a fault.
+- **Dying**: `MedicalSystem::isProbablyDying` (`MedicalState.ProbablyDying`, **Verified** in the engine) or two medical fields the port reads
+  as no blood while bleeding (**Unknown** what they are). Not checked in game. **Observed** (2026-11-19, headless sandbox fight): an earlier
+  build ran 3000 ticks without a fault.
 
 ## Missing
 
-- The settings row's shortcut capture and language rows: a mod cannot rebind its key action (Controls page) and there is no per-mod
-  translation API, so the nine languages, their widths and font heights are missing (engine gaps).
+- The second Dying field pair's meaning (above); nothing else known.
