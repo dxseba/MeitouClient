@@ -182,6 +182,7 @@ sealed class GameSaves(GameHost host)
             Seed = host.Session.World.Seed ^ (ulong)++_captures << 20,
             View = new SavedView(view.Pivot, view.Yaw, view.Pitch, view.Distance),
             HandlesWritten = host.BloodDecals.NoteHandles,
+            GroundPoses = host.GroundItemSync.DrawnPose,
         };
     }
 
@@ -707,6 +708,8 @@ sealed class GameSaves(GameHost host)
                 (gameplay.Dismemberment, host.Config.Decapitation, host.Config.AdvancedRagdolls);
             (data.BodyOptions.SquadXp, data.BodyOptions.OthersXp) = (host.Config.SquadXp, host.Config.OthersXp);
             data.BodyOptions.SquadSkillXp = SkillXp.Rates(host.Config.SquadSkillXp);
+            (data.BodyOptions.MaxFactionSize, data.BodyOptions.MaxSquadSize, data.BodyOptions.MaxSquads) =
+                (host.Config.MaxFactionSize, host.Config.MaxSquadSize, host.Config.MaxSquads);
         }
 
         foreach (var population in host.Session.World.Systems.OfType<PopulationSystem>())
@@ -757,7 +760,7 @@ sealed class GameSaves(GameHost host)
             },
             Ai = new Simulation.Ai.AiSettings { TownAttacks = Gameplay.TownAttacks },
             Captives = new Simulation.Kidnap.CaptiveSettings { SpareOwnFaction = host.Config.CagesSpareOwn },
-            Arrest = new Simulation.Crime.ArrestSettings { LiftFix = host.Config.FixArrestLifts },
+            Arrest = new Simulation.Crime.ArrestSettings { LiftFix = host.Config.FixArrestLifts, LostFix = host.Config.FixArrestChases },
             Construction = new Simulation.Construction.ConstructionSettings { BuildingSpeed = (settings ?? Difficulty)[5], EdgeGap = SiteEdgeGap },
             Production = new Simulation.Production.ProductionSettings { ProductionOption = (settings ?? Difficulty)[3],
                 ResearchOption = (settings ?? Difficulty)[4], EdgeGap = SiteEdgeGap, UnloadedProduction = host.Config.UnloadedProduction },

@@ -73,6 +73,19 @@ items); the launcher never downloads or hosts mods.
   the same buttons open the newest `launcher-v*` release page.
 - **Unknown**: the update path end to end (1.0.1 → 1.0.2 is the first real one).
 
+## App menu (Linux)
+
+- Run from the AppImage (`APPIMAGE` is set, by the AppImage runtime), the first-start dialog offers "Add to the app menu" (ticked) and
+  Settings has an Add/Remove button. `AppMenuEntry` writes `wiki.kenshi.meitou.launcher.desktop` and a 128 px `.png` to
+  `$XDG_DATA_HOME/applications` (`~/.local/share/applications`), with `Exec` and `TryExec` set to the AppImage, so the menu hides the entry
+  once the AppImage is deleted. While the entry exists, each start rewrites it for the AppImage's current path.
+- The window's X11 class is `MeitouLauncher` (`X11PlatformOptions.WmClass`; Avalonia's default is the executable name), Velopack's packId
+  and the `StartupWMClass` of both this entry and the AppImage's embedded one. **Verified** with `xprop` in a headless gamescope:
+  `WM_CLASS = "meitou-launcher", "MeitouLauncher"`.
+- The AppImage's file icon is its 64 px `.DirIcon`; Dolphin shows it only through KDE's AppImage thumbnailer, which needs `libappimage`
+  (an optional dependency of `kio-extras`). **Observed** on CachyOS: without it `ldd` reports `libappimage.so.1.0` not found for
+  `appimagethumbnail.so`, and Dolphin shows the generic icon.
+
 ## Unsigned macOS packages
 
 The macOS launcher and game are **not notarized**: there is no paid Apple Developer ID in this project. The app and the
@@ -461,7 +474,7 @@ folder, never in the installed versions or Kenshi's save folder:
   while a benchmark runs and the page refuses while the game Play started runs.
 - Results: each session folder of the chosen build and platform, its `groups` in `result.json` order with each run's `avgFps`, `p99Ms`,
   `over33Pct`. Submit (`POST /bench`) needs both runs agreeing on scenario, tier, version and fingerprint, a target build whose version is
-  each run's `game.version`, and a machine id and name. The body is `{ installId, handle, machine, platform, target, runs, summary }`:
+  each run's `game.version`, and a machine id (the name is optional). The body is `{ installId, handle, machine, platform, target, runs, summary }`:
   the runs' `result.json` as written, run 2's `summary.md`, `machine` = `{id, name, notes}` as typed, `cpu`, `gpu`, `ramGb`, `os`,
   `osFamily` from run 2's `hardware` and `resolution` from the primary screen. The service's `error` (else its status and text) is shown.
 - `launcher.json` `Benchmark`: `InstallId` (a GUID made at the first submit), `Handle`, `MachineId` (default from the probed GPU and OS

@@ -172,7 +172,12 @@ while the title draws or shows and cleared when it closes; simulation and saves 
   animation systems with zero damage and no medical tick. Real time advances them while gameplay is paused; their pair centres
   stay at the authored road points despite animation root motion. Bodies and pair spacing render at 2.5× scale for visibility,
   grounded on the road; combat keeps its normal dimensions. Their poses update every frame, exempt from distance throttling.
-  They start three seconds into combat.
+  They start three seconds into combat. The world has no fight footwork (pursuit/movement), so `TitleSpacing` holds each pair
+  at least both radii + 1 apart at the end of every tick; without it they overlapped and face-the-target turned them round each
+  tick. Easter egg (`TitleTornado`, display only, off for `--screenshot`): one landed melee blow in 500, every blow on 1 April and
+  25 October, throws its victim 210 up (fast rise, bobbing hover, falling back), spinning six turns over 4.5 s, inside a funnel of
+  24 `kenshi_twister_dust1` bursts stacked to 330 (size 0.04 at the foot to 1.8 at the top, growing with the cube of the height; 0.6 of
+  their particles' life, so each ring stays near its height).
 The title menu is the [Meitou UI kit](meitou-ui.md)'s main menu (`MeitouTitleMenu`): its stack, save card and plate buttons at the kit's
 1600×900 sizes scaled with the height, over the kit's vignette. The card (paper, edge, rounded corners, drop shadow), the plates (Button1Skin
 9-slice at 70%, pushed skin at 85% under the mouse) and the key chip are baked on the CPU from crops of `Kenshi_UI.png` and uploaded as

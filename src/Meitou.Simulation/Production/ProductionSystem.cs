@@ -414,7 +414,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
                         }
 
                         if (!(machine.Data.Operable || machine.Data.IsTraining || IsSeat(machine))) break;
-                        var row = machine.Data.IsTraining ? TaskType.UseTrainingDummy : TaskType.OperateMachinery;
+                        var row = OperateRow(machine);
                         foreach (var id in Who(world, order.Characters))
                         {
                             if (table.TryResolveNext(id, out int slot)
@@ -446,6 +446,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
                 case FocusCommand look: _focus = look.Position; break;
                 case QueueResearch queue: Queue(world, queue.Research); break;
                 case CancelResearch cancel: world.Research.Dequeue(cancel.Research); break;
+                case MoveResearch move: MoveResearchTo(world, move); break;
                 case QueueCraft craft: QueueCraft(world, craft); break;
                 case CancelCraft cancel: CancelCraft(world, cancel); break;
                 case RepeatCrafts repeat:
@@ -468,6 +469,17 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// The order a quick Use gives on machine <paramref name="m"/>: 97 on a training dummy, 152 Auto-Haul on an automatic machine (raw
+    /// <c>max operators</c> 0, docs/game/ui-input.md "Building picking and selection"), else 87.
+    /// </summary>
+    static TaskType OperateRow(Machine m)
+    {
+        if (m.Data.IsTraining) return TaskType.UseTrainingDummy;
+
+        return m.Data.IsAutomatic && m.Data.Operable ? TaskType.OperateAutomaticMachinery : TaskType.OperateMachinery;
     }
 
     /// <summary>
@@ -1324,11 +1336,40 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
             return true;
         }
 
-        // An automatic machine (the 152 job): its hauler fills its inputs and carries its output away; the machine works by itself.
+        // An automatic machine (152): its hauler fills its inputs and carries its output away; the machine works by itself.
         if (!m.Data.IsAutomatic) return false;
 
-        if (!StartHaul(world, cold, site, m) && n.Velocity.X == 0 && n.Velocity.Z == 0) n.Yaw = FacingTo(n, site);
+        Haul(world, i, ref n, cold, site, m);
         return true;
+    }
+
+    /// <summary>
+    /// The hauler of an automatic machine between trips: it puts in what it carries and sets off on the next trip, on 152 (order or job) with any
+    /// output (<see cref="StartHaul"/>). A one-shot 152 order, once the
+    /// order step has dropped it (<see cref="AutoHaulFinder"/>), ends the act-out here instead, after the trip it was on (the original's desire pop
+    /// leaves the running plan step to its end).
+    /// </summary>
+    void Haul(World world, int i, ref CharacterHot n, CharacterCold cold, BuildSite site, Machine m)
+    {
+        if (AutoHaulDropped(cold, site.Id))
+        {
+            if (cold.Inventory is { } inv && PutCarried(inv, m)) world.Machines.Touch();
+            End(world, i);
+            return;
+        }
+
+        bool autoHaul = cold.Running is { Row: TaskType.OperateAutomaticMachinery };
+        if (!StartHaul(world, cold, site, m, autoHaul) && n.Velocity.X == 0 && n.Velocity.Z == 0) n.Yaw = FacingTo(n, site);
+    }
+
+    /// <summary>
+    /// Whether the character runs a 152 order on <paramref name="site"/> that is no longer the started front of its queue.
+    /// </summary>
+    static bool AutoHaulDropped(CharacterCold cold, string site)
+    {
+        if (cold.Running is not { Source: TaskSource.Order, Row: TaskType.OperateAutomaticMachinery }) return false;
+
+        return cold.OrderQueue.Front is not { Started: true, Row: TaskType.OperateAutomaticMachinery } front || front.Site != site;
     }
 
     /// <summary>
@@ -1859,6 +1900,48 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     }
 
     /// <summary>
+    /// Applies a research queue drop between two entries still in the queue.
+    /// </summary>
+    void MoveResearchTo(World world, MoveResearch move)
+    {
+        var state = world.Research;
+        var positions = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < state.Queue.Count; i++) positions.Add(state.Queue[i].Id, i);
+
+        if (!positions.TryGetValue(move.Research, out int from) || !positions.TryGetValue(move.Target, out int to) || from == to) return;
+        if (!CanMoveResearch(state, positions, from, to)) return;
+
+        state.Move(from, to);
+    }
+
+    /// <summary>
+    /// The original drop check (<c>FUN_14049f320</c>): look up prerequisites with the endpoints swapped and compare against each dependent's
+    /// original index.
+    /// </summary>
+    bool CanMoveResearch(ResearchState state, Dictionary<string, int> positions, int from, int to)
+    {
+        var queue = state.Queue;
+        for (int i = 0; i < queue.Count; i++)
+        {
+            if (Research(queue[i].Id) is not { } data) continue;
+
+            foreach (string id in data.Requirements)
+            {
+                if (_db.Find(id) is not { } record || RequirementMet(state, record)) continue;
+
+                if (!positions.TryGetValue(id, out int index)) return false;
+
+                int swapped = index == from ? to
+                    : index == to ? from
+                    : index;
+                if (swapped >= i) return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// A complete player-owned bench counts regardless of its town association.
     /// </summary>
     bool CanResearch(World world, Machine machine) => Site(world, machine.Site) is { Complete: true } site &&
@@ -1951,12 +2034,18 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         {
             var record = _db.Find(req);
             if (record is null) continue;
-            if (record.Type == FcsRecordType.Research ? world.Research.IsDone(req) : world.Research.IsUnlocked(req)) continue;
+            if (RequirementMet(world.Research, record)) continue;
             if (!lenient || !Met(world, record.GetReferences("requirements").Select(l => l.TargetStringId), lenient: false)) return false;
         }
 
         return true;
     }
+
+    /// <summary>
+    /// Whether a research prerequisite has been completed or unlocked.
+    /// </summary>
+    static bool RequirementMet(ResearchState state, GameRecord record) =>
+        record.Type == FcsRecordType.Research ? state.IsDone(record.StringId) : state.IsUnlocked(record.StringId);
 
     /// <summary>
     /// The zone of the camera focus, null while none was told.
@@ -2330,11 +2419,11 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
             || !Near(world, take.Character, site, out var cold))
             return;
         var goods = TownGoods(take.Site);
-        var (record, wanted) = world.GoodsTakenObservers.Active && goods is { Owner: >= 0 } ? Wanted(m, take) : ("", 0);
+        int owner = goods?.Owner ?? site.Owner;
+        var (record, wanted) = world.GoodsTakenObservers.Active && owner >= 0 ? Wanted(m, take) : ("", 0);
         if (CaughtTaking(world, goods, take.Character, cold, with => RoomFor(world, m, cold, take, with), out var mark))
         {
-            if (wanted > 0)
-                Crime.GoodsTakenObservers.Report(world, take.Character, goods!.Value.Owner, CharacterId.None, take.Site, record, wanted, true);
+            if (wanted > 0) Crime.GoodsTakenObservers.Report(world, take.Character, owner, CharacterId.None, take.Site, record, wanted, true);
             return;
         }
 
@@ -2343,7 +2432,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         if (wanted > 0)
         {
             int moved = Units(cold.Inventory!, record) - before;
-            Crime.GoodsTakenObservers.Report(world, take.Character, goods!.Value.Owner, CharacterId.None, take.Site, record, moved, caught: false);
+            Crime.GoodsTakenObservers.Report(world, take.Character, owner, CharacterId.None, take.Site, record, moved, caught: false);
         }
     }
 

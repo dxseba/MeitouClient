@@ -710,7 +710,7 @@ Implemented (`PopulationRoaming.cs`):
     with `interior` references, so bandits stop outside the Hub ([patrol task](game/factions-squads-towns.md#off-screen-world)).
     A squad belongs to the sector it stands in: one that walks into an unloaded sector leaves the world (after the roaming
     10 s grace outside the active zones, ≥ 1382.4 from every player character), kept there with
-    `KeepWild` up to that sector's count, else dropped. The area tick refills the loaded sectors, all taken as one island (engine choice): while below the sum of their shares one sector is drawn by weight and, if it makes no squad (no spot), the next in the same look, as the original. Sectors a town stands in (re-read each refill, not Ruins or points of interest) and the one under the camera focus are never refilled.
+    `KeepWild` up to that sector's count, else dropped. The area tick refills the loaded sectors, all taken as one island (engine choice): while below the sum of their shares one sector is drawn by weight and, if it makes no squad (no spot), the next in the same look, as the original. Sectors a town stands in (re-read each refill, not Ruins or points of interest) and the one under the camera focus are never refilled; a town's sector makes none at load either (#1311).
     **Observed** (headless, Fog Islands, one zone loaded): a fogman squad walks a sector a few minutes; leaving, a fresh one is made.
 
 Implemented (`PopulationCampaigns.cs`; [original rules](game/factions-squads-towns.md#campaigns),
@@ -895,7 +895,7 @@ through the item's vfunc +0x228 (`FUN_14075d9b0`; its vfunc +0x2d0 `FUN_14075d66
 **Observed**), and its PhysX object (a dynamic capsule from the item's `physics file`, [collision](formats/collision.md#item-physics)) falls from there. Engine choice: the host draws that fall (`GameHost.UpdateFalls`, display only; the simulation keeps the rest point): from the stump's bone (`bone name 2`, sampled once its character is drawn), free fall at 98.1 from rest, a drift to the rest point, then a 0.25 s tip; the placement comes on landing (none in the animation sandbox, where the piece stays drawn). A dropped item that is not a limb is placed by the original's rule ([planted weapons](game/carry-loot.md#dropped-item-placement), `GameHost.PlacedPose`). A limb the host lays as it would rest
 (`GameHost.LaidFlat`): its mesh bounds' thinnest axis up (the severed limb meshes are plain static meshes lying along +X, bounds read equal to their vertices, **Verified** on every `severed limbs` mesh of the install's
 merged data), its yaw, tilted to the terrain slope under it (the heights round the drop point over the item's own size; not on a building's floor, where the simulation's ground is used flat), and set down so that none of a
-5x5x5 lattice of points of its bounds is below the rendered terrain under it. A weapon, modelled along +Y, lies on the flat of its blade. Read items are drawn by their saved position and whole rotation. The host adds each as a runtime world-object
+5x5x5 lattice of points of its bounds is below the rendered terrain under it. A weapon, modelled along +Y, lies on the flat of its blade. Read items are drawn by their saved position and whole rotation (a save writes a drop's drawn pose; a yaw-only WEAPON, ARMOUR or CONTAINER is laid again: [placement](game/carry-loot.md#dropped-item-placement)). The host adds each as a runtime world-object
 placement of its record's `ground mesh` / `mesh` (else `steel1.mesh`, as the original; a bare weapon's `bare sword` not modelled; `GroundItemSync`, `WorldObjectLayout.Item`). A right click on one (on its collision where it is drawn,
 [collision](formats/collision.md#item-physics); pointer `pick_item`) gives `PickUpItemOrder`: the nearest able selected character walks to it and, within 15 units on the ground plane
 (`PickUps.PickUpReach`) and under 20 of its height (`PickUps.PickUpHeight`, the original's `isAtLocation` height, so not through a floor), or once its walk to the item has finished whatever the height (`isAtLocation` also holds when the mover is done: an item on a high shelf is taken from the floor, #990), puts it in its inventory (`Inventory.Add`), or when it does not fit, wears it in its free equipment slot (`InventoryCommands.TryEquip`; a bag in a free `backpack_attach`, `TryWearBag`); what does not fit
@@ -1292,7 +1292,7 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
 - **Lockpicking** (`Lockpicking`, serial; the player's order is in [Arrest and jail](#arrest-and-jail)): `Step` per task update (pending crime,
   timer on the lock, seeded roll by the lock's roll counter, XP), `Allowed` (min chance; engine: conscious, an arm, not
   carried), `Sheathe` (a weapon in hand put away first by every pick and cut, one update, [locks](game/locks.md#lockpicking-task_picklock-76-task_picklock_shackles-201)), `Break` (strength > 3 x hardness); `CutLock` / `Break` also serve doors, containers and cages (Use Tools / Use Strength, `LockSystem.Force.cs`, [locks](game/locks.md#player-orders-on-locks)).
-  A player character picking a lock or shackles at the lock gets the floating bar (`CharacterSnapshot.Bar`, drawn in the
+  A player-faction character (only, as the original) picking a lock or shackles at the lock gets the floating bar (`CharacterSnapshot.Bar`, drawn in the
   `Kenshi_ProgressBarPanel` layout just above the name tag; anchor engine choice). No bar for cutting.
 - **Bashing doors** (`LockSystem.Bash`, `DoorPlan`; rules in [locks](game/locks.md)): every 30 ticks an NPC attacking whose target is inside a building
   whose doors are all locked (`IsShut`; inside: nearer the door fixture's origin than its farthest door spot) while it is outside plans row 4 with the
@@ -1355,7 +1355,10 @@ which an order's hold refuses. The chain's rows and states are in [AI tasks](gam
   stopping with the target up (it ran off, the guard lost it) starts it again at any distance: the order stays queued and is planned again each update,
   its need 7 planning the fight anew (the order step `FUN_140510920` pops it only on its desire or done test; a failed step pops the front only when it
   is the order's own row, `FUN_140506b10` comparing the task type, so the fight row ending pops nothing, **Verified**); only 113 / 95 above or a new order
-  stop it. The downed target is lifted whether or not a cage is free (240's list B and desire ask for none) and snatched from any carrier outside the
+  stop it. Meitou fix, Fixes option **Guards give up lost suspects** (`ArrestSettings.LostFix`, on by default, read at load): a fight that stopped
+  while the guard's senses hold no entry of the target (the test `CombatSystem.NothingLeft` ended it by) ends the arrest and the order leaves the queue,
+  so a culprit who slipped away unseen is not run down by a guard who knows nowhere to look (#1312); off starts the fight again as the original does.
+  The downed target is lifted whether or not a cage is free (240's list B and desire ask for none) and snatched from any carrier outside the
   guard's squad, of his faction too; while a member of his own squad carries it, 240's desire (AI slot 59, `FUN_14059e1a0`: the carrier hand's
   container id and serial, `+0xc` / `+0x10` as `FUN_1400d1c20` writes them, are the guard's platoon's) is 0 and the order leaves the queue, then the 112 behind it with nothing carried (**Verified**). So at a full station
   guards can pass one body round. Meitou fix, Fixes option **Guards stop passing bodies** (`ArrestSettings.LiftFix`, on by default, read at load):
@@ -2078,7 +2081,7 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   drop-off) and it stands `ProductionSystem.StepPauseSeconds` (0.5 s) before the next leg or job; a path left to finish by itself set a wanderer's 5-10 s wait.
 - **Automatic machines** (`MachineData.IsAutomatic`, raw `max operators` 0; [facts](game/buildings-production.md#production)) produce
   every tick with nobody at them at s = 1 (producers only: refineries, mines, auto-looms, campfires), and their power demand is full. A character
-  operating one (job 152, or the quick order) does not work it: it only hauls as above, every round whatever `AutoHaul` says.
+  hauling for one (152, job or order, or the 124 job on it) does not work it: it only hauls as above, every round whatever `AutoHaul` says.
 - **Job lists** (`PermaJobs.cs`, `ProductionSystem.Jobs.cs`, `Saving/PermaJobSave`; facts in [perma-jobs](game/ai-tasks.md#perma-jobs)).
   `CharacterCold.Jobs` is the ordered list; `AddJob` (Shift + right click on a finished machine or storage) adds through the original's rules
   (remap, duplicate refusal, companion, switch on), a code mod's offered job type by its offer ([modding](modding.md#registration-surface), Mod jobs);
@@ -2119,9 +2122,10 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
     lets a hauler in a player town take such an item, which marks it stolen); else the nearest player machine within that 4.246733e7 bound (3D) of the storage whose output
     (a bench's: its finished items) the storage takes is emptied into the hauler's pack and carried there. Blocked with none. The walk stops at
     the pick-up and the drop-off ([leg beat](#production), engine choice).
-  - 152 Operating automatic machine (Shift + Auto-Haul on an automatic machine; its companion 124 lands on the same machine): the operator above at the machine, hauling only. Its done list is `!62` (machineHasEmptyInputs false, **Verified**, TaskData row 152): the job is finished, and the list moves on to the 124 companion, as soon as no input of the machine is empty (`ProductionSystem.Blocked`).
-    Blocked unless it is mid-trip for it, carries an item an input has room for, an empty input's item is in a storage, or a full or carried output has a storage that takes it
-    (engine reading of the row's goal "no empty inputs", `AutoWork`). 124 on an automatic machine runs the same way, blocked unless it carries an item an input has room for.
+  - 152 Operating automatic machine (Shift + Auto-Haul on an automatic machine; its companion 124 lands on the same machine): the hauler at the machine takes
+    its output, held or carried, to a storage. Blocked, unless mid-trip, at desire x finder 0 or less (`ProductionSystem.AutoHaulScore`, as the job pass skips it,
+    [order pops](game/ai-tasks.md#finished-tests)): so never at a fuel generator. 124 on an automatic machine fills the inputs: blocked unless mid-trip, carrying an
+    item an input has room for, or an empty input has a source (`AutoWork`); it fetches that item (`StartHaul`).
   - 125 Engineer (ordered as 2 Build or 95 Repair; Shift + quick right click on an unfinished site): builds the site or repairs the door of
     `ConstructionSystem.EngineerWork`'s pick, whatever the job's target ([buildings](#buildings)); its tasks are *Build*, *DeliverMaterials* and
     *FetchMaterials*. Blocked with nothing to work.

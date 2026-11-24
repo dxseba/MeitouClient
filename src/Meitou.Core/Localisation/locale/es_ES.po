@@ -5134,8 +5134,8 @@ msgid "Machine id (letters, digits, dashes)"
 msgstr "ID del equipo (letras, dígitos, guiones)"
 
 #. machine-translated
-msgid "Machine name"
-msgstr "Nombre del equipo"
+msgid "Machine name (optional)"
+msgstr "Nombre del equipo (opcional)"
 
 #. machine-translated
 msgid "Notes (cooling, power plan, ...)"
@@ -5218,8 +5218,8 @@ msgid "The runs were made by {1}, not {2}: they cannot be submitted."
 msgstr "Las ejecuciones se hicieron con {1}, no con {2}: no se pueden enviar."
 
 #. machine-translated
-msgid "Fill in the machine's id and name to submit."
-msgstr "Rellena el ID y el nombre del equipo para enviar."
+msgid "Fill in the machine's id to submit."
+msgstr "Rellena el ID del equipo para enviar."
 
 #. machine-translated
 msgid "The service refused it: {1}"
@@ -5373,3 +5373,123 @@ msgstr "Probabilidad de forzar en el puntero"
 #. machine-translated
 msgid "Pointing at a lock too hard to pick shows 0%, as its Pick Lock menu entry does, since the character cannot pick it. The game shows the chance before that limit there, such as 3% for a lock the menu gives 0%."
 msgstr "Al señalar una cerradura demasiado difícil de forzar se muestra 0 %, como en su opción Forzar cerradura del menú, ya que el personaje no puede forzarla. El juego muestra ahí la probabilidad antes de ese límite, como un 3 % para una cerradura a la que el menú da 0 %."
+
+#. machine-translated
+msgid "Mute corpse flies"
+msgstr "Silenciar moscas de cadáveres"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings"
+msgstr "Silenciar moscas de cadáveres en los ajustes de Audio"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings is on"
+msgstr "Silenciar moscas de cadáveres en los ajustes de Audio está activado"
+
+#. machine-translated
+msgid "Silences the buzzing of the flies over corpses; the flies are still shown (the game: off)."
+msgstr "Silencia el zumbido de las moscas sobre los cadáveres; las moscas se siguen mostrando (el juego: desactivado)."
+
+#. machine-translated
+msgid "Quiet corpse flies"
+msgstr "Moscas de cadáveres discretas"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings"
+msgstr "Moscas de cadáveres discretas en los ajustes de Audio"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings is on"
+msgstr "Moscas de cadáveres discretas en los ajustes de Audio está activado"
+
+#. machine-translated
+msgid "Corpse flies range"
+msgstr "Alcance de las moscas de cadáveres"
+
+#. machine-translated
+msgid "The flies over corpses are heard only close to them, not from across the base (the game: off)."
+msgstr "Las moscas sobre los cadáveres solo se oyen cerca de ellos, no desde el otro lado de la base (el juego: desactivado)."
+
+#. machine-translated
+msgid "How far the corpse flies are heard, of the game's distance: lower to hear them less, higher for more."
+msgstr "Hasta dónde se oyen las moscas de cadáveres, respecto a la distancia del juego: más bajo para oírlas menos, más alto para más."
+
+#. machine-translated
+msgid "Guards give up lost suspects"
+msgstr "Los guardias abandonan a los sospechosos perdidos"
+
+#. machine-translated
+msgid "A guard who loses sight of the character he was arresting gives up and goes back to his duties. The game has him take the fight up again wherever the character is, so he can run straight to someone hiding out of sight."
+msgstr "Un guardia que pierde de vista al personaje que estaba arrestando se rinde y vuelve a sus tareas. El juego le hace retomar la pelea dondequiera que esté el personaje, así que puede correr directo hacia alguien escondido fuera de su vista."
+
+#. machine-translated
+msgid "Max faction size"
+msgstr "Tamaño máximo de facción"
+
+#. machine-translated
+msgid "Max squad size"
+msgstr "Tamaño máximo de escuadrón"
+
+#. machine-translated
+msgid "Max squads"
+msgstr "Máximo de escuadrones"
+
+#. machine-translated
+msgid "Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "Tamaño máximo de facción, Tamaño máximo de escuadrón y Máximo de escuadrones en los ajustes Avanzados"
+
+#. machine-translated
+msgid "its limits are now Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "sus límites ahora son Tamaño máximo de facción, Tamaño máximo de escuadrón y Máximo de escuadrones en los ajustes Avanzados"
+
+#. machine-translated
+msgid "The faction's recruitment limit: how many characters and animals your faction may hold (the game: 30). Existing members stay if you lower it. Click the number to type an exact value."
+msgstr "El límite de reclutamiento de la facción: cuántos personajes y animales puede tener tu facción (el juego: 30). Los miembros existentes permanecen si lo bajas. Haz clic en el número para escribir un valor exacto."
+
+#. machine-translated
+msgid "How many members one of your squads may hold (the game: 20). Full squads put new recruits into a new squad."
+msgstr "Cuántos miembros puede tener uno de tus escuadrones (el juego: 20). Los escuadrones llenos colocan a los nuevos reclutas en un escuadrón nuevo."
+
+#. machine-translated
+msgid "How many squads your faction may create (the game: 10)."
+msgstr "Cuántos escuadrones puede crear tu facción (el juego: 10)."
+
+#. machine-translated
+msgid "App menu"
+msgstr "Menú de aplicaciones"
+
+#. machine-translated
+msgid "Could not change the app menu entry: {1}"
+msgstr "No se pudo cambiar la entrada del menú de aplicaciones: {1}"
+
+#. machine-translated
+msgid "Meitou Launcher was added to the app menu."
+msgstr "Meitou Launcher se ha añadido al menú de aplicaciones."
+
+#. machine-translated
+msgid "Meitou Launcher was removed from the app menu."
+msgstr "Meitou Launcher se ha quitado del menú de aplicaciones."
+
+#. machine-translated
+msgid "Remove"
+msgstr "Quitar"
+
+#. machine-translated
+msgid "Add"
+msgstr "Añadir"
+
+#. machine-translated
+msgid "Meitou Launcher is in your desktop's app launcher."
+msgstr "Meitou Launcher está en el lanzador de aplicaciones de tu escritorio."
+
+#. machine-translated
+msgid "Add Meitou Launcher, with its icon, to your desktop's app launcher."
+msgstr "Añade Meitou Launcher, con su icono, al lanzador de aplicaciones de tu escritorio."
+
+#. machine-translated
+msgid "Add to the app menu"
+msgstr "Añadir al menú de aplicaciones"
+
+#. machine-translated
+msgid "Meitou Launcher, with its icon, in your desktop's app launcher."
+msgstr "Meitou Launcher, con su icono, en el lanzador de aplicaciones de tu escritorio."

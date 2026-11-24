@@ -200,6 +200,10 @@ msgid "A guard picks up a knocked-out prisoner only when a cage is free for them
 msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
+msgid "A guard who loses sight of the character he was arresting gives up and goes back to his duties. The game has him take the fight up again wherever the character is, so he can run straight to someone hiding out of sight."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
 msgid "A key of the mod {1}: {2}."
 msgstr ""
 
@@ -353,6 +357,14 @@ msgstr ""
 msgid "Adaptive exposure strength (max x)"
 msgstr ""
 
+#: launcher/Meitou.Launcher/MainWindow.axaml.cs
+msgid "Add"
+msgstr ""
+
+#: launcher/Meitou.Launcher/MainWindow.axaml.cs
+msgid "Add Meitou Launcher, with its icon, to your desktop's app launcher."
+msgstr ""
+
 #: src/Meitou.Game/Settings/SettingHints.cs
 msgid "Add airglow to the night haze."
 msgstr ""
@@ -367,6 +379,10 @@ msgstr ""
 
 #: src/Meitou.Game/Ui/FurnitureUse.cs
 msgid "Add to jobs"
+msgstr ""
+
+#: launcher/Meitou.Launcher/SetupOverlay.axaml
+msgid "Add to the app menu"
 msgstr ""
 
 #: src/Meitou.Game/Settings/LauncherSchema.cs
@@ -507,6 +523,10 @@ msgstr ""
 
 #: src/Meitou.Game/Host/Photo/PhotoMode.cs
 msgid "Aperture"
+msgstr ""
+
+#: launcher/Meitou.Launcher/MainWindow.axaml
+msgid "App menu"
 msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml launcher/Meitou.Launcher/MainWindow.axaml.cs launcher/Meitou.Launcher/ModsFromSave.cs
@@ -677,12 +697,12 @@ msgstr ""
 msgid "Balanced: more resident detail than Safe, with some headroom for macOS and other apps."
 msgstr ""
 
-#: src/Meitou.Game/Settings/GamePages.cs
-msgid "Beds used as seats"
-msgstr ""
-
 #: launcher/Meitou.Launcher/Benchmarks/BenchmarkScenario.cs
 msgid "Bases: the play bench on a save"
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Beds used as seats"
 msgstr ""
 
 #: src/Meitou.Game/Building/BuildingSelection.cs
@@ -1183,6 +1203,14 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/Benchmarks/BenchmarkRunner.cs
 msgid "Copying the save..."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Corpse flies range"
+msgstr ""
+
+#: launcher/Meitou.Launcher/MainWindow.axaml.cs
+msgid "Could not change the app menu entry: {1}"
 msgstr ""
 
 #: launcher/Meitou.Launcher/GraphicsPage.cs
@@ -1714,7 +1742,7 @@ msgid "Fights far away"
 msgstr ""
 
 #: launcher/Meitou.Launcher/Benchmarks/BenchmarkResultsPanel.cs
-msgid "Fill in the machine's id and name to submit."
+msgid "Fill in the machine's id to submit."
 msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
@@ -2082,6 +2110,10 @@ msgid "Grows riceweed indoors, safe from the weather. Needs power and water."
 msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
+msgid "Guards give up lost suspects"
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
 msgid "Guards searching for smuggled or stolen goods and bandits after food or loot also look inside bags carried in the inventory, and guards confiscating stolen goods inside the worn backpack. The game misses those bags, so goods hidden in them are never found."
 msgstr ""
 
@@ -2286,6 +2318,10 @@ msgid "How far shadows are drawn; zero disables them."
 msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
+msgid "How far the corpse flies are heard, of the game's distance: lower to hear them less, higher for more."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
 msgid "How fast the arrow keys and the screen edge pan the camera (the game: 500; faster the higher the camera)."
 msgstr ""
 
@@ -2338,7 +2374,15 @@ msgid "How many maps the shadows are split over, nearest to farthest: more keeps
 msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
+msgid "How many members one of your squads may hold (the game: 20). Full squads put new recruits into a new squad."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
 msgid "How many squads roam and live in the wild (the game: 1). Affects performance."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "How many squads your faction may create (the game: 10)."
 msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
@@ -2939,7 +2983,7 @@ msgid "Machine id (letters, digits, dashes)"
 msgstr ""
 
 #: launcher/Meitou.Launcher/Benchmarks/BenchmarkResultsPanel.cs
-msgid "Machine name"
+msgid "Machine name (optional)"
 msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml.cs
@@ -2972,6 +3016,22 @@ msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
 msgid "Match the display refresh rate to prevent tearing."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Max faction size"
+msgstr ""
+
+#: src/Meitou.Core/Content/CoveredMods.cs
+msgid "Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Max squad size"
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Max squads"
 msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml
@@ -3036,6 +3096,22 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml
 msgid "Meitou Launcher"
+msgstr ""
+
+#: launcher/Meitou.Launcher/MainWindow.axaml.cs
+msgid "Meitou Launcher is in your desktop's app launcher."
+msgstr ""
+
+#: launcher/Meitou.Launcher/MainWindow.axaml.cs
+msgid "Meitou Launcher was added to the app menu."
+msgstr ""
+
+#: launcher/Meitou.Launcher/MainWindow.axaml.cs
+msgid "Meitou Launcher was removed from the app menu."
+msgstr ""
+
+#: launcher/Meitou.Launcher/SetupOverlay.axaml
+msgid "Meitou Launcher, with its icon, in your desktop's app launcher."
 msgstr ""
 
 #: src/Meitou.Game/Settings/LauncherSchema.cs
@@ -3292,6 +3368,18 @@ msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
 msgid "Music frequency"
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Mute corpse flies"
+msgstr ""
+
+#: src/Meitou.Core/Content/CoveredMods.cs
+msgid "Mute corpse flies in the Audio settings"
+msgstr ""
+
+#: src/Meitou.Game/Mods/BuiltInMods.cs
+msgid "Mute corpse flies in the Audio settings is on"
 msgstr ""
 
 #: launcher/Meitou.Launcher/GraphicsPage.cs src/Meitou.Game/Settings/PresetNamingDialog.cs
@@ -3973,6 +4061,18 @@ msgstr ""
 msgid "Quarter resolution"
 msgstr ""
 
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Quiet corpse flies"
+msgstr ""
+
+#: src/Meitou.Core/Content/CoveredMods.cs
+msgid "Quiet corpse flies in the Audio settings"
+msgstr ""
+
+#: src/Meitou.Game/Mods/BuiltInMods.cs
+msgid "Quiet corpse flies in the Audio settings is on"
+msgstr ""
+
 #: launcher/Meitou.Launcher/Rows.cs
 msgid "RE_Kenshi file rebinds: applied to the map files"
 msgstr ""
@@ -4087,6 +4187,10 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml
 msgid "Release page"
+msgstr ""
+
+#: launcher/Meitou.Launcher/MainWindow.axaml.cs
+msgid "Remove"
 msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs src/Meitou.Game/SettingsMenu.cs
@@ -4641,6 +4745,10 @@ msgstr ""
 msgid "Sideways"
 msgstr ""
 
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Silences the buzzing of the flies over corpses; the flies are still shown (the game: off)."
+msgstr ""
+
 #: src/Meitou.Game/Rendering/Frame/WorldFrame.cs
 msgid "Simple terrain shading"
 msgstr ""
@@ -5181,6 +5289,14 @@ msgstr ""
 msgid "The door will lock when it closes."
 msgstr ""
 
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "The faction's recruitment limit: how many characters and animals your faction may hold (the game: 30). Existing members stay if you lower it. Click the number to type an exact value."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "The flies over corpses are heard only close to them, not from across the base (the game: off)."
+msgstr ""
+
 #: launcher/Meitou.Launcher/MainWindow.axaml.cs launcher/Meitou.Launcher/SetupOverlay.axaml.cs
 msgid "The folder with data/gamedata.base."
 msgstr ""
@@ -5233,6 +5349,10 @@ msgstr ""
 msgid "The game's cascades, Meitou's soft cascades to the horizon, ray-traced shadows, or ray-traced near and soft cascades further away (both need ray tracing and turn on global illumination)."
 msgstr ""
 
+#: launcher/Meitou.Launcher/Benchmarks/BenchmarkPage.cs
+msgid "The game's quality presets."
+msgstr ""
+
 #: src/Meitou.Game/Building/BuildingDescriptions.cs
 msgid "The gate for Defensive Wall II."
 msgstr ""
@@ -5243,10 +5363,6 @@ msgstr ""
 
 #: src/Meitou.Game/Building/BuildingDescriptions.cs
 msgid "The gate for Defensive Wall IV."
-msgstr ""
-
-#: launcher/Meitou.Launcher/Benchmarks/BenchmarkPage.cs
-msgid "The game's quality presets."
 msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
@@ -5409,12 +5525,12 @@ msgstr ""
 msgid "This build did not report the hardware (exit code {1}): it may be older than launcher benchmarks."
 msgstr ""
 
-#: launcher/Meitou.Launcher/Benchmarks/BenchmarkPlatform.cs
-msgid "This computer's build"
-msgstr ""
-
 #: src/Meitou.Game/Ui/ProductionWindows.cs
 msgid "This building stands outside every outpost's build limit, so no generator can power it. Dismantle it and build it again inside the red ring."
+msgstr ""
+
+#: launcher/Meitou.Launcher/Benchmarks/BenchmarkPlatform.cs
+msgid "This computer's build"
 msgstr ""
 
 #: src/Meitou.Game/Ui/ProductionWindows.cs
@@ -6185,6 +6301,10 @@ msgstr ""
 
 #: src/Meitou.Game/Mods/ModHost.cs
 msgid "its game data changes failed to apply"
+msgstr ""
+
+#: src/Meitou.Game/Mods/BuiltInMods.cs
+msgid "its limits are now Max faction size, Max squad size and Max squads in the Advanced settings"
 msgstr ""
 
 #: src/Meitou.Game/Mods/BuiltInMods.cs

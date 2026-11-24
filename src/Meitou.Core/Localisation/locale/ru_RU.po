@@ -5136,8 +5136,8 @@ msgid "Machine id (letters, digits, dashes)"
 msgstr "ID компьютера (буквы, цифры, дефисы)"
 
 #. machine-translated
-msgid "Machine name"
-msgstr "Имя компьютера"
+msgid "Machine name (optional)"
+msgstr "Имя компьютера (необязательно)"
 
 #. machine-translated
 msgid "Notes (cooling, power plan, ...)"
@@ -5220,8 +5220,8 @@ msgid "The runs were made by {1}, not {2}: they cannot be submitted."
 msgstr "Прогоны сделаны сборкой {1}, а не {2}: их нельзя отправить."
 
 #. machine-translated
-msgid "Fill in the machine's id and name to submit."
-msgstr "Для отправки укажите ID и имя компьютера."
+msgid "Fill in the machine's id to submit."
+msgstr "Для отправки укажите ID компьютера."
 
 #. machine-translated
 msgid "The service refused it: {1}"
@@ -5375,3 +5375,123 @@ msgstr "Шанс взлома на указателе"
 #. machine-translated
 msgid "Pointing at a lock too hard to pick shows 0%, as its Pick Lock menu entry does, since the character cannot pick it. The game shows the chance before that limit there, such as 3% for a lock the menu gives 0%."
 msgstr "При наведении на замок, который слишком сложно взломать, показывается 0%, как в пункте меню «Взломать замок», ведь персонаж не может его взломать. Игра показывает там шанс без учёта этого предела, например 3% для замка, которому меню даёт 0%."
+
+#. machine-translated
+msgid "Mute corpse flies"
+msgstr "Заглушить мух над трупами"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings"
+msgstr "Заглушить мух над трупами в настройках звука"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings is on"
+msgstr "Заглушить мух над трупами в настройках звука включено"
+
+#. machine-translated
+msgid "Silences the buzzing of the flies over corpses; the flies are still shown (the game: off)."
+msgstr "Убирает жужжание мух над трупами; сами мухи по-прежнему видны (в игре: выкл.)."
+
+#. machine-translated
+msgid "Quiet corpse flies"
+msgstr "Тихие мухи над трупами"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings"
+msgstr "Тихие мухи над трупами в настройках звука"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings is on"
+msgstr "Тихие мухи над трупами в настройках звука включено"
+
+#. machine-translated
+msgid "Corpse flies range"
+msgstr "Дальность мух над трупами"
+
+#. machine-translated
+msgid "The flies over corpses are heard only close to them, not from across the base (the game: off)."
+msgstr "Мух над трупами слышно только вблизи, а не через всю базу (в игре: выкл.)."
+
+#. machine-translated
+msgid "How far the corpse flies are heard, of the game's distance: lower to hear them less, higher for more."
+msgstr "Как далеко слышно мух над трупами, от расстояния в игре: ниже — слышно меньше, выше — больше."
+
+#. machine-translated
+msgid "Guards give up lost suspects"
+msgstr "Стражники отказываются от потерянных подозреваемых"
+
+#. machine-translated
+msgid "A guard who loses sight of the character he was arresting gives up and goes back to his duties. The game has him take the fight up again wherever the character is, so he can run straight to someone hiding out of sight."
+msgstr "Стражник, потерявший из виду персонажа, которого арестовывал, сдаётся и возвращается к своим обязанностям. В игре он снова вступает в бой, где бы ни был персонаж, и может прибежать прямо к тому, кто прячется вне поля зрения."
+
+#. machine-translated
+msgid "Max faction size"
+msgstr "Макс. размер фракции"
+
+#. machine-translated
+msgid "Max squad size"
+msgstr "Макс. размер отряда"
+
+#. machine-translated
+msgid "Max squads"
+msgstr "Макс. число отрядов"
+
+#. machine-translated
+msgid "Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "Макс. размер фракции, Макс. размер отряда и Макс. число отрядов в расширенных настройках"
+
+#. machine-translated
+msgid "its limits are now Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "его лимиты теперь находятся в расширенных настройках: Макс. размер фракции, Макс. размер отряда и Макс. число отрядов"
+
+#. machine-translated
+msgid "The faction's recruitment limit: how many characters and animals your faction may hold (the game: 30). Existing members stay if you lower it. Click the number to type an exact value."
+msgstr "Лимит найма фракции: сколько персонажей и животных может быть в вашей фракции (в игре: 30). Уже нанятые участники останутся, если снизить значение. Щёлкните по числу, чтобы ввести точное значение."
+
+#. machine-translated
+msgid "How many members one of your squads may hold (the game: 20). Full squads put new recruits into a new squad."
+msgstr "Сколько участников может быть в одном отряде (в игре: 20). Если отряд полон, новые рекруты попадают в новый отряд."
+
+#. machine-translated
+msgid "How many squads your faction may create (the game: 10)."
+msgstr "Сколько отрядов может создать ваша фракция (в игре: 10)."
+
+#. machine-translated
+msgid "App menu"
+msgstr "Меню приложений"
+
+#. machine-translated
+msgid "Could not change the app menu entry: {1}"
+msgstr "Не удалось изменить пункт меню приложений: {1}"
+
+#. machine-translated
+msgid "Meitou Launcher was added to the app menu."
+msgstr "Meitou Launcher добавлен в меню приложений."
+
+#. machine-translated
+msgid "Meitou Launcher was removed from the app menu."
+msgstr "Meitou Launcher удалён из меню приложений."
+
+#. machine-translated
+msgid "Remove"
+msgstr "Удалить"
+
+#. machine-translated
+msgid "Add"
+msgstr "Добавить"
+
+#. machine-translated
+msgid "Meitou Launcher is in your desktop's app launcher."
+msgstr "Meitou Launcher есть в меню приложений вашего рабочего стола."
+
+#. machine-translated
+msgid "Add Meitou Launcher, with its icon, to your desktop's app launcher."
+msgstr "Добавить Meitou Launcher со значком в меню приложений вашего рабочего стола."
+
+#. machine-translated
+msgid "Add to the app menu"
+msgstr "Добавить в меню приложений"
+
+#. machine-translated
+msgid "Meitou Launcher, with its icon, in your desktop's app launcher."
+msgstr "Meitou Launcher со значком в меню приложений вашего рабочего стола."

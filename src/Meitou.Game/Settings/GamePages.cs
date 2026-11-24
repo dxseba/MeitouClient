@@ -50,6 +50,10 @@ sealed class GamePages(SettingsMenu menu)
     /// The Shift pan multiplier slider, made on first use.
     /// </summary>
     Slider? _shiftPanMultiplier;
+    /// <summary>
+    /// The Corpse flies range slider, made on first use.
+    /// </summary>
+    Slider? _corpseFlyRange;
 
     /// <summary>
     /// The audio sliders, made on first use.
@@ -90,6 +94,11 @@ sealed class GamePages(SettingsMenu menu)
     /// The skills' own Squad XP sliders, in <see cref="SkillXp.Skills"/>' order, made on first use.
     /// </summary>
     Slider[]? _skillXpSliders;
+
+    /// <summary>
+    /// The player faction size, squad size and squad count limit sliders, made on first use.
+    /// </summary>
+    Slider? _maxFactionSizeSlider, _maxSquadSizeSlider, _maxSquadsSlider;
 
     /// <summary>
     /// The dropped items kept slider, made on first use.
@@ -135,6 +144,19 @@ sealed class GamePages(SettingsMenu menu)
     Slider ShiftPanMultiplier => _shiftPanMultiplier ??= new("Shift pan speed", UserConfig.MinShiftPanMultiplier,
         UserConfig.MaxShiftPanMultiplier, () => menu.Config.ShiftPanMultiplier, SetShiftPanMultiplier, "0.00", Text: v => $"{v * 100:0}%",
         Meitou: UserConfig.DefaultShiftPanMultiplier, Scale: 100, Step: 0.25f);
+
+    /// <summary>
+    /// The Corpse flies range slider in 5% steps, marked at Meitou's 30%.
+    /// </summary>
+    Slider CorpseFlyRange => _corpseFlyRange ??= new("Corpse flies range", UserConfig.MinCorpseFlyRange, UserConfig.MaxCorpseFlyRange,
+        () => menu.Config.CorpseFlyRange, SetCorpseFlyRange, "0.00", Text: v => $"{v * 100:0}%", Meitou: UserConfig.DefaultCorpseFlyRange,
+        Scale: 100, Step: 0.05f);
+
+    /// <summary>
+    /// The corpse flies' range, rounded to 5% and clamped, into the config.
+    /// </summary>
+    void SetCorpseFlyRange(float v) =>
+        menu.Config.CorpseFlyRange = Math.Clamp(MathF.Round(v * 20) / 20, UserConfig.MinCorpseFlyRange, UserConfig.MaxCorpseFlyRange);
 
     /// <summary>
     /// The Shift pan multiplier, rounded to 25% and clamped, into the config and the camera.
@@ -344,6 +366,43 @@ sealed class GamePages(SettingsMenu menu)
             "0.##", Text: v => $"{v:0.##}x", Faithful: 1, Step: 0.25f);
 
     /// <summary>
+    /// The max faction size slider (1 to 256), marked at the game's 30.
+    /// </summary>
+    Slider MaxFactionSizeSlider => _maxFactionSizeSlider ??= SquadLimitSlider("Max faction size", UserConfig.DefaultMaxFactionSize,
+        () => menu.Config.MaxFactionSize ?? menu.Player.SquadWindows.SquadLimits?.Invoke()?.Constants.MaxFactionSize
+            ?? UserConfig.DefaultMaxFactionSize,
+        v => menu.Config.MaxFactionSize = v);
+
+    /// <summary>
+    /// The max squad size slider (1 to 256), marked at the game's 20.
+    /// </summary>
+    Slider MaxSquadSizeSlider => _maxSquadSizeSlider ??= SquadLimitSlider("Max squad size", UserConfig.DefaultMaxSquadSize,
+        () => menu.Config.MaxSquadSize ?? menu.Player.SquadWindows.SquadLimits?.Invoke()?.Constants.MaxSquadSize
+            ?? UserConfig.DefaultMaxSquadSize,
+        v => menu.Config.MaxSquadSize = v);
+
+    /// <summary>
+    /// The max squads slider (1 to 256), marked at the game's 10.
+    /// </summary>
+    Slider MaxSquadsSlider => _maxSquadsSlider ??= SquadLimitSlider("Max squads", UserConfig.DefaultMaxSquads,
+        () => menu.Config.MaxSquads ?? menu.Player.SquadWindows.SquadLimits?.Invoke()?.Constants.MaxSquads
+            ?? UserConfig.DefaultMaxSquads,
+        v => menu.Config.MaxSquads = v);
+
+    /// <summary>
+    /// A player squad or faction cap slider (1 to 256, whole counts, marked at the game's <paramref name="faithful"/>), applied to the running
+    /// world at once.
+    /// </summary>
+    Slider SquadLimitSlider(string label, int faithful, Func<int> get, Action<int> set) =>
+        new(label, UserConfig.MinSquadLimit, UserConfig.MaxSquadLimit, () => get(),
+            v =>
+            {
+                set(Math.Clamp((int)MathF.Round(v), UserConfig.MinSquadLimit, UserConfig.MaxSquadLimit));
+                menu.GameplayChanged?.Invoke();
+            },
+            "0", Faithful: faithful, Step: 1);
+
+    /// <summary>
     /// The fast speed slider, in half steps, marked at the game's default.
     /// </summary>
     Slider FastSpeedSlider => _fastSpeedSlider ??= TimeSpeed("Fast speed", SimulationClock.MinFastSpeed, SimulationClock.MaxFastSpeed, 1,
@@ -485,13 +544,25 @@ sealed class GamePages(SettingsMenu menu)
             "Picked-up and looted items go into the character's backpack first, then its slots and inventory (the game: only while the bag "
             + "window is open).",
             Toggle: new("Loot into backpack", () => menu.Config.TakeIntoBackpack, SetTakeIntoBackpack, OnOff: true)));
-        foreach (var action in Enum.GetValues<InputAction>().Where(a => a != InputAction.Quit && a != InputAction.ToggleFps))
+        var shown = Enum.GetValues<InputAction>().Where(a => a != InputAction.Quit && a != InputAction.ToggleFps).ToArray();
+        var mods = menu.Bindings.ModActions;
+        foreach (var action in shown)
+        {
             result.Add(new(SettingsMenu.ActionLabel(action), SettingHints.BindingHint(action), Binding: action));
 
-        // The code mods' key actions follow the game's, in load order (docs/modding.md "Key actions").
-        foreach (var mod in menu.Bindings.ModActions)
-            result.Add(new(mod.Caption, Loc.Tr("A key of the mod {1}: {2}.", mod.OwnerName, mod.Label), Binding: mod.Action));
+            // A code mod's key action that names this row follows it, in load order (docs/modding.md "Key actions").
+            foreach (var mod in mods.Where(m => m.After == action)) result.Add(ModKeyRow(mod));
+        }
+
+        // The other code mods' key actions follow the game's, in load order.
+        foreach (var mod in mods.Where(m => m.After is not { } after || !shown.Contains(after))) result.Add(ModKeyRow(mod));
     }
+
+    /// <summary>
+    /// A code mod's key action's row: its label (in the mod's translation) and the mod's name.
+    /// </summary>
+    static SettingsMenu.Entry ModKeyRow(ModKeyAction mod) =>
+        new(mod.Caption, Loc.Tr("A key of the mod {1}: {2}.", mod.OwnerName, mod.ShownLabel), Binding: mod.Action);
 
     /// <summary>
     /// The Shift pan boost switch, into the config and the camera.
@@ -521,7 +592,7 @@ sealed class GamePages(SettingsMenu menu)
     }
 
     /// <summary>
-    /// The Audio page: the volumes, music frequency, voices and range, and where the listener is.
+    /// The Audio page: the volumes, music frequency, voices and range, where the listener is, and the corpse flies' sound and range.
     /// </summary>
     internal void AudioRows(List<SettingsMenu.Entry> result)
     {
@@ -545,6 +616,15 @@ sealed class GamePages(SettingsMenu menu)
             + "nobody is selected).",
             Toggle: new("Hear from", () => menu.Config.HearFromSelected, v => menu.Config.HearFromSelected = v,
                 Text: () => menu.Config.HearFromSelected ? "Character" : "Camera")));
+        result.Add(new("Mute corpse flies", "Silences the buzzing of the flies over corpses; the flies are still shown (the game: off).",
+            Toggle: new("Mute corpse flies", () => menu.Config.MuteCorpseFlies, v => menu.Config.MuteCorpseFlies = v, OnOff: true)));
+        result.Add(new("Quiet corpse flies", "The flies over corpses are heard only close to them, not from across the base (the game: off).",
+            Toggle: new("Quiet corpse flies", () => menu.Config.QuietCorpseFlies, v => menu.Config.QuietCorpseFlies = v, OnOff: true)));
+        if (menu.Config.QuietCorpseFlies)
+        {
+            result.Add(new(CorpseFlyRange.Label, "How far the corpse flies are heard, of the game's distance: lower to hear them less, higher for more.",
+                Slider: CorpseFlyRange, Depth: 1));
+        }
     }
 
     /// <summary>
@@ -605,6 +685,11 @@ sealed class GamePages(SettingsMenu menu)
             "A guard picks up a knocked-out prisoner only when a cage is free for them, and never takes one from a guard of his own faction. "
             + "The game lets guards lift and grab prisoners anyway, so at a full prison they hand the same body round without end.",
             Toggle: new("Guards stop passing bodies", () => menu.Config.FixArrestLifts, v => menu.Config.FixArrestLifts = v, Remaster: true,
+                OnOff: true)));
+        result.Add(new("Guards give up lost suspects",
+            "A guard who loses sight of the character he was arresting gives up and goes back to his duties. "
+            + "The game has him take the fight up again wherever the character is, so he can run straight to someone hiding out of sight.",
+            Toggle: new("Guards give up lost suspects", () => menu.Config.FixArrestChases, v => menu.Config.FixArrestChases = v, Remaster: true,
                 OnOff: true)));
         result.Add(new("Door break sound",
             "Doors and gates make their breaking sound when they are bashed or broken open. "
@@ -853,6 +938,16 @@ sealed class GamePages(SettingsMenu menu)
 
         result.Add(new(OthersXpSlider.Label,
             "The same for everyone outside your faction: other factions, enemies and wild animals (the game: 1x).", Slider: OthersXpSlider));
+        result.Add(new(MaxFactionSizeSlider.Label,
+            "The faction's recruitment limit: how many characters and animals your faction may hold (the game: 30). Existing members stay if you lower "
+            + "it. Click the number to type an exact value.",
+            Slider: MaxFactionSizeSlider));
+        result.Add(new(MaxSquadSizeSlider.Label,
+            "How many members one of your squads may hold (the game: 20). Full squads put new recruits into a new squad.",
+            Slider: MaxSquadSizeSlider));
+        result.Add(new(MaxSquadsSlider.Label,
+            "How many squads your faction may create (the game: 10).",
+            Slider: MaxSquadsSlider));
         result.Add(new(FastSpeedSlider.Label, "The game speed of the second speed button (two arrows) and its key (the game: 2x).",
             Slider: FastSpeedSlider));
         result.Add(new(FastestSpeedSlider.Label,

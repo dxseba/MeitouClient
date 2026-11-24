@@ -110,6 +110,8 @@ sealed class GameMods(GameHost host)
         _builtInNotices = BuiltInMods.Adopt(host.Config, host.Install);
         (data.BodyOptions.SquadXp, data.BodyOptions.OthersXp) = (host.Config.SquadXp, host.Config.OthersXp);
         data.BodyOptions.SquadSkillXp = Meitou.Game.Settings.SkillXp.Rates(host.Config.SquadSkillXp);
+        (data.BodyOptions.MaxFactionSize, data.BodyOptions.MaxSquadSize, data.BodyOptions.MaxSquads) =
+            (host.Config.MaxFactionSize, host.Config.MaxSquadSize, host.Config.MaxSquads);
 
         if (host.DataPhase?.Mods is { } prepared) StartPrepared(prepared, host.DataPhase.Enabled, db, data);
         else LoadMods(db, data);
@@ -153,7 +155,12 @@ sealed class GameMods(GameHost host)
     /// </summary>
     void KeepModSettings(ModHost mods)
     {
-        foreach (var group in mods.Settings) group.Changed += host.Config.KeepModSetting;
+        foreach (var group in mods.Settings)
+        {
+            group.Changed += host.Config.KeepModSetting;
+            group.UsePresets(host.Config.ModSettingPresets.GetValueOrDefault(group.ModId));
+            group.PresetsChanged += host.Config.KeepModPresets;
+        }
     }
 
     /// <summary>
@@ -181,7 +188,7 @@ sealed class GameMods(GameHost host)
     {
         foreach (var notice in _builtInNotices) ui.Notice(notice);
         if (Mods is null) return;
-        Mods.RegisterUi((extension, folder) => ui.RegisterUiExtension(extension, folder));
+        Mods.RegisterUi((extension, folder, texts) => ui.RegisterUiExtension(extension, folder, texts));
         Mods.AttachInterface(new Game.Ui.PlayerModInterface(ui));
         if (Mods.ArrangesFactionList) ui.FactionWindow.ArrangeList = Mods.ArrangeFactionList;
         foreach (var notice in Mods.Notices) ui.Notice(notice, true);

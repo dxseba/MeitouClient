@@ -97,7 +97,9 @@ Save sample (autosave of the owner's game, 51 zone files): `lock lvl` values spa
   `k = 1.2` on success, 0.24 on failure. The lock level is passed but unused.
 - **Bar** (**Verified**, Task_PickLock slot 2 `FUN_140359160`): each update sets the task's floating bar
   (`FloatingProgressBar::ProgressBarWidget`, `FUN_1406e8580`, layout `Kenshi_ProgressBarPanel`: `ProgressBar` fill, `Text`
-  caption) to pick time / next-roll time and its caption to "Lockpicking (Chance {p}%)" with the cage penalty.
+  caption) to pick time / next-roll time and its caption to "Lockpicking (Chance {p}%)" with the cage penalty. Only a player-faction picker
+  has the bar: `ProgressBarTask`'s start (`FUN_140331ca0`, **Verified**) makes it only when the character's faction (vfunc `0x58`) has
+  `+0x250` set, and the update skips the caption with none, so an NPC picking a lock shows only the floaters below (#1313).
 - **Messages/sounds** (**Verified** `FUN_140359160`): after every roll, success or failure, any picker (no player check) gets a
   floating label (`FUN_14073faf0`, font 0 small) 15 units over it: "Pick success!" (0.4, 0.8, 0.4, alpha 0.9) or "Pick failed"
   (0.7, 0.4, 0.4, alpha 0.7), the stealth KO's colours; no name, no log line. Success also plays `Character_Unlock_Success`.
@@ -269,7 +271,8 @@ Same targets as picking; Task_CutLock / Task_BruteForceLock share the shackle ta
   through a locked door (no unlock, bash, pick or cut) and stops there; 60 still gives it the way out of a building it stands in.
   **Observed** (headless, vanilla Sho-Battai, 30,000 ticks): before, the UC town racists' boss on patrol worked the shut shop 43.11:16's lock
   from outside at night for 1,900 ticks, was booked for Burglary and the garrison fought his squad; after, no such booking or fight. **Observed** (headless, #885 save and a fresh Mourn): before, a Tech Hunter patroller unlocked Mourn's Ancient Lab gate, which then stood open, and the Great White Gorillo fought the guards and left; after, the gate
-  stayed locked for 40,000 ticks. A picker or cutter puts a weapon in
+  stayed locked for 40,000 ticks. Unlike the patroller, 157 Static town guard (and 38 / 268) has a way in: its `31` atNode comes from 31 Staying close, whose list B
+  has 59 (**Verified**, row table), so a guard whose drawn post is inside a locked building works its way in like any NPC (#1313). A picker or cutter puts a weapon in
   hand away first ([weapon away](#lockpicking-task_picklock-76-task_picklock_shackles-201)). An NPC's planned goal whose destination is behind
   locked doors does not plan (59 in the main planner, `PlanContext.Accessible`: its own unlock, a bash, a cut or a pick, as `WayIn` gives; an
   animal a building keeps out gets 59's default), so its walk is not started; once under way it takes the same way in at the door. An engine
@@ -492,6 +495,7 @@ Meitou registers them as outdoor fixtures using their level placement and bed ma
   a bed standing on its own keeps its whole rotation (`Fixture.Rotation`), `FixtureRegistry.LeanOf` gives the snapshot's `Lean` (none for a level bed) and the host draws the body turned by its yaw, then
   the lean; a tilted bed with use nodes still has its nodes placed by yaw only (`Nearest`), no base bed on its own has any (#688: sleepers on Camp Beds built on a hillside lay level and cut through the mattress).
 - **Getting out of bed** (`Task_GetOutOfBed`, **Verified**): the start `FUN_140345760` posts Get_Out / Character_Bed; when the bed's clip name (`FUN_140297330`) is `gotobed` the sleeper stays in bed, else it leaves at once (`FUN_140345620`). The update `FUN_140348480` plays `gotobed` at rate -1 and leaves once its progress is under 0.1. No base bed names `gotobed` (they use `sleepinbed`), so only modded beds animate the exit. Meitou: `FixtureRegistry.GetOutOfBed` (`CharacterCold.LeavingBed` / `BedExitDone`, `AnimationSystem.FinishBedExit`) for the AI's get-out step and the bed system's get-up; forced removals (carried off, kidnapped, an order) use `LeaveBed` at once. Meitou stands one getting out where it lay unless the bed's navmesh hole leaves no floor at its height there (a modded bunk's node lies 16 or more inside it); then it stands on the nearest floor point at that height within 40.
+- **Out cold in a bed** (#1263): a knock-out only sets its time and no task or AI runs while down ([combat](combat.md), `FUN_14034cd80`, `FUN_1405d00b0`), so a sleeper knocked out lies on in its bed. Meitou: `BedSystem.GetUp` leaves a knocked-out occupant in, whatever its task (the debug `ko`'s task reset got it up). A body that leaves a bed while out cold (carried off) drops the bed's clips at once (`FixtureRegistry.DropBedPose`, engine choice): from `sleepinbed` its ragdoll started with the pelvis inside the Bed's collision (box top 8.1 over the lie spot, `meitou-tools navmesh --ragdoll --probe`) and fell through to the floor under the mattress, where the bed took every click; now it goes limp at the lie spot beside the bed (**Observed**, the reporter's save, United Cities house `Bed`s: 11.4 units to the mattress centre at floor height before, 0.2 after).
 - **Rent cost** (UseableStuff slot 152 `FUN_140330ab0(bed, character)`): 0 in this order: no bed faction; the faction's `not real` flag
   (+0x1d0; the FACTION loader `FUN_1407fe270` reads `not real` into it, **Verified**); ally(bed faction, character's) ([factions](factions-squads-towns.md) 3.3); a
   `fundamental type` 8 (bandit) owner; no town for the building (`FUN_1400f6c20` takes the root building, `FUN_1409f9100` the town nearest its position); a town of type

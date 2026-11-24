@@ -394,6 +394,8 @@ as the fighters whose target it is stand for it), stamped with the owner's `List
     Passive one −1;
   - +10 when the candidate's intended target (state broadcast +0x68) is the chooser's AI-task target, that target is not fighting it back, and
     the candidate has under 2 attackers;
+  - with param_6 set (named LawEnforcer by the original TauntExpansion mod) a term from the candidate's state broadcast `+0xa0` and the chooser's
+    faction is added first (**Observed**, decompile; which callers set it **Unknown**; Meitou scores none);
   - a player-faction chooser drops candidates beyond a limit only when its caller sets the clamp flag (`FUN_14059e300` param_7, **Verified**): the in-fight chooser `CombatClassAI::chooseAttackTarget` does, every goal finder and the sight look pass 0 (no clamp, so the attack-on-sight look reaches the sight range). The limit is 400 (`DAT_1416abf04`) while the shooting gate `FUN_1407f2840` is false; with a ranged weapon ready (gate true) it is `FUN_140436910`: 800 (`DAT_1416d4750`) without aim data, else the aim object's range x a height factor (1 within a height difference of 20, down to 0.6 when the target is higher, up to 1.5 when lower). Meitou: `TargetScore.PlayerRange` 400 for the in-fight chooser only (the ranged limit is not modelled); on Hold ×0.01 beyond 40;
   - when the Hold test `FUN_140598630` passes: + range term (×20 for a crippled chooser), + murderous (−2) for a candidate whose fight is off
     (then the whole score ×0.5 when its intended aggression, vfunc 0x1e8 `getIntendedAggression`, is ≤ 0), the whole score ×0.1 while it gets up
@@ -741,7 +743,7 @@ which its next update (`FUN_14050d920` → `FUN_14050d7d0`) consumes by dropping
   - the chaser has no sense entry for the target → give up;
   - the target is neither seen nor heard (entry `+0x38`/`+0x39`) and its last sighting is older than 12 units, or the chaser
     stands within 60 of where it was last sensed (squared 3600) → give up.
-  - Giving up ends the task, fires dialogue event 60 GIVE_UP_CHASE from the chaser at the target and resets the AI's plan. Meitou (`AggroSystem.ResetPlan`): both resets clear the chaser's plan and commitment and ask for a new think; `vfunc_1` is `FUN_14033a800`, called from the `Task_MeleeAttack` update `FUN_14034ca40` (not `FUN_14034c7c0`, `Task_PlayerTalkto`).
+  - Giving up ends the task, fires dialogue event 60 GIVE_UP_CHASE from the chaser at the target and resets the AI task system (`FUN_1405074a0`, both resets, **Verified** decompile of `FUN_14034ca40` and `FUN_14033a800`: it empties the order queue `+0x38` and the second list `+0x70`/`+0x78` and force-clears the current goal `+0x1c0`, so an ordered chase, an arrest's, leaves with its order). Meitou (`AggroSystem.ResetPlan` → `PlayerOrders.Wipe`): both resets clear the chaser's orders, second list, plan, commitment and goal and ask for a new think; `vfunc_1` is `FUN_14033a800`, called from the `Task_MeleeAttack` update `FUN_14034ca40` (not `FUN_14034c7c0`, `Task_PlayerTalkto`).
 - Time: the world clock is in game hours; the sense-age unit is hours × 3600 / 33 × 0.5 (`FUN_140852150`, `FUN_14033a170`),
   so 12 = 13.2 game minutes, about 24 s real at 1x ([game loop](game-loop.md#the-three-time-values)).
 - So a player's character never gives up a path chase by this rule, and an NPC on open ground (no path chase) keeps
@@ -835,7 +837,7 @@ values; trajectory, aim timing and obstruction uncertainties remain labelled.
   owner test `FUN_140546dd0`)). Base data: harpoon turrets 75, auto/multi 50 (`output rate`, **Verified** probe); walls 10–30.
 - **Gun slots of `GunClassTurret`** (vtable `1416d5258`): 6 target weight `FUN_1404348e0`: 1 when dot(turret facing `+0x458`, target − turret) > 0, else 0.1 for a target outdoors,
   for one inside a building 0.1 only in the turret's own building on its floor, else 0 (**Observed**); 12 aim direction = the barrel node's +Z (`FUN_140434f40`); 13 aim error = building `+0x448`;
-  18 mount factor M = 1 + 0.01 × the output value of the building in `+0x478` (the `mounted` handle: a wall's turret bonus) (`FUN_1404353b0`); 19 power factor P = 0.8 e + 0.2 (`FUN_140435380`),
+  18 mount factor M = 1 + 0.01 × the output value of the building in `+0x478` (the `mounted` handle: a wall's turret bonus; any mounted building, a placed turret's too, **Verified** by decompile; Meitou `TurretManning.MountOf`) (`FUN_1404353b0`); 19 power factor P = 0.8 e + 0.2 (`FUN_140435380`),
   e = building slot 109 `FUN_140296e00` = 0 when not operational, else hp ratio × power grant; 22/23 pierce ends trunc(0.75 D), trunc(1.25 D).
 - **Manning** (`Task_UseTurret`, update `FUN_1403474f0`): the building of the order's target or the character's `+0x258`; it must be a turret (slot 107 = 8) with a free
   operator place (slot 159); the gunner faces it and holds clip `combatstance`; unless broken (`+0x3b6`) the controller gets the building and stat 11 Turrets
@@ -1062,6 +1064,12 @@ still running answers "pending". **Line of fire** (`FUN_140437ad0`): from the mu
 the shape's handle: a character that is not the shooter and not an enemy (`Character::isEnemy` slot 0x3e8, disguises counted) holds (2); any enemy, the target or another, fires (1);
 another object (a building) blocks (0) unless the shooter is nearer the target than the hit point (feet to feet, `FUN_1404346d0`); a shape without an object and no hit at all
 fire. The terrain is such a shape (`FUN_1407eaf90`: heightfield, group 2, no user data and no handle set), so a hill in the way fires into the hill. So packed ranks hold: a rear rank's line runs into the front rank's hulls (5 wide, 6 apart in Meitou's battle) unless they stand aside.
+**Turret's mount** (**Verified** by decompile; names from KenshiLib's exports): the ray request (`FUN_140435b40`) asks the gun whether the first shape met is a building
+(object kind 0) whose handle equals its turret's mounted building (gun slot 11 `GunClassTurret::didThisTraceHitOurMountedBuilding` `FUN_140438050`; the turret is gun `+0x128`,
+`TurretBuilding::getMountedBuilding` returns `+0x478`, the saved `mounted` handle). Then a second ray (`FUN_140434750`, same mask and direction) starts from gun slot 10
+(`FUN_140435040`): barrel node + orientation × unit(gun `+0x90` = (0, `barrel pos Y`, `barrel pos Z`), `FUN_14043baa0`) × 50 (`DAT_141683170`), and what it meets decides
+as above. So a turret on a wall or roof shoots over its own parapet. Meitou: `CombatSystem.TurretLineOfFire`, `TurretRig.RecastFrom`; the mount's collision
+(`IRagdollEnvironment.BuildingTriangles`) tells it apart from other buildings at the hit point.
 **Closing ray** (`FUN_140438c70`, state 1): from the muzzle along (target feet + 5 up) − (own feet + 5 up) (read through the decompiler's garbled Ogre operators: the feet-to-feet
 line), mask `0x87f9e04` (no characters); it passes when it meets something
 farther from the shooter than the target is. Meeting nothing does not pass, so on open ground a walker goes on until its path fails or the planner turns it to melee.

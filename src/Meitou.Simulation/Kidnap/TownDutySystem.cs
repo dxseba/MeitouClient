@@ -366,7 +366,7 @@ public sealed class TownDutySystem(PopulationData data, PopulationSystem populat
     {
         var town = AiSystem.TownAt(data, world, at);
         if (town.IsNone || cold.Inventory is not { } inv) return null;
-        return StoreFor(world, squad, cold, at, town, [.. Production.ProductionSystem.Ditchable(inv)], register);
+        return StoreFor(world, squad, cold, at, town, [.. Production.ProductionSystem.Ditchable(world, cold, inv)], register);
     }
 
     /// <summary>
@@ -378,7 +378,7 @@ public sealed class TownDutySystem(PopulationData data, PopulationSystem populat
         var town = AiSystem.TownAt(data, world, at);
         if (town.IsNone || cold.Inventory is not { } inv) return null;
 
-        return StoreFor(world, squad, cold, at, town, [.. Production.ProductionSystem.Ditchable(inv).Where(i => i.Record == record)], register: false);
+        return StoreFor(world, squad, cold, at, town, [.. Production.ProductionSystem.Ditchable(world, cold, inv).Where(i => i.Record == record)], register: false);
     }
 
     /// <summary>
@@ -1248,16 +1248,8 @@ public sealed class TownDutySystem(PopulationData data, PopulationSystem populat
     {
         if (!Accepts(f, item)) return false;
 
-        var box = f.Contents!;
-        int room = box.LimitOf(item);
-        foreach (var other in box.Items)
-        {
-            if (other.Record == item.Record && other.Quality == item.Quality && other.Mark == item.Mark && other.Section == "main"
-                    && other.Quantity < room)
-                return true;
-        }
-
-        return box.FindCell("main", item.Width, item.Height, out _, out _);
+        // The stacking rule the put follows (Inventory.SameStack), so a container chosen for a stack always takes some of it.
+        return f.Contents!.HasRoomIn("main", item);
     }
 
     /// <summary>
@@ -1558,7 +1550,7 @@ public sealed class TownDutySystem(PopulationData data, PopulationSystem populat
     /// </summary>
     void StashHere(World world, bool ditch, CharacterCold gc, Inventory inv, Production.Machine? machine, Fixture? box, Inventory store, Vector3 at)
     {
-        var carried = ditch ? Production.ProductionSystem.Ditchable(inv) : LootOf(world, gc);
+        var carried = ditch ? Production.ProductionSystem.Ditchable(world, gc, inv) : LootOf(world, gc);
         foreach (var item in carried.Where(i => machine is not null ? Production.ProductionSystem.Stores(machine, i) : Takes(box!, i)).ToList())
         {
             inv.Remove(item);

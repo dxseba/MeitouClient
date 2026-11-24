@@ -5977,8 +5977,8 @@ msgid "Machine id (letters, digits, dashes)"
 msgstr "机器 ID（字母、数字、连字符）"
 
 #. machine-translated
-msgid "Machine name"
-msgstr "机器名称"
+msgid "Machine name (optional)"
+msgstr "机器名称（可选）"
 
 #. machine-translated
 msgid "Notes (cooling, power plan, ...)"
@@ -6061,8 +6061,8 @@ msgid "The runs were made by {1}, not {2}: they cannot be submitted."
 msgstr "这些运行由 {1} 而非 {2} 完成：无法提交。"
 
 #. machine-translated
-msgid "Fill in the machine's id and name to submit."
-msgstr "请填写机器 ID 和名称后再提交。"
+msgid "Fill in the machine's id to submit."
+msgstr "请填写机器 ID 后再提交。"
 
 #. machine-translated
 msgid "The service refused it: {1}"
@@ -6204,3 +6204,123 @@ msgstr "指针上的撬锁几率"
 #. machine-translated
 msgid "Pointing at a lock too hard to pick shows 0%, as its Pick Lock menu entry does, since the character cannot pick it. The game shows the chance before that limit there, such as 3% for a lock the menu gives 0%."
 msgstr "指向难度过高、无法撬开的锁时显示 0%，与其菜单中的“撬锁”一项一致，因为角色撬不开它。游戏在那里显示的是应用该下限之前的几率，例如菜单给出 0% 的锁会显示 3%。"
+
+#. machine-translated
+msgid "Mute corpse flies"
+msgstr "尸体苍蝇静音"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings"
+msgstr "音频设置中的尸体苍蝇静音"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings is on"
+msgstr "音频设置中的尸体苍蝇静音已开启"
+
+#. machine-translated
+msgid "Silences the buzzing of the flies over corpses; the flies are still shown (the game: off)."
+msgstr "消除尸体上方苍蝇的嗡嗡声；苍蝇仍会显示（游戏：关）。"
+
+#. machine-translated
+msgid "Quiet corpse flies"
+msgstr "尸体苍蝇减弱"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings"
+msgstr "音频设置中的尸体苍蝇减弱"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings is on"
+msgstr "音频设置中的尸体苍蝇减弱已开启"
+
+#. machine-translated
+msgid "Corpse flies range"
+msgstr "尸体苍蝇声音范围"
+
+#. machine-translated
+msgid "The flies over corpses are heard only close to them, not from across the base (the game: off)."
+msgstr "尸体上方的苍蝇只有在近处才能听到，不会传遍整个基地（游戏：关）。"
+
+#. machine-translated
+msgid "How far the corpse flies are heard, of the game's distance: lower to hear them less, higher for more."
+msgstr "尸体苍蝇能被听到的距离，相对于游戏中的距离：调低则听到得更少，调高则更多。"
+
+#. machine-translated
+msgid "Guards give up lost suspects"
+msgstr "守卫放弃跟丢的嫌疑人"
+
+#. machine-translated
+msgid "A guard who loses sight of the character he was arresting gives up and goes back to his duties. The game has him take the fight up again wherever the character is, so he can run straight to someone hiding out of sight."
+msgstr "跟丢了正在逮捕的角色的守卫会放弃并回到自己的职责。原版游戏会让他无论角色在哪里都重新开始战斗，因此他可能径直跑向躲在视线之外的人。"
+
+#. machine-translated
+msgid "Max faction size"
+msgstr "派系人数上限"
+
+#. machine-translated
+msgid "Max squad size"
+msgstr "小队人数上限"
+
+#. machine-translated
+msgid "Max squads"
+msgstr "小队数量上限"
+
+#. machine-translated
+msgid "Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "高级设置中的派系人数上限、小队人数上限和小队数量上限"
+
+#. machine-translated
+msgid "its limits are now Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "其上限现已移至高级设置中的派系人数上限、小队人数上限和小队数量上限"
+
+#. machine-translated
+msgid "The faction's recruitment limit: how many characters and animals your faction may hold (the game: 30). Existing members stay if you lower it. Click the number to type an exact value."
+msgstr "派系的招募上限：你的派系最多可容纳的角色和动物数量（游戏：30）。调低上限不会移除现有成员。点击数字可输入精确值。"
+
+#. machine-translated
+msgid "How many members one of your squads may hold (the game: 20). Full squads put new recruits into a new squad."
+msgstr "单个小队最多可容纳的成员数量（游戏：20）。小队满员时，新招募的成员会进入一个新小队。"
+
+#. machine-translated
+msgid "How many squads your faction may create (the game: 10)."
+msgstr "你的派系最多可创建的小队数量（游戏：10）。"
+
+#. machine-translated
+msgid "App menu"
+msgstr "应用菜单"
+
+#. machine-translated
+msgid "Could not change the app menu entry: {1}"
+msgstr "无法更改应用菜单项：{1}"
+
+#. machine-translated
+msgid "Meitou Launcher was added to the app menu."
+msgstr "已将 Meitou Launcher 添加到应用菜单。"
+
+#. machine-translated
+msgid "Meitou Launcher was removed from the app menu."
+msgstr "已将 Meitou Launcher 从应用菜单中移除。"
+
+#. machine-translated
+msgid "Remove"
+msgstr "移除"
+
+#. machine-translated
+msgid "Add"
+msgstr "添加"
+
+#. machine-translated
+msgid "Meitou Launcher is in your desktop's app launcher."
+msgstr "Meitou Launcher 已在桌面的应用启动器中。"
+
+#. machine-translated
+msgid "Add Meitou Launcher, with its icon, to your desktop's app launcher."
+msgstr "将 Meitou Launcher 及其图标添加到桌面的应用启动器。"
+
+#. machine-translated
+msgid "Add to the app menu"
+msgstr "添加到应用菜单"
+
+#. machine-translated
+msgid "Meitou Launcher, with its icon, in your desktop's app launcher."
+msgstr "在桌面的应用启动器中显示 Meitou Launcher 及其图标。"

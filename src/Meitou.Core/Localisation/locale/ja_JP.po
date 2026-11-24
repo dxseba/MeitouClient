@@ -5132,8 +5132,8 @@ msgid "Machine id (letters, digits, dashes)"
 msgstr "マシン ID（英字・数字・ハイフン）"
 
 #. machine-translated
-msgid "Machine name"
-msgstr "マシン名"
+msgid "Machine name (optional)"
+msgstr "マシン名（任意）"
 
 #. machine-translated
 msgid "Notes (cooling, power plan, ...)"
@@ -5216,8 +5216,8 @@ msgid "The runs were made by {1}, not {2}: they cannot be submitted."
 msgstr "実行したのは {2} ではなく {1} です。送信できません。"
 
 #. machine-translated
-msgid "Fill in the machine's id and name to submit."
-msgstr "送信するにはマシンの ID と名前を入力してください。"
+msgid "Fill in the machine's id to submit."
+msgstr "送信するにはマシンの ID を入力してください。"
 
 #. machine-translated
 msgid "The service refused it: {1}"
@@ -5371,3 +5371,123 @@ msgstr "ポインターの解錠確率"
 #. machine-translated
 msgid "Pointing at a lock too hard to pick shows 0%, as its Pick Lock menu entry does, since the character cannot pick it. The game shows the chance before that limit there, such as 3% for a lock the menu gives 0%."
 msgstr "解錠が難しすぎる錠を指すと、メニューの「解錠」項目と同じく 0% と表示されます。キャラクターはその錠を解錠できないためです。ゲームではそこにその下限を適用する前の確率が表示され、メニューが 0% とする錠でも 3% などと表示されます。"
+
+#. machine-translated
+msgid "Mute corpse flies"
+msgstr "死体のハエを消音"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings"
+msgstr "オーディオ設定の死体のハエを消音"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings is on"
+msgstr "オーディオ設定の死体のハエを消音がオン"
+
+#. machine-translated
+msgid "Silences the buzzing of the flies over corpses; the flies are still shown (the game: off)."
+msgstr "死体にたかるハエの羽音を消します。ハエ自体は表示されたままです（ゲーム：オフ）。"
+
+#. machine-translated
+msgid "Quiet corpse flies"
+msgstr "死体のハエを静かに"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings"
+msgstr "オーディオ設定の死体のハエを静かに"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings is on"
+msgstr "オーディオ設定の死体のハエを静かにがオン"
+
+#. machine-translated
+msgid "Corpse flies range"
+msgstr "死体のハエの聞こえる範囲"
+
+#. machine-translated
+msgid "The flies over corpses are heard only close to them, not from across the base (the game: off)."
+msgstr "死体にたかるハエの羽音は近くでのみ聞こえ、拠点の反対側からは聞こえません（ゲーム：オフ）。"
+
+#. machine-translated
+msgid "How far the corpse flies are heard, of the game's distance: lower to hear them less, higher for more."
+msgstr "死体のハエが聞こえる距離（ゲームの距離に対する割合）：下げると聞こえにくく、上げると遠くまで聞こえます。"
+
+#. machine-translated
+msgid "Guards give up lost suspects"
+msgstr "見失った容疑者を衛兵があきらめる"
+
+#. machine-translated
+msgid "A guard who loses sight of the character he was arresting gives up and goes back to his duties. The game has him take the fight up again wherever the character is, so he can run straight to someone hiding out of sight."
+msgstr "逮捕しようとしていたキャラクターを見失った衛兵は、あきらめて持ち場に戻ります。ゲームではキャラクターがどこにいても戦いを再開するため、見えない場所に隠れている相手のもとへまっすぐ走っていくことがあります。"
+
+#. machine-translated
+msgid "Max faction size"
+msgstr "最大派閥人数"
+
+#. machine-translated
+msgid "Max squad size"
+msgstr "最大部隊人数"
+
+#. machine-translated
+msgid "Max squads"
+msgstr "最大部隊数"
+
+#. machine-translated
+msgid "Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "詳細設定の最大派閥人数、最大部隊人数、最大部隊数"
+
+#. machine-translated
+msgid "its limits are now Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "その上限は現在、詳細設定の最大派閥人数、最大部隊人数、最大部隊数になっています"
+
+#. machine-translated
+msgid "The faction's recruitment limit: how many characters and animals your faction may hold (the game: 30). Existing members stay if you lower it. Click the number to type an exact value."
+msgstr "派閥の勧誘上限：派閥に所属できるキャラクターと動物の最大数（ゲーム：30）。下げても既存のメンバーは残ります。数字をクリックすると正確な値を入力できます。"
+
+#. machine-translated
+msgid "How many members one of your squads may hold (the game: 20). Full squads put new recruits into a new squad."
+msgstr "1つの部隊に所属できる最大メンバー数（ゲーム：20）。部隊が満員の場合、新しい仲間は新しい部隊に入ります。"
+
+#. machine-translated
+msgid "How many squads your faction may create (the game: 10)."
+msgstr "派閥が作成できる部隊の最大数（ゲーム：10）。"
+
+#. machine-translated
+msgid "App menu"
+msgstr "アプリメニュー"
+
+#. machine-translated
+msgid "Could not change the app menu entry: {1}"
+msgstr "アプリメニューの項目を変更できませんでした: {1}"
+
+#. machine-translated
+msgid "Meitou Launcher was added to the app menu."
+msgstr "Meitou Launcher をアプリメニューに追加しました。"
+
+#. machine-translated
+msgid "Meitou Launcher was removed from the app menu."
+msgstr "Meitou Launcher をアプリメニューから削除しました。"
+
+#. machine-translated
+msgid "Remove"
+msgstr "削除"
+
+#. machine-translated
+msgid "Add"
+msgstr "追加"
+
+#. machine-translated
+msgid "Meitou Launcher is in your desktop's app launcher."
+msgstr "Meitou Launcher はデスクトップのアプリランチャーにあります。"
+
+#. machine-translated
+msgid "Add Meitou Launcher, with its icon, to your desktop's app launcher."
+msgstr "Meitou Launcher をアイコン付きでデスクトップのアプリランチャーに追加します。"
+
+#. machine-translated
+msgid "Add to the app menu"
+msgstr "アプリメニューに追加"
+
+#. machine-translated
+msgid "Meitou Launcher, with its icon, in your desktop's app launcher."
+msgstr "Meitou Launcher をアイコン付きでデスクトップのアプリランチャーに表示します。"

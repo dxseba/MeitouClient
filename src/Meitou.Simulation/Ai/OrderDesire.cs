@@ -70,6 +70,9 @@ public static class OrderDesire
             TaskType.LiftPersonPlayerOrder or TaskType.KidnapOrder or TaskType.LiftPersonSnatchingAllowed
                 or TaskType.LiftPersonSnatchingAllowedInTownOnly => LiftDesire(world, slot, cold, order.Target),
             TaskType.UseTurret => TurretDesire(world, slot, cold),
+            TaskType.OperateAutomaticMachinery => order.Site is { } site && world.SystemOf<Production.ProductionSystem>() is { } production
+                ? production.AutoHaulScore(world, slot, cold, site)
+                : Registered(world, slot, order),
             TaskType.FirstAidOrder => world.SystemOf<FirstAidSystem>()?.TreatOrderDesire(world, slot, order.Target, robot: false),
             TaskType.FirstAidRobot => world.SystemOf<FirstAidSystem>()?.TreatOrderDesire(world, slot, order.Target, robot: true),
             TaskType.SplintOrder => world.SystemOf<FirstAidSystem>()?.SplintOrderDesire(world, slot, order.Target),

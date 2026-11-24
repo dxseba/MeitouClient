@@ -395,15 +395,16 @@ public sealed partial class ProductionSystem
             if (on == TaskType.DitchAllResources && cold.HaulTo is { } keep && !PlayerOrders.Holds(world, slot) && cold.Inventory is { } held
                 && Site(world, keep) is { Complete: true } keptSite && keptSite.Owner == world.Player.Faction
                 && Ensure(world, keptSite) is { } keptStore && keptStore.Data.IsStorage && keptStore.Storage is not null
-                && Ditchable(held).Any(item => Stores(keptStore, item)) && world.StorageAllows(cold, keep, StorageUse.Put, DitchRecord(world, held)))
+                && Ditchable(world, cold, held).Any(item => Stores(keptStore, item))
+                && world.StorageAllows(cold, keep, StorageUse.Put, DitchRecord(world, cold, held)))
                 return (TaskType.DitchAllResources, keep);
 
-            bool ditching = !PlayerOrders.Holds(world, slot) && cold.Inventory is { } carried && Ditchable(carried).Any();
+            bool ditching = !PlayerOrders.Holds(world, slot) && cold.Inventory is { } carried && Ditchable(world, cold, carried).Any();
             if (ditching && NearestSite(world, at, float.MaxValue, IsStore, Ditches) is { } store)
                 return (TaskType.DitchAllResources, store);
 
-            bool Ditches(BuildSite s, Machine m) => InFinderRange(s.Position, at) && TakesDitched(m, cold.Inventory!)
-                && world.StorageAllows(cold, s.Id, StorageUse.Put, DitchRecord(world, cold.Inventory!));
+            bool Ditches(BuildSite s, Machine m) => InFinderRange(s.Position, at) && TakesDitched(world, cold, m)
+                && world.StorageAllows(cold, s.Id, StorageUse.Put, DitchRecord(world, cold, cold.Inventory!));
         }
 
         // Sleep and Sit not while holding position (FUN_1402b2b90), carrying someone (+0x348) or selected by the player (FUN_1407f4d20, the
@@ -471,10 +472,15 @@ public sealed partial class ProductionSystem
 
     /// <summary>
     /// Whether machine <paramref name="m"/> takes the character as an operator (<c>FUN_1400f7c90</c>, <b>Verified</b>): it operates it already, or
-    /// fewer than its <c>max operators</c> do.
+    /// fewer than its <c>max operators</c> do. Never an automatic machine: its raw <c>max operators</c> is 0, so <c>tryOperate</c> takes nobody on
+    /// and its hauler is no operator (Meitou's <see cref="MachineData.MaxOperators"/> is at least 1).
     /// </summary>
-    internal static bool TakesOperator(World world, CharacterCold cold, Machine m) =>
-        cold.OperateSite == m.Site || OperatorsOf(world, m.Site) < m.Data.MaxOperators;
+    internal static bool TakesOperator(World world, CharacterCold cold, Machine m)
+    {
+        if (m.Data.IsAutomatic) return false;
+
+        return cold.OperateSite == m.Site || OperatorsOf(world, m.Site) < m.Data.MaxOperators;
+    }
 
     /// <summary>
     /// Nobody else lies or sits on it.
@@ -651,7 +657,7 @@ public sealed partial class ProductionSystem
         }
 
         if (job.Site is { } id && Site(world, id) is { } site && Vector3.DistanceSquared(at, site.Position) >= JobRangeSq) return false;
-        return !Blocked(world, cold, job, at);
+        return !Blocked(world, slot, cold, job, at);
     }
 
     /// <summary>
@@ -680,10 +686,10 @@ public sealed partial class ProductionSystem
     /// docs/game/ai-tasks.md "Perma-jobs"). Operating: the building is gone or not an operable machine, its operator places are taken by others, or
     /// it has no work (<see cref="HasWork"/>). Hauling to: the storage is gone, and the character at <paramref name="at"/> carries nothing it takes,
     /// fetches no loose item for it (<see cref="FetchesLoose"/>), no loose item it wants lies near (<see cref="LooseFor"/>) and no machine within
-    /// <see cref="InFinderRange"/> has an output it takes. Automatic
-    /// machines (152, and 124 on one): <see cref="AutoWork"/>.
+    /// <see cref="InFinderRange"/> has an output it takes. At an automatic machine 152 by <see cref="AutoHaulScore"/>, 124 by
+    /// <see cref="AutoWork"/>.
     /// </summary>
-    bool Blocked(World world, CharacterCold cold, PermaJob job, Vector3 at)
+    bool Blocked(World world, int slot, CharacterCold cold, PermaJob job, Vector3 at)
     {
         if (job.Site is not { } id || Site(world, id) is not { Complete: true } site || Ensure(world, site) is not { } m) return true;
         switch (job.Type)
@@ -703,12 +709,13 @@ public sealed partial class ProductionSystem
                 if (!m.Data.IsTraining || OperatorsOf(world, id) - (cold.OperateSite == id ? 1 : 0) >= m.Data.MaxOperators) return true;
                 return !HasWorkingArm(cold);
             case TaskType.OperateAutomaticMachinery:
-                // Done as soon as no input of the machine is empty (the row's done list !62, machineHasEmptyInputs false): the 124 companion goes on
-                // from there.
-                return !m.Data.IsHauledAutomatic || !m.HasEmptyInputs || !AutoWork(world, site, m, cold, fetch: true);
+                // The job pass skips 152 at desire x finder 0 or less (its list A is empty, and it has an effect): the trip under way goes on.
+                if (!m.Data.IsHauledAutomatic) return true;
+                if (cold.HaulSite is not null && cold.OperateSite == id) return false;
+                return AutoHaulScore(world, slot, cold, id) <= 0;
             case TaskType.OperateStorage:
-                // On an automatic machine (152's companion, the original's Task_FillMachine into it): what the character carries for its inputs.
-                if (m.Data.IsHauledAutomatic) return !AutoWork(world, site, m, cold, fetch: false);
+                // On an automatic machine (152's companion, the original's Task_FillMachine into it, which 94 feeds): its inputs.
+                if (m.Data.IsHauledAutomatic) return !AutoWork(world, site, m, cold);
                 if (!m.Data.IsStorage || m.Storage is null) return true;
                 if (cold.Inventory is { } inv && inv.All().Any(i => Takes(world, m, i))) return false;
                 if (FetchesLoose(world, cold, id)) return false;
@@ -778,24 +785,21 @@ public sealed partial class ProductionSystem
     }
 
     /// <summary>
-    /// Haul work at an automatic machine (engine reading of 152, whose goal is "no empty inputs", and of 124 on it): the character is on a trip for
-    /// it, or carries an item an input has room for; with <paramref name="fetch"/> also an empty input a storage holds the item of, a full output a
-    /// storage takes, or the machine's output carried that a storage takes.
+    /// Hauling to (124) at an automatic machine: the character is on a trip for it, carries an item an input has room for, or an empty input has a
+    /// source (<see cref="NearestSource"/>, the trip <see cref="StartHaul"/> makes).
     /// </summary>
-    bool AutoWork(World world, BuildSite site, Machine m, CharacterCold cold, bool fetch)
+    bool AutoWork(World world, BuildSite site, Machine m, CharacterCold cold)
     {
         if (cold.Inventory is not { } inv) return false;
-        if (fetch && cold.HaulSite is not null && cold.OperateSite == site.Id) return true;
+        if (cold.HaulSite is not null && cold.OperateSite == site.Id) return true;
         foreach (var input in m.Inputs)
         {
             if (input.Rate <= 0) continue;
             if (input.Count < input.Recipe.Capacity && Carried(inv, input.Item).Any()) return true;
-            if (fetch && input.Count == 0 && NearestSource(world, site, input.Item, cold, operating: cold) is not null) return true;
+            if (input.Count == 0 && NearestSource(world, site, input.Item, cold, operating: cold) is not null) return true;
         }
 
-        if (!fetch || m.Output is not { } output || _items.Create(output.Recipe.Item, 1) is not { } one) return false;
-        if (!output.Full && !Carried(inv, one.Record).Any()) return false;
-        return NearestStorage(world, site, cold, one.Record, s => s.Data.Accepts(one.Record, one.Type) && Fits(s.Storage!, one)) is not null;
+        return false;
     }
 
     /// <summary>
@@ -845,8 +849,8 @@ public sealed partial class ProductionSystem
     /// <summary>
     /// The record the storage filters are asked about for a ditch trip: the one every ditchable item shares, else null; none without a filter.
     /// </summary>
-    static string? DitchRecord(World world, Items.Inventory inv) =>
-        world.StorageFilters.Active ? Meitou.Simulation.Items.StorageFilters.OneRecord(Ditchable(inv)) : null;
+    static string? DitchRecord(World world, CharacterCold cold, Items.Inventory inv) =>
+        world.StorageFilters.Active ? Meitou.Simulation.Items.StorageFilters.OneRecord(Ditchable(world, cold, inv)) : null;
 
     /// <summary>
     /// A storage machine with its grid (what <see cref="TakesDitched"/> asks first).
@@ -859,16 +863,27 @@ public sealed partial class ProductionSystem
     static bool IsMaker(Machine m) => !m.Data.IsStorage;
 
     /// <summary>
-    /// A storage machine that takes something 242 Ditch all resources carries off from <paramref name="inv"/>.
+    /// A storage machine that takes something 242 Ditch all resources carries off from <paramref name="cold"/>'s inventory.
     /// </summary>
-    static bool TakesDitched(Machine m, Items.Inventory inv) =>
-        m.Data.IsStorage && m.Storage is not null && Ditchable(inv).Any(item => Stores(m, item));
+    static bool TakesDitched(World world, CharacterCold cold, Machine m) =>
+        m.Data.IsStorage && m.Storage is not null && Ditchable(world, cold, cold.Inventory!).Any(item => Stores(m, item));
 
     /// <summary>
     /// What 242 Ditch all resources carries off (finder <c>FUN_1405a59a0</c>, its item collection <c>FUN_140749490</c>, <b>Verified</b>): ITEMs with
-    /// <c>item function</c> 0 or 15, and food (function 3) but the first, in inventory order.
+    /// <c>item function</c> 0 or 15, and food (function 3) but the first, in inventory order; an item a code mod's ditch filter keeps with
+    /// <paramref name="cold"/> (<see cref="Items.IDitchItemFilter"/>) is left out.
     /// </summary>
-    internal static IEnumerable<Items.ItemInstance> Ditchable(Items.Inventory inv)
+    internal static IEnumerable<Items.ItemInstance> Ditchable(World world, CharacterCold cold, Items.Inventory inv)
+    {
+        var all = Ditchable(inv);
+        var filters = world.DitchItemFilters;
+        return filters.Active ? all.Where(item => !filters.Keeps(world, cold.Id, Meitou.Simulation.Items.DitchKind.Resources, item)) : all;
+    }
+
+    /// <summary>
+    /// <see cref="Ditchable(World, CharacterCold, Items.Inventory)"/> before the code mods' filters.
+    /// </summary>
+    static IEnumerable<Items.ItemInstance> Ditchable(Items.Inventory inv)
     {
         bool fed = false;
         foreach (var item in inv.All())
@@ -887,8 +902,8 @@ public sealed partial class ProductionSystem
     /// What a hauler puts into the storage: for a ditch run what <see cref="Ditchable"/> lists and the storage takes, else what <see cref="Takes"/>
     /// allows.
     /// </summary>
-    static IEnumerable<Items.ItemInstance> Delivered(World world, Items.Inventory inv, Machine store, bool ditch) =>
-        ditch ? Ditchable(inv).Where(i => Stores(store, i)) : inv.All().Where(i => Takes(world, store, i));
+    static IEnumerable<Items.ItemInstance> Delivered(World world, CharacterCold cold, Items.Inventory inv, Machine store, bool ditch) =>
+        ditch ? Ditchable(world, cold, inv).Where(i => Stores(store, i)) : inv.All().Where(i => Takes(world, store, i));
 
     /// <summary>
     /// The player's complete machine (not a storage) nearest a storage within <see cref="InFinderRange"/> whose output (a bench's:
@@ -970,7 +985,7 @@ public sealed partial class ProductionSystem
         n.Task = (byte)CharacterTask.Haul;
         n.Mode = SpeedMode.Free;
         n.TaskTime = 0;
-        bool carries = cold.Inventory is { } inv && Delivered(world, inv, store, ditch).Any();
+        bool carries = cold.Inventory is { } inv && Delivered(world, cold, inv, store, ditch).Any();
         cold.HaulTo = storage.Id;
         cold.HaulItem = null;
         if (!carries && !ditch && LooseFor(world, cold, n.Position, store) is { } loose)
@@ -1036,12 +1051,12 @@ public sealed partial class ProductionSystem
 
             // The walk stops here, as at a loose item (PickUpLoose), so the leg to the storage starts after the beat.
             StopWalk(ref n, cold);
-            if (Delivered(world, inv, store, Ditching(cold)).Any()) cold.HaulSite = storeId;
+            if (Delivered(world, cold, inv, store, Ditching(cold)).Any()) cold.HaulSite = storeId;
             else End(world, slot);
             return;
         }
 
-        foreach (var item in Delivered(world, inv, store, Ditching(cold)).ToList())
+        foreach (var item in Delivered(world, cold, inv, store, Ditching(cold)).ToList())
         {
             inv.Remove(item);
             if (store.Storage!.Add(item)) continue;
@@ -1094,7 +1109,7 @@ public sealed partial class ProductionSystem
 
         cold.HaulItem = null;
         StopWalk(ref n, cold);
-        if (Delivered(world, inv, store, ditch: false).Any()) cold.HaulSite = store.Site;
+        if (Delivered(world, cold, inv, store, ditch: false).Any()) cold.HaulSite = store.Site;
         else End(world, slot);
     }
 

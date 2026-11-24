@@ -5132,8 +5132,8 @@ msgid "Machine id (letters, digits, dashes)"
 msgstr "기기 ID(문자, 숫자, 대시)"
 
 #. machine-translated
-msgid "Machine name"
-msgstr "기기 이름"
+msgid "Machine name (optional)"
+msgstr "기기 이름(선택)"
 
 #. machine-translated
 msgid "Notes (cooling, power plan, ...)"
@@ -5216,8 +5216,8 @@ msgid "The runs were made by {1}, not {2}: they cannot be submitted."
 msgstr "실행한 빌드가 {2}이(가) 아니라 {1}입니다. 제출할 수 없습니다."
 
 #. machine-translated
-msgid "Fill in the machine's id and name to submit."
-msgstr "제출하려면 기기 ID와 이름을 입력하세요."
+msgid "Fill in the machine's id to submit."
+msgstr "제출하려면 기기 ID를 입력하세요."
 
 #. machine-translated
 msgid "The service refused it: {1}"
@@ -5371,3 +5371,123 @@ msgstr "포인터의 자물쇠 따기 확률"
 #. machine-translated
 msgid "Pointing at a lock too hard to pick shows 0%, as its Pick Lock menu entry does, since the character cannot pick it. The game shows the chance before that limit there, such as 3% for a lock the menu gives 0%."
 msgstr "따기 너무 어려운 자물쇠를 가리키면 메뉴의 자물쇠 따기 항목처럼 0%가 표시됩니다. 캐릭터가 그 자물쇠를 딸 수 없기 때문입니다. 게임은 그 자리에 그 한계를 적용하기 전의 확률을 보여 주어, 메뉴가 0%로 표시하는 자물쇠도 3% 등으로 나옵니다."
+
+#. machine-translated
+msgid "Mute corpse flies"
+msgstr "시체 파리 음소거"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings"
+msgstr "오디오 설정의 시체 파리 음소거"
+
+#. machine-translated
+msgid "Mute corpse flies in the Audio settings is on"
+msgstr "오디오 설정의 시체 파리 음소거 켜짐"
+
+#. machine-translated
+msgid "Silences the buzzing of the flies over corpses; the flies are still shown (the game: off)."
+msgstr "시체 위 파리의 윙윙거리는 소리를 없앱니다. 파리는 계속 보입니다(게임: 꺼짐)."
+
+#. machine-translated
+msgid "Quiet corpse flies"
+msgstr "시체 파리 조용히"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings"
+msgstr "오디오 설정의 시체 파리 조용히"
+
+#. machine-translated
+msgid "Quiet corpse flies in the Audio settings is on"
+msgstr "오디오 설정의 시체 파리 조용히 켜짐"
+
+#. machine-translated
+msgid "Corpse flies range"
+msgstr "시체 파리 소리 범위"
+
+#. machine-translated
+msgid "The flies over corpses are heard only close to them, not from across the base (the game: off)."
+msgstr "시체 위 파리 소리가 가까이에서만 들리고 기지 반대편에서는 들리지 않습니다(게임: 꺼짐)."
+
+#. machine-translated
+msgid "How far the corpse flies are heard, of the game's distance: lower to hear them less, higher for more."
+msgstr "시체 파리 소리가 들리는 거리(게임 거리 대비): 낮추면 덜 들리고, 높이면 더 멀리서 들립니다."
+
+#. machine-translated
+msgid "Guards give up lost suspects"
+msgstr "경비병이 놓친 용의자를 포기"
+
+#. machine-translated
+msgid "A guard who loses sight of the character he was arresting gives up and goes back to his duties. The game has him take the fight up again wherever the character is, so he can run straight to someone hiding out of sight."
+msgstr "체포하던 캐릭터를 놓친 경비병은 포기하고 원래 임무로 돌아갑니다. 게임에서는 캐릭터가 어디에 있든 다시 싸움을 시작하므로, 보이지 않는 곳에 숨은 사람에게 곧장 달려갈 수 있습니다."
+
+#. machine-translated
+msgid "Max faction size"
+msgstr "최대 세력 인원"
+
+#. machine-translated
+msgid "Max squad size"
+msgstr "최대 분대 인원"
+
+#. machine-translated
+msgid "Max squads"
+msgstr "최대 분대 수"
+
+#. machine-translated
+msgid "Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "고급 설정의 최대 세력 인원, 최대 분대 인원 및 최대 분대 수"
+
+#. machine-translated
+msgid "its limits are now Max faction size, Max squad size and Max squads in the Advanced settings"
+msgstr "해당 제한은 이제 고급 설정의 최대 세력 인원, 최대 분대 인원 및 최대 분대 수로 옮겨졌습니다"
+
+#. machine-translated
+msgid "The faction's recruitment limit: how many characters and animals your faction may hold (the game: 30). Existing members stay if you lower it. Click the number to type an exact value."
+msgstr "세력의 영입 제한: 세력이 보유할 수 있는 캐릭터와 동물의 최대 수(게임: 30). 값을 낮춰도 기존 구성원은 유지됩니다. 숫자를 클릭해 정확한 값을 입력할 수 있습니다."
+
+#. machine-translated
+msgid "How many members one of your squads may hold (the game: 20). Full squads put new recruits into a new squad."
+msgstr "하나의 분대에 소속될 수 있는 최대 인원수(게임: 20). 분대가 가득 차면 새로 영입한 동료는 새 분대에 배치됩니다."
+
+#. machine-translated
+msgid "How many squads your faction may create (the game: 10)."
+msgstr "세력이 생성할 수 있는 최대 분대 수(게임: 10)."
+
+#. machine-translated
+msgid "App menu"
+msgstr "앱 메뉴"
+
+#. machine-translated
+msgid "Could not change the app menu entry: {1}"
+msgstr "앱 메뉴 항목을 변경할 수 없습니다: {1}"
+
+#. machine-translated
+msgid "Meitou Launcher was added to the app menu."
+msgstr "Meitou Launcher를 앱 메뉴에 추가했습니다."
+
+#. machine-translated
+msgid "Meitou Launcher was removed from the app menu."
+msgstr "Meitou Launcher를 앱 메뉴에서 제거했습니다."
+
+#. machine-translated
+msgid "Remove"
+msgstr "제거"
+
+#. machine-translated
+msgid "Add"
+msgstr "추가"
+
+#. machine-translated
+msgid "Meitou Launcher is in your desktop's app launcher."
+msgstr "Meitou Launcher가 데스크톱의 앱 실행기에 있습니다."
+
+#. machine-translated
+msgid "Add Meitou Launcher, with its icon, to your desktop's app launcher."
+msgstr "Meitou Launcher를 아이콘과 함께 데스크톱의 앱 실행기에 추가합니다."
+
+#. machine-translated
+msgid "Add to the app menu"
+msgstr "앱 메뉴에 추가"
+
+#. machine-translated
+msgid "Meitou Launcher, with its icon, in your desktop's app launcher."
+msgstr "Meitou Launcher를 아이콘과 함께 데스크톱의 앱 실행기에 표시합니다."

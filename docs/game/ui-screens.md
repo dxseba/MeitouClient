@@ -594,8 +594,12 @@ also finds `MessagesTextBox`). The tag replaces the `Kenshi_EditBoxStandardText`
 character, test `FUN_1407916d0`), the conversation window's NPC line (`140674170`, ML_NORMAL), the player's chosen reply (`140683df0`, the player character's name or
 "Player", ML_PLAYER) and each MessageRoller message (`140724a20`, empty owner, ML_SYSTEM).
 
+**Observed** (Steam 1.0.68 `14049a130` and MyGUI 3.2.2 `EditBox::setCaption`): the visible Dialogue tab refreshes when new lines arrive.
+Replacing the caption moves the cursor to the end of the text and scrolls it into view.
+
 Meitou: `World.Said` from `DialogueSystem` (bubble lines, conversation lines, replies) → `DialogueLog.LogMessage`, each line tagged with its colour (ML_NORMAL is
 the kit's Main colour in the Meitou mode, for its dark panel); notices log as ML_SYSTEM without the `[`. The newest 200 lines are kept; not saved.
+The tab scrolls to the newest line when it shows an updated log. Manual scrolling holds its position between updates.
 
 ### Inline colour tags
 
@@ -648,7 +652,8 @@ How a building gets selected: [ui-input](ui-input.md#building-picking-and-select
     material still owed (the target's required less the current state's delivered, > 0: six spaces + item name, `+` amount) and, for a building
     with power, `Power` with the `power output` change (Good, Bad when negative); without a target the line is removed (`FUN_1406fd460`). With a
     downgrade target while the construction state is not complete, `[DOWNGRADE]` (Main) with the tooltip `Downgrade To:` name. WallBuilding's
-    slot 116 (`FUN_1402ff760`) has only the upgrade, keyed `Upgradeable to:`. Then the construction buttons (slot 117 `FUN_1402fea10`, shown when slot 79 `FUN_14029c380` is
+    slot 116 (`FUN_1402ff760`) has only the upgrade, keyed `Upgradeable to:`, its tooltip without Power; the materials owed are against slot 69's
+    state (an attached piece's is its wall's) and the button acts on the piece's wall (its parent handle), else on itself. Then the construction buttons (slot 117 `FUN_1402fea10`, shown when slot 79 `FUN_14029c380` is
     true, **Observed**: the owner is the player's faction and `isFoliage` (+0xc0, KenshiLib 1ce4a16) is clear; then true when the building it is furniture of (slot `0x438`) is
     the player's; else false only for a building with no such parent (slot `0x1d8` handle of type 11) whose town (slot 15) exists, is not the player's and whose record has
     `creates player town`): a full-row button `Dismantle` (caption BadBright) and, while the construction state is not complete, `PAUSE CONSTRUCTION` (Main), captioned
@@ -713,8 +718,8 @@ How a building gets selected: [ui-input](ui-input.md#building-picking-and-select
   the mounted refusal comes from the simulation; no inventory warning, as its items drop) and PAUSE CONSTRUCTION (`PauseSite`); the first door's lines come before the house's (Meitou does not focus the
   door object). Open to public on another faction's building is its residents' template `public day`, else the state's `is public day`, at any hour (slot 82; `public night` is
   [never read](locks.md)); a private one shows the line only when its record has an `interior` list (engine choice: the original shows it on every building not the player's). A building of the player's (its site, or a town building whose fixtures the player's faction owns, `BuildingDetail.Owned`) gets the
-  buttons: the door lines as full-row buttons, `[UPGRADE]` / `[DOWNGRADE]` on a site (`UpgradeSite` / `DowngradeSite`, same scope as the
-  simulation's), and in a town, for a record with an `interior` list, the Open to public toggle (`SetBuildingPublic`: a site's `BuildSite.Public`, a town building's flag in the fixtures,
+  buttons: the door lines as full-row buttons, `[UPGRADE]` / `[DOWNGRADE]` on a site (`UpgradeSite` / `DowngradeSite`; a wall's
+  `Upgradeable to:` line, `AddWallUpgradeLine`), and in a town, for a record with an `interior` list, the Open to public toggle (`SetBuildingPublic`: a site's `BuildSite.Public`, a town building's flag in the fixtures,
   both saved as `is public day`; a town building set Private drops out of the town AI's wander and bar places). **Observed** (owner's original-game Longhouse screenshot): clicking its price opens a confirmation titled with the building name, asking `Do you want to buy this building for c.{1,num}?`, with Yes / No buttons. For sale and its confirmation use the [house purchase contract](../simulation.md#town-house-purchases). A bought town house gets no Dismantle (**Verified**: 82 of the 85 base-data BUILDING records with an interior or a house/shack name have `creates player town`, so the slot 79 rule
   above hides it in another faction's town); only furniture inside it (its parent the player's) and the rare record without the flag (Outhouse, Ash Dome) get it, not built in Meitou.
   Not built: the original's other consumers of +0xc8.
@@ -1018,6 +1023,11 @@ Stats Affected and Ways To Train headings with bullet rows. The right starts wit
 a thin Next Level bar and percentage, followed by Description and wrapped prose.
 Help text is available from the installed [gettext catalog](../formats/gettext.md).
 
+**Physical effects** (**Verified**, 1.0.68 `FUN_1408b9270` branches matched to `main.pot`, `kenshi/statswindow.cpp`):
+the description adds a physical bulk label for Strength (line 429), Weapon smith and Armour smith (433),
+a slight muscle definition label for Athletics and Swimming (426), a visible muscle definition label for Dexterity and Martial arts (422),
+and a negative visible muscle definition label for Cooking and Science (437).
+
 **Observed** in the original (1.0.68): the description shows the stat whose row (label or value, attribute or skill) is under the pointer, with
 no click. It keeps the last stat pointed at once the pointer leaves the rows, and a click pins nothing: pointing at another row shows that one.
 The description is empty each time the window opens, until the pointer reaches a row. Meitou: the same; a click on a row still shows it.
@@ -1177,8 +1187,12 @@ Overview tab 2 (`ResearchTab`), part of `ManagementScreen` (constructor `FUN_140
   label-less line below with the rest, joined by ", " (#444444 finished, Good queued, else Bad; "-" for none); then one line per record of `enable buildings`, `enable weapon type`,
   `enable weapon model`, `enable armour`, `enable item`, `enable crossbow`, `enable backpack`, `enable robotics`, labelled "New Building:", "New Weapon Class:", "New Weapons
   Grade:", "New Armour Type:", "New Items:", "New Crossbows:", "New Backpacks:", "New Robot Limbs:", the name in Good (`FUN_14048ebc0`).
-- Meitou: `ResearchQueueList` rows are plain text; a click on a line queues it, on a queue row takes it off; the wheel
-  scrolls the blueprint lines a line per notch (no bar drawn); the description lines use the DatapanelGUI row geometry; the DESCRIPTION captions are inset 8 px at 1080 (engine choice).
+- **Queue drag** (**Verified**, Kenshi 1.0.68, `FUN_1404b13b0`, `FUN_14049f320`, `FUN_1404c8dd0`): drop onto another queue row to move there.
+  The drop check tests every queued item's unmet requirements by swapping the two endpoints for the lookup. Each unmet requirement must be found
+  before the dependent's original index in that lookup. An accepted drop removes the dragged entry and reinserts it at the target index, keeping its progress.
+- Meitou: `ResearchQueueList` rows are plain text; a click on a blueprint queues it and a click on a queue row takes it off. Drag between queue rows
+  to reorder them. The wheel scrolls the blueprint lines a line per notch (no bar drawn). The description lines use the DatapanelGUI row geometry,
+  and the DESCRIPTION captions are inset 8 px at 1080 (engine choice).
 
 ### Craft tab
 

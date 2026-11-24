@@ -734,6 +734,9 @@ sealed partial class GameHost(
                 SquadXp = Config.SquadXp,
                 SquadSkillXp = SkillXp.Rates(Config.SquadSkillXp),
                 OthersXp = Config.OthersXp,
+                MaxFactionSize = Config.MaxFactionSize,
+                MaxSquadSize = Config.MaxSquadSize,
+                MaxSquads = Config.MaxSquads,
             },
             ZoneReady = ready =>
             {
@@ -1084,7 +1087,7 @@ sealed partial class GameHost(
         // The region (BIOME_GROUP) under a point, for the biome banner.
         ui.BiomeBanner.RegionAt = (x, z) => ActiveWeather?.World.RegionAt(x, z).Def is { } def ? (def.StringId, def.Name) : null;
         ui.Build.BuildHost = BuildingSync.MakeBuildServices();
-        ui.SquadWindows.SquadLimits = () => PopData?.Bodies.Constants;
+        ui.SquadWindows.SquadLimits = () => PopData?.Bodies;
         ui.Furniture.Rocks = () => PopData?.ResourceNodes;
 
         ConnectFactions(ui);
@@ -1223,7 +1226,8 @@ sealed partial class GameHost(
         selection.BuildTarget = record => BuildingDataOf(record)?.Materials.Sum(m => m.Required);
 
         // The upgrade chain of a BUILDING (the panel's [UPGRADE] / [DOWNGRADE]) and its build data (their tooltips' materials).
-        selection.UpgradeOf = record => PopData is { } d ? Simulation.Construction.BuildingUpgrades.UpgradeOf(d.Db, record) : null;
+        selection.UnlockedUpgradeOf = (record, wall, unlocked) =>
+            PopData is { } d ? Simulation.Construction.BuildingUpgrades.UnlockedUpgradeOf(d.Db, record, wall, unlocked.Contains) : null;
         selection.DowngradeOf = record => PopData is { } d ? Simulation.Construction.BuildingUpgrades.DowngradeOf(d.Db, record) : null;
         selection.BuildingData = BuildingDataOf;
         selection.PowerOutput = record => PopData?.Db.Find(record)?.GetInt("power output");
@@ -1272,7 +1276,7 @@ sealed partial class GameHost(
             : d.Relations.IsAlly(mine, town) ? MapStanding.Ally
             : relation < -30 ? MapStanding.Enemy
             : MapStanding.Neutral;
-        return new MapFaction(faction.Name, relation, standing, faction.NotReal);
+        return new MapFaction(FactionNameOf(town) ?? faction.Name, relation, standing, faction.NotReal);
     }
 
     /// <summary>

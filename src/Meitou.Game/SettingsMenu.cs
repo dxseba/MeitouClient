@@ -1537,11 +1537,7 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
 
         // Rotate item acts only over an inventory item, so it shares its control with whatever acts elsewhere (the camera's orbit by default).
         // The build map is a key map of its own (docs/game/ui-input.md section 4): its keys are taken only from its actions, and the reverse.
-        bool shared = action == InputAction.RotateItem;
-        var conflicts = Bindings.Actions
-            .Where(a => InputBindings.IsBuildMap(a) == InputBindings.IsBuildMap(action))
-            .Where(a => a != action && a != InputAction.RotateItem && !shared && Bindings.Get(a).Contains(binding))
-            .ToArray();
+        var conflicts = Bindings.Holders(action, binding);
 
         // A mouse button taken from another action is swapped: that action gets this one's old button, so the three buttons can be shuffled (the
         // buttons form a cycle otherwise).
@@ -1644,10 +1640,15 @@ sealed class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBin
         Player.FixLockpickLabel = Config.FixLockpickLabel = true;
         Config.FixRaidClocks = true;
         Config.FixArrestLifts = true;
+        Config.FixArrestChases = true;
         Config.FixGround = true;
         OffscreenChanged?.Invoke();
         Config.Audio = new();
         AudioChanged?.Invoke();
+        Config.MuteCorpseFlies = false;
+        Config.QuietCorpseFlies = false;
+        Config.CorpseFlyRange = UserConfig.DefaultCorpseFlyRange;
+        Config.MaxFactionSize = Config.MaxSquadSize = Config.MaxSquads = null;
         GamePages.SetGameplay(new());
         Config.HardwareMouse = false;
         Config.EnhancedHardwareMouse = true;

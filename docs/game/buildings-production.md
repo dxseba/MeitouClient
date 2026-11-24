@@ -440,7 +440,9 @@ shows the first failing message in this order (**Verified** unless marked):
   none (it snaps to `snaps to` buildings). With a node type the update (`0x1404dd7a0`) takes the nearest node of that **node type** (any record,
   `0x14038aca0`) within 300 units 3D, 60 for a `gun turret`, and its position and turn; a turret then turns 180 degrees about its own up
   (`0x1404dda21` -> `0x1404d4f80`). The `Node Turret` instances sit on wall parts' walkways (`Wall Level 02`: three at x -1.2, y 43.4, turned
-  180 degrees about Y; data).
+  180 degrees about Y; data). The placed building is then mounted on the building it snapped to (`FUN_1404ec160`, **Verified** by decompile):
+  class 8 (BCTYPE_TURRET) through `TurretBuilding::setMountedBuilding` (`FUN_140298220`, the `mounted` handle `+0x478`); Meitou records it as
+  the site's parent ([turret line of fire](combat.md#line-of-fire-and-the-hit-shape)).
 - **Snap nodes and blue node markers** (**Verified**, `PreviewBuilding_Snapping` vtable `0x1416e1cb8`, `0x1404dd410`, `0x1404ddb43`, `0x1404d0ff0`,
   `0x1404fe160`, `0x14038cdf0`, `0x140388e10`):
   - A building's `is node` child instances (such as `Node Light Mount`, `node type` 5, or `Node Turret`, `node type` 3) are placed at
@@ -512,15 +514,23 @@ dispatch to slots 75 / 76 through `FUN_140313d50` / `FUN_140313d90`).
 - Data (**Verified**, game data with mods): chains on production buildings (Stone Mine I-VII, Iron Refinery I-IV, Research
   Bench II-VI ...), farms (S-XL), turrets, training dummies, walls (Makeshift Wall -> Defensive Wall II ...) and gates
   (Makeshift Gate -> Defensive Gate II, III -> IV -> V); the targets are mostly also `enable buildings` of a research, so a
-  higher tier can be placed directly too. Walls have their own slot 75/77 (`WallBuilding`, `wall master`: the whole line).
+  higher tier can be placed directly too.
+- **Walls** (`WallBuilding`, gates excluded: they are GatewayBuildings and take the generic slots; **Verified**, vtable `1416edfc8`):
+  slot 77 (`FUN_1402a5270`): a record with a `wall master` (a subsection, `Makeshift Wall Short` -> `Defensive Wall II Short`)
+  takes its own first `upgrades to` when the master's first `upgrades to` is unlocked, its own unchecked; otherwise the
+  generic rule. Slot 75 (`FUN_1402a5e20`): with a target, each attached piece (the wall's child handles at +0x388, appended
+  by `FUN_14029a890`, [walls](#walls)) runs its own slot 75 (reentry-guarded: one level), then the wall the generic body,
+  then its bounds are queued for navmesh regeneration (`FUN_1404d2c80`). A piece without a target keeps its record. Slots
+  76/78 are generic, but the panel offers no downgrade ([ui](ui-screens.md)).
 - Meitou (`UpgradeSite` / `DowngradeSite`, `ConstructionSystem.CanUpgrade` / `CanDowngrade`, chain lookup
   `BuildingUpgrades`): the site's record, name, rate, target and materials swapped, delivered amounts carried over per item
   (engine reading of the re-applied state), complete and paused cleared, progress capped at 50 / 80; a downgrade whose
   delivered materials cover the lower record finishes at once. An upgrade then pulls what is still owed from its own stock
   (`PullOwn`: the machine's storage, then input and output stock). A machine gets a new one for the new record that keeps the
   stock of the same items, storage items that fit, a farm's growth by plant index, a bench's queue and the power switches; the
-  rest drops at the building (engine; `ProductionSystem.Rebuild`). An unfinished site's machine is saved and read. Engine scope:
-  no walls or wall pieces (gates, `is wall gate`, do upgrade). The doors stay registered while it is built (`BuildSite.Upgrading`, not
+  rest drops at the building (engine; `ProductionSystem.Rebuild`). An unfinished site's machine is saved and read. A wall
+  (`ConstructionSystem.Upgrade`, `BuildingUpgrades.UnlockedUpgradeOf`) swaps its attached pieces first, then itself; an
+  `UpgradeSite` naming a piece acts on its wall (the panel's binding). The doors stay registered while it is built (`BuildSite.Upgrading`, not
   saved: a reloaded unfinished upgrade gets its doors when finished) and keep their state by door index; the building
   leaves the navmesh until it is complete again (engine).
 
@@ -1358,13 +1368,16 @@ inputs in list order as the finder does, takes storages before producers and ski
 - **Option** (**Verified**, string): "If they have nothing else to do, characters will automatically put any excess
   materials they are carrying into storage."
 - **Jobs** (**Verified**, [perma-jobs](ai-tasks.md#perma-jobs)): Shift with an order on a machine adds job 87 "Operating machine";
-  on a storage 124 "Hauling to" (several targets allowed); an automatic machine (152) adds 152 plus 124 on it. The first job in a
+  on a storage 124 "Hauling to" (several targets allowed); an automatic machine (152) adds 152 plus 124 on it (152 takes the output to a storage, 124 fills the inputs, [order pops](ai-tasks.md#finished-tests)). The first job in a
   character's list that can run wins; operating is skipped while the machine's output is full or its inputs are empty (row 87's !63 and !62 unmet at the job's root,
   [perma-jobs](ai-tasks.md#perma-jobs)), so a character moves down its list and returns when the machine can work again.
 - **Fuel generators**: automatic with `consumes` (Small Generator, Generator II: Fuel 10, rate 100), so 152 Auto-Haul, with Shift 152 plus 124
   (Generator class slot 131, [ui-input](ui-input.md#building-picking-and-selection)). Meitou: `MachineData.IsFuelGenerator` makes them `Operable`
-  and `IsHauledAutomatic`, so the hauler fetches Fuel from a storage into the tank as for an automatic producer; wind generators and batteries
-  get no verb.
+  and `IsHauledAutomatic`; wind generators and batteries get no verb. A generator has no output, so 152's finder finds nothing there (**Verified**,
+  [order pops](ai-tasks.md#finished-tests)): the plain order leaves at once and the 152 job is always skipped; with Shift the 124 companion fetches
+  Fuel from a storage into the tank.
+- **Auto-Haul order** (152 without Shift, **Verified**, [order pops](ai-tasks.md#finished-tests)): leaves once the machine's output holds nothing
+  a storage takes (Meitou's hauler carries it there first).
 - **Storage pick** (**Verified**, `FUN_14059acd0`, also called by the 242 ditch finder `FUN_1405a59a0`): the candidates are the current town's
   buildings (the nearest-allies query, mask `0x4002436`) with a StorageBuilding cast, complete, of the character's faction, whose slot `0x4a0`
   takes the item; the nearest to the character by squared 3D distance wins, within the AI's range-mode bound (ROAM_FAR 4.246733e7).
