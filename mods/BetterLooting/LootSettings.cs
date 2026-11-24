@@ -79,6 +79,9 @@ public sealed class LootSettings
     [Setting("Other")]
     public bool Other { get; set; } = true;
 
+    [Setting("Debug logging", Hint = "Write every looting step to the mod log.", SubGroup = "Advanced")]
+    public bool DebugLogging { get; set; }
+
     /// <summary>The radius in world units.</summary>
     public float RadiusUnits => Math.Clamp(LootRadius, 1, 100) * 10;
 

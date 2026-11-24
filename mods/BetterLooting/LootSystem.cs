@@ -43,6 +43,7 @@ sealed partial class LootSystem(PopulationData data) : IPausedCommandHandler
         if (table.Cold(lead) is not { IsPlayer: true, Inventory: not null, Medical: not { Unconscious: true } and not { Dead: true } } cold) return;
 
         _required = request.Required;
+        TraceRules();
         if (request.Deposit) Deposit(world, lead, cold);
         else Collect(world, lead, cold);
     }
@@ -59,7 +60,30 @@ sealed partial class LootSystem(PopulationData data) : IPausedCommandHandler
     bool Passes(ItemInstance item, bool stolen, int value)
     {
         bool required = _required.Matches(item, data.Db);
-        return LootRules.Decide(Settings, LootRules.CategoryOf(item, data.Db), stolen, value, item.UnitWeight, required) == LootDecision.Loot;
+        var category = LootRules.CategoryOf(item, data.Db);
+        var decision = LootRules.Decide(Settings, category, stolen, value, item.UnitWeight, required);
+        BetterLootingMod.Trace(() => $"PLAN item={item.Record} category={category} value={value} weight={item.UnitWeight:0.###} stolen={stolen} " +
+            $"required={required} decision={Decision(decision)}");
+        return decision == LootDecision.Loot;
+    }
+
+    static string Decision(LootDecision decision) => decision switch
+    {
+        LootDecision.SkipCategory => "SKIP_CATEGORY",
+        LootDecision.SkipStolen => "SKIP_STOLEN",
+        LootDecision.SkipMinValue => "SKIP_MIN_VALUE",
+        LootDecision.SkipValuePerKg => "SKIP_VALUE_PER_KG",
+        _ => "LOOT",
+    };
+
+    /// <summary>The original's CONFIG and AUDIT_RULES lines for a press.</summary>
+    void TraceRules()
+    {
+        BetterLootingMod.Trace(() => $"CONFIG minValue={Settings.MinValue} minValuePerKg={Settings.MinValuePerKg:0.00} " +
+            $"allowStolen={Settings.AllowStolen} requiredList={!_required.IsEmpty}");
+        BetterLootingMod.Trace(() => $"AUDIT_RULES radius={Settings.LootRadius:0.00} categories=" +
+            string.Join(",", Enum.GetValues<LootCategory>().Where(Settings.Allows)) + $" bestItemsFirst={Settings.BestItemsFirst} " +
+            $"preferBackpack={Settings.PreferBackpack} protectStorage={Settings.ProtectPlayerStorage} ground={Settings.GroundPickup}");
     }
 
     /// <summary>The item's base value per unit at its level (<c>Market.BaseValue</c>, the inventory tooltip's Value), 0 without a market.</summary>

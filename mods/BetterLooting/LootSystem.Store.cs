@@ -27,14 +27,19 @@ sealed partial class LootSystem
             .Select(s => s.Machine)
             .ToList();
 
+        BetterLootingMod.Trace(() => $"STORE_ALL START character={owner.Name} targets={stores.Count}");
         if (stores.Count == 0)
         {
+            BetterLootingMod.Trace(() => "STORE_ALL END no storage targets");
             world.Post($"{owner.Name} has no storage of yours within {Settings.LootRadius:0} m.");
             return;
         }
 
         var used = new HashSet<Machine>();
-        int units = Ordered(Carried(world, owner)).Sum(c => Store(c, Tiered(stores, c.Item), used));
+        var carried = Ordered(Carried(world, owner));
+        int units = carried.Sum(c => Store(c, Tiered(stores, c.Item), used));
+        int left = carried.Count(c => c.Owner.Items.Contains(c.Item));
+        BetterLootingMod.Trace(() => $"deposit by {owner.Name}: {units} item(s) put away, {left} left (no room)");
         world.Post(units > 0
             ? $"{owner.Name} stored {Plural(units, "item")} in {Plural(used.Count, "storage")}."
             : $"{owner.Name} had nothing to store.");
@@ -87,9 +92,12 @@ sealed partial class LootSystem
             int moved = InventoryCommands.MoveUnits(candidate.Owner, item, 0, store.Storage!);
             units += moved;
             if (moved > 0) used.Add(store);
+            BetterLootingMod.Trace(() => $"STORE_ALL MOVE item={item.Record} tier={(Specialised(store.Data, item) ? "RESOURCE" : "GENERAL")} " +
+                $"destination={store.Site} moved={moved}");
             if (!candidate.Owner.Items.Contains(item)) break;
         }
 
+        if (candidate.Owner.Items.Contains(item)) BetterLootingMod.Trace(() => $"STORE_ALL NO_DESTINATION item={item.Record} remaining={item.Quantity}");
         return units;
     }
 
@@ -105,6 +113,7 @@ sealed partial class LootSystem
             .Where(g => GroundPickable(g.Item) && Passes(world, g.Item, GroundStolen(world, g, looter)))
             .ToList();
         var picks = Route(candidates, at);
+        BetterLootingMod.Trace(() => $"GROUND_PICKUP accepted={candidates.Count + picks.Count} queued={picks.Count} limit={GroundLimit}");
 
         var id = world.Characters.IdOf(lead);
         foreach (var pick in picks)

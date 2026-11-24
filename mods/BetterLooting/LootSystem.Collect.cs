@@ -15,13 +15,24 @@ sealed partial class LootSystem
     void Collect(World world, int lead, CharacterCold looter)
     {
         var sources = Sources(world, lead);
+        int bodies = sources.Count(s => s.Body >= 0);
+        BetterLootingMod.Trace(() => $"RADIAL_RUN START radius={Settings.LootRadius:0.00} targets={sources.Count} characters={bodies} " +
+            $"buildings={sources.Count - bodies}");
+
         int units = 0, places = 0;
-        foreach (var source in sources)
+        for (int i = 0; i < sources.Count; i++)
         {
+            var source = sources[i];
+            int index = i;
+            BetterLootingMod.Trace(() => $"RADIAL_TARGET index={index} type={(source.Body >= 0 ? "CHARACTER" : "BUILDING")} " +
+                $"items={source.Inventory.Items.Count} distanceMeters={source.Distance / 10:0.00}");
+
             int moved = LootFrom(world, lead, looter, source);
             units += moved;
             if (moved > 0) places++;
         }
+
+        BetterLootingMod.Trace(() => $"RADIAL_RUN END processed={places} total={sources.Count} units={units}");
 
         int queued = Settings.GroundPickup ? QueueGround(world, lead, looter) : 0;
         world.Post(Report(looter.Name, units, places, queued));
@@ -140,8 +151,12 @@ sealed partial class LootSystem
         var before = item.Mark;
         if (mark is { } arriving && before == StolenMark.None) item.Mark = arriving;
 
+        int quantity = item.Quantity;
         int moved = LootTransfer.Take(candidate.Owner, item, looter, Settings.PreferBackpack);
         if (candidate.Owner.Items.Contains(item)) item.Mark = before;
+        BetterLootingMod.Trace(() => moved > 0
+            ? $"TRANSFER item={item.Record} result=OK quantity={moved}/{quantity}"
+            : $"TRANSFER item={item.Record} result=SKIPPED reason=NO_ENGINE_SLOT remaining={quantity}");
         return moved;
     }
 }

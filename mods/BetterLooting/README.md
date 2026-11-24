@@ -39,8 +39,23 @@ Port of *Better Looting* (workshop 3816121198, MCM fork release 8; rules and def
   character, with items; building targets are only the player faction's buildings of function 2, 10 or 13 with items, and none while
   storage protection is on (a building whose furniture parent chain, up to 8, is the player's counts as protected); targets sorted nearest
   first.
-- **Missing**: five MCM preset slots; the original's Russian and Chinese texts; deposit's first tier, the storage an item was taken from
-  (the original tracks each item's origin storage); the original's guard keeping the game's own auto-deposit (`getExcessLoot` hook) from
-  storing items the character holds; the emergency spill into player storage when full; detailed logging. The original's Insert key (and Alt+Insert): Insert opens the developer
-  console on the Vulkan host and is reserved, so the action defaults to O.
+- **Debug logging** (*Advanced*, off; the original's `[Debug] Log`): each press writes its steps to the mod log with the original's tags
+  (`CONFIG`, `AUDIT_RULES`, `RADIAL_RUN START` / `END`, `RADIAL_TARGET`, a `PLAN` line per judged item with its category, value, weight and
+  decision `LOOT` / `SKIP_CATEGORY` / `SKIP_STOLEN` / `SKIP_MIN_VALUE` / `SKIP_VALUE_PER_KG`, `TRANSFER` with `NO_ENGINE_SLOT` for an item with no
+  room, `STORE_ALL START` / `MOVE` with its tier `RESOURCE` or `GENERAL` / `NO_DESTINATION`, the deposit summary, `GROUND_PICKUP`). Texts are
+  built only while it is on.
+- **Emergency spill**: not needed. **Observed** (decompiled DLL): the original stores an item in the nearest player storage (function 2 or 13,
+  within the radius, a section that takes it) only after the game refused an item it had found room for and the rollback put it back on the
+  body; an item with no room is skipped (`NO_ENGINE_SLOT`) there as here. The port's move finds room and places in one step, so that failure
+  cannot happen.
+- **Missing** (engine):
+  - The five MCM preset slots (name, Save, Apply, Clear): the Settings page has no buttons or named setting sets.
+  - The original's Russian and Chinese texts: no per-mod translation API.
+  - Deposit's first tier, the storage an item was taken from: the original records where each item the character took from player storage
+    came from; the goods-taken observer does not report takes from the player's own storage machines.
+  - The auto-deposit guard: the original remembers how many of each record a press looted into the character and keeps that many out of the
+    game's own excess-loot deposit (`getExcessLoot`) until the count drops back. The storage filter is asked per storage with one record or
+    none (a mixed load), so it can only keep a whole trip or none, not single stacks.
+  - The original's Insert key (and Alt+Insert): Insert opens the developer console on the Vulkan host and is reserved, so the action defaults
+    to O.
 - **Unknown**: in-play behaviour (window detection, paused application, crime and marks, refresh, pickup orders) until tested in game.

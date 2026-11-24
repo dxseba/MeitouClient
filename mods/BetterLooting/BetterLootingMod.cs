@@ -18,6 +18,15 @@ public sealed class BetterLootingMod : IMod
     /// </summary>
     static Action<string> s_log = _ => { };
 
+    /// <summary>
+    /// A line in the mod log when <see cref="LootSettings.DebugLogging"/> is on (the original's "Write every looting step"); the text is built
+    /// only then.
+    /// </summary>
+    internal static void Trace(Func<string> line)
+    {
+        if (Settings.DebugLogging) s_log("BetterLooting: " + line());
+    }
+
     public void Initialize(ModContext context)
     {
         s_log = context.Log;
