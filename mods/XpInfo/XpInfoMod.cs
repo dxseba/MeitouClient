@@ -19,8 +19,10 @@ public sealed class XpInfoMod : IMod
     {
         var settings = new XpSettings();
         context.AddSettings(settings);
+        if (settings.VerboseLog) context.Log(Describe(settings));
+
         var board = new XpBoard();
-        context.AddSystem("xp", _ => NewWatch(settings, board), SystemAnchor.End);
+        context.AddSystem("xp", _ => NewWatch(settings, board, context.Log), SystemAnchor.End);
         XpFloat.Install(context, settings);
         context.AddUi(new XpFloatUi());
         context.AddUi(new XpPanelLines(settings, board));
@@ -28,11 +30,20 @@ public sealed class XpInfoMod : IMod
     }
 
     /// <summary>A watch for a new world; the last world's progress is forgotten.</summary>
-    static XpWatchSystem NewWatch(XpSettings settings, XpBoard board)
+    static XpWatchSystem NewWatch(XpSettings settings, XpBoard board, Action<string> log)
     {
         board.Clear();
-        return Running = new XpWatchSystem(settings, board);
+        return Running = new XpWatchSystem(settings, board, log);
     }
+
+    /// <summary>
+    /// The settings line the original logs at start.
+    /// </summary>
+    static string Describe(XpSettings s) => string.Create(CultureInfo.InvariantCulture,
+        $"settings: labels={B(s.Gains)} levelUps={B(s.Levels)} bars={B(s.PanelBars)} maxRows={s.PanelLines} minPercent={s.MinPercent:0.00} "
+        + $"emit={s.AnnounceSeconds:0.0}s recent={s.RecentSeconds}s");
+
+    static int B(bool value) => value ? 1 : 0;
 
     /// <summary>
     /// The running world's watch, for the labels; null before a world starts.
@@ -110,7 +121,8 @@ public sealed class XpSettings
     /// <summary>
     /// <c>maxRows</c>, 2.
     /// </summary>
-    [Setting("Most bars at once", Hint = "At most this many skills, those that gained XP most recently.", Min = 1, Max = 4, Step = 1)]
+    [Setting("Most bars at once", Hint = "At most this many skills, those that gained XP most recently, and as many as fit in the panel.",
+        Min = 1, Max = 10, Step = 1)]
     public int PanelLines { get; set; } = 2;
 
     /// <summary>
@@ -118,6 +130,12 @@ public sealed class XpSettings
     /// </summary>
     [Setting("Keep a bar for (s)", Hint = "A skill's bar stays this long after its last XP gain.", Min = 5, Max = 3600, Step = 5)]
     public int RecentSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// <c>verboseLog</c>, 0: the settings at start and each label shown, to the mod log.
+    /// </summary>
+    [Setting("Verbose log", Hint = "Writes the settings and every XP label to the log.")]
+    public bool VerboseLog { get; set; }
 }
 
 /// <summary>A label for the floating text: who, the text, the tick.</summary>
@@ -129,10 +147,15 @@ public readonly record struct XpLabel(CharacterId Character, string Text, long T
 /// own. A first sighting only records. Each poll also publishes the levels and last gains to the <see cref="XpBoard"/>. Presentation only: not
 /// saved, not hashed.
 /// </summary>
-sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
+sealed class XpWatchSystem(XpSettings settings, XpBoard board, Action<string> log) : ITickSystem
 {
     static readonly StatsEnumerated[] Watched = XpBoard.Watched;
     const int Kept = 24;
+
+    /// <summary>
+    /// The most gains one label lists; the rest are counted as "+N more" (the original's).
+    /// </summary>
+    const int MostGains = 4;
 
     readonly Dictionary<CharacterId, float[]> _seen = [];
     readonly Dictionary<CharacterId, float[]> _pending = [];
@@ -165,6 +188,7 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
         }
 
         if (labels.Count > 0) _recent = [.. _recent.Concat(labels).TakeLast(Kept)];
+        if (settings.VerboseLog) Log(world, labels);
         board.Publish(shown);
     }
 
@@ -209,7 +233,25 @@ sealed class XpWatchSystem(XpSettings settings, XpBoard board) : ITickSystem
         }
 
         _seen[id] = now;
-        if (settings.Gains && gains.Count > 0) labels.Add(new(id, string.Join("  ", gains), world.Tick, false));
+        if (settings.Gains && gains.Count > 0) labels.Add(new(id, Merged(gains), world.Tick, false));
+    }
+
+    /// <summary>
+    /// One character's gains of a poll, one a line: the first four, then "+N more" for the rest.
+    /// </summary>
+    static string Merged(List<string> gains)
+    {
+        string shown = string.Join('\n', gains.Take(MostGains));
+        int more = gains.Count - MostGains;
+        return more > 0 ? string.Create(CultureInfo.InvariantCulture, $"{shown}\n+{more} more") : shown;
+    }
+
+    void Log(World world, List<XpLabel> labels)
+    {
+        foreach (var label in labels)
+        {
+            log($"{world.Characters.NameOf(label.Character)}: {label.Text.Replace('\n', ',')}");
+        }
     }
 }
 
@@ -308,12 +350,23 @@ public sealed class XpFloatUi : IUiExtension
         for (int i = 0; i < labels.Count; i++)
         {
             var (at, isLevel, text) = labels[i];
-            var placement = new UiPlacement(Width, Height, Left: at.X - Width / 2, Top: at.Y - Height / 2);
-            string style = isLevel ? level : gain;
-            root.Children.Add(new("xpinfo-float-" + i, UiNodeKind.Label) { Placement = placement, Text = text, Style = style, Pickable = false });
+            AddLines(root, "xpinfo-float-" + i, at, text.Split('\n'), isLevel ? level : gain);
         }
 
         return root;
+    }
+
+    /// <summary>
+    /// A label's lines, one row each, the block centred on <paramref name="at"/>.
+    /// </summary>
+    static void AddLines(UiNode root, string id, System.Numerics.Vector2 at, string[] lines, string style)
+    {
+        float top = at.Y - lines.Length * Height / 2;
+        for (int k = 0; k < lines.Length; k++)
+        {
+            var placement = new UiPlacement(Width, Height, Left: at.X - Width / 2, Top: top + k * Height);
+            root.Children.Add(new($"{id}-{k}", UiNodeKind.Label) { Placement = placement, Text = lines[k], Style = style, Pickable = false });
+        }
     }
 }
 
