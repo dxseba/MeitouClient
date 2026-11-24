@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.medkitmerge",
+  "apiVersion": 2,
+  "assemblies": ["MedkitMerge.dll"],
+  "entry": "Meitou.MedkitMerge.MedkitMergeMod",
+  "gameVersion": ">=0.22.2"
+}
