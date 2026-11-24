@@ -24,7 +24,8 @@ Port specifics: a frame callback (`AddFrame`) ages the toasts on the real clock;
 opacity (ARGB alpha x opacity x fade), text scale (font size x the pixel scale over the standard font's 13.9 px) and
 `Animated` fades; with *Hide with game UI* off the overlay sets `ShowWithHudHidden`. Settings: the panel's presets plus *Custom* with the
 ini's `textColor` as #AARRGGBB, the ini's `fontSize`, and its `autoScale`, `referenceHeight` and box sizes under *Layout*. *Show Preview*
-is a switch that adds the preview toast and turns itself off (the Settings screen has no buttons). **Observed** (2026-11-17/18, earlier version: notices and floating text) that level
+is a button row (an `Action` setting) that adds the preview toast, as the panel's button. The original has no translation catalogue (English
+only, as here). **Observed** (2026-11-17/18, earlier version: notices and floating text) that level
 ups are detected in play; the toasts are **Unknown** in a running game.
 
 Missing:

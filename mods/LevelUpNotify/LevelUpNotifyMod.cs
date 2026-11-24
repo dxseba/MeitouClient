@@ -12,22 +12,11 @@ public sealed class LevelUpNotifyMod : IMod
     public void Initialize(ModContext context)
     {
         var settings = new LevelUpSettings();
-        context.AddSettings(settings).Changed += setting => Preview(setting, settings);
+        context.AddSettings(settings);
         context.AddSystem("levels", _ => Toasts.Watch(settings), SystemAnchor.End);
         Toasts.Install(context, settings);
         context.AddUi(new ToastUi(settings));
         context.Log("Level Up Notifications initialized");
-    }
-
-    /// <summary>
-    /// The "Show Preview" switch acts as the original's button: on, it asks for the preview toast and turns itself off.
-    /// </summary>
-    static void Preview(ModSetting setting, LevelUpSettings settings)
-    {
-        if (setting.Key != nameof(LevelUpSettings.ShowPreview) || !settings.ShowPreview) return;
-
-        Toasts.RequestPreview();
-        setting.Set(false);
     }
 }
 

@@ -64,10 +64,10 @@ public sealed class LevelUpSettings
     public int PollMs { get; set; } = 500;
 
     /// <summary>
-    /// The F10 panel's "Show Preview" button as a switch: turning it on shows "Preview: Athletics Lv.42" and turns it off again.
+    /// The F10 panel's "Show Preview" button: a click shows "Preview: Athletics Lv.42" with the current settings.
     /// </summary>
-    [Setting("Show Preview", Hint = "Shows a sample notification with the current settings")]
-    public bool ShowPreview { get; set; }
+    [Setting("Preview", Button = "Show Preview", Hint = "Shows a sample notification with the current settings")]
+    public Action ShowPreview { get; } = Toasts.RequestPreview;
 
     const string Layout = "Layout (ini only in the original)";
 
