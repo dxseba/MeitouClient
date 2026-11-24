@@ -5,11 +5,12 @@ using Meitou.Modding;
 namespace Meitou.SquadAutonomy;
 
 /// <summary>
-/// The Squad Autonomy window (AUT): one player squad at a time, with the original's options: Enable Autonomy, the home building, the AI packages
-/// with priorities (Add AI Package, Clear AI Packages, a searchable picker), the work hours and the Combat switches; this port's off-work
-/// package. The view comes from the running system; every change goes out as a command.
+/// The Squad Autonomy window (AUT): one player squad at a time, with the original's options: Enable Autonomy, the home and work buildings, the AI
+/// packages with priorities (Add AI Package, Clear AI Packages, a searchable picker) and its categories (Basic, Labour, Combat, Guard); this
+/// port's off-work package. Opened by the AUT button on the main bar or in a squad's box of the squad screen. Its texts are the original's
+/// catalogue msgids, so they show in the game's language. The view comes from the running system; every change goes out as a command.
 /// </summary>
-sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExtension
+sealed partial class AutonomyWindow(ModContext context, PackageList packages) : IUiExtension
 {
     /// <summary>
     /// What the picker is choosing for.
@@ -111,7 +112,9 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         _searchAction = registration.RegisterAction("search", c => (_search, _page) = (c.Text, 0));
         _autAction = registration.RegisterAction("aut", OnAutButton);
         _autStyle = registration.RegisterStyle("aut", new() { Skin = "Kenshi_Button1Skin", TextAlign = "Center" });
+        _squadAction = registration.RegisterAction("aut-squad", OnSquadButton);
         registration.Contribute(UiSlots.Overlay, Build, order: 59);
+        registration.AddScreenControls("overview", UiScreens.SquadCells, UiAnchorPlacement.Inside, SquadButton);
     }
 
     /// <summary>
@@ -194,6 +197,7 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
         if (view.Squads.Count == 0) lines.Add(Text("aut-none", "No squad selected/invalid squad", _styles.Dim));
         else
         {
+            ShowRequested(view);
             _squad = (_squad % view.Squads.Count + view.Squads.Count) % view.Squads.Count;
             var squad = view.Squads[_squad];
             lines.Add(Header(squad, view.Squads.Count));
@@ -229,15 +233,11 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     List<UiNode> Details(SquadRow squad, AutonomyView view)
     {
         var plan = squad.Plan ?? Plan.Default(squad.Name);
-        var lines = new List<UiNode> { EnableLine(squad), HomeLine(squad, view) };
+        var lines = new List<UiNode> { EnableLine(squad), BuildingsLine(squad), HomeLine(squad, view) };
         lines.AddRange(PackageLines(plan));
         lines.Add(PriorityLine(squad, plan));
-        lines.Add(HourLine(squad, plan, "start", "Start Work Time", plan.StartHour, h => plan with { StartHour = h }, $"Now {view.Hour:00}:00"));
-        lines.Add(HourLine(squad, plan, "end", "End Work Time", plan.EndHour, h => plan with { EndHour = h }, ""));
-        lines.Add(RestLine(plan));
-        lines.Add(RecoveryLine(squad, plan));
-        lines.Add(ThresholdLine(squad, plan));
-        lines.Add(CombatLine(squad, plan));
+        lines.Add(CategoryLine(squad));
+        lines.AddRange(CategoryLines(squad, plan, view));
 
         string hint = !squad.Autonomous ? "Enable Autonomy to let the AI run this squad." : plan.Packages.Count == 0 ? "Add an AI package." : "";
         if (hint != "") lines.Add(Text("aut-hint", hint, _styles.Dim));
@@ -257,16 +257,29 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     }
 
     /// <summary>
-    /// Home:, Set Squad Home Building and Clear Buildings.
+    /// Home: and Work: (the original's lines, its home and work buildings).
+    /// </summary>
+    UiNode BuildingsLine(SquadRow squad)
+    {
+        var row = Row("aut-buildings");
+        row.Children.Add(Label("aut-home-l", "Home:", 56, _styles.Dim));
+        row.Children.Add(Label("aut-home-v", squad.Home, 254, _styles.Text));
+        row.Children.Add(Label("aut-work-l", "Work:", 56, _styles.Dim));
+        row.Children.Add(Label("aut-work-v", squad.Work, 250, _styles.Text));
+        return row;
+    }
+
+    /// <summary>
+    /// Set Squad Home Building, Set Squad Work Building, Clear Buildings and the building the HUD inspects.
     /// </summary>
     UiNode HomeLine(SquadRow squad, AutonomyView view)
     {
         var row = Row("aut-home");
-        row.Children.Add(Label("aut-home-l", "Home:", 60, _styles.Dim));
-        row.Children.Add(Label("aut-home-v", squad.Home, 210, _styles.Text));
-        string set = view.Inspected is { } b ? "Set Squad Home Building: " + b : "Set Squad Home Building";
-        row.Children.Add(Button("home.set", set, 230, () => Home(squad, false)));
-        row.Children.Add(Button("home.clear", "Clear Buildings", 110, () => Home(squad, true), squad.Home != "None"));
+        string none = context.Tr("None");
+        row.Children.Add(Button("home.set", "Set Squad Home Building", 196, () => Home(squad, false, false)));
+        row.Children.Add(Button("work.set", "Set Squad Work Building", 196, () => Home(squad, false, true)));
+        row.Children.Add(Button("home.clear", "Clear Buildings", 120, () => Home(squad, true, false), squad.Home != none || squad.Work != none));
+        row.Children.Add(Label("aut-inspected", view.Inspected ?? "", 104, _styles.Dim));
         return row;
     }
 
@@ -275,15 +288,16 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     /// </summary>
     IEnumerable<UiNode> PackageLines(Plan plan)
     {
+        string title = context.Tr("AI package") + ": ";
         if (plan.Packages.Count == 0)
         {
-            yield return Text("aut-pk-none", "AI package: None", _styles.Text);
+            yield return Text("aut-pk-none", title + context.Tr("None"), _styles.Text);
             yield break;
         }
 
         int i = 0;
         foreach (var p in plan.Packages.OrderByDescending(p => p.Priority))
-            yield return Text($"aut-pk-{i++}", $"AI package: {packages.NameOf(p.Id)} (priority {p.Priority})", _styles.Text);
+            yield return Text($"aut-pk-{i++}", $"{title}{packages.NameOf(p.Id)} ({context.Tr("Priority")} {p.Priority})", _styles.Text);
     }
 
     /// <summary>
@@ -334,7 +348,6 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     {
         var rules = plan.Rules;
         var row = Row("aut-recovery");
-        row.Children.Add(Label("aut-recovery-l", "Basic", 64, _styles.Dim));
         row.Children.Add(Button("rest.healed", "Rest Until Healed When Wounded", 230,
             () => Save(squad, plan with { Resting = rules with { UntilHealed = !rules.UntilHealed } }), selected: rules.UntilHealed));
         row.Children.Add(Button("rest.sleep", "Allow Sleep Outside Work Hours", 230,
@@ -472,15 +485,16 @@ sealed class AutonomyWindow(ModContext context, PackageList packages) : IUiExten
     /// Sends the squad's plan.
     /// </summary>
     void Save(SquadRow squad, Plan plan) =>
-        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Packages, plan.Rest, plan.StartHour, plan.EndHour, plan.Switches, plan.Resting)
+        context.Enqueue(new SquadPlanOrder(squad.Id, plan.Packages, plan.Rest, plan.StartHour, plan.EndHour, plan.Switches, plan.Resting,
+            plan.Labouring, plan.Gate)
         {
             Tick = context.Tick,
         });
 
     /// <summary>
-    /// Sets or clears the home.
+    /// Sets the home or the work building, or clears both.
     /// </summary>
-    void Home(SquadRow squad, bool clear) => context.Enqueue(new SquadHomeOrder(squad.Id, clear) { Tick = context.Tick });
+    void Home(SquadRow squad, bool clear, bool work) => context.Enqueue(new SquadHomeOrder(squad.Id, clear, work) { Tick = context.Tick });
 
     #endregion
 

@@ -1,6 +1,7 @@
 using Meitou.Data;
 using Meitou.Modding;
 using Meitou.Simulation;
+using Meitou.Simulation.Ai;
 
 namespace Meitou.SquadAutonomy;
 
@@ -34,6 +35,7 @@ public sealed class SquadAutonomyMod : IMod
 
     public void Initialize(ModContext context)
     {
+        AddTranslations(context);
         SettingsGroup = context.AddSettings(Settings);
         AutonomyLog.Sink = context.Log;
 
@@ -42,33 +44,60 @@ public sealed class SquadAutonomyMod : IMod
         var packages = PackageList.Load(context.Records(72), configs);
         context.Log($"Squad Autonomy: {packages.Featured.Count} listed packages, {packages.All.Count} in all");
 
-        context.AddSystem("autonomy", _ => Running = new AutonomySystem(context.Id, context.Population, context.Data, context.Enqueue),
-            SystemAnchor.End);
+        context.AddSystem("autonomy", _ => Running = new AutonomySystem(context.Id, context.Population, context.Data, context.Enqueue,
+            text => context.Tr(text)), SystemAnchor.End);
         context.AddUi(new AutonomyWindow(context, packages));
         context.Log("Squad Autonomy initialized");
     }
 
     /// <summary>
+    /// The installed original's gettext catalogues (<c>locale/&lt;lang&gt;/LC_MESSAGES/SquadAutonomy.mo</c>: de, en_GB, es, fr, ja and more),
+    /// for the window, the settings and the messages; the window's texts are the catalogues' msgids.
+    /// </summary>
+    static void AddTranslations(ModContext context)
+    {
+        if (OriginalFolder(context.Folder) is { } original) context.AddTranslations("SquadAutonomy", original);
+        else context.Log("Squad Autonomy: the original mod (Workshop 3800729618) is not beside this one; its translations are not used");
+    }
+
+    /// <summary>
+    /// The installed original's folder beside this mod's (Workshop id or mod name), when there.
+    /// </summary>
+    static string? OriginalFolder(string folder)
+    {
+        string own = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (Path.GetDirectoryName(own) is not { } parent) return null;
+
+        return OriginalFolders
+            .Select(name => Path.Combine(parent, name))
+            .FirstOrDefault(path => Directory.Exists(path) && !string.Equals(path, own, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// The installed original's SquadAutonomy.cfg beside this mod's folder (Workshop id or mod name), when there.
     /// </summary>
-    static IEnumerable<string> OriginalConfigs(string folder)
-    {
-        if (Path.GetDirectoryName(Path.GetFullPath(folder)) is not { } parent) return [];
-
-        return OriginalFolders.Select(name => Path.Combine(parent, name, "SquadAutonomy.cfg")).Where(File.Exists);
-    }
+    static IEnumerable<string> OriginalConfigs(string folder) =>
+        OriginalFolder(folder) is { } original && Path.Combine(original, "SquadAutonomy.cfg") is var cfg && File.Exists(cfg) ? [cfg] : [];
 }
 
 /// <summary>
-/// The mod's settings.
+/// The mod's settings: the original's options (its <c>SquadAutonomy.cfg</c> <c>&lt;Options&gt;</c>, defaults as shipped), labelled with the
+/// msgids of its catalogues so they show in the game's language; the button's place (<c>BtnLeft</c>, <c>BtnTop</c>) has no row in the original's
+/// settings window and keeps Meitou's English labels.
 /// </summary>
 public sealed class AutonomySettings
 {
     /// <summary>
     /// The original's <c>ShowOnMain</c> (default true).
     /// </summary>
-    [Setting("Show button on Mainbar", Hint = "Show AUT button on the Mainbar.")]
+    [Setting("Show button on Mainbar", Hint = "Show AUT button on the Mainbar")]
     public bool ShowButton { get; set; } = true;
+
+    /// <summary>
+    /// The original's <c>ShowInSquad</c> (default true): an AUT button in each squad's box of the squad management screen.
+    /// </summary>
+    [Setting("Show button in Squad screen", Hint = "Show AUT button in the Squad Management screen")]
+    public bool ShowInSquad { get; set; } = true;
 
     /// <summary>
     /// The original's <c>LockPosition</c> (default true): off, the AUT button can be dragged.
@@ -93,21 +122,19 @@ public sealed class AutonomySettings
     /// <summary>
     /// The original's <c>BtnWidth</c> (1.5): the button's width in per cent of the screen width.
     /// </summary>
-    [Setting("Button width (%)", Hint = "BtnWidth: the AUT button's width, per cent of the screen width.", Min = 0.5, Max = 20, Step = 0.1,
-        SubGroup = "Button")]
+    [Setting("Button Width", Hint = "Set the button width relative to the screen width", Min = 0.5, Max = 20, Step = 0.1, SubGroup = "Button")]
     public float BtnWidth { get; set; } = 1.5f;
 
     /// <summary>
     /// The original's <c>BtnHeight</c> (3.58): the button's height in per cent of the screen height.
     /// </summary>
-    [Setting("Button height (%)", Hint = "BtnHeight: the AUT button's height, per cent of the screen height.", Min = 0.5, Max = 20, Step = 0.01,
-        SubGroup = "Button")]
+    [Setting("Button Height", Hint = "Set the button height relative to the screen height", Min = 0.5, Max = 20, Step = 0.01, SubGroup = "Button")]
     public float BtnHeight { get; set; } = 3.58f;
 
     /// <summary>
     /// The original's <c>BtnFontSize</c> (12): the caption's font height in pixels.
     /// </summary>
-    [Setting("Button font size", Hint = "BtnFontSize: the AUT caption's height in pixels.", Min = 6, Max = 40, SubGroup = "Button")]
+    [Setting("Button Font Size", Hint = "Set the button font size", Min = 6, Max = 40, SubGroup = "Button")]
     public int BtnFontSize { get; set; } = 12;
 
     /// <summary>
@@ -117,15 +144,15 @@ public sealed class AutonomySettings
     public bool EnableLogging { get; set; }
 
     /// <summary>
-    /// The original's <c>LogSeverity</c> (0 none, 1 errors, 2 warnings, 3 info, 4 debug; default 0).
+    /// The original's <c>LogSeverity</c> (None, Error, Warning, Info, Debug; default None).
     /// </summary>
-    [Setting("Log severity", Hint = "LogSeverity: 0 none, 1 errors, 2 warnings, 3 info, 4 debug.", Min = 0, Max = 4, SubGroup = "Logging")]
-    public int LogSeverity { get; set; }
+    [Setting("Log Severity", Hint = "Select log severity level. Higher severity includes all lower ones.", SubGroup = "Logging")]
+    public LogSeverity LogSeverity { get; set; }
 
     /// <summary>
     /// The original's <c>LogSpam</c> (default false).
     /// </summary>
-    [Setting("Log spam", Hint = "LogSpam: also every AI score the mod changes (many lines).", SubGroup = "Logging")]
+    [Setting("Allow Spam", Hint = "Allow logging spam.", SubGroup = "Logging")]
     public bool LogSpam { get; set; }
 }
 
@@ -204,15 +231,18 @@ public readonly record struct PlannedPackage(string Id, int Priority);
 
 /// <summary>
 /// The squad's plan: its AI packages by priority, the rest package (this port's: run outside the work hours; null none), the work hours
-/// (0-24; start equal to end: no work time, as the original), the combat switches and the rest rules (null: the original's defaults).
+/// (0-24; start equal to end: no work time, as the original), the combat switches, the rest rules and the labour priorities (null: the
+/// original's defaults) and the gate rules (<c>SquadConduct.GateInside</c> Stay Inside Gate, <c>CloseDoors</c> Close Gate).
 /// </summary>
 public sealed record SquadPlanOrder(int SquadId, IReadOnlyList<PlannedPackage> Packages, string? Rest, int StartHour, int EndHour,
-    CombatSwitches Switches = CombatSwitches.Default, RestRules? Resting = null) : SimCommand;
+    CombatSwitches Switches = CombatSwitches.Default, RestRules? Resting = null, LabourPriorities? Labouring = null,
+    SquadConduct Gate = SquadConduct.None) : SimCommand;
 
 /// <summary>
-/// The squad's home becomes the building the HUD inspects (none inspected: no change), or none with <paramref name="Clear"/>.
+/// The squad's home (or with <paramref name="Work"/> its work building) becomes the building the HUD inspects (none inspected: no change), or
+/// both none with <paramref name="Clear"/>.
 /// </summary>
-public sealed record SquadHomeOrder(int SquadId, bool Clear) : SimCommand;
+public sealed record SquadHomeOrder(int SquadId, bool Clear, bool Work = false) : SimCommand;
 
 /// <summary>
 /// The window's Enable Autonomy switch for a squad.

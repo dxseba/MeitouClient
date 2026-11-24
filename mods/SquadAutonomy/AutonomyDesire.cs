@@ -27,29 +27,31 @@ public enum CombatSwitches
 
 /// <summary>
 /// A squad's rest rules (the original's Basic category; defaults Rest Until Healed When Wounded on, Rest Health Threshold 50, Healed Health
-/// Threshold 90, Allow Sleep Outside Work Hours off).
+/// Threshold 90, Allow Sleep Outside Work Hours off, Allow Using Paid Beds off).
 /// </summary>
-public sealed record RestRules(bool UntilHealed = true, int RestHealth = 50, int HealedHealth = 90, bool SleepOffWork = false)
+public sealed record RestRules(bool UntilHealed = true, int RestHealth = 50, int HealedHealth = 90, bool SleepOffWork = false,
+    bool PaidBeds = false)
 {
     /// <summary>The original's defaults.</summary>
     public static readonly RestRules Default = new();
 }
 
 /// <summary>
-/// A member's own state as of the system's last schedule: player orders queued (<c>hasOrders</c>), inside a building, asleep (lying in a bed), a
-/// melee attacker close by (the stand-in for <c>isLiterallyUnderMeleeAttackRightNowForSure</c>), its current goal, an organic race, its rested
-/// level (medical <c>restedState</c>), its organic first aid need and the one for its race's kit, and the game hours since it last lay in a bed.
+/// A member's own state as of the system's last schedule: player orders queued (<c>hasOrders</c>), inside a building, asleep (lying in a bed),
+/// under melee attack (<c>isLiterallyUnderMeleeAttackRightNowForSure</c>, <c>CharacterFacts.UnderMeleeAttack</c>), its current goal, an
+/// organic race, its rested level (medical <c>restedState</c>), its organic first aid need and the one for its race's kit, and the game hours
+/// since it last slept (<c>lastSlept</c>).
 /// </summary>
 readonly record struct MemberState(bool HasOrders, bool Inside, bool Asleep, bool Threatened, TaskType? Goal, bool Organic, float Rested,
     float AidNeed, float KitNeed, double HoursSinceSlept);
 
 /// <summary>
-/// What the desire filter knows of a member of an autonomous squad with a plan, as of the system's last schedule: its squad's switches and rest
-/// rules, whether it is off work (the original's <c>isRestTime</c>), whether its squad leader lies in a bed or relaxes in town (its current goal
-/// <c>RELAX_IN_TOWN_PACKAGE</c>), whether it leads the squad itself, and its own state.
+/// What the filters know of a member of an autonomous squad with a plan, as of the system's last schedule: its squad's switches, rest rules and
+/// labour priorities, whether it is off work (the original's <c>isRestTime</c>), whether its squad leader lies in a bed or relaxes in town (its
+/// current goal <c>RELAX_IN_TOWN_PACKAGE</c>), whether it leads the squad itself, and its own state.
 /// </summary>
-readonly record struct MemberRule(CombatSwitches Switches, RestRules Rest, bool OffWork, bool LeaderInBed, bool LeaderRelaxing, bool IsLeader,
-    MemberState Self);
+readonly record struct MemberRule(CombatSwitches Switches, RestRules Rest, LabourPriorities Labour, bool OffWork, bool LeaderInBed,
+    bool LeaderRelaxing, bool IsLeader, MemberState Self);
 
 /// <summary>
 /// The original's score hooks (its shipped source and DLL) as a chooser desire filter on an autonomous squad's members. <c>Tasker::score</c>, on
@@ -63,7 +65,8 @@ readonly record struct MemberRule(CombatSwitches Switches, RestRules Rest, bool 
 /// <item>Protect allies (staying in town too) and protect the own squad: 0 with Protect Allies off, and while it sleeps with no melee attacker
 /// on it.</item>
 /// <item>Medic and robot repair jobs: 0 with Do Medic off, else twice its own first aid need for its race's kit.</item>
-/// <item>Patrolling the town: 0 off work inside a building, unless it is already its goal.</item>
+/// <item>Patrolling the town: 0 off work inside a building, unless it is already its goal; while it is the current goal its held score decays
+/// to max(0.0001, held x 0.95) each think (<see cref="GoalDesireKind.HeldScore"/>), so the member turns to something else.</item>
 /// <item>Relaxing in town: 1 for a member whose leader relaxes in town.</item>
 /// <item>Find and rescue (if there are beds, the leader): 0 with Rescue off.</item>
 /// <item>Acquiring food at the home base and grabbing one food: x10.</item>
@@ -78,20 +81,35 @@ sealed class AutonomyDesire(Func<FrozenDictionary<CharacterId, MemberRule>?> mem
 
     public float Desire(World world, in GoalDesireAsk ask)
     {
-        if (ask.Kind is not (GoalDesireKind.Goal or GoalDesireKind.PlanStep)) return ask.Desire;
+        if (ask.Kind is not (GoalDesireKind.Goal or GoalDesireKind.PlanStep or GoalDesireKind.HeldScore)) return ask.Desire;
         if (members() is not { } table || !table.TryGetValue(ask.Character, out var rule)) return ask.Desire;
 
-        float score = ask.Type switch
+        float score = ask.Kind == GoalDesireKind.HeldScore ? Held(ask) : ask.Type switch
         {
             TaskType.GoHomeAndGoToBed or TaskType.GoHomeAndGoToBedSecure => GoToBed(rule),
             TaskType.GetOutOfBedIfItsEmergency => GetOutOfBed(rule, ask.Desire),
             _ => ask.Kind == GoalDesireKind.Goal ? Score(ask.Type, rule, ask.Desire) : ask.Desire,
         };
-        if (score != ask.Desire && AutonomyLog.On(AutonomyLog.Severity.Debug, spam: true))
-            AutonomyLog.Write(AutonomyLog.Severity.Debug, $"score TaskType: {(int)ask.Type} - {ask.Desire} -> {score}", spam: true);
+        if (score != ask.Desire && AutonomyLog.On(LogSeverity.Debug, spam: true))
+            AutonomyLog.Write(LogSeverity.Debug, $"score TaskType: {(int)ask.Type} - {ask.Desire} -> {score}", spam: true);
 
         return score;
     }
+
+    /// <summary>
+    /// The current goal's held score: patrolling the town decays (<c>currentGoalScore = max(0.0001, currentGoalScore x 0.95)</c>, <b>Verified</b>
+    /// original DLL (decompiled)); the first think on it starts from this think's score. Any other goal keeps the game's.
+    /// </summary>
+    static float Held(in GoalDesireAsk ask)
+    {
+        if (ask.Type != TaskType.PatrolTown) return ask.Desire;
+
+        float held = float.IsNaN(ask.HeldScore) ? ask.Desire : ask.HeldScore;
+        return MathF.Max(PatrolFloor, held * PatrolDecay);
+    }
+
+    /// <summary>The patrol decay's factor and floor.</summary>
+    const float PatrolDecay = 0.95f, PatrolFloor = 0.0001f;
 
     /// <summary>
     /// The original's <c>Tasker::score</c> rule for <paramref name="type"/>.

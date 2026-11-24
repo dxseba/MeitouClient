@@ -13,13 +13,18 @@ namespace Meitou.SquadAutonomy;
 
 /// <summary>
 /// A squad's plan as the system keeps it (the name finds the squad again after a load). Defaults are the original's: no packages, work
-/// hours 0 to 24, the combat switches' and the rest rules' defaults.
+/// hours 0 to 24, the combat switches', the rest rules' and the labour priorities' defaults, and the gate rules (Stay Inside Gate, Close Gate)
+/// off.
 /// </summary>
 sealed record Plan(string SquadName, IReadOnlyList<PlannedPackage> Packages, string? Rest, int StartHour, int EndHour,
-    CombatSwitches Switches = CombatSwitches.Default, RestRules? Resting = null)
+    CombatSwitches Switches = CombatSwitches.Default, RestRules? Resting = null, LabourPriorities? Labouring = null,
+    SquadConduct Gate = SquadConduct.None)
 {
     /// <summary>The rest rules (the original's defaults when none were set).</summary>
     public RestRules Rules => Resting ?? RestRules.Default;
+
+    /// <summary>The labour priorities (the original's defaults when none were set).</summary>
+    public LabourPriorities Labour => Labouring ?? LabourPriorities.Default;
 
     /// <summary>
     /// The original's StartWorkTime and EndWorkTime defaults.
@@ -33,9 +38,10 @@ sealed record Plan(string SquadName, IReadOnlyList<PlannedPackage> Packages, str
 }
 
 /// <summary>
-/// One player squad as the window shows it.
+/// One player squad as the window shows it: its home and work buildings' names, and whether a package of its plan has the labour goal (the
+/// original shows the Labour options only then).
 /// </summary>
-sealed record SquadRow(int Id, string Name, bool Autonomous, string? Package, string Home, Plan? Plan);
+sealed record SquadRow(int Id, string Name, bool Autonomous, string? Package, string Home, string Work, bool Labours, Plan? Plan);
 
 /// <summary>
 /// What the window shows: the squads, the hour, and the building the HUD inspects (its name; null: none).
@@ -44,16 +50,19 @@ sealed record AutonomyView(IReadOnlyList<SquadRow> Squads, int Hour, string? Ins
 
 /// <summary>
 /// Keeps the squads' plans (saved with the world), puts an autonomous squad's packages on its board by priority (<c>SetSquadPackages</c>; outside
-/// the work hours the rest package instead, when one is set), turns the inspected building into a home key, and publishes the window's view and
-/// the desire filter's member table (<see cref="AutonomyDesire"/>, registered with the chooser) every 30th tick.
+/// the work hours the rest package instead, when one is set), sets its gate rules (<c>SetSquadConduct</c>), turns the inspected building into a
+/// home or work key (<c>SetSquadHome</c>, <c>SetSquadWork</c>), and publishes the window's view and the filters' member table every 30th tick:
+/// the desire filter (<see cref="AutonomyDesire"/>, registered with the chooser), the bed filter and the job score filter
+/// (<see cref="AutonomyChoices"/>). Messages go through the mod's catalogues (<paramref name="tr"/>).
 /// </summary>
-sealed class AutonomySystem(string modId, PopulationData population, GameDatabase data, Action<SimCommand> enqueue)
-    : IChooserOwner, IWorldReady, IModSaveData
+sealed class AutonomySystem(string modId, PopulationData population, GameDatabase data, Action<SimCommand> enqueue, Func<string, string> tr)
+    : IChooserOwner, IWorldReady, IModSaveData, IBedFilter, IJobScoreFilter
 {
     /// <summary>
-    /// The save format: 4 adds the rest rules, 3 the combat switches, 2 holds the package list with priorities (1: one work package).
+    /// The save format: 5 adds paid beds, the labour priorities and the gate rules, 4 the rest rules, 3 the combat switches, 2 holds the package
+    /// list with priorities (1: one work package).
     /// </summary>
-    const int Version = 4;
+    const int Version = 5;
 
     /// <summary>
     /// Ticks before a package change that did not show is sent again.
@@ -97,11 +106,23 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     /// </summary>
     volatile FrozenDictionary<CharacterId, MemberRule>? _members;
 
+    /// <summary>
+    /// The bed and labour answers, on the member table.
+    /// </summary>
+    AutonomyChoices? _choices;
+
+    AutonomyChoices Choices => _choices ??= new(() => _members, new WorkplaceStats(population.Db));
+
     public void Register(ChooserRegistry chooser) => chooser.DesireFilter(new AutonomyDesire(() => _members));
+
+    public bool Allows(World world, in BedAsk ask) => Choices.Allows(world, ask);
+
+    public float Score(World world, in JobScoreAsk ask) => Choices.Score(ask);
 
     public void Ready(World world, bool fromSave)
     {
         if (_rebind) Rebind(world);
+        Choices.Beds = world.Systems.OfType<BedSystem>().FirstOrDefault();
         _members = Members(world);
     }
 
@@ -137,22 +158,43 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         switch (order)
         {
             case SquadPlanOrder plan when world.Squads.Find(plan.SquadId) is { } squad:
-                _plans[plan.SquadId] = new(squad.Name, [.. plan.Packages], plan.Rest, Hour(plan.StartHour), Hour(plan.EndHour), plan.Switches,
-                    Clamp(plan.Resting));
-                _sentAt.Remove(plan.SquadId);
-                AutonomyLog.Write(AutonomyLog.Severity.Info,
-                    $"{squad.Name}: plan set, {plan.Packages.Count} packages, work {plan.StartHour}-{plan.EndHour}");
+                SetPlan(world, squad, plan);
                 break;
             case SquadHomeOrder home when world.Squads.Find(home.SquadId) is { } squad:
-                Home(world, squad, home.Clear);
+                Home(world, squad, home.Clear, home.Work);
                 break;
             case AutonomySwitchOrder change when world.Squads.Find(change.SquadId) is { } squad:
                 enqueue(new SetSquadAutonomy(squad.Id, change.On, Owner: modId) { Tick = world.Tick + 1 });
                 world.Post(squad.Name + (change.On ? ": Autonomy enable" : ": Autonomy disable"));
-                AutonomyLog.Write(AutonomyLog.Severity.Info, squad.Name + (change.On ? ": Autonomy enable" : ": Autonomy disable"));
+                AutonomyLog.Write(LogSeverity.Info, squad.Name + (change.On ? ": Autonomy enable" : ": Autonomy disable"));
                 _sentAt.Remove(squad.Id);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Keeps the window's plan for the squad and sends its gate rules when they changed.
+    /// </summary>
+    void SetPlan(World world, Squad squad, SquadPlanOrder plan)
+    {
+        var gate = plan.Gate & SquadConduct.All;
+        _plans[squad.Id] = new(squad.Name, [.. plan.Packages], plan.Rest, Hour(plan.StartHour), Hour(plan.EndHour), plan.Switches,
+            Clamp(plan.Resting), Clamp(plan.Labouring), gate);
+        _sentAt.Remove(squad.Id);
+        if (squad.Conduct != gate) enqueue(new SetSquadConduct(squad.Id, gate) { Tick = world.Tick + 1 });
+
+        AutonomyLog.Write(LogSeverity.Info, $"{squad.Name}: plan set, {plan.Packages.Count} packages, work {plan.StartHour}-{plan.EndHour}");
+    }
+
+    /// <summary>
+    /// Labour priorities with every category kept to 0-10.
+    /// </summary>
+    static LabourPriorities? Clamp(LabourPriorities? labour)
+    {
+        if (labour is null) return null;
+
+        var values = Enumerable.Range(0, LabourPriorities.Count).Select(i => Math.Clamp(labour.Of((LabourKind)i), 0, LabourPriorities.Max));
+        return new([.. values]);
     }
 
     /// <summary>
@@ -171,25 +213,34 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         };
 
     /// <summary>
-    /// Sets the squad's home to the inspected building, or clears it, with the original's messages.
+    /// Sets the squad's home or work building to the inspected building, or clears both, with the original's messages ("Set &lt;squad&gt; home
+    /// building: &lt;building&gt;, &lt;town&gt;").
     /// </summary>
-    void Home(World world, Squad squad, bool clear)
+    void Home(World world, Squad squad, bool clear, bool work)
     {
         if (clear)
         {
             enqueue(new SetSquadHome(squad.Id, null) { Tick = world.Tick + 1 });
-            world.Post("Buildings cleared");
+            enqueue(new SetSquadWork(squad.Id, null) { Tick = world.Tick + 1 });
+            world.Post(tr("Buildings cleared"));
+            return;
+        }
+
+        if (string.IsNullOrEmpty(world.Player.InspectedBuilding))
+        {
+            world.Post(tr("No object selected!"));
             return;
         }
 
         if (HomeKey(world, world.Player.InspectedBuilding) is not { } key)
         {
-            world.Post("Select a building!");
+            world.Post(tr("Select a building!"));
             return;
         }
 
-        enqueue(new SetSquadHome(squad.Id, key) { Tick = world.Tick + 1 });
-        world.Post($"{squad.Name} home building: {HomeName(world, key)}");
+        long tick = world.Tick + 1;
+        enqueue(work ? new SetSquadWork(squad.Id, key) { Tick = tick } : new SetSquadHome(squad.Id, key) { Tick = tick });
+        world.Post($"{tr("Set")} {squad.Name} {tr(work ? "work building:" : "home building:")} {ReportName(world, key)}");
     }
 
     #endregion
@@ -253,7 +304,7 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         enqueue(new SetSquadPackages(squad.Id, packages) { Tick = world.Tick + 1 });
         _sentAt[squad.Id] = world.Tick;
         string sent = string.Join(", ", packages.Select(p => $"{p.PackageId} ({p.Slot})"));
-        AutonomyLog.Write(AutonomyLog.Severity.Info, $"{squad.Name}: packages {sent}");
+        AutonomyLog.Write(LogSeverity.Info, $"{squad.Name}: packages {sent}");
     }
 
     /// <summary>
@@ -281,17 +332,18 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         int hour = Hour(world);
         var table = world.Characters;
         var rules = new Dictionary<CharacterId, MemberRule>();
-        _states.Begin(world);
         foreach (var (id, plan) in _plans.OrderBy(p => p.Key))
         {
             if (world.Squads.Find(id) is not { Autonomous: true } squad) continue;
 
             bool leaderInBed = table.TryResolveNext(squad.Leader, out int slot) && table.Cold(slot) is { InSomething: HeldState.Bed };
             bool relaxing = MemberStates.GoalOf(world, squad.Leader) == TaskType.RelaxInTownPackage;
+            bool off = OffWork(plan, hour);
             foreach (var member in squad.Members)
             {
-                if (_states.Of(world, member) is { } self)
-                    rules[member] = new(plan.Switches, plan.Rules, OffWork(plan, hour), leaderInBed, relaxing, member == squad.Leader, self);
+                if (_states.Of(world, member) is not { } self) continue;
+
+                rules[member] = new(plan.Switches, plan.Rules, plan.Labour, off, leaderInBed, relaxing, member == squad.Leader, self);
             }
         }
 
@@ -323,22 +375,38 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     }
 
     /// <summary>
-    /// A home key's shown name; None for none.
+    /// A home key's shown name, "building (town)"; None for none.
     /// </summary>
     string HomeName(World world, string? key)
     {
-        if (key is null) return "None";
-        if (world.Buildings.Find(key) is { } built) return data.Find(built.Record)?.Name ?? key;
+        if (NameAndTown(world, key) is not var (name, town)) return tr("None");
+
+        return town is null ? name : $"{name} ({town})";
+    }
+
+    /// <summary>
+    /// A home key's name as the original's report gives it, "building, town".
+    /// </summary>
+    string ReportName(World world, string key) =>
+        NameAndTown(world, key) is var (name, town) && town is not null ? $"{name}, {town}" : HomeName(world, key);
+
+    /// <summary>
+    /// A home key's building and town names (no town for a player-built one); null for none.
+    /// </summary>
+    (string Name, string? Town)? NameAndTown(World world, string? key)
+    {
+        if (key is null) return null;
+        if (world.Buildings.Find(key) is { } built) return (data.Find(built.Record)?.Name ?? key, null);
 
         foreach (var site in population.Sites)
         {
             foreach (var b in site.Buildings)
             {
-                if (b.Key == key) return $"{b.Name} ({site.Record.Name})";
+                if (b.Key == key) return (b.Name, site.Record.Name);
             }
         }
 
-        return key;
+        return (key, null);
     }
 
     #endregion
@@ -350,12 +418,23 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     /// </summary>
     AutonomyView Publish(World world)
     {
-        var rows = SquadManagement.PlayerSquads(world)
-            .Select(s => new SquadRow(s.Id, s.Name, s.Autonomous, s.Ai?.Current?.Id, HomeName(world, s.AssignedHome), _plans.GetValueOrDefault(s.Id)))
-            .ToList();
+        var rows = SquadManagement.PlayerSquads(world).Select(s => RowOf(world, s)).ToList();
         string? inspected = HomeKey(world, world.Player.InspectedBuilding) is { } key ? HomeName(world, key) : null;
         return new(rows, Hour(world), inspected);
     }
+
+    SquadRow RowOf(World world, Squad s)
+    {
+        var plan = _plans.GetValueOrDefault(s.Id);
+        return new SquadRow(s.Id, s.Name, s.Autonomous, s.Ai?.Current?.Id, HomeName(world, s.AssignedHome), HomeName(world, s.AssignedWork),
+            plan is not null && Labours(plan), plan);
+    }
+
+    /// <summary>
+    /// Whether a package of the plan has the labour goal (<c>AUTO_LABOURING_MINES</c>; the original's <c>hasTask</c>).
+    /// </summary>
+    bool Labours(Plan plan) =>
+        plan.Packages.Any(p => population.Ai.Package(p.Id)?.Roles.Any(r => r.Any(g => g.Task.Type == TaskType.AutoLabouringMines)) == true);
 
     #endregion
 
@@ -393,13 +472,16 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         writer.Write(rules.RestHealth);
         writer.Write(rules.HealedHealth);
         writer.Write(rules.SleepOffWork);
+        writer.Write(rules.PaidBeds);
+        foreach (int value in plan.Labour.Values) writer.Write(value);
+        writer.Write((int)plan.Gate);
     }
 
     public void Read(Stream stream)
     {
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4)) return;
+        if (version is < 1 or > Version) return;
 
         _plans.Clear();
         for (int i = reader.ReadInt32(); i > 0; i--)
@@ -414,7 +496,8 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
     }
 
     /// <summary>
-    /// A version 2 to 4 plan (2: the default switches; before 4 the default rest rules).
+    /// A version 2 to 5 plan (2: the default switches; before 4 the default rest rules; before 5 no paid beds, the default labour priorities and
+    /// no gate rules).
     /// </summary>
     static Plan ReadPlan(BinaryReader reader, int version)
     {
@@ -426,7 +509,12 @@ sealed class AutonomySystem(string modId, PopulationData population, GameDatabas
         int start = reader.ReadInt32(), end = reader.ReadInt32();
         var switches = version >= 3 ? (CombatSwitches)reader.ReadInt32() : CombatSwitches.Default;
         RestRules? rules = version >= 4 ? new(reader.ReadBoolean(), reader.ReadInt32(), reader.ReadInt32(), reader.ReadBoolean()) : null;
-        return new(name, packages, rest == "" ? null : rest, start, end, switches, rules);
+        if (version < 5) return new(name, packages, rest == "" ? null : rest, start, end, switches, rules);
+
+        rules = rules! with { PaidBeds = reader.ReadBoolean() };
+        var labour = new LabourPriorities([.. Enumerable.Range(0, LabourPriorities.Count).Select(_ => reader.ReadInt32())]);
+        var gate = (SquadConduct)reader.ReadInt32() & SquadConduct.All;
+        return new(name, packages, rest == "" ? null : rest, start, end, switches, rules, labour, gate);
     }
 
     /// <summary>

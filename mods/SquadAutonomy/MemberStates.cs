@@ -1,4 +1,3 @@
-using System.Numerics;
 using Meitou.Data.Gameplay.Ai;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation;
@@ -9,23 +8,16 @@ using Meitou.Simulation.Movement;
 namespace Meitou.SquadAutonomy;
 
 /// <summary>
-/// Reads what the original's score hooks read of a member, in the serial slow step (<see cref="MemberState"/>), and keeps the game hour each
-/// member was last seen lying in a bed (the original reads the game's <c>lastSlept</c>; Meitou keeps none, so this is the port's own record,
-/// saved with the plans by the members' lasting ids; a member never seen asleep counts as long awake).
+/// Reads what the original's score hooks read of a member, in the serial slow step (<see cref="MemberState"/>). The last sleep is the game's
+/// sleep clock (<c>CharacterCold.BedUsedHours</c>, stamped by the bed task: the original's <c>lastSlept</c>); the engine does not save it, so
+/// the port keeps the latest it saw per lasting id, saved with the plans, for after a load. A member never seen asleep counts as long awake.
 /// </summary>
 sealed class MemberStates
 {
-    /// <summary>The reach of a melee attacker that counts as attacking right now (the game's immediate threat, 40 units).</summary>
-    const float MeleeReach = 40;
-
     /// <summary>Hours since sleeping for a member never seen asleep: long enough for the original's top score.</summary>
     const double LongAwake = 24;
 
     readonly Dictionary<LastingId, double> _sleptAt = [];
-    readonly HashSet<CharacterId> _attacked = [];
-
-    /// <summary>Notes once per schedule who is under melee attack (the stand-in, <see cref="Threats"/>).</summary>
-    public void Begin(World world) => Threats(world);
 
     /// <summary>The member's state now; null when it does not resolve to a living character.</summary>
     public MemberState? Of(World world, CharacterId id)
@@ -35,14 +27,26 @@ sealed class MemberStates
         if (table.Cold(slot) is not { Medical: { } medical } cold) return null;
 
         bool asleep = cold.InSomething == HeldState.Bed;
-        if (asleep) _sleptAt[world.LastingIds.GetOrGive(id)] = world.GameHours;
-
         var race = cold.Race;
         var (aid, kit) = race is null ? (0f, 0f) : Needs(world, cold, medical, race);
-        double since = !cold.LastingId.IsNone && _sleptAt.TryGetValue(cold.LastingId, out double at) ? world.GameHours - at : LongAwake;
         float rested = race is null ? 1 : medical.RestedLevel(race);
-        return new(cold.OrderQueue.Count > 0, world.Sight.Inside(slot), asleep, _attacked.Contains(id), cold.Ai?.Goal?.Task.Type,
-            race is { IsRobot: false }, rested, aid, kit, since);
+        bool attacked = CharacterFacts.UnderMeleeAttack(world, slot);
+        return new(cold.OrderQueue.Count > 0, world.Sight.Inside(slot), asleep, attacked, cold.Ai?.Goal?.Task.Type, race is { IsRobot: false },
+            rested, aid, kit, HoursSinceSlept(world, id, cold));
+    }
+
+    /// <summary>
+    /// Game hours since the member last slept: the sleep clock, else (after a load, before it sleeps again) the hour kept from before.
+    /// </summary>
+    double HoursSinceSlept(World world, CharacterId id, CharacterCold cold)
+    {
+        if (cold.BedUsedHours > 0)
+        {
+            var lasting = world.LastingIds.GetOrGive(id);
+            _sleptAt[lasting] = Math.Max(_sleptAt.GetValueOrDefault(lasting), cold.BedUsedHours);
+        }
+
+        return !cold.LastingId.IsNone && _sleptAt.TryGetValue(cold.LastingId, out double at) ? world.GameHours - at : LongAwake;
     }
 
     /// <summary>The current goal of <paramref name="id"/>, null without one.</summary>
@@ -84,23 +88,5 @@ sealed class MemberStates
         float extraLoss = world.Systems.OfType<BodySystem>().FirstOrDefault()?.Constants.ExtraBloodLossFromBodyparts ?? 1;
         var (organic, robot) = medical.FirstAidNeeds(race, capacity, extraLoss);
         return (organic, race.IsRobot ? robot : organic);
-    }
-
-    /// <summary>
-    /// The stand-in for <c>isLiterallyUnderMeleeAttackRightNowForSure</c>: a living character whose running attack targets the member from within
-    /// 40 units. The game's own flag (its immediate threat) is not open to mods.
-    /// </summary>
-    void Threats(World world)
-    {
-        _attacked.Clear();
-        var table = world.Characters;
-        for (int slot = 0; slot < table.HighWater; slot++)
-        {
-            if (!table.Next[slot].Alive || table.Cold(slot)?.Running is not { Task: CharacterTask.Attack } running || running.Target.IsNone) continue;
-            if (!table.TryResolveNext(running.Target, out int target)) continue;
-
-            float d2 = Vector3.DistanceSquared(table.Next[slot].Position, table.Next[target].Position);
-            if (d2 < MeleeReach * MeleeReach) _attacked.Add(running.Target);
-        }
     }
 }
