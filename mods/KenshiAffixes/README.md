@@ -7,7 +7,8 @@ Rolls (once per item, kept in `ItemInstance.ModTag`: `affix=id:value,...` or `no
 `dxseba;key=value` tag also used by Equipment Durability), deterministic (`Rng.Hash`), as the world makes the item (`IItemCreatedObserver`):
 - Sources: a new NPC's equipped kit at its level ((mean of trained strength, dexterity, toughness) + best of (melee attack + defence) / 2,
   martial arts, bows) / 2, 1-100 (`AutoNPC`); a shop's new stock at 12 + 16 x band (`AutoShops`, `ShopBaseLevel`, `ShopLevelPerBand`); new
-  loot (`AutoContainers`) at max(quality level, round(0.7 x site strength + 0.3 x quality level)); gear a player character crafts
+  loot in a container (`AutoContainers`; `ItemCreated.Place` `Container`, a camp's ground items are not rolled) at max(quality level,
+  round(0.7 x site strength + 0.3 x quality level)); gear a player character crafts
   (`AutoCrafting`) at round(0.7 x its trained weapon or armour smithing + 0.3 x quality level). A 60-tick sweep rolls fixed NPCs' gear (also
   after a load), shop stock from before the mod ran and Meitou weapons. The player's characters' other gear is never rolled (marked `aplain`,
   so selling or storing it keeps it plain).
@@ -31,6 +32,13 @@ Rolls (once per item, kept in `ItemInstance.ModTag`: `affix=id:value,...` or `no
   `KenshiAffixes.ini`, the player's `%LOCALAPPDATA%\KenshiAffixes\KenshiAffixes.ini`, then one in this port's folder (later keys win):
   `[ExcludeTemplates]` `ID=1` (never rolled, Meitou included), `[FixedNPCs]` `CHARACTER_ID=profile` or `off` (replaces the built-in entry),
   `[FixedProfile_NAME]` `Melee=` / `Armour=` (space-separated affix ids, replacing the profile's). The single options are the settings below.
+- Site strength and loot quality (**Verified**, `KenshiAffixes.cpp` `siteStrength`, `templateThreat`, `lootNativeLevel`; `AffixRules.h`
+  `lootLevel`, `lootQualityLevel`): the loot's town (`ItemCreated.Town`, `PopulationData.Sites`; its override TOWN when replaced) by its
+  `[LootSiteLevels]` `TOWN_ID=level` (1-100; 0 or more counts), else the highest of `combat stats`, `unarmed stats`, `ranged stats`, `melee
+  attack`, `melee defence` (each 0-100) over its template and the records it links by `residents`, `leader`, `squad`, `characters`, `members`,
+  `housemates`, `stats` (depth first, six links deep, 192 records), else 10. *Improve loot quality* (`ImproveNewLootQuality`, on): a new
+  container weapon or armour piece whose roll 0-99 is under strength - 20 (0-80) is lifted to at least grade 20 / 40 / 60 / 80 for a site of
+  25 / 45 / 65 / 85 and up (`ItemInstance.Level`, before its affix band is taken), logged `LOOT_QUALITY`.
 - Container items from before the mod ran (**Verified**, `ensureContainerItem` on the tooltip): an unrolled weapon or armour piece in a
   non-player container rolls at the loot level on its first tooltip (`UiItemTooltipContext.First`, `Owner`; the system checks the container's
   kind and owner and the item at the index).
@@ -63,9 +71,9 @@ equipped unrolled gear (the player's too, no fixed profiles) at max(its level, *
 *Combat log* (`CombatLog`): "COMBAT crit= mult= chance= leech= dealt= healed=" per melee hit with a critical chance or leech, at most 10,000.
 
 Missing:
-- Loot: site strength (garrison templates, `[LootSiteLevels]`) is not known (`ItemCreated` names no site), so the default 10 applies, which
-  makes the level the quality level; camp ground loot rolls too (the original's are containers only); `ImproveNewLootQuality` (an observer
-  may only tag the item); container gear taken without a tooltip seen (take-all) stays plain (the original also rolls at the take) (engine gaps).
+- Loot: the building's own resident squad, which the original weighs before the town's template (not known for a container here); container
+  gear from before the mod ran that is taken without a tooltip seen (take-all) stays plain (the original also rolls at the take: no hook
+  before a take) (engine gaps).
 - The original's affix effect lines (one line each under its affix): the effect is the line's value (tooltips take 8 lines from all mods).
 - A trader's stock tooltip shows no tag (the engine's), so stock affixes show once bought (engine gap).
 - Critical rolls use the world seed, not the original's own stream (deterministic by design). The test window's save/load buttons (a

@@ -2,6 +2,7 @@ using Meitou.Data.Gameplay.Combat;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
 using Meitou.Simulation.Items;
+using Meitou.Simulation.Population;
 
 namespace Meitou.KenshiAffixes;
 
@@ -10,7 +11,8 @@ namespace Meitou.KenshiAffixes;
 /// stat affixes of each character's equipped gear as stat modifiers (every 30th tick; not saved, so set again after a load); weapon damage and
 /// critical hits as a hit filter, the armour resistance affixes as an armour filter, and Leeching as a heal of the attacker's stun.
 /// </summary>
-sealed partial class AffixSystem(AffixSettings settings, RngPurpose purpose, CombatDatabase? combat, Profiles profiles, Action<string> log)
+sealed partial class AffixSystem(
+    AffixSettings settings, RngPurpose purpose, CombatDatabase? combat, Profiles profiles, Action<string> log, PopulationData data)
     : ICombatHitFilter, IArmourFilter, ICombatHitObserver
 {
     readonly List<ShowAffixesOrder> _shows = [];

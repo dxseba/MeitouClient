@@ -61,6 +61,6 @@ sealed partial class AffixSystem
         if (Meitou(world, item) || Rolling.BaselineOf(item, combat!) is not { } baseline) return;
 
         int quality = Rolling.ShopLevel(Rolling.Band(item), settings.ShopBaseLevel, settings.ShopLevelPerBand);
-        Roll(world, item, baseline, LootLevel(quality), StableHash(order.Site) ^ (ulong)order.Index << 40 ^ StableHash(item.Record) << 8);
+        Roll(world, item, baseline, LootLevel(quality, SiteStrength(world, fixture.Site)), StableHash(order.Site) ^ (ulong)order.Index << 40 ^ StableHash(item.Record) << 8);
     }
 }

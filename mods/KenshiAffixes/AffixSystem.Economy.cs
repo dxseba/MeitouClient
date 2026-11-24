@@ -7,15 +7,12 @@ namespace Meitou.KenshiAffixes;
 
 /// <summary>
 /// Rolls as the world makes items (<see cref="IItemCreatedObserver"/>): a fresh NPC's equipped kit at its level, a shop's new stock at its band's
-/// level, new container loot at its band's level (the site strength the original reads from garrison templates is not known here: its default),
-/// and the player's crafted gear from the crafter's smithing skill. And the original's value premium on affixed gear
+/// level, new container loot at its site's loot level (a camp's ground items are not rolled, as the original rolls containers only), and the
+/// player's crafted gear from the crafter's smithing skill. And the original's value premium on affixed gear
 /// (<see cref="ITradePriceFilter"/>).
 /// </summary>
 sealed partial class AffixSystem : IItemCreatedObserver, ITradePriceFilter
 {
-    /// <summary>The original's site strength when no garrison data is found.</summary>
-    const int DefaultSiteStrength = 10;
-
     /// <summary>The rolls made so far this tick, keying each roll apart (the creation order is the world's own, so the same in every run).</summary>
     long _rollTick = -1;
     ulong _rollsThisTick;
@@ -23,28 +20,35 @@ sealed partial class AffixSystem : IItemCreatedObserver, ITradePriceFilter
     public void Created(World world, in ItemCreated created)
     {
         var item = created.Item;
-        if (!settings.Enabled || combat is null || !Rollable(item) || AffixTag.Rolled(item.ModTag) || AffixTag.Plain(item.ModTag)) return;
+        if (!settings.Enabled || combat is null) return;
+
+        ulong key = CreationKey(world, created);
+        int strength = ContainerLoot(created) ? SiteStrength(world, created.Town) : 0;
+        if (strength > 0) ImproveLoot(world, item, strength, key);
+
+        if (!Rollable(item) || AffixTag.Rolled(item.ModTag) || AffixTag.Plain(item.ModTag)) return;
         if (Meitou(world, item) || Rolling.BaselineOf(item, combat) is not { } baseline) return;
 
-        if (SourceLevel(world, created, item) is { } level) Roll(world, item, baseline, level, CreationKey(world, created));
+        if (SourceLevel(world, created, item, strength) is { } level) Roll(world, item, baseline, level, key);
     }
 
+    /// <summary>New loot in a non-player container, with container rolls on.</summary>
+    bool ContainerLoot(in ItemCreated created) =>
+        settings.AutoContainers && created.Kind == ItemCreatedKind.Loot && created.Place == ItemCreatedPlace.Container;
+
     /// <summary>The roll's source level by where the item came from; null for none.</summary>
-    float? SourceLevel(World world, in ItemCreated created, ItemInstance item)
+    float? SourceLevel(World world, in ItemCreated created, ItemInstance item, int strength)
     {
         int band = Rolling.Band(item), quality = Rolling.ShopLevel(band, settings.ShopBaseLevel, settings.ShopLevelPerBand);
         return created.Kind switch
         {
             ItemCreatedKind.SpawnEquipment => NpcKitLevel(world, created.Character, item),
             ItemCreatedKind.ShopStock when settings.AutoShops && world.Squads.Find(created.Squad)?.Faction != world.Player.Faction => quality,
-            ItemCreatedKind.Loot when settings.AutoContainers => LootLevel(quality),
+            ItemCreatedKind.Loot when strength > 0 => LootLevel(quality, strength),
             ItemCreatedKind.Crafted when settings.AutoCrafting => CraftLevel(world, created.Character, item, quality),
             _ => null,
         };
     }
-
-    /// <summary>The original's loot level: max(quality level, round(0.7 x site strength + 0.3 x quality level)), the strength its default.</summary>
-    static float LootLevel(int quality) => Math.Max(quality, MathF.Floor(0.7f * DefaultSiteStrength + 0.3f * quality + 0.5f));
 
     /// <summary>A fresh NPC's equipped gear at its level; a fixed NPC's is left to its profile (the sweep), the player's gear stays plain.</summary>
     float? NpcKitLevel(World world, CharacterId id, ItemInstance item)

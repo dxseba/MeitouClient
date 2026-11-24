@@ -9,7 +9,7 @@ namespace Meitou.KenshiAffixes;
 /// <c>%LOCALAPPDATA%\KenshiAffixes\KenshiAffixes.ini</c>, then a <c>KenshiAffixes.ini</c> in this port's folder, a later file's key winning.
 /// <c>[ExcludeTemplates]</c> <c>ID=1</c> keeps an item template from ever rolling; <c>[FixedNPCs]</c> <c>CHARACTER_ID=profile</c> (or <c>off</c>)
 /// names or disables a fixed NPC's profile; <c>[FixedProfile_NAME]</c> <c>Melee=</c> / <c>Armour=</c> give a profile's affix ids, space separated.
-/// The single options are on the Mod settings page; <c>[LootSiteLevels]</c> is read but has no use here (see README).
+/// <c>[LootSiteLevels]</c> <c>TOWN_ID=level</c> sets a site's loot strength. The single options are on the Mod settings page.
 /// </summary>
 sealed class Overrides
 {
@@ -36,6 +36,9 @@ sealed class Overrides
     /// <summary><c>[FixedProfile_NAME]</c>'s <c>Melee</c> or <c>Armour</c> ids; null when the ini says nothing.</summary>
     public string[]? Profile(string name, bool armour) =>
         Value("FixedProfile_" + name, armour ? "Armour" : "Melee")?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary><c>[LootSiteLevels]</c>: the TOWN template's level as <c>GetPrivateProfileInt</c> reads it (0 for text), or null without one.</summary>
+    public int? SiteLevel(string town) => Value("LootSiteLevels", town) is { } v ? LeadingInt(v) : null;
 
     string? Value(string section, string key) => _sections.TryGetValue(section, out var s) && s.TryGetValue(key, out string? v) ? v : null;
 

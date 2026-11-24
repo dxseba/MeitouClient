@@ -24,8 +24,8 @@ public sealed class KenshiAffixesMod : IMod
         context.AddSettings(Settings);
         var profiles = Profiles.Load(context);
         Texts = profiles.Texts;
-        context.AddSystem("affixes", build => new AffixSystem(Settings, context.RngPurpose, build.Data.Combat, profiles, context.Log),
-            SystemAnchor.End);
+        context.AddSystem("affixes",
+            build => new AffixSystem(Settings, context.RngPurpose, build.Data.Combat, profiles, context.Log, build.Data), SystemAnchor.End);
         context.AddUi(new AffixMenu());
         context.AddUi(new AffixTooltip());
         context.Log("Kenshi Affixes initialized");
@@ -44,8 +44,11 @@ public sealed class AffixSettings
     [Setting("Shop stock", Hint = "Roll affixes on the gear shops sell (AutoShops).")]
     public bool AutoShops { get; set; } = true;
 
-    [Setting("Container loot", Hint = "Roll affixes on new loot in containers and camps (AutoContainers).")]
+    [Setting("Container loot", Hint = "Roll affixes on new loot in containers, at the site's level (AutoContainers).")]
     public bool AutoContainers { get; set; } = true;
+
+    [Setting("Improve loot quality", Hint = "Stronger sites may lift new container weapons and armour to a better grade (ImproveNewLootQuality).")]
+    public bool ImproveLootQuality { get; set; } = true;
 
     [Setting("Crafted gear", Hint = "Roll affixes on gear your characters craft, from their smithing skill (AutoCrafting).")]
     public bool AutoCrafting { get; set; } = true;
