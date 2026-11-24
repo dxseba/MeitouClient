@@ -6,8 +6,8 @@ using Meitou.Modding;
 namespace Meitou.Mentors;
 
 /// <summary>
-/// The training window, with the original's texts (<b>Verified</b>, original DLL strings): the teacher and trade, "Student: name    Money: N cats",
-/// and one row per skill: its label, "level -> limit  (teacher T)" and the "+N  P cats" buttons for 1 and 5 lessons. The offer comes from the
+/// The training window, with the original's texts (<b>Verified</b>, original DLL strings; Russian in a Russian game,
+/// <see cref="OriginalTexts"/>): the teacher and trade, "Student: name    Money: N cats", and one row per skill: its label, "level -> limit  (teacher T)" and the "+N  P cats" buttons for 1 and 5 lessons. The offer comes from the
 /// running system (<see cref="MentorSystem.Offer"/>); a press queues a command.
 /// </summary>
 sealed class MentorWindow(ModContext context) : IUiExtension
@@ -42,7 +42,8 @@ sealed class MentorWindow(ModContext context) : IUiExtension
     {
         if (MentorsMod.Running?.Offer is not { } offer) return new UiNode("mentors-hidden") { Visible = false };
 
-        var lines = new List<UiNode> { Header(offer), Text("mentors-sub", $"Student: {offer.StudentName}    Money: {Cats(offer.Money)}", _styles.Dim) };
+        string sub = MentorsMod.Tr("Student: ") + offer.StudentName + MentorsMod.Tr("    Money: ") + Cats(offer.Money);
+        var lines = new List<UiNode> { Header(offer), Text("mentors-sub", sub, _styles.Dim) };
         lines.AddRange(offer.Lessons.Select(l => LessonRow(l)));
         if (offer.Status != "") lines.Add(Text("mentors-status", offer.Status, _styles.Dim));
 
@@ -64,7 +65,7 @@ sealed class MentorWindow(ModContext context) : IUiExtension
         var row = Row("mentors-header");
         string title = offer.TeacherName == "" ? "Mentors" : $"{offer.TeacherName} ({offer.Profession})";
         row.Children.Add(Label("mentors-title", title, Width - 12 - 70 - 4, _styles.Text));
-        row.Children.Add(Button("mentors-close", "Close", 70, _close, "", true));
+        row.Children.Add(Button("mentors-close", MentorsMod.Tr("Close"), 70, _close, "", true));
         return row;
     }
 
@@ -72,8 +73,8 @@ sealed class MentorWindow(ModContext context) : IUiExtension
     {
         string key = lesson.Stat.ToString();
         var row = Row("mentors-row-" + key);
-        row.Children.Add(Label($"mentors-{key}-name", lesson.Label, 150, _styles.Text));
-        string levels = $"{Level(lesson.Student)} -> {Level(lesson.Limit)}  (teacher {Level(lesson.Teacher)})";
+        row.Children.Add(Label($"mentors-{key}-name", MentorsMod.Tr(lesson.Label), 150, _styles.Text));
+        string levels = $"{Level(lesson.Student)} -> {Level(lesson.Limit)}{MentorsMod.Tr("  (teacher ")}{Level(lesson.Teacher)})";
         row.Children.Add(Label($"mentors-{key}-levels", levels, 150, _styles.Text));
         row.Children.Add(Button($"mentors-{key}-1", $"+{lesson.Count1}  {Cats(lesson.Cost1)}", 105, _buy, $"{key}:1", true));
         string caption = $"+{lesson.CountBatch}  {Cats(lesson.CostBatch)}";
@@ -95,7 +96,7 @@ sealed class MentorWindow(ModContext context) : IUiExtension
 
     static string Level(int level) => level.ToString(CultureInfo.InvariantCulture);
 
-    static string Cats(long cats) => cats.ToString(CultureInfo.InvariantCulture) + " cats";
+    static string Cats(long cats) => cats.ToString(CultureInfo.InvariantCulture) + MentorsMod.Tr(" cats");
 
     static UiNode Row(string id) =>
         new(id) { Placement = new(UiLength.Fill, Line), Flow = UiFlow.Row, Gap = 4, Pickable = false };

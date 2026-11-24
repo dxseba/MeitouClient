@@ -105,6 +105,44 @@ sealed class PeImage
     }
 
     /// <summary>
+    /// The NUL-terminated UTF-16 string at <paramref name="va"/> in any script (no control characters or lone surrogates), 1 to
+    /// <paramref name="max"/> chars; null otherwise.
+    /// </summary>
+    public string? Text16(ulong va, int max)
+    {
+        int start = Offset(va);
+        if (start < 0) return null;
+
+        var text = new StringBuilder();
+        for (int o = start; In(o, 2); o += 2)
+        {
+            char c = (char)BinaryPrimitives.ReadUInt16LittleEndian(_bytes.AsSpan(o));
+            if (c == 0) return text.Length > 0 && !HasLoneSurrogate(text) ? text.ToString() : null;
+            if (char.IsControl(c) || text.Length == max) return null;
+
+            text.Append(c);
+        }
+
+        return null;
+    }
+
+    static bool HasLoneSurrogate(StringBuilder text)
+    {
+        string s = text.ToString();
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1])) i++;
+            else if (char.IsSurrogate(s[i])) return true;
+        }
+
+        return false;
+    }
+
+    public byte U8(int offset) => In(offset, 1) ? _bytes[offset] : (byte)0;
+
+    public int I32(int offset) => In(offset, 4) ? BinaryPrimitives.ReadInt32LittleEndian(_bytes.AsSpan(offset)) : 0;
+
+    /// <summary>
     /// The targets of every <c>lea r64, [rip+disp32]</c> byte pattern in <paramref name="code"/> (REX.W 48/4C, 8D, ModRM mod 00 rm 101). A pattern
     /// scan, not a disassembly: a stray match only adds a target.
     /// </summary>

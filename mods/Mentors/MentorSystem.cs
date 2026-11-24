@@ -122,8 +122,8 @@ sealed class MentorSystem(MentorsSettings settings, GameDatabase data) : ITickSy
 
         var field = FieldOf(world, teacher);
         var lessons = field is null || !Available(student, teacher) ? [] : Lessons(field, student.Stats!, teacher.Stats!);
-        string status = _status != "" ? _status : lessons.Count == 0 ? "Nothing left to teach." : "";
-        string trade = field is null ? "none" : $"{field.Name} ({field.Covers})";
+        string status = _status != "" ? _status : lessons.Count == 0 ? MentorsMod.Tr("Nothing left to teach.") : "";
+        string trade = field is null ? "none" : $"{MentorsMod.Tr(field.Name)} ({MentorsMod.Tr(field.Covers)})";
         Offer = new(studentId, student.Name, teacherId, teacher.Name, trade, world.Player.Money, lessons, status);
     }
 
@@ -182,22 +182,23 @@ sealed class MentorSystem(MentorsSettings settings, GameDatabase data) : ITickSy
     string Buy(World world, BuyLessonOrder buy)
     {
         if (Pair(world, buy.Student, buy.Teacher) is not var (student, teacher) || !Available(student, teacher))
-            return "The teacher or the student is not available now.";
+            return MentorsMod.Tr("The teacher or the student is not available now.");
 
         var skill = Professions.All.FirstOrDefault(t => t.Stat == buy.Stat);
         var field = FieldOf(world, teacher);
         var stats = student.Stats!;
         float own = stats.Stored(buy.Stat), master = teacher.Stats![buy.Stat];
         if (skill is null || field is null || !field.Skills.Contains(buy.Stat) || !LessonMath.CanTeach(settings, master, own))
-            return "The teacher cannot teach this any further.";
+            return MentorsMod.Tr("The teacher cannot teach this any further.");
 
         var (count, price) = LessonMath.Lessons(settings, master, own, skill.Attribute, buy.Levels);
-        if (count < 1) return "The teacher cannot teach this any further.";
-        if (world.Player.Money < price) return $"Not enough money: it costs {price} cats.";
+        if (count < 1) return MentorsMod.Tr("The teacher cannot teach this any further.");
+
+        if (world.Player.Money < price) return MentorsMod.Tr("Not enough money: it costs ") + price + MentorsMod.Tr(" cats.");
 
         world.Player.Money -= price;
         stats[buy.Stat] = LessonMath.Trained(own, count);
-        return $"{skill.Label}: {(int)own} -> {(int)stats.Stored(buy.Stat)}  (-{price} cats)";
+        return $"{MentorsMod.Tr(skill.Label)}: {(int)own} -> {(int)stats.Stored(buy.Stat)}  (-{price}{MentorsMod.Tr(" cats)")}";
     }
 
     #endregion

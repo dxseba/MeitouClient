@@ -23,6 +23,7 @@ static class OriginalTrades
     const int StatSlots = 16;
     const int MaxTrades = 64;
     const int MaxText = 80;
+    const int LabelSize = 32;
 
     static readonly HashSet<StatsEnumerated> Teachable = [.. Professions.All.Select(t => t.Stat)];
 
@@ -67,6 +68,62 @@ static class OriginalTrades
         return Build(trades, matches, exactCount);
     }
 
+    /// <summary>
+    /// The Russian texts of the trade table and of the skill label table just before it (README "Russian"), as (English, Russian) pairs: each
+    /// trade's name and covers text (record +0 / +0x10 Russian, +8 / +0x18 English), and each skill's label by its stat, keyed by the port's
+    /// label. Throws <see cref="InvalidDataException"/> when the trade table does not read; a label table that does not validate adds nothing.
+    /// </summary>
+    internal static List<(string English, string Russian)> RussianPairs(PeImage pe)
+    {
+        var data = pe.Section(".rdata") ?? throw new InvalidDataException("no .rdata section");
+        var code = pe.Section(".text") ?? throw new InvalidDataException("no .text section");
+        var leas = pe.LeaTargets(code);
+
+        var (start, count) = MatchRun(pe, data);
+        int tradeCount = ReadMatches(pe, start, count).Max(m => m.Trade) + 1;
+        int array = TradeArray(pe, data, tradeCount, leas);
+
+        var pairs = new List<(string, string)>();
+        for (int i = 1; i < tradeCount; i++)
+        {
+            int o = array + i * TradeSize;
+            AddPair(pairs, pe.Utf16(pe.U64(o + 8), MaxText), pe.Text16(pe.U64(o), MaxText));
+            AddPair(pairs, pe.Utf16(pe.U64(o + 0x18), MaxText), pe.Text16(pe.U64(o + 0x10), MaxText));
+        }
+
+        pairs.AddRange(RussianLabels(pe, data, array - LabelSize * Teachable.Count, leas));
+        return pairs;
+    }
+
+    static void AddPair(List<(string, string)> pairs, string? english, string? russian)
+    {
+        if (!string.IsNullOrEmpty(english) && russian is not null) pairs.Add((english, russian));
+    }
+
+    /// <summary>
+    /// The label table's Russian labels keyed by the port's labels: 33 code-referenced 32-byte entries (u32 stat, u32 0, Russian and English
+    /// text pointers, u32 attribute flag 0 or 1, u32 0), every teachable stat once; empty when it does not validate.
+    /// </summary>
+    static List<(string, string)> RussianLabels(PeImage pe, PeSection data, int table, HashSet<ulong> leas)
+    {
+        if (table < data.RawOffset || !leas.Contains(pe.Va(data, table))) return [];
+
+        var labels = new List<(string, string)>();
+        var seen = new HashSet<StatsEnumerated>();
+        for (int i = 0; i < Teachable.Count; i++)
+        {
+            int o = table + i * LabelSize;
+            var stat = (StatsEnumerated)pe.U32(o);
+            bool valid = Teachable.Contains(stat) && seen.Add(stat) && pe.U32(o + 4) == 0 && pe.U32(o + 0x18) <= 1 && pe.U32(o + 0x1c) == 0;
+            if (!valid || pe.Utf16(pe.U64(o + 0x10), MaxText) is not { Length: > 0 } || pe.Text16(pe.U64(o + 8), MaxText) is not { } russian)
+                return [];
+
+            labels.Add((Professions.All.First(t => t.Stat == stat).Label, russian));
+        }
+
+        return labels;
+    }
+
     static IEnumerable<string> Candidates(ModContext context)
     {
         if (Path.GetDirectoryName(Path.GetFullPath(context.Folder)) is { } parent) yield return Path.Combine(parent, OriginalItem, DllName);
@@ -74,7 +131,7 @@ static class OriginalTrades
         if (Installed(context) is { } folder) yield return Path.Combine(folder, DllName);
     }
 
-    static string? Locate(ModContext context) => Candidates(context).FirstOrDefault(File.Exists);
+    internal static string? Locate(ModContext context) => Candidates(context).FirstOrDefault(File.Exists);
 
     static string? Installed(ModContext context)
     {

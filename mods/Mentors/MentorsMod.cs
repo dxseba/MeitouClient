@@ -24,6 +24,9 @@ public sealed class MentorsMod : IMod
 
     static ModContext? s_context;
 
+    /// <summary>The text in the game's language (the original's Russian texts in a Russian game, <see cref="OriginalTexts"/>); any thread.</summary>
+    internal static string Tr(string english) => s_context?.Tr(english) ?? english;
+
     /// <summary>The original's <c>TraceDialogue</c>: one "[trace] " line in the mod log when the setting is on.</summary>
     internal static void Trace(string text)
     {
@@ -35,6 +38,7 @@ public sealed class MentorsMod : IMod
         s_context = context;
         Data = context.Data;
         Professions.Load(context);
+        OriginalTexts.Add(context);
         context.AddSettings(Settings);
         context.AddSystem("mentors", _ => Running = new MentorSystem(Settings, context.Data), SystemAnchor.End);
         context.AddUi(new TeachReply());
@@ -60,12 +64,18 @@ sealed class TeachReply : IUiExtension
     {
         if (!MentorsMod.Settings.Enabled || talk.Player is not { IsPlayer: true } student || talk.Npc is not { } teacher) return [];
 
+        if (MentorsMod.Settings.OnlyPlayerStartedTalk && !talk.Conversation.PlayerStarted)
+        {
+            MentorsMod.Trace($"offer? {teacher.Name} started the talk, no training reply");
+            return [];
+        }
+
         bool teaches = Teachers.CanTeach(teacher, student);
         MentorsMod.Trace($"offer? teacher {teacher.Name}, student {student.Name}, {(teaches ? "can teach" : "nothing to teach")}");
         if (!teaches) return [];
 
         MentorsMod.Trace("training reply added to dialogue with " + teacher.Name);
-        return [new UiDialogueReply(Text, () =>
+        return [new UiDialogueReply(MentorsMod.Tr(Text), () =>
         {
             MentorsMod.Trace($"training reply clicked: teacher {teacher.Name}, student {student.Name}");
             talk.Enqueue(new OpenLessonsOrder(student.Id, teacher.Id) { Tick = talk.Tick });
@@ -129,7 +139,7 @@ static class LessonShortcut
 
         if (key.Selected.Count == 0)
         {
-            key.Enqueue(new OpenLessonsOrder(CharacterId.None, CharacterId.None) { Tick = key.Tick, Note = NoStudent });
+            key.Enqueue(new OpenLessonsOrder(CharacterId.None, CharacterId.None) { Tick = key.Tick, Note = MentorsMod.Tr(NoStudent) });
             return;
         }
 
@@ -148,12 +158,14 @@ static class LessonShortcut
     /// <summary>The note for a press without a teacher: about the inspected NPC when the trades decide, else "nobody nearby".</summary>
     static string WhyNot(ModKeyContext key)
     {
-        if (!MentorsMod.Settings.RequireProfession || key.Frame?.Shown is not { } shown) return Nobody;
-        if (key.Snapshot.Characters.FirstOrDefault(c => c.Id == shown) is not { IsPlayer: false } npc) return Nobody;
+        string nobody = MentorsMod.Tr(Nobody);
+        if (!MentorsMod.Settings.RequireProfession || key.Frame?.Shown is not { } shown) return nobody;
+
+        if (key.Snapshot.Characters.FirstOrDefault(c => c.Id == shown) is not { IsPlayer: false } npc) return nobody;
 
         var field = Professions.Of(MentorsMod.Data?.Find(npc.RecordId)?.BaseName ?? "", trader: false, default);
         MentorsMod.Trace($"hotkey: no teacher, selected {npc.Name} ({field?.Name ?? "no trade"})");
-        return field is null ? npc.Name + NoTrade : $"{npc.Name} ({field.Name}){NoMore}";
+        return field is null ? npc.Name + MentorsMod.Tr(NoTrade) : $"{npc.Name} ({MentorsMod.Tr(field.Name)}){MentorsMod.Tr(NoMore)}";
     }
 
     /// <summary>The character the HUD shows (an inspected NPC) when it can teach the first selected one.</summary>

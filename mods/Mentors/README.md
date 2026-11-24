@@ -45,9 +45,18 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
 - **Unknown**: whether the original reads the effective or the stored stat (`CharStats::getStat(stat, true)`); port: the student's stored, the
   teacher's with modifiers. Not run in game since these changes. **Observed** (2026-11-19, headless sandbox): an earlier build ran 3000 ticks.
 
+- **Only player-started talk** (`OnlyPlayerStartedTalk`, on, **Verified** `Mentors.ini`): the reply shows only in a conversation the player
+  started (`UiDialogueContext.Conversation.PlayerStarted`, false for an NPC's approach).
+- **Russian** (**Verified**, DLL code): the original shows Russian when the game's locale id starts with "ru". Its texts are pairs, no
+  catalogue: each window or notice text is one call of a picker taking the Russian (rdx) and English (r8) UTF-16 strings; each trade record
+  holds its Russian name and covers text at +0 / +0x10; a 33-entry skill label table (32 bytes: u32 stat, u32 0, Russian and English text
+  pointers, u32 attribute flag, u32 0) sits just before the trade array. In a Russian game the port reads them from the installed original
+  (`OriginalTexts.cs`: the calls whose rdx and r8 are set by `lea [rip+disp32]` since the call before, under the one picker that takes the
+  training reply; the tables through `OriginalTrades.RussianPairs`, labels by stat), writes them as a gettext catalogue in the temporary folder
+  and adds it (`ModContext.AddTranslations`); the window, notices and reply go through it (`MentorsMod.Tr`). **Verified** by a scratch run
+  (not in the repo) on the installed 0.5 DLL: 18 picker pairs and 75 table pairs, all Russian. Settings stay English (the original has none).
+
 ## Missing
 
-- The original's trades when it is not installed (the port's heuristic is used): they are its author's table, not shipped.
-- `OnlyPlayerStartedTalk`: the reply shows in every conversation with a teacher; the dialogue context does not say who started the talk
-  (engine gap).
-- Russian texts: no per-mod translation API (engine gap).
+- The original's trades and Russian texts when it is not installed (the port's heuristic and English are used): they are its author's, not
+  shipped.

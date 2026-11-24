@@ -28,6 +28,9 @@ public sealed class MentorsSettings
         Max = 5, Step = 0.1)]
     public float AttributeMultiplier { get; set; } = 1.5f;
 
+    [Setting("Only player-started talk", Hint = "OnlyPlayerStartedTalk: offer training only in conversations the player started.")]
+    public bool OnlyPlayerStartedTalk { get; set; } = true;
+
     [Setting("Close dialogue", Hint = "CloseDialogue: close the conversation when the training window opens.")]
     public bool CloseDialogue { get; set; } = true;
 
