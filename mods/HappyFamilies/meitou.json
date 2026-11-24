@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.happyfamilies",
+  "apiVersion": 2,
+  "assemblies": ["HappyFamilies.dll"],
+  "entry": "Meitou.HappyFamilies.HappyFamiliesMod",
+  "gameVersion": ">=0.22.2"
+}
