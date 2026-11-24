@@ -5,7 +5,8 @@ namespace Meitou.Disarm;
 
 /// <summary>
 /// Kick: the actor walks to a loose ground item and moves it <see cref="DisarmSettings.KickDistance"/> plus up to <see cref="KickVary"/> further
-/// along the line from the actor through the item, stopping short of unwalkable ground or a step (a wall or another floor).
+/// the way the actor faces (the original's movement facing direction), stopping short of unwalkable ground or a step (a wall or another floor).
+/// The item keeps its turn, as the original keeps its rotation.
 /// </summary>
 sealed partial class DisarmSystem
 {
@@ -44,28 +45,39 @@ sealed partial class DisarmSystem
         if (!world.Characters.TryResolveNext(kick.Actor, out int actor) || world.GroundItems.Find(kick.Item) is not { } item) return true;
         if (world.Characters.Cold(actor) is not { Animal: null }) return true;   // the original lets no animal kick
 
-        var from = world.Characters.Next[actor].Position;
-        if (Distance(from, item.Position) <= KickReach)
+        ref readonly var hot = ref world.Characters.Next[actor];
+        if (Distance(hot.Position, item.Position) <= KickReach)
         {
-            Kick(world, from, item);
+            Kick(world, Facing(hot.Yaw), item);
             return true;
         }
 
         return world.Tick - kick.Tick > KickSeconds / world.TickSeconds;
     }
 
-    void Kick(World world, Vector3 from, Meitou.Simulation.Items.GroundItem item)
+    void Kick(World world, Vector2 direction, Meitou.Simulation.Items.GroundItem item)
     {
-        var flat = new Vector2(item.Position.X - from.X, item.Position.Z - from.Z);
-        var direction = flat.LengthSquared() > 1e-4f ? Vector2.Normalize(flat) : Vector2.UnitY;
         ulong key = Rng.Hash(world.Seed, (ulong)item.Id, purpose, (ulong)world.Tick);
         float distance = settings.KickDistance + Rng.Float(key) * KickVary;
 
         var to = Landing(world, item.Position, direction, distance);
         if (world.GroundItems.Take(item.Id) is not { } taken) return;
 
-        float yaw = MathF.Atan2(direction.X, direction.Y);
-        world.GroundItems.Place(taken.Item, to, yaw, taken.Slot, taken.OwnedBy, taken.Camp);
+        world.GroundItems.Place(taken.Item, to, YawOf(taken.Rotation), taken.Slot, taken.OwnedBy, taken.Camp);
+    }
+
+    /// <summary>
+    /// The ground direction (x, z) of a heading (0 along +Z, turning towards +X).
+    /// </summary>
+    static Vector2 Facing(float yaw) => new(MathF.Sin(yaw), MathF.Cos(yaw));
+
+    /// <summary>
+    /// The heading about Y of a lying item's rotation (exact for a dropped item, which is turned about Y only).
+    /// </summary>
+    static float YawOf(Quaternion rotation)
+    {
+        var forward = Vector3.Transform(Vector3.UnitZ, rotation);
+        return MathF.Atan2(forward.X, forward.Z);
     }
 
     /// <summary>Walks one unit at a time from <paramref name="start"/>; the last walkable point before a wall, a gap or a step.</summary>
