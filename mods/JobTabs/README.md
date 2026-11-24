@@ -16,9 +16,15 @@ tab's put in its place, then its next decision is asked for (`DecisionSystem.Req
 Saved in the mod sidecar (version 2), keyed by lasting character id; a kept job per target keeps its target's lasting id and names the target
 again when restored, also after a load. Removing the mod leaves each character with the jobs of the tab it was on.
 
-Missing:
-- The `dot` style and the `JobTabs_ActiveFrame` skin (the lit button stands in), the cfg file (the Settings screen has *Tabs*). The engine
-  allows 9 job panel buttons across all mods, so another mod's buttons take from them.
-- The click sound plays on every press (the original's only when a list changed).
-- Not in the vanilla save (`jt_active`/`pjob` keys): a save taken to the original game loses the other tabs.
-- **Unknown**: not checked in game, the buttons and their tooltips included.
+`JobTabs.cfg`: read once at the start from the installed original's folder (the port ships none) as the original reads it, **Verified**
+against its DLL (decompiled): `key=value`, `#` starts a comment, `tabCount` a whole number (`strtol`, base 10, nothing after it) in 2..9, else
+5 with a warning; `activeStyle` `frame` or `dot`. Its `tabCount` becomes the *Tabs* default (a value set on the Settings page wins); the
+warnings go to the mod log.
+
+Missing (engine):
+- The `dot` style and the `JobTabs_ActiveFrame` skin: a job panel button has no skin of its own, so the lit state stands in for both; a
+  `dot` in the cfg is logged. The engine allows 9 job panel buttons across all mods, so another mod's buttons take from them.
+- The click sound plays on every press (the original's only when a list changed): the job panel button always clicks.
+- Not in the vanilla save (`jt_active`/`pjob` keys): a save taken to the original game loses the other tabs; no hook writes fields into a
+  character's orders record.
+- **Unknown**: not checked in game, the buttons, their tooltips and the cfg read included.

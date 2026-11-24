@@ -17,6 +17,7 @@ public sealed class JobTabsMod : IMod
 
     public void Initialize(ModContext context)
     {
+        OriginalConfig.Apply(context, Settings);
         context.AddSettings(Settings);
         context.AddSystem("jobtabs", _ => Running = new JobTabsSystem(Settings), SystemAnchor.End);
         context.AddUi(new TabButtons());
@@ -29,7 +30,8 @@ public sealed class JobTabsSettings
     /// <summary>The original's most tabs (tabCount 2-9), also the engine's limit of job panel buttons across all mods.</summary>
     public const int Most = 9;
 
-    [Setting("Tabs", Hint = "How many job tabs each character has (restart to change).", Min = 2, Max = Most)]
+    [Setting("Tabs", Hint = "How many job tabs each character has (restart to change; the default is the original's JobTabs.cfg tabCount).",
+        Min = 2, Max = Most)]
     public int Count { get; set; } = 5;
 }
 
