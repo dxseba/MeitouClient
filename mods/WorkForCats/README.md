@@ -24,7 +24,9 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
   `14521-rebirth.mod` (Iron Rock). **Verified** (original source). Meitou also refuses training dummies, turrets, ruins and automatic machines.
 - **Working**: a living, conscious player character out of combat, doing its operate action on the bench with Jobs on and the bench job in its
   list, holding an operator slot. **Verified** (original source). Meitou: at the station at the work clip; a hire needs a free operator slot
-  (`AiSystem.WorkSlots(site).Free`, "Every station here is taken."), but the employee then holds none, so NPCs may still fill the station.
+  (`AiSystem.WorkSlots(site).Free`, "Every station here is taken."); while the job runs (walking there or working) the employee holds one
+  (`AiSystem.HoldWorkSlot`), so the town's workers leave it; it is let go when the job stops, is quit or removed, and held again after a load
+  (the engine does not save holds). Its own hold does not count against it in the checks (`StationFull`).
 - **Wage** per in-game hour: lerp(WageAtSkill0, WageAtSkill100, clamp(skill, 0, 100) / 100) x (1 + clamp(relation, 0, 100) / 100 x
   BonusPercentAt100 / 100), the bonus only with RelationBonusEnabled at a foreign workplace. Hours and cats accrue while working; at a full hour
   the whole cats earned less the overshoot's share at the current rate are paid, the rest carries. Quitting discards the unfinished hour.
@@ -34,7 +36,10 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
 - **XP**: the station's skill trains through `CharStats::xpGeneral(dt, 1, stat)` in place of the native operating XP. **Verified** (original
   source). Meitou: `XpService.Continuous` at amount 1.
 - **Window text**: "Get a job" / "Quit job"; "N cats/hour" (whole cats), employed here " | m/60 min" and " (waiting)" while not working.
-  **Verified** (original source; it also has the Russian captions).
+  **Verified** (original source). Russian when the game's locale id (`ModContext.Language`) is `ru`, `ru_RU` or `ru-RU`, the original's test:
+  the port does not carry those texts, it reads them at runtime from the installed original's shipped `Source/WorkForCats.cpp` (each English
+  caption paired with the Russian of the same `russian ? ... : ...` choice) and uses them only when all five are found (`Captions`), else
+  English. **Observed** (the pairing checked against the installed source with an equivalent script); not seen in a Russian game.
 - **Hunger while working**: the original's employee runs the native operate action, which takes the functionality's `hunger rate` as the
   hunger situation factor (docs/game/character-stats.md). Meitou's employee stands on the job's idle task (factor 0.8 idle, else 1), so an
   `INeedRateFilter` swaps that for the workplace's rate while it stands still at the work clip out of combat (rates published by the work
@@ -45,9 +50,6 @@ Port of *Work for Cats - Get Hired at NPC Workbenches* (workshop 3802290991, GPL
 
 ## Missing
 
-- Holding an operator slot for the employee: `WorkSlots` is read only, so an NPC may take the station after the hire (engine gap).
-- Russian captions: the original picks them by the game's locale, which a Meitou mod cannot read, and its texts are its own (engine gap:
-  locale or per-mod translations).
 - The panel shows only in the windows the engine opens for a building (its own machine windows); whether an NPC town's bench opens one is not
   checked.
 - The approach: the original walks to within 3 units of the building's position marker and then hands over to the native operate order (retries

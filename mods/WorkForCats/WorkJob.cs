@@ -37,7 +37,7 @@ internal sealed class WorkJob(WorkSystem system) : IJobSource, ITaskHandler
         if (Continues(world, slot, cold, k, place)) return DecisionCheck.Runs;
 
         // The original's access check before each approach (isFreeSlot): a station whose every slot is held takes no new walk.
-        return system.StationFull(site) ? DecisionCheck.No("every station here is taken") : DecisionCheck.Run;
+        return system.StationFull(site, world.Characters.IdOf(slot)) ? DecisionCheck.No("every station here is taken") : DecisionCheck.Run;
     }
 
     public void Start(World world, int slot, int k)

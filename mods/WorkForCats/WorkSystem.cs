@@ -80,12 +80,12 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
 
     /// <summary>
     /// The workplace of <paramref name="site"/> and why it offers no job; a new hire also needs one of its operator slots free (the AI's
-    /// <c>WorkSlots</c>: the original's employee holds one, so a full station takes nobody).
+    /// <c>WorkSlots</c>: the original's employee holds one, so a full station takes nobody; the employee's own hold, WorkSystem.Slots.cs).
     /// </summary>
-    Lookup Find(World world, string? site)
+    Lookup Find(World world, string? site, CharacterId worker)
     {
         var lookup = _finder.Find(world, site, _rules);
-        if (lookup.Eligible is null || site is null || _ai?.WorkSlots(site) is not { Free: false }) return lookup;
+        if (lookup.Eligible is null || site is null || !StationFull(site, worker)) return lookup;
 
         return lookup with { Refusal = "Every station here is taken." };
     }
@@ -132,7 +132,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
         var table = world.Characters;
         if (!table.TryResolveNext(order.Actor, out int slot) || table.Cold(slot) is not { IsPlayer: true, Medical.Dead: false } cold) return;
 
-        var lookup = Find(world, order.Site);
+        var lookup = Find(world, order.Site, order.Actor);
         if (lookup.Eligible is not { } place)
         {
             world.Post(lookup.Refusal ?? "This building offers no employment.");
@@ -154,6 +154,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
 
         RemoveJob(world, slot, cold);
         _employees.Remove(actor);
+        ReleaseSlot(world, actor);
         DecisionSystem.Request(cold);
         world.Post($"{cold.Name} quit the job.");
     }
@@ -188,11 +189,13 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
             if (JobSite(cold) is not { } site)
             {
                 _employees.Remove(id);
+                ReleaseSlot(world, id);
                 continue;
             }
 
             var employee = EmployeeOf(world, slot, site);
             employee.Name = cold.Name;
+            HoldSlot(world, id, cold, site);
             if (Working(world, slot, cold, employee) is not { } place) continue;
 
             Earn(world, cold, employee, place);
@@ -200,6 +203,7 @@ internal sealed partial class WorkSystem : ITickSystem, IStateHashed, IChooserOw
         }
 
         foreach (var id in _employees.Keys.Where(id => !table.TryResolveNext(id, out _)).ToList()) _employees.Remove(id);
+        ForgetGone(world);
         PublishHunger(working);
     }
 

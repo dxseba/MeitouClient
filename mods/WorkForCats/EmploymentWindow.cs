@@ -100,7 +100,7 @@ internal sealed class EmploymentWindow(ModContext context) : IUiExtension
         if (view.WorkerName is null) return lines;
 
         string rate = view.Rate.ToString("0", CultureInfo.InvariantCulture);
-        lines.Add($"{rate} cats/hour{view.Status}");
+        lines.Add(rate + Captions.Of(Captions.PerHour) + view.Status);
         return lines;
     }
 
@@ -111,7 +111,7 @@ internal sealed class EmploymentWindow(ModContext context) : IUiExtension
         new("workforcats-button", UiNodeKind.Button)
         {
             Placement = new(UiLength.Fill, Line + 4),
-            Text = view.EmployedHere ? "Quit job" : "Get a job",
+            Text = Captions.Of(view.EmployedHere ? Captions.QuitJob : Captions.GetJob),
             Action = view.EmployedHere ? quit : hire,
             Enabled = view.WorkerName is not null && (view.EmployedHere || view.Refusal is null),
             Style = style,

@@ -36,9 +36,4 @@ internal sealed partial class WorkSystem : INeedRateFilter
     /// Publishes the workplace rates of the employees found working in a sweep.
     /// </summary>
     void PublishHunger(Dictionary<CharacterId, float> working) => _workHunger = working.ToFrozenDictionary();
-
-    /// <summary>
-    /// Whether every operator slot of <paramref name="site"/> is held (the AI's <c>WorkSlots</c>; false when the AI does not know it). Serial phases.
-    /// </summary>
-    internal bool StationFull(string site) => _ai?.WorkSlots(site) is { Free: false };
 }

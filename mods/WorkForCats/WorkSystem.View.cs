@@ -22,7 +22,7 @@ internal sealed partial class WorkSystem
 
     void Publish(World world)
     {
-        var lookup = Find(world, world.Player.InspectedBuilding);
+        var lookup = Find(world, world.Player.InspectedBuilding, Worker(world)?.Item1 ?? CharacterId.None);
         _view = lookup.Place is { } place ? ViewOf(world, place, lookup.Refusal) : null;
     }
 
@@ -62,8 +62,8 @@ internal sealed partial class WorkSystem
         var e = _employees.GetValueOrDefault(world.Characters.IdOf(slot));
         int minutes = e is null ? 0 : (int)(e.Hours * 60);
         bool working = e is not null && Working(world, slot, cold, e) is not null;
-        string text = string.Create(CultureInfo.InvariantCulture, $" | {minutes}/60 min");
-        return working ? text : text + " (waiting)";
+        string text = string.Create(CultureInfo.InvariantCulture, $" | {minutes}") + Captions.Of(Captions.OfHour);
+        return working ? text : text + Captions.Of(Captions.Waiting);
     }
 
     /// <summary>

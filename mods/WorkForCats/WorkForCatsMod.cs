@@ -26,6 +26,7 @@ public sealed class WorkForCatsMod : IMod
 
     public void Initialize(ModContext context)
     {
+        Captions.Load(context);
         context.AddSettings(Settings);
         context.AddJobType(JobType, "Paid work");
         context.AddSystem("work", build => Running = new WorkSystem(Settings, context.Population, build.Find<AiSystem>()), SystemAnchor.End);
