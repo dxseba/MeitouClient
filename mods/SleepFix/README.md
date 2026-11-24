@@ -24,7 +24,16 @@ Port of *SleepFix* (workshop 3787375792). Every second, for each living player c
   The plan step *get out of bed once healed* weighs 0 while it lies in bed not healed (*stayInBed*), else x *getUpMult* (1). The filter reads a
   table the slow step publishes every pass (and when the world is ready), so all threads of a tick see the same values. **Verified** (original
   DLL decompiled): those branches and defaults. **Observed** (by reading the engine): it asks a bed goal only when its own bed search found a
-  bed, so the original's "no bed" branch (the multiplied desire) never comes up. **Unknown**: which task types the original's `scoreGoToBed`
-  scores; the two bed goals are taken.
-- **Not ported**: the cfg file (settings page instead), `debug`/`logLimit`, `pauseJobs`/`skipJobs` and the diagnostic probes.
-- **Observed**: not checked in game. Timers count game seconds (the original's count real milliseconds).
+  bed, so the original's "no bed" branch (the multiplied desire) never comes up. **Verified** (KenshiLib's 1.0.68 address of `AI::scoreGoToBed`,
+  0x5A0880, is AI slot 30, the desire of both bed goals in Meitou's task table): it scores exactly `GoHomeAndGoToBed` and
+  `GoHomeAndGoToBedSecure`.
+- **Log** (*Logging* settings; **Verified**, original DLL decompiled: its cfg keys `debug`, `logLimit` (2000), `probeBeds`, `dumpParts` and its
+  per-category line cap with repeat folding): the settings line at start, then with *Debug log* each bed order and each release with its
+  reason, with *Log bed searches* each search's bed, with *Log body parts* the part table of each character sent; each category stops after
+  *Log limit* lines. Into the mod log, not `SleepFix.log`.
+- **Settings**: the Mod settings page, applied at once, in place of the original's `SleepFix.cfg` (re-read a few seconds after saving).
+  **Verified** (decompiled cfg reader): `pauseJobs`, `skipJobs`, `skipSelected`, `forceGoal` are not read from the cfg (only printed in its
+  status), so they are not player settings.
+- **Not ported**: `dumpHex` and `probeOrder` (hex dumps of the game's own order and part structures; there are no such structures here).
+- **Observed**: not checked in game. Timers count game seconds where the original's count real milliseconds (the simulation has no wall clock);
+  the pass runs every 30 ticks, the original every AI update.

@@ -17,7 +17,7 @@ namespace Meitou.SleepFix;
 /// rules pick each character up again from what it is doing. Each pass (and when the world is ready) also publishes what the bed desire filter
 /// (<see cref="BedDesire"/>, registered with the chooser) reads.
 /// </summary>
-sealed class SleepSystem(SleepSettings settings, PopulationData population) : IChooserOwner, IWorldReady
+sealed class SleepSystem(SleepSettings settings, PopulationData population, SleepLog log) : IChooserOwner, IWorldReady
 {
     /// <summary>
     /// Ticks between passes.
@@ -112,8 +112,9 @@ sealed class SleepSystem(SleepSettings settings, PopulationData population) : IC
         bool wounded = BodyRating.Wounded(rating, settings);
         var order = BedOrder(cold);
 
-        if (order is not null && Release(world, cold, watch, rating, seconds, order, hasRepairBed))
+        if (order is not null && Release(world, cold, watch, rating, seconds, order, hasRepairBed) is { } reason)
         {
+            log.Write("release", () => $"{cold.Name}: bed order released ({reason}), rating {rating:0.000}");
             Get(world, slot, id);
             return;
         }
@@ -124,11 +125,11 @@ sealed class SleepSystem(SleepSettings settings, PopulationData population) : IC
     }
 
     /// <summary>
-    /// Whether the bed order <paramref name="order"/> is to be released: to switch a robot due for repair out of a normal bed, after
+    /// Why the bed order <paramref name="order"/> is to be released (null: kept): to switch a robot due for repair out of a normal bed, after
     /// <c>stuckRelease</c> seconds without healing, after <c>bedReachTimeout</c> seconds without lying down, or once healed when it was held while
     /// wounded (<c>clearBedOrder</c>, whoever gave it).
     /// </summary>
-    bool Release(World world, CharacterCold cold, Watch watch, float rating, float seconds, string order, bool hasRepairBed)
+    string? Release(World world, CharacterCold cold, Watch watch, float rating, float seconds, string order, bool hasRepairBed)
     {
         bool wounded = BodyRating.Wounded(rating, settings);
         if (wounded) watch.HeldWounded = true;
@@ -137,13 +138,13 @@ sealed class SleepSystem(SleepSettings settings, PopulationData population) : IC
                 && BodyRating.NeedsRepair(cold.Medical!, cold.Race, settings))
         {
             watch.Switched = true;
-            return true;
+            return "robot due for repair in a normal bed";
         }
 
-        if (wounded && Stuck(watch, rating, seconds)) return true;
-        if (Unreached(cold, watch, seconds, order)) return true;
+        if (wounded && Stuck(watch, rating, seconds)) return "stuckRelease";
+        if (Unreached(cold, watch, seconds, order)) return "bedReachTimeout";
 
-        return !wounded && settings.ClearBedOrder && watch.HeldWounded;
+        return !wounded && settings.ClearBedOrder && watch.HeldWounded ? "healed" : null;
     }
 
     /// <summary>
@@ -230,8 +231,11 @@ sealed class SleepSystem(SleepSettings settings, PopulationData population) : IC
         var bed = BodyRating.NeedsRepair(cold.Medical!, cold.Race, settings)
             ? NearestRepairBed(world, slot, cold, repairBeds)
             : world.Fixtures.FindBed(world, slot, population.Relations, f => PassedOver(world, cold, watch, f));
+        log.Write("beds", () => $"{cold.Name}: bed search found {bed?.Id ?? "no free bed"}");
         if (bed is null) return;
 
+        log.Write("order", () => $"{cold.Name}: bed order to {bed.Id}");
+        log.Write("parts", () => $"{cold.Name}: {BodyRating.Describe(cold.Medical!)}");
         world.GiveOrder(id, TaskType.UseBed, site: bed.Id);
         watch.LastOrder = world.Tick;
         watch.Target = bed.Id;

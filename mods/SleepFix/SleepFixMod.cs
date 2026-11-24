@@ -14,8 +14,9 @@ public sealed class SleepFixMod : IMod
     {
         var settings = new SleepSettings();
         context.AddSettings(settings);
-        context.AddSystem("sleepfix", _ => new SleepSystem(settings, context.Population), SystemAnchor.End);
-        context.Log("SleepFix initialized");
+        var log = new SleepLog(settings, context.Log);
+        context.AddSystem("sleepfix", _ => new SleepSystem(settings, context.Population, log), SystemAnchor.End);
+        context.Log("SleepFix initialized: " + settings.Describe());
     }
 }
 
@@ -130,4 +131,37 @@ public sealed class SleepSettings
     /// </summary>
     [Setting("Get-up multiplier", Hint = "getUpMult: how much a healed character wants to get out of bed.", Min = 0, Max = 10, Step = 0.1)]
     public float GetUpMult { get; set; } = 1;
+
+    /// <summary>
+    /// <c>debug=0</c>: the diagnostic log (the original's SleepFix.log; here the mod log).
+    /// </summary>
+    [Setting("Debug log", Hint = "debug: writes bed orders and releases to the mod log.", SubGroup = "Logging")]
+    public bool Debug { get; set; }
+
+    /// <summary>
+    /// <c>logLimit=2000</c>: lines per log category before it goes quiet.
+    /// </summary>
+    [Setting("Log limit", Hint = "logLimit: lines per category before it goes quiet; raise it when investigating.", Min = 100, Max = 20000,
+        Step = 100, SubGroup = "Logging")]
+    public int LogLimit { get; set; } = 2000;
+
+    /// <summary>
+    /// <c>probeBeds</c> (off here): with <c>debug</c>, each bed search's result.
+    /// </summary>
+    [Setting("Log bed searches", Hint = "probeBeds: with Debug log, the bed each search found.", SubGroup = "Logging")]
+    public bool ProbeBeds { get; set; }
+
+    /// <summary>
+    /// <c>dumpParts</c> (off here): with <c>debug</c>, the body part table of each character sent to bed.
+    /// </summary>
+    [Setting("Log body parts", Hint = "dumpParts: with Debug log, the body part table of each character sent to bed.", SubGroup = "Logging")]
+    public bool DumpParts { get; set; }
+
+    /// <summary>The settings as the original's start-up line lists them.</summary>
+    internal string Describe() => string.Join(" ",
+        FormattableString.Invariant($"autoBedOrder={AutoBedOrder} respectMoveOrder={RespectMoveOrder} bedOrderCooldownMs={BedOrderCooldownMs}"),
+        FormattableString.Invariant($"healThreshold={HealThreshold:0.00} stayInBed={StayInBed} clearBedOrder={ClearBedOrder} skipCombat={SkipCombat}"),
+        FormattableString.Invariant($"forceBed={ForceBed:0.0} bedMult={BedMult:0.00} getUpMult={GetUpMult:0.00} debug={Debug}"),
+        FormattableString.Invariant($"wearThreshold={WearThreshold:0.0} repairRobotHp={RepairRobotHp:0.00} bedReachTimeout={BedReachTimeout}"),
+        FormattableString.Invariant($"waitForTreatment={WaitForTreatment} ownBedsOnly={OwnBedsOnly} logLimit={LogLimit}"));
 }

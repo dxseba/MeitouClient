@@ -114,4 +114,10 @@ static class BodyRating
     /// A robot's part or a fitted limb (<see cref="HealthPart.IsRobotic"/>).
     /// </summary>
     static bool Robotic(HealthPart part, RaceData? race) => race is not null ? part.IsRobotic(race) : part.Limb == LimbState.Replaced;
+
+    /// <summary>
+    /// The part table for the <c>dumpParts</c> log: each part's name, health share, flesh, stun, bandage, wear and maximum.
+    /// </summary>
+    public static string Describe(MedicalState medical) => string.Join("; ", medical.Parts.Select(p => FormattableString.Invariant(
+        $"{p.Template.Name} {p.Fraction:0.000} flesh={p.Flesh:0.0} stun={p.Stun:0.0} bandage={p.Bandage:0.0} wear={p.Wear:0.0} max={p.MaxHp:0.0}")));
 }
