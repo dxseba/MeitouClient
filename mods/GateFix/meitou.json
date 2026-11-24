@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.gatefix",
+  "apiVersion": 2,
+  "assemblies": ["GateFix.dll"],
+  "entry": "Meitou.GateFix.GateFixMod",
+  "gameVersion": ">=0.22.2"
+}
