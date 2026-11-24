@@ -72,15 +72,18 @@ sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose, DodgeLog
         if (!fighter.CanBlock) return new(null, "unarmed-vanilla-controls");
         if (Ineligible(cold, medical) is { } reason) return new(null, reason);
         if (CoolingDown(world, ask.Defender)) return new(null, "dodge-cooldown-block-fallback");
-        if (!table.IsAlive(ask.Attacker) || table.Cold(ask.Attacker.Slot) is not { } attacker) return new(null, "missing-character");
+        if (!table.IsAlive(ask.Attacker) || CombatSystem.AttackSkill(world, ask.Attacker.Slot) is not { } attack)
+        {
+            return new(null, "missing-character");
+        }
 
-        float dodge = EffectiveDodge(cold, fighter, medical);
-        if (WeaponDodgeGuardMod.Settings.Adaptive && !DodgeFirst(world, ask.Defender, cold, fighter, dodge))
+        float dodge = CombatSystem.EffectiveDodge(world, ask.Defender.Slot) ?? 0;
+        if (WeaponDodgeGuardMod.Settings.Adaptive && !DodgeFirst(world, ask.Defender, dodge))
         {
             return new(null, "adaptive-priority-defense-higher", dodge);
         }
 
-        return Roll(world, combat, ask, dodge, Chance(dodge, attacker));
+        return Roll(world, combat, ask, dodge, Chance(dodge, attack));
     }
 
     DodgeDecision Roll(World world, CombatSystem combat, in DefenceChoiceAsk ask, float dodge, float chance)
@@ -96,9 +99,9 @@ sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose, DodgeLog
     /// <summary>
     /// Adaptive priority: the dodge comes first while the effective dodge is at least the effective melee defence.
     /// </summary>
-    bool DodgeFirst(World world, CharacterId who, CharacterCold cold, Fighter fighter, float dodge)
+    bool DodgeFirst(World world, CharacterId who, float dodge)
     {
-        float defence = EffectiveMeleeDefence(cold, fighter);
+        float defence = CombatSystem.MeleeDefence(world, who.Slot) ?? 0;
         log.Priority(world, who, dodge, defence);
         return dodge >= defence;
     }
@@ -146,38 +149,17 @@ sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose, DodgeLog
     }
 
     /// <summary>
-    /// The scaled chance: the vanilla dodge chance against the attacker's skill, held to [0, 100], times Chance scale, held to the minimum and
-    /// maximum.
+    /// The scaled chance: the vanilla dodge chance (the engine's effective dodge, <c>getDodge(true)</c> with the gear's term, against the
+    /// attacker's attack skill with its gear and weapon bonuses, <see cref="CombatSystem.AttackSkill"/>), held to [0, 100], times Chance scale,
+    /// held to the minimum and maximum.
     /// </summary>
-    float Chance(float dodge, CharacterCold attacker)
+    float Chance(float dodge, float attack)
     {
         var settings = WeaponDodgeGuardMod.Settings;
-        float vanilla = Math.Clamp(DefenceFormulas.BlockChance(dodge, AttackSkill(attacker), constants, 0, 95), 0, 100);
+        float vanilla = Math.Clamp(DefenceFormulas.BlockChance(dodge, attack, constants, 0, 95), 0, 100);
         float scaled = settings.ChanceScale * vanilla;
         return scaled < settings.MinimumChance ? settings.MinimumChance : Math.Min(scaled, settings.MaximumChance);
     }
-
-    /// <summary>
-    /// The unarmed dodge's effective defence (the engine's, with the defender's martial arts): the original's <c>getDodge(true)</c>.
-    /// </summary>
-    static float EffectiveDodge(CharacterCold cold, Fighter fighter, MedicalState medical)
-    {
-        float martialArts = Stat(cold, StatsEnumerated.MartialArts);
-        return DefenceFormulas.EffectiveDefence(martialArts, fighter.EncumbranceFactor, Speed.LegFactor(medical), fighter.DefenceBonus,
-            fighter.Guarding);
-    }
-
-    /// <summary>
-    /// The guard's defence: the original's <c>getMeleeDefence(true)</c>.
-    /// </summary>
-    static float EffectiveMeleeDefence(CharacterCold cold, Fighter fighter) =>
-        DefenceFormulas.Defence(cold.Stats?[StatsEnumerated.MeleeDefence] ?? 0, fighter.Weapon!.Stats.DefenceMod, true, fighter.DefenceBonus,
-            fighter.Guarding);
-
-    static float AttackSkill(CharacterCold attacker) => attacker.Fighter is { } f ? Stat(attacker, f.WeaponSkill) : 0;
-
-    static float Stat(CharacterCold c, StatsEnumerated stat) =>
-        c.Stats is { } s && c.Medical is { } m ? s[stat] * s.Scale * m.StatMultiplier(stat) : 0;
 }
 
 /// <summary>

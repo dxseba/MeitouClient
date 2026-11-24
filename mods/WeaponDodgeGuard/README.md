@@ -10,8 +10,10 @@ guards. Deterministic (`Rng.Hash` of the defender's key and the tick). No Harmon
   `RequireNormalProneState`; not in defensive mode unless `AllowInDefensiveMode`; past `DodgeCooldownMs`; with `AdaptivePriority`, effective
   dodge (`getDodge(true)`) not below effective melee defence (`getMeleeDefence(true)`). **Verified** (original DLL (decompiled)).
 - **Chance**: the vanilla dodge chance (`calculateDodgeChance`) held to [0, 100], times `ChanceScale`, held to [`MinimumChance`,
-  `MaximumChance`]; dodge when 100 x a uniform draw is under it, else the guard stands. **Verified** (as above). Meitou: the engine's unarmed dodge
-  chance (`DefenceFormulas.EffectiveDefence` of martial arts, then `BlockChance` 0 to 95) and its effective defence as `getDodge(true)`.
+  `MaximumChance`]; dodge when 100 x a uniform draw is under it, else the guard stands. **Verified** (as above). Meitou: `BlockChance` (0 to
+  95) of the engine's `CombatSystem.EffectiveDodge` (`getDodge(true)`: stored dodge with the gear's dodge term, encumbrance and legs) against
+  `CombatSystem.AttackSkill` (the attacker's melee attack with its gear's and weapon's bonuses); Adaptive priority compares with
+  `CombatSystem.MeleeDefence` (`getMeleeDefence(true)`).
 - **Technique**: VanillaOnly (0) the dodge back; Compatible (1) a draw weighted on `chance` over every standing dodge technique (dodge, not
   stumble or prone) whose skill range holds the effective dodge, not a taunt or battle cry, not in `BlockedAnimations`, in `AllowedAnimations`
   when it has names; else the dodge back; CustomAllowList (2) only the allowed. **Verified** (as above). Names are compared without case or
@@ -35,4 +37,4 @@ guards. Deterministic (`Rng.Hash` of the defender's key and the tick). No Harmon
 
 ## Missing
 
-- Gear bonuses on the attacker's skill and the defender's dodge (the engine's are internal; engine gap).
+- Nothing beyond the differences above (the cooldown on game time, the engine's XP).
