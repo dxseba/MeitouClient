@@ -10,8 +10,8 @@ namespace Meitou.ElementalEnchantment;
 /// main element, its held blade gives off that element's blade system and, once the secondary counts (level 50), the secondary's too
 /// (<see cref="ModContext.KeepEffect"/> on <see cref="EffectAnchor.Weapon"/>, sized by level); fighting unarmed, both hands give off the hand
 /// systems instead (<see cref="EffectAnchor.Bone"/> on <c>Bip01 R Hand</c> and <c>Bip01 L Hand</c>). The size by level is the original's 0.8 to
-/// 1.15, times 1.3 for 0.18 s after the character lands a hit. From level 20, with *Weapon trails* on, an armed character in combat leaves the
-/// original's trail (<c>EE_Trail</c>) along its blade (<see cref="ModContext.KeepTrail"/>). Without the original mod's particles, base-game
+/// 1.15, times 1.3 for 0.18 s after the character lands a hit. From level 20, with *Weapon trails* on, an armed character swinging leaves the
+/// original's trail (<c>EE_Trail</c>) from a point on its blade (<see cref="ModContext.KeepTrail"/>). Without the original mod's particles, base-game
 /// stand-ins in the element's colour. Players and the enchanted bosses alike; run once a frame (<see cref="ModContext.AddFrame"/>), renewed once a
 /// second or when a flare starts or ends. The <c>Blade tint</c> setting also tints the blade (<see cref="ModContext.Glow"/>).
 /// </summary>
@@ -20,7 +20,7 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings)
     /// <summary>
     /// How long each renewal lasts (game seconds, so it holds at the highest game speed); renewed every <see cref="RenewSeconds"/> of real time.
     /// </summary>
-    const float GlowSeconds = 10f, RenewSeconds = 1f, TrailKeepSeconds = 3f;
+    const float GlowSeconds = 10f, RenewSeconds = 1f, TrailKeepSeconds = 0.2f;
 
     /// <summary>
     /// The original's hit flare: the size times 1.3 for 0.18 s (real time) after a landed hit.
@@ -28,10 +28,12 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings)
     const float FlareSize = 1.3f, FlareSeconds = 0.18f;
 
     /// <summary>
-    /// The original's trail: from level 20, its places fade over 0.47 s (alpha 0.28 losing 0.59 a second), along the blade to the tip.
+    /// The original's trail: from level 20, its places fade over 0.47 s (alpha 0.28 losing 0.59 a second); one camera-facing ribbon point on
+    /// the blade at (L x 0.12 + L x 0.98) / 2 - 5 along it from the weapon's origin (L the weapon's length), here (0.12 + 0.98) / 2 of the
+    /// weapon's 8.5 units (the - 5 needs the length in world units, <b>Unknown</b> here).
     /// </summary>
     const int TrailLevel = 20;
-    const float TrailSeconds = 0.47f, TrailAlpha = 0.28f, BladeSpan = 8.5f;
+    const float TrailSeconds = 0.47f, TrailAlpha = 0.28f, TrailPoint = 8.5f * (0.12f + 0.98f) / 2;
 
     /// <summary>The base game's stand-ins: a small fire, the parry sparks, a small smoke (ice), light dust (wind and water).</summary>
     const string Flame = "kenshi_fire1_small", Sparks = "kenshi_sparks", Smoke = "kenshi_smoke3_small", Dust = "kenshi_light_dust_particles1";
@@ -155,36 +157,40 @@ sealed class WeaponAura(ModContext context, EnchantSettings settings)
     }
 
     /// <summary>
-    /// The original's weapon trail on every armed enchanted character of level 20 or more that is in combat, while the setting is on: a band along
-    /// the blade to its tip in the main element's colour, fading out behind; stopped otherwise.
+    /// The original's weapon trail on every armed enchanted character of level 20 or more while it swings (<see cref="CharacterSnapshot.Attacking"/>,
+    /// the original's "while attacking"), while the setting is on: a ribbon from one point on the blade in the main element's colour, fading out
+    /// behind; stopped otherwise.
     /// </summary>
     void Trails(WorldSnapshot snapshot, IReadOnlyDictionary<CharacterId, EnchantView>? view)
     {
         var trailing = new HashSet<CharacterId>();
         if (settings.Enabled && settings.Trails && view is not null)
         {
-            var fighting = snapshot.Characters.Where(c => c.InCombat).Select(c => c.Id).ToHashSet();
+            var fighting = snapshot.Characters.Where(c => c.Attacking).Select(c => c.Id).ToHashSet();
             foreach (var (id, shown) in view)
             {
                 if (!shown.Able || shown.Main == Element.None || shown.Unarmed || shown.Level < TrailLevel || !fighting.Contains(id)) continue;
-                if (context.KeepTrail(EffectAnchor.Weapon(id), TrailOf(shown.Main), TrailKeepSeconds)) trailing.Add(id);
+                if (context.KeepTrail(TrailAnchor(id), TrailOf(shown.Main), TrailKeepSeconds)) trailing.Add(id);
             }
         }
 
-        foreach (var id in _trailing.Except(trailing).ToArray()) context.StopTrail(EffectAnchor.Weapon(id));
+        foreach (var id in _trailing.Except(trailing).ToArray()) context.StopTrail(TrailAnchor(id));
         _trailing.Clear();
         _trailing.UnionWith(trailing);
     }
 
+    static EffectAnchor TrailAnchor(CharacterId id) => EffectAnchor.Weapon(id, new(0, TrailPoint, 0));
+
     /// <summary>
-    /// The trail's look for an element: the original's material and colour, its alpha and fade.
+    /// The trail's look for an element: the original's material and colour, its alpha and fade; a camera-facing ribbon (the width is the
+    /// engine's default, the original's <b>Unknown</b>).
     /// </summary>
     static TrailStyle TrailOf(Element element)
     {
         var colour = new Vector4(TrailColour(element), TrailAlpha);
         return new TrailStyle
         {
-            Span = BladeSpan, Seconds = TrailSeconds, Colour = colour, EndColour = colour with { W = 0 }, Material = "EE_Trail",
+            Seconds = TrailSeconds, Colour = colour, EndColour = colour with { W = 0 }, Material = "EE_Trail",
         };
     }
 

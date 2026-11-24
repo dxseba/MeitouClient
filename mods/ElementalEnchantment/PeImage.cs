@@ -100,6 +100,52 @@ sealed class PeImage
     /// </summary>
     public byte ByteAt(ulong va) => _bytes[Offset(va, 1)];
 
+    /// <summary>
+    /// The strict UTF-8 C string at virtual address <paramref name="va"/> (at most <paramref name="max"/> bytes, no control character but a line
+    /// break); null when there is none or it is not valid text.
+    /// </summary>
+    public string? Utf8At(ulong va, int max)
+    {
+        if (TryOffset(va, 1) is not { } start) return null;
+
+        int end = Array.IndexOf(_bytes, (byte)0, start, Math.Min(max + 1, _bytes.Length - start));
+        if (end < 0) return null;
+
+        var text = _bytes.AsSpan(start, end - start);
+        foreach (byte b in text)
+        {
+            if (b < 0x20 && b != (byte)'\n') return null;
+        }
+
+        try
+        {
+            return Strict.GetString(text);
+        }
+        catch (DecoderFallbackException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The virtual address of every 8-byte-aligned 64-bit value in the data (not code) sections for which <paramref name="match"/> holds.
+    /// </summary>
+    public List<ulong> FindDataPointers(Func<ulong, bool> match)
+    {
+        var found = new List<ulong>();
+        foreach (var s in _sections.Where(s => (s.Flags & CodeFlag) == 0))
+        {
+            for (uint i = 0; i + 8 <= s.RawSize; i += 8)
+            {
+                if (match(UInt64((int)(s.RawOffset + i)))) found.Add(ImageBase + s.Rva + i);
+            }
+        }
+
+        return found;
+    }
+
+    static readonly UTF8Encoding Strict = new(false, true);
+
     void ReadSections(int pe, int optional)
     {
         int count = UInt16(pe + 6);

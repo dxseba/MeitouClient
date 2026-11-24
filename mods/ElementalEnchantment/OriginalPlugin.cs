@@ -16,9 +16,14 @@ static class OriginalPlugin
     /// <summary>
     /// The plugin's path; null when the original is not installed.
     /// </summary>
-    public static string? Find(ModContext context)
+    public static string? Find(ModContext context) => Find(context.Folder, context.Log);
+
+    /// <summary>
+    /// The plugin's path for the mod in <paramref name="ownFolder"/>; null when the original is not installed.
+    /// </summary>
+    public static string? Find(string ownFolder, Action<string> log)
     {
-        foreach (string folder in Folders(context))
+        foreach (string folder in Folders(ownFolder, log))
         {
             string path = Path.Combine(folder, PluginPath);
             if (File.Exists(path)) return path;
@@ -27,20 +32,20 @@ static class OriginalPlugin
         return null;
     }
 
-    static IEnumerable<string> Folders(ModContext context)
+    static IEnumerable<string> Folders(string ownFolder, Action<string> log)
     {
-        if (Path.GetDirectoryName(Path.GetFullPath(context.Folder)) is { } parent) yield return Path.Combine(parent, OriginalItem);
+        if (Path.GetDirectoryName(Path.GetFullPath(ownFolder)) is { } parent) yield return Path.Combine(parent, OriginalItem);
 
-        if (Installed(context) is { } found) yield return found;
+        if (Installed(ownFolder, log) is { } found) yield return found;
     }
 
-    static string? Installed(ModContext context)
+    static string? Installed(string ownFolder, Action<string> log)
     {
         try
         {
             if (GameInstall.Locate() is not { } install) return null;
 
-            string own = Path.GetFullPath(context.Folder);
+            string own = Path.GetFullPath(ownFolder);
             bool IsOriginal(ModInfo m) =>
                 m.Name == OriginalName && !m.HasCode && !string.Equals(Path.GetFullPath(m.Folder), own, StringComparison.OrdinalIgnoreCase);
 
@@ -48,7 +53,7 @@ static class OriginalPlugin
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            context.Log($"mod folders not read: {e.Message}");
+            log($"mod folders not read: {e.Message}");
             return null;
         }
     }

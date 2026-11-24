@@ -60,8 +60,9 @@ particles load when that mod is enabled beside this one.
   (`EffectAnchor.Weapon(...).Sized`), and every size is 1.3x for 0.18 s after the character lands a hit (renewed in place). A bolt an
   enchanted character shoots carries its main element's `EE_Bolt_<Element>` (Fire `SB_Prototype_HandFire`), and the secondary's once it
   counts, until it lands
-  (`AddProjectileFeed`, `EffectAnchor.Projectile`). From level 20, with *Weapon trails*, an armed character in combat leaves a trail along its
-  blade (`KeepTrail`, material `EE_Trail`, the original's element colour at alpha 0.28 fading out over 0.47 s). From level 40, with *Impact effects*, hits burst the main's and the secondary's `EE_Impact_<Element>` on the victim for
+  (`AddProjectileFeed`, `EffectAnchor.Projectile`). From level 20, with *Weapon trails*, an armed character leaves a trail while it swings
+  (`CharacterSnapshot.Attacking`): a camera-facing ribbon from one point on its blade (`KeepTrail` on `EffectAnchor.Weapon(id, offset)`,
+  material `EE_Trail`, the original's element colour at alpha 0.28 fading out over 0.47 s). From level 40, with *Impact effects*, hits burst the main's and the secondary's `EE_Impact_<Element>` on the victim for
   1 s; a ward's wearer shows `EE_AuraPreview` (Fire) / `EE_DeviceStorm` (Lightning) / `EE_Device<Element>` at its pelvis on its hits
   (*Device combat effects*). Without the original's particles, base-game stand-ins in the element's colour (`kenshi_fire1_small`,
   `kenshi_sparks`, `kenshi_smoke3_small`, `kenshi_light_dust_particles1`; impacts `small- fire2_torch`, `small- sparks1`,
@@ -73,10 +74,25 @@ particles load when that mod is enabled beside this one.
   `UIScale` 1).
 - **Verified** (decompiled DLL): the reload and bolt factors and their 1..2 window; the trail's material, colours, alpha 0.28 and fade 0.59 a
   second, level 20 and "while attacking".
-- **Differences**: the trail is a band over the whole blade where the original's is one camera-facing ribbon point on the blade (the weapon
-  anchor takes no offset; its width is **Unknown**), and it shows while the character is in combat (the snapshot has no attack state); the
-  stats window button sits just below the window (the original's place is **Unknown**).
-- **Missing** (engine): the original's translations (the plugin's texts in nine languages and the localisation patch's `.eepatch` files;
-  Meitou has no per-mod translation API).
+- **Trail point** (**Verified**, decompile FUN_18000c350): the ribbon's one node sits along the weapon's +Y at (L s + 0.98 L) / 2 - 5 from
+  its origin, L the weapon's length, s 0.12 or 0.45 by a per-slot flag. Port: (0.12 + 0.98) / 2 of the weapon (8.5 units = its length,
+  so about 4.7); **Unknown**: the flag's meaning (0.12 taken), the - 5 (needs the length in world units) and the ribbon's width (the
+  engine's default 2).
+- **Translations** (read at start from the installed original; nothing shipped):
+  - The plugin's interface texts (**Observed**, the bytes of the Workshop build and the decompile's lookups FUN_180010720/FUN_180010740):
+    tables of rows, one row a language (a pointer to its locale code, then one pointer per text, English first; en_GB, ja_JP, ko_KR,
+    zh_CN, es_ES, pt_BR, de_DE, ru_RU, fr_FR). The reader (`PluginTexts`) finds every pointer to `en_GB` in the data sections, takes the
+    row width from the next locale-code pointer and accepts a table only with distinct locale codes and valid UTF-8 texts. A scratch
+    program against the installed DLL found three tables (window texts, two settings groups: 54 texts in Russian, Chinese and German).
+    The game language's texts are written at each start as a gettext catalogue in the user's temporary folder (`Meitou/<mod id>`) and
+    added with `AddTranslations`, so the window, the menu row, the panel line and the settings whose English is the plugin's show in that
+    language. The port's window uses the plugin's English words (MAIN, SUB, effect labels) so they match.
+  - The localisation patch (**Verified**, decompile of `ElementalLocalizationPatchTest.dll`): after the game loads
+    `Elemental Enchantment.mod` it loads `plugin/raid-language/<game locale>.eepatch` (an FCS data file, v16; **Observed** read by
+    `FcsReader`: 69 records each in 8 languages, 31 in en_GB) as one more data file. Port: the data phase (`IModDataPhase`) applies that
+    file's records after the loaded data when `Elemental Enchantment.mod` is loaded (the original right after it).
+- **Differences**: the stats window button sits just below the window (the original's place is **Unknown**). The three plugin texts kept
+  in a table without locale codes (the recruit chance setting, its hint, "No elemental ability") stay English: that table's language
+  order lives only in its lookup code.
 - **Unknown**: whether the bolt's secondary system needs the secondary to count (level 50, as the port takes it) or only to be set;
   everything in play (window, bonuses, bosses, wards, effects) until tested in game.

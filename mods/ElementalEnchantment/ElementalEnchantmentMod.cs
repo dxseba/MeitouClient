@@ -11,14 +11,18 @@ namespace Meitou.ElementalEnchantment;
 /// by its aptitude, and show on its blade or hands and on its hits. Bosses (from the installed original's plugin, or bosses.json) fight enchanted; a worn ward protects and,
 /// with two different elements, resonates.
 /// </summary>
-public sealed class ElementalEnchantmentMod : IMod
+public sealed class ElementalEnchantmentMod : IMod, IModDataPhase
 {
     internal static readonly EnchantSettings Settings = new();
 
     internal static volatile ElementSystem? Running;
 
+    /// <summary>The original's localisation patch for the game's language (<see cref="Translations.Patch"/>).</summary>
+    public void EditData(ModDataContext context) => Translations.Patch(context);
+
     public void Initialize(ModContext context)
     {
+        Translations.Add(context);
         context.AddSettings(Settings);
         var skill = context.AddSkill(Skill());
         context.AddSystem("elements", _ => Running = new ElementSystem(Settings, skill), SystemAnchor.End);
@@ -119,7 +123,7 @@ sealed class ElementMenu(EnchantWindow window) : IUiExtension
         if (!ElementalEnchantmentMod.Settings.Enabled || !target.IsPlayer || target.Body is not { Dead: false }) return [];
         if (ElementalEnchantmentMod.Running?.View.TryGetValue(target.Id, out var view) != true) return [];
 
-        return [new UiMenuVerb($"Enchantment ({Caption(view!)})", () => window.Open(target.Id))];
+        return [new UiMenuVerb($"{Translations.T("Enchantment")} ({Caption(view!)})", () => window.Open(target.Id))];
     }
 
     /// <summary>
@@ -130,9 +134,11 @@ sealed class ElementMenu(EnchantWindow window) : IUiExtension
         if (!ElementalEnchantmentMod.Settings.Enabled || !context.Character.IsPlayer) return [];
         if (ElementalEnchantmentMod.Running?.View.TryGetValue(context.Id, out var view) != true) return [];
 
-        return [new UiCharacterLine("ENCHANTMENT", Caption(view!), Press: () => window.Open(context.Id))];
+        return [new UiCharacterLine(Translations.T("ENCHANTMENT"), Caption(view!), Press: () => window.Open(context.Id))];
     }
 
     static string Caption(EnchantView view) =>
-        !view.Able ? "No elemental ability" : view.Main == Element.None ? $"none ({view.Level})" : $"{view.Main} {view.Level}";
+        !view.Able ? Translations.T("No elemental ability")
+        : view.Main == Element.None ? $"{Translations.T("None")} ({view.Level})"
+        : $"{Translations.T(view.Main.ToString())} {view.Level}";
 }

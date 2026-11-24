@@ -132,9 +132,9 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
         }
 
         y = Progress(window, view, y, s);
-        y = Elementals(window, "Main", view.Main, view.Level >= 0, _main, y, s, "main");
+        y = Elementals(window, "MAIN", view.Main, view.Level >= 0, _main, y, s, "main");
         bool open = view.Level >= Elements.SecondaryLevel;
-        y = Elementals(window, "Secondary", view.Second, open, _second, y, s, "second");
+        y = Elementals(window, "SUB", view.Second, open, _second, y, s, "second");
         y = Aptitudes(window, view, y, s);
         Effects(window, view, y, s);
     }
@@ -146,11 +146,11 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
     {
         bool max = view.Level >= Elements.MaxLevel;
         string title = max ? "ELEMENTAL MASTER" : "ELEMENTAL";
-        window.Children.Add(Text("ee-level", $"{title}  {view.Level}", 10, y, 200, Row, s, _text));
+        window.Children.Add(Text("ee-level", $"{T(title)}  {view.Level}", 10, y, 200, Row, s, _text));
 
         int from = Elements.XpFor(view.Level), to = Elements.XpFor(view.Level + 1);
         float part = max ? 1 : Math.Clamp((view.Xp - from) / (float)Math.Max(1, to - from), 0, 1);
-        string label = max ? "MAX LEVEL" : $"Next Level  {view.Xp - from} / {to - from}";
+        string label = max ? "MAX LEVEL" : $"{T("Next Level")}  {view.Xp - from} / {to - from}";
         window.Children.Add(Panel("ee-bar", 210, y + 4, 250, Row - 8, s, _bar));
         window.Children.Add(Panel("ee-fill", 210, y + 4, 250 * part, Row - 8, s, _barFill));
         window.Children.Add(Text("ee-next", label, 210, y, 250, Row, s, _dim));
@@ -187,8 +187,8 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
     float Aptitudes(UiNode window, EnchantView view, float y, float s)
     {
         var profile = new Profile { Favoured = view.Favoured, Rare = view.Rare };
-        var parts = Elements.All.Select(e => $"{e} {(settings.FlatAptitude ? 100 : profile.Aptitude(e))}%");
-        window.Children.Add(Text("ee-aptitude", "Aptitude: " + string.Join("  ", parts), 10, y, Width - 20, Row, s, _dim));
+        var parts = Elements.All.Select(e => $"{T(e.ToString())} {(settings.FlatAptitude ? 100 : profile.Aptitude(e))}%");
+        window.Children.Add(Text("ee-aptitude", T("Aptitude") + ": " + string.Join("  ", parts), 10, y, Width - 20, Row, s, _dim));
         return y + Row + Gap;
     }
 
@@ -234,7 +234,7 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
             float w = e.Weight(element);
             if (w <= 0) continue;
 
-            foreach (var line in Lines(element, e.Level, m * w)) yield return $"{element}: {line}";
+            foreach (var line in Lines(element, e.Level, m * w)) yield return $"{T(element.ToString())}: {line}";
         }
     }
 
@@ -246,21 +246,21 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
         switch (element)
         {
             case Element.Fire:
-                yield return $"Blunt damage +{Pct(Elements.Percent(level) * w)} (percent of base damage)";
+                yield return $"{T("Blunt damage")} +{Pct(Elements.Percent(level) * w)} ({OfBase()})";
                 break;
             case Element.Lightning:
-                yield return $"Armour penetration +{Pct(Elements.Percent(level) * w)}";
-                yield return $"Attack / bolt speed +{Pct(Elements.LightningSpeed(level) * w)}";
+                yield return $"{T("Armour penetration")} +{Pct(Elements.Percent(level) * w)}";
+                yield return $"{T("Attack / bolt speed")} +{Pct(Elements.LightningSpeed(level) * w)}";
                 break;
             case Element.Wind:
-                yield return $"Attack / block speed +{Pct(Elements.Minor(level) * w)}";
+                yield return $"{T("Attack / block speed")} +{Pct(Elements.Minor(level) * w)}";
                 break;
             case Element.Water:
-                yield return $"Cutting damage +{Pct(Elements.Percent(level) * w)} (percent of base damage)";
+                yield return $"{T("Cutting damage")} +{Pct(Elements.Percent(level) * w)} ({OfBase()})";
                 break;
             case Element.Ice:
-                yield return $"Cutting damage +{Pct(Elements.Minor(level) * w)} (percent of base damage)";
-                yield return $"Bleed multiplier +{(Elements.IceBleed(level) * w).ToString("0.00", CultureInfo.InvariantCulture)}";
+                yield return $"{T("Cutting damage")} +{Pct(Elements.Minor(level) * w)} ({OfBase()})";
+                yield return $"{T("Bleed multiplier")} +{(Elements.IceBleed(level) * w).ToString("0.00", CultureInfo.InvariantCulture)}";
                 break;
         }
     }
@@ -274,6 +274,11 @@ sealed class EnchantWindow(ModContext context, EnchantSettings settings) : IUiEx
 
         return view.Enchant.Resonant ? "3-Element Resonance" : "Resonance: use different elements in all three slots";
     }
+
+    /// <summary>The plugin's "Percent of base damage." note, without its full stop, for a parenthesis.</summary>
+    static string OfBase() => T("Percent of base damage.").TrimEnd('.', '。');
+
+    static string T(string english) => Translations.T(english);
 
     static string Pct(float value) => (value * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%";
 
