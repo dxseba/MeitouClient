@@ -195,6 +195,7 @@ public sealed class SoundHandle
             stopper = _stopper;
             _stopper = null;
         }
+
         stopper?.Invoke(fadeSeconds);
     }
 

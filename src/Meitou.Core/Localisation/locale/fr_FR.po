@@ -5701,3 +5701,62 @@ msgstr "Généré lors de la détection du matériel."
 #. machine-translated
 msgid "Generated for this computer so the site keeps your results together."
 msgstr "Généré pour cet ordinateur afin que le site regroupe vos résultats."
+
+#. machine-translated
+msgid "Benchmark settings"
+msgstr "Paramètres du benchmark"
+
+#. machine-translated
+msgid "Benchmarks always use fixed settings so results stay comparable:"
+msgstr "Les benchmarks utilisent toujours des paramètres fixes afin que les résultats restent comparables :"
+
+#. machine-translated
+msgid "• Windowed 1920×1080, Vulkan, VSync & frame limit off, HDR off"
+msgstr "• Fenêtré 1920×1080, Vulkan, VSync et limite de FPS désactivés, HDR désactivé"
+
+#. machine-translated
+msgid "• Chosen quality tier (Meitou look), TAA at 100% scale (Low: no AA at 83%), no upscaler"
+msgstr "• Niveau de qualité choisi (style Meitou), TAA à 100 % (Bas : sans AA à 83 %), sans upscaler"
+
+#. machine-translated
+msgid "• Ray tracing only on Ultra and Extreme"
+msgstr "• Ray tracing uniquement en Ultra et Extrême"
+
+#. machine-translated
+msgid "• Your saved graphics settings and mods are ignored and never modified"
+msgstr "• Vos paramètres graphiques enregistrés et vos mods sont ignorés et jamais modifiés"
+
+msgid "Settings window opacity"
+msgstr "Opacité de la fenêtre des paramètres"
+
+msgid "How opaque the in-game settings window is (lower to see the world behind it while adjusting settings)."
+msgstr "Opacité de la fenêtre des paramètres en jeu (baissez-la pour voir le monde derrière pendant vos réglages)."
+
+msgid "No mod matches the filter."
+msgstr "Aucun mod ne correspond au filtre."
+
+msgid "Issues"
+msgstr "Problèmes"
+
+msgid "Name A-Z"
+msgstr "Nom A-Z"
+
+msgid "Filter mods"
+msgstr "Filtrer les mods"
+
+msgid "Show"
+msgstr "Afficher"
+
+msgid "Opacity"
+msgstr "Opacité"
+
+msgid "Restore"
+msgstr "Restaurer"
+
+msgid "{1} of {2}"
+msgstr "{1} sur {2}"
+
+msgid "{1} mod"
+msgid_plural "{1} mods"
+msgstr[0] "{1} mod"
+msgstr[1] "{1} mods"

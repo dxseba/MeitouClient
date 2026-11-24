@@ -1769,10 +1769,36 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
     readonly Dictionary<TownBuilding, int> _workTaken = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
+    /// The operator slots the code mods hold for their workers (<see cref="HoldWorkSlot"/>); made on first use, null while no mod held one.
+    /// </summary>
+    ModWorkHolds? _modWork;
+
+    /// <summary>
+    /// The mods' held slots, made on first use over the AI's own taken count.
+    /// </summary>
+    ModWorkHolds ModWork => _modWork ??= new(_townPlaces, _workTaken, b => HasFreeSlot(b));
+
+    /// <summary>
+    /// Holds an operator slot of workplace <paramref name="building"/> (<see cref="TownBuilding.Key"/>, as <see cref="WorkSlots"/>) for the mod's
+    /// worker <paramref name="worker"/>: counted in <see cref="WorkplaceSlots.Held"/> at once and in every package cadence pass after, so the AI's
+    /// workers do not take it (the original's hired operator holds the machine's slot). One hold a worker: holding another building moves it; the
+    /// same one again changes nothing. False, holding nothing new, for a worker not alive, a building that is no workplace the AI looked at, or
+    /// one with no free slot. Released by <see cref="ReleaseWorkSlot"/> or when the worker leaves the world or dies. Not saved: a mod holds again
+    /// after a load (<c>IWorldReady</c>). Serial phases only (throws in a parallel one).
+    /// </summary>
+    public bool HoldWorkSlot(World world, string building, CharacterId worker) => ModWork.Hold(world, building, worker);
+
+    /// <summary>
+    /// Lets go of the slot <see cref="HoldWorkSlot"/> holds for <paramref name="worker"/>; false when it holds none. Serial phases only.
+    /// </summary>
+    public bool ReleaseWorkSlot(World world, CharacterId worker) => ModWork.Release(world, worker);
+
+    /// <summary>
     /// The operator slots of workplace <paramref name="building"/> (docs/modding.md "Workplace slots"): its <see cref="TownBuilding.Key"/> (a town
     /// building's <c>x.y:instance</c>, a player-built one's site id). <see cref="WorkplaceSlots.Held"/> counts the AI workers holding it, the
-    /// player's operators on a job at an outpost machine and the mods' workers (<see cref="HoldWorkSlot"/>), as of the last package cadence pass; null for a building that is no workplace of a town
-    /// or outpost the AI looked at then. Read only, in the serial phases (the pass changes it in the serial step).
+    /// player's operators on a job at an outpost machine and the mods' workers (<see cref="HoldWorkSlot"/>), as of the last package cadence pass;
+    /// null for a building that is no workplace of a town or outpost the AI looked at then. Read only, in the serial phases (the pass changes it in
+    /// the serial step).
     /// </summary>
     public WorkplaceSlots? WorkSlots(string building)
     {
@@ -1848,10 +1874,11 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
         TownBuilding? held = null)
     {
         if (!WorkAllowed(world, self.Slot, town)) return null;
-        if (AssignedWorkOf(world, self) is { } assigned) return HasFreeSlot(assigned, held) && WorksAt(world, assigned, type) ? assigned : null;
+        if (AssignedWorkOf(world, self) is { } assigned)
+            return HasFreeSlot(assigned, held) && WorksAt(world, assigned, type) ? assigned : null;
 
         var list = WorkplacesFor(town, type);
-        if (world.JobScoreFilters.Active) return PickScoredWork(world, self, list, epoch, type, held);
+        if (world.JobScoreFilters.Active) return ScoredWork.Pick(this, world, self, list, epoch, type, held);
 
         int free = 0;
         foreach (var b in list) if (HasFreeSlot(b, held)) free++;
@@ -1863,6 +1890,25 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
     }
 
     /// <summary>
+    /// The work building assigned to the squad of <paramref name="self"/> (<see cref="Squad.AssignedWork"/>, docs/modding.md "Job choice") as a
+    /// workplace the AI looked at; null without one. Any thread (reads only).
+    /// </summary>
+    TownBuilding? AssignedWorkOf(World world, CharacterId self) =>
+        world.Characters.Cold(self.Slot) is { SquadId: >= 0 } cold ? AssignedWorkOf(world.Squads.Find(cold.SquadId)) : null;
+
+    /// <summary>
+    /// <see cref="AssignedWorkOf(World, CharacterId)"/> of <paramref name="squad"/>.
+    /// </summary>
+    TownBuilding? AssignedWorkOf(Squad? squad) => squad?.AssignedWork is { } key ? _townPlaces.FindWorkplace(key) : null;
+
+    /// <summary>
+    /// Whether a worker on <paramref name="type"/> may work at <paramref name="building"/>: 189 only where it can really work
+    /// (<see cref="RealWork"/>), 190 anywhere.
+    /// </summary>
+    static bool WorksAt(World world, TownBuilding building, TaskType type) =>
+        type != TaskType.AutoLabouringMines || RealWork(world, building);
+
+    /// <summary>
     /// Whether a mind holds a workplace that is still one its goal <paramref name="type"/> may work at.
     /// </summary>
     bool HoldsWork(AiMind mind, CampaignTown town, TaskType type) => mind.WorkPost is { } post
@@ -1872,7 +1918,7 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
     /// Whether a workplace has an operator slot no one holds in this cadence pass (73 <c>machineHasFreeOperatorSlot</c>; the finder's
     /// <c>couldIOperate</c>, docs/game/ai-tasks.md "Worker"): fewer holders than its functionality's <c>max operators</c>.
     /// </summary>
-    bool HasFreeSlot(TownBuilding building, TownBuilding? held = null) =>
+    internal bool HasFreeSlot(TownBuilding building, TownBuilding? held = null) =>
         _workTaken.GetValueOrDefault(building) - (ReferenceEquals(building, held) ? 1 : 0) < _work.MaxOperatorsOf(building);
 
     /// <summary>
@@ -1922,7 +1968,7 @@ public sealed partial class AiSystem(PopulationData data, AiSettings? settings =
             }
         }
 
-        ReserveModWork(world);
+        _modWork?.Reserve(world);
     }
 
     /// <summary>

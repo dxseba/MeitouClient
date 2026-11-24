@@ -206,9 +206,9 @@ public sealed class Squad
     /// </summary>
     public string? AssignedHome { get; set; }
     /// <summary>
-    /// The work building an autonomous squad was given (<see cref="Ai.SetSquadWork"/>): a workplace's <see cref="Meitou.Data.World.TownBuilding.Key"/>
-    /// (a town building's or an outpost machine's site id); its workers (189 / 190) work there, wherever its home is. Null: none. Saved, hashed
-    /// while set.
+    /// The work building an autonomous squad was given (<see cref="Ai.SetSquadWork"/>): a workplace's
+    /// <see cref="Meitou.Data.World.TownBuilding.Key"/> (a town building's or an outpost machine's site id); its workers (189 / 190) work there,
+    /// wherever its home is. Null: none. Saved, hashed while set.
     /// </summary>
     public string? AssignedWork { get; set; }
     /// <summary>

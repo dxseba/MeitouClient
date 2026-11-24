@@ -230,8 +230,7 @@ sealed class JobModButtons(PlayerInterface player)
 
     /// <summary>
     /// A press of button <paramref name="argument"/> (its index): runs it with the click sound (none for a silent one) while the jobs list still
-    /// shows the character it was
-    /// laid out for.
+    /// shows the character it was laid out for.
     /// </summary>
     internal void Press(string argument)
     {

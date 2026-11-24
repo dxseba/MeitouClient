@@ -61,8 +61,7 @@ sealed class CharacterModLines(PlayerInterface player)
 
     /// <summary>
     /// Line <paramref name="k"/>'s controls in <paramref name="row"/>: a divider's rule, or its icon, then one button across it, or its label and
-    /// then its value as a
-    /// button, over a bar or as text in the value column; the line style's colours over the panel's.
+    /// then its value as a button, over a bar or as text in the value column; the line style's colours over the panel's.
     /// </summary>
     void AddLine(List<UiControl> controls, int k, UiRect row, float valuePixels, UiRect? clip)
     {

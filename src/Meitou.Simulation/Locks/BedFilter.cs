@@ -61,7 +61,8 @@ sealed class BedFilters
         var sleeper = world.Characters.IdOf(slot);
         for (int i = 0; i < _hooks.Count; i++)
         {
-            if (_hooks.Asked(i, tick)) allowed = Ask(world, i, new BedAsk(tick, sleeper, bed.Id, bed.Building, bed.Owner, allowed));
+            if (_hooks.Asked(i, tick))
+                allowed = Ask(world, i, new BedAsk(tick, sleeper, bed.Id, bed.Building, bed.Owner, allowed));
         }
 
         return allowed;

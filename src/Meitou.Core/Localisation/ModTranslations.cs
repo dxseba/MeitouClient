@@ -4,8 +4,8 @@ namespace Meitou.Localisation;
 
 /// <summary>
 /// A code mod's own gettext catalogues for the game's language (docs/modding.md "Translations"): each read from
-/// <c>&lt;folder&gt;/locale/&lt;language&gt;/LC_MESSAGES/&lt;domain&gt;.mo</c> (else <c>.po</c>), looked up in the order they were added. Lookups by the
-/// English source text, as the game's own catalogue is. Added to while the mod initializes; read on any thread after.
+/// <c>&lt;folder&gt;/locale/&lt;language&gt;/LC_MESSAGES/&lt;domain&gt;.mo</c> (else <c>.po</c>), looked up in the order they were added. Lookups by
+/// the English source text, as the game's own catalogue is. Added to while the mod initializes; read on any thread after.
 /// </summary>
 public sealed class ModTranslations
 {
@@ -46,14 +46,6 @@ public sealed class ModTranslations
         _catalogs = [.. _catalogs, catalog];
         return true;
     }
-
-    /// <summary>
-    /// Whether the locale code <paramref name="language"/> stands for <paramref name="gameLanguage"/>: the same code, else the same language part,
-    /// case ignored.
-    /// </summary>
-    static bool SameLanguage(string language, string gameLanguage) =>
-        language.Equals(gameLanguage, StringComparison.OrdinalIgnoreCase)
-        || language.Split('_')[0].Equals(gameLanguage.Split('_')[0], StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The translation of <paramref name="english"/> in the catalogues (first that has it), or null.
@@ -100,6 +92,14 @@ public sealed class ModTranslations
         Any && FindPlural(singular, n) is { } found ? Loc.Format(found, args) : Loc.Plural(singular, plural, n, args);
 
     /// <summary>
+    /// Whether the locale code <paramref name="language"/> stands for <paramref name="gameLanguage"/>: the same code, else the same language part,
+    /// case ignored.
+    /// </summary>
+    static bool SameLanguage(string language, string gameLanguage) =>
+        language.Equals(gameLanguage, StringComparison.OrdinalIgnoreCase)
+        || language.Split('_')[0].Equals(gameLanguage.Split('_')[0], StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The folder of <paramref name="language"/> under <paramref name="localeRoot"/>: its exact name ignoring case, else the first (ordinal order)
     /// whose language part before <c>_</c> is the same; null for none.
     /// </summary>
@@ -133,8 +133,10 @@ public sealed class ModTranslations
             if (LanguageFolder(Path.Combine(folder, "locale"), language) is not { } languageFolder) return null;
             if (Child(languageFolder, "LC_MESSAGES") is not { } messages) return null;
 
-            if (Child(messages, domain + ".mo", file: true) is { } mo) return GettextCatalog.ReadMo(File.ReadAllBytes(mo));
-            if (Child(messages, domain + ".po", file: true) is { } po) return GettextCatalog.ReadPo(File.ReadAllText(po, Encoding.UTF8));
+            if (Child(messages, domain + ".mo", file: true) is { } mo)
+                return GettextCatalog.ReadMo(File.ReadAllBytes(mo));
+            if (Child(messages, domain + ".po", file: true) is { } po)
+                return GettextCatalog.ReadPo(File.ReadAllText(po, Encoding.UTF8));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
         {

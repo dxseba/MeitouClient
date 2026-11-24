@@ -324,7 +324,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed, ITaskOwner
     public ModMoveBlock ModMoveBlockOf(World world, CharacterId id)
     {
         var table = world.Characters;
-        if (!table.TryResolveNext(id, out int slot) || !table.Previous[slot].Alive || table.Cold(slot) is not { } cold) return ModMoveBlock.Gone;
+        if (!table.TryResolveNext(id, out int slot) || !table.Previous[slot].Alive || table.Cold(slot) is not { } cold)
+            return ModMoveBlock.Gone;
 
         long tick = world.Tick;
         if (Playing(id, tick) is { } playing) return playing.IsAttack ? ModMoveBlock.Attacking : ModMoveBlock.Reacting;

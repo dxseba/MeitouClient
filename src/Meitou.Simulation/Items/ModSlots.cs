@@ -104,7 +104,8 @@ public static class ModSlots
         if (VanillaSections.Contains(slot.Section)) return $"Section '{slot.Section}' is the game's.";
         if (BySection.ContainsKey(slot.Section)) return $"Section '{slot.Section}' is taken.";
         if (slot.Width is < 1 or > 20 || slot.Height is < 1 or > 20) return "A slot is 1 to 20 cells wide and high.";
-        if (slot.MaxItems < 1 || slot.MaxItems > slot.Width * slot.Height) return "A slot holds 1 item up to one per cell.";
+        if (slot.MaxItems < 1 || slot.MaxItems > slot.Width * slot.Height)
+            return "A slot holds 1 item up to one per cell.";
         return slot.Secondary ? SecondaryRefusal(slot) : OwnRefusal(slot);
     }
 

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.IO.Enumeration;
 using System.Numerics;
 using Meitou.Data.Ui;
@@ -169,9 +168,7 @@ sealed class ScreenOverrides
     static void Commit(List<UiControl> controls, List<(int Index, UiWidgetOverride Override)> asked)
     {
         foreach (var (i, over) in asked)
-        {
             if (over.Bounds is { } to && over.Visible != false) MoveParts(controls, controls[i], to);
-        }
 
         for (int k = asked.Count - 1; k >= 0; k--)
         {
@@ -201,16 +198,14 @@ sealed class ScreenOverrides
 
     /// <summary>
     /// <paramref name="c"/> with <paramref name="over"/>'s rectangle, caption and colour (the colour also as its <c>TextColour</c> property, which
-    /// comes before a
-    /// skin's).
+    /// comes before a skin's).
     /// </summary>
     static UiControl Changed(UiControl c, UiWidgetOverride over)
     {
         c = c with { Bounds = over.Bounds ?? c.Bounds };
         if (over.TextColour is not { } colour) return c with { Caption = over.Caption ?? c.Caption };
 
-        string value = string.Create(CultureInfo.InvariantCulture, $"{colour.X:R} {colour.Y:R} {colour.Z:R} {colour.W:R}");
-        var properties = new Dictionary<string, string>(c.Properties, StringComparer.Ordinal) { ["TextColour"] = value };
+        var properties = new Dictionary<string, string>(c.Properties, StringComparer.Ordinal) { ["TextColour"] = UiHost.Format(colour) };
         return c with { Caption = over.Caption ?? c.Caption, TextColour = colour, Properties = properties };
     }
 }

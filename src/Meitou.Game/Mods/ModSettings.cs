@@ -329,7 +329,7 @@ public sealed class ModSetting
         if (type == typeof(int) || type == typeof(float) || type == typeof(double)) return ModSettingKind.Slider;
         if (type.IsEnum || type == typeof(string) && about.Options.Length > 0) return ModSettingKind.List;
         if (type == typeof(string)) return ModSettingKind.Text;
-        throw new ArgumentException($"Setting '{property.Name}': a {type.Name} can't be a setting (bool, int, float, double, an enum, a string or an Action).");
+        throw new ArgumentException($"Setting '{property.Name}': {type.Name} is none of bool, int, float, double, an enum, a string or an Action.");
     }
 
     /// <summary>
@@ -385,7 +385,8 @@ public sealed class ModSetting
     object Convert(object value)
     {
         var type = _property.PropertyType;
-        if (Kind == ModSettingKind.Action) throw new InvalidOperationException($"Setting '{Key}' is a button: it has no value to set.");
+        if (Kind == ModSettingKind.Action)
+            throw new InvalidOperationException($"Setting '{Key}' is a button: it has no value to set.");
         if (Kind == ModSettingKind.Switch) return (bool)value;
         if (Kind == ModSettingKind.Text) return OneLine(value as string ?? Format(value));
         if (Kind == ModSettingKind.List)
@@ -428,6 +429,13 @@ public sealed class ModSetting
 /// </summary>
 public sealed class ModSettingsGroup
 {
+    #region Settings
+
+    /// <summary>
+    /// The mod's translations its labels, hints and choices are shown through; null: as written.
+    /// </summary>
+    internal Meitou.Localisation.ModTranslations? Texts { get; init; }
+
     /// <summary>
     /// Reads the public properties of <paramref name="target"/> marked [Setting], in declaration order; throws when it has none or one cannot be
     /// a setting.
@@ -493,24 +501,28 @@ public sealed class ModSettingsGroup
     }
 
     /// <summary>
-    /// The longest preset name and the most presets a group keeps.
+    /// A label, hint or choice of the group as the page shows it: in the mod's catalogues, else as written.
     /// </summary>
-    public const int MaxPresetName = 64, MaxPresets = 64;
+    internal string Shown(string text) => Texts?.Text(text) ?? text;
+
+    #endregion
+
+    #region Presets
+
+    /// <summary>
+    /// The longest preset name a group keeps.
+    /// </summary>
+    public const int MaxPresetName = 64;
+
+    /// <summary>
+    /// The most presets a group keeps.
+    /// </summary>
+    public const int MaxPresets = 64;
 
     /// <summary>
     /// The named presets (docs/modding.md "Settings"): each the values of the settings as saved, in the order first saved.
     /// </summary>
     readonly List<(string Name, Dictionary<string, string> Values)> _presets = [];
-
-    /// <summary>
-    /// The mod's translations its labels, hints and choices are shown through; null: as written.
-    /// </summary>
-    internal Meitou.Localisation.ModTranslations? Texts { get; init; }
-
-    /// <summary>
-    /// A label, hint or choice of the group as the page shows it: in the mod's catalogues, else as written.
-    /// </summary>
-    internal string Shown(string text) => Texts?.Text(text) ?? text;
 
     /// <summary>
     /// The presets' names, in the order first saved.
@@ -593,4 +605,6 @@ public sealed class ModSettingsGroup
     /// </summary>
     static bool ValidPresetName(string name) =>
         !string.IsNullOrWhiteSpace(name) && name.Length <= MaxPresetName && !name.Any(char.IsControl);
+
+    #endregion
 }

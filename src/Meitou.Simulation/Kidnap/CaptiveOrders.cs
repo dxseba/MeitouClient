@@ -11,7 +11,7 @@ namespace Meitou.Simulation.Kidnap;
 /// cannibal goals act out (<see cref="CaptiveJobKind.Eat"/> at a cage, <see cref="CaptiveJobKind.EatBody"/> on the ground), for any character the
 /// player's order queue holds, a player character included. The job runs while the order is the queue's front; another order ends it.
 /// </summary>
-public sealed partial class CaptiveSystem : IOrderOwner, IOrderSteps
+internal sealed class CaptiveOrders(CaptiveSystem captives) : IOrderOwner, IOrderSteps
 {
     /// <summary>
     /// 220's check: gone when the target is no longer one to eat (alive in a cage with nobody else's job on it, or down or dead on the ground,
@@ -21,7 +21,8 @@ public sealed partial class CaptiveSystem : IOrderOwner, IOrderSteps
     {
         var table = world.Characters;
         var cold = table.Cold(slot)!;
-        if (!table.TryResolveNext(order.Target, out int c) || c == slot || MealOf(world, table.IdOf(slot), c) is null) return OrderCheck.Gone;
+        if (!table.TryResolveNext(order.Target, out int c) || c == slot || MealOf(world, table.IdOf(slot), c) is null)
+            return OrderCheck.Gone;
 
         bool able = cold is { Medical.Incapacitated: false, IsImprisoned: false } && cold.CarriedBy.IsNone && cold.Carrying.IsNone;
         return able ? OrderCheck.Run : OrderCheck.Blocked();
@@ -40,7 +41,7 @@ public sealed partial class CaptiveSystem : IOrderOwner, IOrderSteps
         var cold = table.Cold(slot)!;
         var cc = table.Cold(c)!;
         cold.DrawnWeapon = WeaponKinds.None;
-        Begin(world, new CaptiveJob
+        captives.Begin(world, new CaptiveJob
         {
             Kind = kind, Worker = worker, Captive = order.Target, Cage = kind == CaptiveJobKind.Eat ? cc.InWhat! : "", Faction = cold.Faction,
             Goal = TaskType.EatTargetAlive, Target = PlanTarget.OfCharacter(order.Target, table.Next[c].Position), Ordered = true,
@@ -65,7 +66,7 @@ public sealed partial class CaptiveSystem : IOrderOwner, IOrderSteps
             return null;
 
         if (cc is { IsImprisoned: true, InWhat: { } cageId } && !m.Dead)
-            return world.Fixtures.Find(cageId) is { } cage && OccupantSlot(world, cage) == c ? CaptiveJobKind.Eat : null;
+            return world.Fixtures.Find(cageId) is { } cage && CaptiveSystem.OccupantSlot(world, cage) == c ? CaptiveJobKind.Eat : null;
 
         return cc.InSomething == HeldState.None && m.Incapacitated ? CaptiveJobKind.EatBody : null;
     }
@@ -75,9 +76,10 @@ public sealed partial class CaptiveSystem : IOrderOwner, IOrderSteps
     /// </summary>
     bool OthersJob(CharacterId worker, CharacterId captive, string? cage)
     {
-        foreach (var j in _jobs)
+        foreach (var j in captives.Jobs)
         {
-            if (j.Worker != worker && (j.Captive == captive || j.Worker == captive || cage is not null && j.Cage == cage)) return true;
+            if (j.Worker != worker && (j.Captive == captive || j.Worker == captive || cage is not null && j.Cage == cage))
+                return true;
         }
 
         return false;
@@ -88,7 +90,7 @@ public sealed partial class CaptiveSystem : IOrderOwner, IOrderSteps
     /// </summary>
     CaptiveJob? OrderedJobOf(CharacterId worker)
     {
-        foreach (var j in _jobs)
+        foreach (var j in captives.Jobs)
             if (j.Ordered && j.Worker == worker) return j;
         return null;
     }
@@ -96,7 +98,7 @@ public sealed partial class CaptiveSystem : IOrderOwner, IOrderSteps
     /// <summary>
     /// Whether an order's job still has its order: the worker's queue front is a started 220 of this system on the job's captive.
     /// </summary>
-    bool OrderHolds(World world, int w, CaptiveJob j) =>
+    public bool Holds(World world, int w, CaptiveJob j) =>
         world.Characters.Cold(w)?.OrderQueue.Front is { Started: true, Row: TaskType.EatTargetAlive } front
         && ReferenceEquals(front.Owner, this) && front.Target == j.Captive;
 }

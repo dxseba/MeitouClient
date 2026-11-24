@@ -108,7 +108,8 @@ public sealed partial class CarrySystem
     {
         if (HasWeapon(cold) || OrderedWeapon(world, slot, cold) is (< 0, < 0)) return OrderCheck.Gone;
 
-        bool able = cold is { Medical.Incapacitated: false, Inventory: not null, IsImprisoned: false } && cold.CarriedBy.IsNone && cold.Carrying.IsNone;
+        bool free = cold.CarriedBy.IsNone && cold.Carrying.IsNone;
+        bool able = cold is { Medical.Incapacitated: false, Inventory: not null, IsImprisoned: false } && free;
         return able ? OrderCheck.Run : OrderCheck.Blocked();
     }
 
@@ -128,7 +129,8 @@ public sealed partial class CarrySystem
             return;
         }
 
-        if (body >= 0) Start(world, slot, CharacterTask.Loot, TaskType.FindWeapon, TaskSource.Order, table.IdOf(body), CharacterTask.Idle);
+        if (body >= 0)
+            Start(world, slot, CharacterTask.Loot, TaskType.FindWeapon, TaskSource.Order, table.IdOf(body), CharacterTask.Idle);
     }
 
     #endregion

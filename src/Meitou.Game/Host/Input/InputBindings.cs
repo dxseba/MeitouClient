@@ -625,8 +625,8 @@ public sealed class InputBindings
     public static bool IsBuildMap(InputAction action) => action is >= InputAction.BuildRotateLeft and <= InputAction.BuildApply;
 
     /// <summary>
-    /// The other actions of <paramref name="action"/>'s key map that have <paramref name="binding"/>: what binding it there takes the key from. Rotate
-    /// item shares its control with whatever acts elsewhere, so it neither takes nor loses one.
+    /// The other actions of <paramref name="action"/>'s key map that have <paramref name="binding"/>: what binding it there takes the key from.
+    /// Rotate item shares its control with whatever acts elsewhere, so it neither takes nor loses one.
     /// </summary>
     public InputAction[] Holders(InputAction action, Binding binding)
     {
@@ -638,8 +638,8 @@ public sealed class InputBindings
     }
 
     /// <summary>
-    /// Takes <paramref name="binding"/> from the <see cref="Holders"/> of it for <paramref name="action"/>: the original's binding map holds one action
-    /// per key (docs/game/ui-input.md, Action table). Returns the actions it was taken from.
+    /// Takes <paramref name="binding"/> from the <see cref="Holders"/> of it for <paramref name="action"/>: the original's binding map holds one
+    /// action per key (docs/game/ui-input.md, Action table). Returns the actions it was taken from.
     /// </summary>
     public InputAction[] TakeFrom(InputAction action, Binding binding)
     {

@@ -333,7 +333,8 @@ public static class InventoryCommands
         if (SectionClosed(wearer, section) || section == "main" && MainClosed(wearer)) return false;
         if (IsEquipmentSection(section))
         {
-            if (SectionSlot(section) != item.AttachSlot || item.Quantity != 1 || SectionFull(target, section, item)) return false;
+            if (SectionSlot(section) != item.AttachSlot || item.Quantity != 1 || SectionFull(target, section, item))
+                return false;
             if (!LiesInCells(section) && (x != 0 || y != 0 || target.Items.Any(i => i != item && i.Section == section)))
                 return false;
         }

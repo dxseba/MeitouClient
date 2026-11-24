@@ -44,7 +44,8 @@ public sealed partial class UiHost
     static void AddLooks(UiNode node, float opacity, Dictionary<string, string> properties)
     {
         if (opacity < 1) properties["Alpha"] = opacity.ToString("R", CultureInfo.InvariantCulture);
-        if (node.Tint is { } t) properties["Colour"] = string.Create(CultureInfo.InvariantCulture, $"{t.X:R} {t.Y:R} {t.Z:R} {t.W:R}");
+        if (node.Tint is { } t)
+            properties["Colour"] = Format(t);
 
         bool portrait = node.Portrait.Length > 0 || node.PortraitOf is not null;
         if (node.Kind == UiNodeKind.Image && !portrait && node.ImageCrop is { } crop)
@@ -55,6 +56,11 @@ public sealed partial class UiHost
     /// <paramref name="r"/> as four numbers (<see cref="UiRect.Parse"/>'s form).
     /// </summary>
     static string Format(UiRect r) => string.Create(CultureInfo.InvariantCulture, $"{r.X} {r.Y} {r.Width} {r.Height}");
+
+    /// <summary>
+    /// <paramref name="c"/> as four round-trip numbers (x y z w), the form a control's colour properties take.
+    /// </summary>
+    internal static string Format(Vector4 c) => string.Create(CultureInfo.InvariantCulture, $"{c.X:R} {c.Y:R} {c.Z:R} {c.W:R}");
 
     #endregion
 

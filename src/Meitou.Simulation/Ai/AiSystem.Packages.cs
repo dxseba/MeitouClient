@@ -42,7 +42,7 @@ public sealed partial class AiSystem
         }
 
         _duties?.Hash(ref hasher);
-        HashModWork(ref hasher);
+        _modWork?.Hash(ref hasher);
     }
 
     #endregion
@@ -912,8 +912,8 @@ public sealed partial class AiSystem
     void OccupyEnded(World world, Squad squad, Blackboard board)
     {
         if (board.Destination.PlayerTown <= 0 || world.Buildings.FindTown(board.Destination.PlayerTown) is not { } town) return;
-        string faction = squad.Faction >= 0 && squad.Faction < data.Factions.Count ? data.Factions[squad.Faction].Name : "";
-        world.Post(Loc.Tr("{1} squad has been removed from {2}", faction, town.Name));
+        string faction = squad.Faction >= 0 && squad.Faction < data.Factions.Count ? World.ShownName(data.Factions[squad.Faction]) : "";
+        world.Post(Loc.Tr("{1} squad has been removed from {2}", faction, world.ShownName(town)));
     }
 
     /// <summary>

@@ -43,8 +43,8 @@ public readonly record struct TargetScoreAsk(
 
     /// <summary>
     /// The choice's law-enforcer flag, the argument before (<c>FUN_14059e300</c> param_6, named so by the original TauntExpansion): set, the
-    /// original adds a term from the candidate's state broadcast <c>+0xa0</c> and the chooser's faction (<b>Observed</b> decompile; which callers
-    /// set it is <b>Unknown</b>). Meitou's choices score no such term, so it is false in every kind.
+    /// original adds a term from the candidate's state broadcast <c>+0xa0</c> and the chooser's faction (<b>Observed</b> decompile). Meitou's
+    /// choices score no such term, so it is false in every kind.
     /// </summary>
     public bool LawEnforcer => false;
 }

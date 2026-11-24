@@ -40,6 +40,18 @@ public sealed partial class CharacterSaveFields
     int _characters;
 
     /// <summary>
+    /// The game's own keys of the stats record: the floats every STATS record of the vanilla saves surveyed holds (docs/formats/save.md
+    /// "Character save fields"), Meitou's stat fields and legacy keys among them.
+    /// </summary>
+    static readonly HashSet<string> StatsKeys =
+    [
+        "armour smith", "arrow defence", "assassin", "athletics", "attack", "bluff", "blunt", "bow", "bow smith", "climbing", "cooking", "defence",
+        "dexterity", "doctor", "dodge", "endurance", "engineer", "farming", "ff", "free attribute points", "hackers", "heavy weapons", "katana",
+        "labouring", "lockpicking", "mass combat", "medic", "perception", "poles", "robotics", "sabres", "science", "stealth", "strength",
+        "survival", "swimming", "thievery", "toughness2", "tracking", "turrets", "unarmed", "warrior spirit", "weapon smith", "xp",
+    ];
+
+    /// <summary>
     /// The fields of <paramref name="world"/>'s characters.
     /// </summary>
     internal CharacterSaveFields(World world) => _world = world;
@@ -87,7 +99,8 @@ public sealed partial class CharacterSaveFields
     /// </summary>
     public void SetFloat(CharacterId character, CharacterSaveRecord record, string key, float value)
     {
-        if (!float.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value), "A save field's float must be a finite number.");
+        if (!float.IsFinite(value))
+            throw new ArgumentOutOfRangeException(nameof(value), "A save field's float must be a finite number.");
 
         Set(character, record, key, value);
     }
@@ -125,18 +138,6 @@ public sealed partial class CharacterSaveFields
         CharacterSaveRecord.Stats => StatsKeys.Contains(key),
         _ => true,
     };
-
-    /// <summary>
-    /// The game's own keys of the stats record: the floats every STATS record of the vanilla saves surveyed holds (docs/formats/save.md
-    /// "Character save fields"), Meitou's stat fields and legacy keys among them.
-    /// </summary>
-    static readonly HashSet<string> StatsKeys =
-    [
-        "armour smith", "arrow defence", "assassin", "athletics", "attack", "bluff", "blunt", "bow", "bow smith", "climbing", "cooking", "defence",
-        "dexterity", "doctor", "dodge", "endurance", "engineer", "farming", "ff", "free attribute points", "hackers", "heavy weapons", "katana",
-        "labouring", "lockpicking", "mass combat", "medic", "perception", "poles", "robotics", "sabres", "science", "stealth", "strength",
-        "survival", "swimming", "thievery", "toughness2", "tracking", "turrets", "unarmed", "warrior spirit", "weapon smith", "xp",
-    ];
 
     /// <summary>
     /// The job list's and order queue's numbered keys of the orders record.
@@ -195,7 +196,8 @@ public sealed partial class CharacterSaveFields
     {
         ArgumentException.ThrowIfNullOrEmpty(key);
         var table = _world.Characters;
-        if (table.Phase == TablePhase.Parallel) throw new InvalidOperationException("Character save fields are set in the serial phases only.");
+        if (table.Phase == TablePhase.Parallel)
+            throw new InvalidOperationException("Character save fields are set in the serial phases only.");
         if (table.SaveHold) throw new InvalidOperationException("Character save fields cannot be set during a save.");
         if (!Enum.IsDefined(record) || IsEngineKey(record, key))
             throw new ArgumentException($"'{key}' is the game's own key of the {record} record.", nameof(key));

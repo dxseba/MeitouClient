@@ -211,7 +211,8 @@ public sealed class ModContext
     {
         if (!sound.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)) return false;
 
-        if (ResolveSound(sound) is { } path) _world()?.PostSound(new Simulation.PostedSound(path), on, at, out handle, onInterface);
+        if (ResolveSound(sound) is { } path)
+            _world()?.PostSound(new Simulation.PostedSound(path), on, at, out handle, onInterface);
         return true;
     }
 
@@ -369,9 +370,9 @@ public sealed class ModContext
 
     /// <summary>
     /// Replaces the game's interface layout <paramref name="layout"/> (a MyGUI layout file name such as
-    /// <c>Kenshi_InventoryCharacterWindow.layout</c>; <c>.layout</c> may be left out) with <paramref name="file"/> (a <c>.layout</c> file, relative to
-    /// the mod's folder or a full path) wherever the interface loads it (docs/modding.md "Layout replacements"). The first mod in load order to
-    /// replace a layout keeps it; a later one's is left out and logged.
+    /// <c>Kenshi_InventoryCharacterWindow.layout</c>; <c>.layout</c> may be left out) with <paramref name="file"/> (a <c>.layout</c> file,
+    /// relative to the mod's folder or a full path) wherever the interface loads it (docs/modding.md "Layout replacements"). The first mod in load
+    /// order to replace a layout keeps it; a later one's is left out and logged.
     /// </summary>
     public void AddLayoutReplacement(string layout, string file)
     {

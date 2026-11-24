@@ -85,8 +85,10 @@ public sealed partial class World
     OrderCheck Give(CharacterId actor, TaskType row, OrderOptions o)
     {
         if (!Characters.TryResolveNext(actor, out int slot) || Characters.Cold(slot) is null) return OrderCheck.Gone;
-        if (row == TaskType.MoveCusOrdered && SystemOf<MovementSystem>() is { } movement) return movement.GiveMove(this, slot, o.Point, o.Queued);
-        if (EntryOf(row, actor, o.Target ?? CharacterId.None, o.Site, o.Point, o.Reach) is not { } entry) return OrderCheck.Gone;
+        if (row == TaskType.MoveCusOrdered && SystemOf<MovementSystem>() is { } movement)
+            return movement.GiveMove(this, slot, o.Point, o.Queued);
+        if (EntryOf(row, actor, o.Target ?? CharacterId.None, o.Site, o.Point, o.Reach) is not { } entry)
+            return OrderCheck.Gone;
 
         entry.Owner.Restored(this, entry);
         return PlayerOrders.Give(this, slot, entry, o.Queued);
@@ -131,7 +133,7 @@ public sealed partial class World
         TaskType.GetOutOfCageLegit => Locks.FreedPrisoner.Instance,
         TaskType.GetOutOfCageEscape => Locks.CageEscape.Instance,
         TaskType.RunAway => SystemOf<Aggro.FleeSystem>(),
-        TaskType.EatTargetAlive => SystemOf<Kidnap.CaptiveSystem>(),
+        TaskType.EatTargetAlive => SystemOf<Kidnap.CaptiveSystem>()?.OrderOwner,
         TaskType.GetUp or TaskType.Aoeu or TaskType.StumbleTaskForced or TaskType.GetOutOfBed => SystemOf<Combat.CombatSystem>()?.BodyOrders,
         TaskType.PlayerTalkTo or TaskType.SeekAndTalkAndSendSignal or TaskType.FollowWhileTalking or TaskType.TownStalker
             => SystemOf<Dialogue.DialogueSystem>()?.TalkOrders,

@@ -75,7 +75,8 @@ sealed class JobScoreFilters
         long tick = world.Tick;
         for (int i = 0; i < _hooks.Count; i++)
         {
-            if (_hooks.Asked(i, tick)) score = Ask(world, i, new JobScoreAsk(tick, character, type, kind, site, record, score));
+            if (_hooks.Asked(i, tick))
+                score = Ask(world, i, new JobScoreAsk(tick, character, type, kind, site, record, score));
         }
 
         return score;

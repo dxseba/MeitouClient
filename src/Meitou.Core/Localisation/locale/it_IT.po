@@ -5701,3 +5701,62 @@ msgstr "Generato al rilevamento dell’hardware."
 #. machine-translated
 msgid "Generated for this computer so the site keeps your results together."
 msgstr "Generato per questo computer affinché il sito raggruppi i tuoi risultati."
+
+#. machine-translated
+msgid "Benchmark settings"
+msgstr "Impostazioni benchmark"
+
+#. machine-translated
+msgid "Benchmarks always use fixed settings so results stay comparable:"
+msgstr "I benchmark usano sempre impostazioni fisse affinché i risultati restino confrontabili:"
+
+#. machine-translated
+msgid "• Windowed 1920×1080, Vulkan, VSync & frame limit off, HDR off"
+msgstr "• In finestra 1920×1080, Vulkan, VSync e limite FPS disattivati, HDR disattivato"
+
+#. machine-translated
+msgid "• Chosen quality tier (Meitou look), TAA at 100% scale (Low: no AA at 83%), no upscaler"
+msgstr "• Livello di qualità scelto (aspetto Meitou), TAA al 100% (Basso: nessun AA all’83%), nessun upscaler"
+
+#. machine-translated
+msgid "• Ray tracing only on Ultra and Extreme"
+msgstr "• Ray tracing solo su Ultra ed Estremo"
+
+#. machine-translated
+msgid "• Your saved graphics settings and mods are ignored and never modified"
+msgstr "• Le impostazioni grafiche salvate e le mod vengono ignorate e mai modificate"
+
+msgid "Settings window opacity"
+msgstr "Opacità della finestra impostazioni"
+
+msgid "How opaque the in-game settings window is (lower to see the world behind it while adjusting settings)."
+msgstr "Quanto è opaca la finestra delle impostazioni in gioco (riducila per vedere il mondo dietro mentre regoli le opzioni)."
+
+msgid "No mod matches the filter."
+msgstr "Nessuna mod corrisponde al filtro."
+
+msgid "Issues"
+msgstr "Problemi"
+
+msgid "Name A-Z"
+msgstr "Nome A-Z"
+
+msgid "Filter mods"
+msgstr "Filtra mod"
+
+msgid "Show"
+msgstr "Mostra"
+
+msgid "Opacity"
+msgstr "Opacità"
+
+msgid "Restore"
+msgstr "Ripristina"
+
+msgid "{1} of {2}"
+msgstr "{1} di {2}"
+
+msgid "{1} mod"
+msgid_plural "{1} mods"
+msgstr[0] "{1} mod"
+msgstr[1] "{1} mod"

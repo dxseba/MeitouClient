@@ -60,4 +60,35 @@ sealed class WorkSiteViews
         _published = [.. fresh];
         return _published;
     }
+
+    /// <summary>
+    /// The site ids the living player characters' jobs name, once each, in slot and job order.
+    /// </summary>
+    public static List<string> JobSiteIds(World world)
+    {
+        var table = world.Characters;
+        var ids = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (int slot = 0; slot < table.HighWater; slot++)
+        {
+            if (!table.Previous[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Jobs.Count: > 0 } cold)
+                continue;
+
+            foreach (var job in cold.Jobs)
+                if (job.Site is { } id && seen.Add(id)) ids.Add(id);
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// What kind of site <paramref name="id"/> is.
+    /// </summary>
+    public static WorkSiteKind KindOf(World world, string id)
+    {
+        if (world.Buildings.Find(id) is not null) return WorkSiteKind.Building;
+        if (ProductionSystem.IsNatural(id)) return WorkSiteKind.ResourceNode;
+        if (ProductionSystem.IsTownWork(id)) return WorkSiteKind.TownMachine;
+        return Locks.FixtureRegistry.IsDummy(id) ? WorkSiteKind.TrainingDummy : WorkSiteKind.Seat;
+    }
 }

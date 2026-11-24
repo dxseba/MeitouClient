@@ -233,6 +233,7 @@ sealed class ContextMenuWindow(PlayerInterface player)
         var target = RowsTarget;
         RowsTarget = null;
         if (player.HasModMenuRows) list = OverriddenRows(title, list, target);
+
         return list.Count == 0 ? null : new ContextMenu(title, at, list);
     }
 
@@ -449,7 +450,9 @@ sealed class ContextMenuWindow(PlayerInterface player)
 
         if (prison.Locked)
         {
-            if (!down && !ownCage)
+            // Another faction's locked cage has Pick Lock whatever the state of its occupant (FUN_1407a6bc0's cage rows test only its lock and
+            // owner; a knocked-out prisoner's cage too, #1357).
+            if (!ownCage)
             {
                 verbs.Add((prison.LockLevel < 0 ? "Pick Lock" : PickLockCaption(target.Position, prison.LockLevel, false),
                     () => player.Say(new PickLockOrder(selection, id) { Tick = player.Session.World.Tick })));
@@ -883,7 +886,9 @@ sealed class ContextMenuWindow(PlayerInterface player)
         return ContextPressOn(p, CharacterMenu, quick);
 
         ContextMenu? CharacterMenu(Vector2 at) =>
-            player.Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } target ? Menu(target.Name, at, Verbs(target)) : null;
+            player.Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } target
+                ? Menu(player.ShownName(target), at, Verbs(target))
+                : null;
     }
 
     /// <summary>

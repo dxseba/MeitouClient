@@ -37,6 +37,11 @@ sealed class SquadPanel(PlayerInterface player)
     const float SquadCellWidth = 0.0416667f, SquadCellHeight = 0.0740741f;
 
     /// <summary>
+    /// The property of a squad box's root control naming its squad (the code mods' <see cref="UiScreens.SquadCells"/> anchor).
+    /// </summary>
+    const string SquadCellProperty = "SquadCell";
+
+    /// <summary>
     /// The prefix of a squad box's scroll id (<see cref="SquadScrollKey"/>), which names its scroll bar's parts too.
     /// </summary>
     const string SquadScrollPrefix = "squads-rows-";
@@ -90,7 +95,7 @@ sealed class SquadPanel(PlayerInterface player)
             return;
         }
 
-        b.TabCaptions["SquadPanel"] = [.. tabs.Select(s => s.Name)];
+        b.TabCaptions["SquadPanel"] = [.. tabs.Select(s => player.ShownName("squad", s.TemplateId, s.Name))];
         b.SelectedTabs["SquadPanel"] = Math.Max(0, tabs.FindIndex(s => s.Id == player.Session.CurrentSnapshot.ActiveSquad));
     }
 
@@ -215,11 +220,6 @@ sealed class SquadPanel(PlayerInterface player)
 
         return b;
     }
-
-    /// <summary>
-    /// The property of a squad box's root control naming its squad (the code mods' <see cref="UiScreens.SquadCells"/> anchor).
-    /// </summary>
-    const string SquadCellProperty = "SquadCell";
 
     /// <summary>
     /// The squad whose box <paramref name="c"/> is the root of (<see cref="UiScreens.SquadCells"/>); null for any other control.
@@ -526,7 +526,7 @@ sealed class SquadPanel(PlayerInterface player)
             return;
         }
 
-        string name = player.Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id)?.Name ?? "";
+        string name = player.Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } who ? player.ShownName(who) : "";
         player.Confirm("Dismiss character", Loc.Tr("Dismiss character '{1}'?", name),
             () => player.Say(new DismissCommand(id) { Tick = player.Session.World.Tick }));
     }

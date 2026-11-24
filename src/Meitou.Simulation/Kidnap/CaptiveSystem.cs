@@ -392,6 +392,16 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
     CaptiveGoals? _goalsOfChooser;
 
     /// <summary>
+    /// The order owner of 220 Eat target alive (<see cref="OrderOwner"/>), made on first use.
+    /// </summary>
+    CaptiveOrders? _orders;
+
+    /// <summary>
+    /// The owner of the order 220 Eat target alive (docs/modding.md "Ordering characters"), made on first use.
+    /// </summary>
+    internal CaptiveOrders OrderOwner => _orders ??= new CaptiveOrders(this);
+
+    /// <summary>
     /// The captive goals (<see cref="_goalsOfChooser"/>), made on first use.
     /// </summary>
     internal CaptiveGoals Goals => _goalsOfChooser ??= new CaptiveGoals(this, data);
@@ -469,7 +479,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
         {
             var j = _jobs[k];
             int w = table.TryResolveNext(j.Worker, out int at) ? at : -1;
-            if (j.Ordered && (w < 0 || !OrderHolds(world, w, j)))
+            if (j.Ordered && (w < 0 || !OrderOwner.Holds(world, w, j)))
             {
                 _jobs.RemoveAt(k);
                 End(world, j, CaptiveEventKind.GaveUp);
@@ -1654,7 +1664,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
 
         // "{1} has been eaten alive." for the player's own (FUN_140856bc0: of the player's faction, or of a squad that is).
         if (eaten && (cc.IsPlayer || world.Player.Faction >= 0 && cc.Faction == world.Player.Faction))
-            world.Post(Loc.Tr("{1} has been eaten alive.", cc.Name));
+            world.Post(Loc.Tr("{1} has been eaten alive.", world.ShownName(cc)));
 
         return wasDead ? eaten : medical.Dead;
     }

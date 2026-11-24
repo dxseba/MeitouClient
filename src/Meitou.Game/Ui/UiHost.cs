@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Ui;
+using Meitou.Localisation;
 
 namespace Meitou.Game.Ui;
 
@@ -269,7 +270,7 @@ public sealed record UiMenuVerb(string Caption, Action Choose)
     /// <summary>
     /// The caption's colour (RGB, 0 to 1 each, clamped; alpha not used); null: the menu's own. An unavailable row stays greyed.
     /// </summary>
-    public System.Numerics.Vector4? Colour { get; init; }
+    public Vector4? Colour { get; init; }
 }
 
 /// <summary>
@@ -343,7 +344,8 @@ public sealed class UiFrameContext
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentException.ThrowIfNullOrWhiteSpace(font);
-        if (!float.IsFinite(scale) || scale <= 0 || scale > UiHost.MaxTextScale) throw new ArgumentOutOfRangeException(nameof(scale));
+        if (!float.IsFinite(scale) || scale <= 0 || scale > UiHost.MaxTextScale)
+            throw new ArgumentOutOfRangeException(nameof(scale));
 
         return text.Length == 0 || _host.Measurer is not { } measure ? Vector2.Zero : measure(font, text, scale);
     }
@@ -360,6 +362,11 @@ public sealed partial class UiHost
     /// The extension API version the host provides; an extension must ask for it.
     /// </summary>
     public const int ApiVersion = 1;
+
+    /// <summary>
+    /// The property that puts an overlay control on another layer than the HUD's (<see cref="UiNode.Layer"/>): <c>Back</c> or <c>Popup</c>.
+    /// </summary>
+    public const string LayerProperty = "ModLayer";
 
     /// <summary>
     /// Measures a caption (font resource, text, text scale) as the interface's painter draws it (<see cref="UiFrameContext.Measure"/>); null
@@ -515,6 +522,17 @@ public sealed partial class UiHost
     /// </summary>
     public event Action<UiDiagnostic>? Diagnostic;
 
+    /// <summary>
+    /// Routes the text sources' failures to the interface that added them.
+    /// </summary>
+    static UiHost() => ShownText.Dropped += ReportDroppedSource;
+
+    /// <summary>
+    /// Reports a text source that threw (<see cref="ShownText.Dropped"/>) as its interface's <see cref="Diagnostic"/>.
+    /// </summary>
+    static void ReportDroppedSource(object host, string owner, ShownTextContext context, Exception error) =>
+        (host as UiHost)?.Diagnostic?.Invoke(new UiDiagnostic(owner, $"shown text ({context.Kind} {context.Key}, dropped)", error));
+
     #endregion
 
     #region Registration
@@ -652,6 +670,7 @@ public sealed partial class UiHost
         _buildingActions.RemoveAll(a => a.Owner == owner);
         _townLines.RemoveAll(l => l.Owner == owner);
         ItemTips.Remove(owner);
+        ShownText.Remove(this, owner);
         CharacterPanel.Remove(owner);
         Screens.Remove(owner);
         ScreenOverrides.Remove(owner);
@@ -962,6 +981,13 @@ public sealed partial class UiHost
     public IReadOnlyList<UiItemTooltipLine> ItemTooltipLines(UiItemTooltipContext item) => ItemTips.For(item, Diagnostic);
 
     /// <summary>
+    /// The name the interface shows for an item of <paramref name="record"/> named <paramref name="name"/> with tag <paramref name="modTag"/>: the
+    /// extensions' text sources' (<see cref="ShownText.Record"/>, the item record's name), else <paramref name="name"/>.
+    /// </summary>
+    public string ItemName(string record, string name, string modTag = "") =>
+        ShownText.Record(record, name, ShownText.RecordName, modTag);
+
+    /// <summary>
     /// Whether any extension adds character panel lines (<see cref="CharacterPanelLines"/>).
     /// </summary>
     public bool HasCharacterPanelLines => CharacterPanel.AnyLines;
@@ -1204,11 +1230,6 @@ public sealed partial class UiHost
             }
         }
     }
-
-    /// <summary>
-    /// The property that puts an overlay control on another layer than the HUD's (<see cref="UiNode.Layer"/>): <c>Back</c> or <c>Popup</c>.
-    /// </summary>
-    public const string LayerProperty = "ModLayer";
 
     /// <summary>
     /// <paramref name="controls"/> marked for <paramref name="layer"/>; as they are on the HUD's layer.
@@ -1602,6 +1623,31 @@ public sealed class UiRegistration : IDisposable
         Check();
         ArgumentNullException.ThrowIfNull(lines);
         _host.ItemTips.Add(Id, lines);
+    }
+
+    /// <summary>
+    /// Changes the text the game shows (docs/modding.md "Shown text"): the interface's and the notices' messages, items' names and dialogue lines.
+    /// <paramref name="source"/> gets the kind of text, its key (a message's English source text, an item's record, a dialogue line's record), the
+    /// text so far (the game's, or an earlier extension's) and a tag, and returns the text to show (null or blank: keep it). Display only: records,
+    /// saves and the game's decisions keep the game's text. It runs the first time a text is shown, the answer kept until
+    /// <see cref="RefreshText"/>; it may be asked on any thread (the simulation's messages and dialogue), one call at a time, so it must read only
+    /// its context and the mod's own state, safely across threads.
+    /// </summary>
+    public void AddText(Func<ShownTextContext, string?> source)
+    {
+        Check();
+        ArgumentNullException.ThrowIfNull(source);
+        ShownText.Add(_host, Id, source);
+    }
+
+    /// <summary>
+    /// Asks every text source again (<see cref="AddText"/>): call it when the mod's answers change, e.g. a word it teaches was learned. Text
+    /// already handed out (a dialogue line said, a notice posted) keeps what it was given.
+    /// </summary>
+    public void RefreshText()
+    {
+        Check();
+        ShownText.Refresh();
     }
 
     /// <summary>

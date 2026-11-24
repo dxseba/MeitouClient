@@ -405,7 +405,7 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
     /// <see cref="StorageSize"/> and <see cref="StorageEmpty"/> are.</param>
     internal static MachineSnapshot Of(Machine m, ItemFactory items, bool storageItems = true)
     {
-        string Name(string record) => items.Info(record)?.Name ?? record;
+        string Name(string record) => items.Info(record) is { } info ? ShownText.Record(record, info.Name) : record;
         var inputs = m.Inputs.Select(i => InputView(m, i, items)).ToArray();
         MachineSlotView? output = m.Output is { } o ? OutputView(o, items) : null;
         InventoryView? storage = storageItems && m.Storage is { } s ? StorageView(s) : null;
@@ -475,8 +475,8 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
     /// The crafting bench's view: its queue with each craft's progress, the repeat flag and the finished items; null when it is not a bench.
     /// </summary>
     static CraftView? Crafting(Machine m, ItemFactory items) => m.Craft is { } c
-        ? new CraftView([.. c.Queue.Select(j => (j.Option.Key, j.Recipe.Name, Math.Clamp(j.Progress, 0, 1), j.Recipe.Hours))], c.Repeat,
-            [.. c.Done.Select((item, index) => InventoryItemView.Of(index, item) with { Section = "out", X = 0, Y = 0 })])
+        ? new CraftView([.. c.Queue.Select(j => (j.Option.Key, j.Recipe.ShownName(items.Db), Math.Clamp(j.Progress, 0, 1), j.Recipe.Hours))],
+            c.Repeat, [.. c.Done.Select((item, index) => InventoryItemView.Of(index, item) with { Section = "out", X = 0, Y = 0 })])
         {
             OutputWidth = m.Data.Craft?.OutputWidth ?? 1,
             OutputHeight = m.Data.Craft?.OutputHeight ?? 1,
@@ -517,7 +517,8 @@ public readonly record struct ResearchOption(string Id, string Name, string Cate
 /// <summary>
 /// The research state as the host shows it (docs/simulation.md "Production", Research).
 /// </summary>
-public sealed record ResearchSnapshot(int TechLevel, int BenchLevel, IReadOnlyList<(string Id, string Name, float Progress)> Queue, float Rate,
+public sealed record ResearchSnapshot(int TechLevel, int BenchLevel, IReadOnlyList<(string Id, string Name, float Progress, float Hours)> Queue,
+    float Rate,
     IReadOnlyList<ResearchOption> Available)
 {
     /// <summary>

@@ -412,6 +412,7 @@ public static class CharacterGenerator
         if (!race.GetBool("no hats")) slots.Add(AttachSlot.Hat);
         if (!race.GetBool("no shoes")) slots.Add(AttachSlot.Boots);
         slots.AddRange([AttachSlot.Body, AttachSlot.Legs, AttachSlot.Belt]);
+
         foreach (var slot in slots)
             RollClothingSlot(db, character, race, rng, loadout, (int)slot, null);
 
