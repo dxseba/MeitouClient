@@ -7,7 +7,7 @@ namespace Meitou.SpeedMenu;
 /// <summary>
 /// The toggle button (the original's yellow diamond when its picture is found, else a text button) beside the HUD's time controls and the
 /// SELECTED CHARACTER SPEEDS panel above them (<c>UiRegistration.AddScreenControls(UiScreens.Hud, "TimeMoneyPanel", Left, ...)</c>): a scroll view
-/// of a row per character with its name and speeds.
+/// of a row per character with its portrait, name and speeds.
 /// </summary>
 public sealed class SpeedMenuUi(string? diamond) : IUiExtension
 {
@@ -28,9 +28,9 @@ public sealed class SpeedMenuUi(string? diamond) : IUiExtension
     const float PanelWidth = 330, PanelHeight = 450, PanelLeft = 365, PanelUp = 454;
 
     /// <summary>
-    /// A row's height and the height above the rows (title and padding).
+    /// A row's step (the original's 82 pixels) and the height above the rows (title and padding).
     /// </summary>
-    const float RowHeight = 38, HeadHeight = 30;
+    const float RowHeight = 82, HeadHeight = 30;
 
     /// <summary>
     /// Whether the panel is open.
@@ -44,7 +44,6 @@ public sealed class SpeedMenuUi(string? diamond) : IUiExtension
         var styles = new Styles(
             registration.RegisterStyle("panel", new() { Skin = "Kenshi_GenericTextBoxSkin", Text = Ink }),
             registration.RegisterStyle("text", new() { Text = Ink, TextPadding = new(6, 1, 6, 1) }),
-            registration.RegisterStyle("small", new() { Text = Ink, TextPadding = new(6, 0, 6, 1), TextScale = .85f }),
             registration.RegisterStyle("button", new() { Skin = "Kenshi_Button1Skin", TextAlign = "Center" }));
         string toggle = registration.RegisterAction("toggle", _ => _open = !_open);
         registration.AddScreenControls(UiScreens.Hud, Anchor, UiAnchorPlacement.Left, context => Build(context, styles, toggle));
@@ -58,7 +57,7 @@ public sealed class SpeedMenuUi(string? diamond) : IUiExtension
     /// <summary>
     /// The registered style keys.
     /// </summary>
-    sealed record Styles(string Panel, string Text, string Small, string Button);
+    sealed record Styles(string Panel, string Text, string Button);
 
     /// <summary>
     /// The button, and the panel while open; nothing before the first sorted frame of a world. The node is laid out in the rectangle left of the
@@ -119,21 +118,25 @@ public sealed class SpeedMenuUi(string? diamond) : IUiExtension
     }
 
     /// <summary>
-    /// One character: its name and "current mph (max max)", then its current speed.
+    /// One character as the original lays it out: an 82-pixel slot holding a 278 x 78 row, its live portrait (64 square at 6, 6), its name
+    /// and "current mph (max max)" (196 wide at x 80). The original's "Current speed" label is created hidden, so it is not shown.
     /// </summary>
     static UiNode Row(Styles styles, SpeedRow row, int i)
     {
-        var node = new UiNode($"speedmenu-row-{i}") { Placement = new(UiLength.Fill, RowHeight), Flow = UiFlow.Column, Pickable = false };
-        var line = new UiNode($"speedmenu-line-{i}") { Placement = new(UiLength.Fill, 20), Flow = UiFlow.Row, Pickable = false };
-        line.Children.Add(new($"speedmenu-name-{i}", UiNodeKind.Label) { Placement = new(130, 20), Text = row.Name, Style = styles.Text });
-        line.Children.Add(new($"speedmenu-speed-{i}", UiNodeKind.Label)
-        {
-            Placement = new(UiLength.Fill, 20), Text = row.Speeds, Style = styles.Text,
-        });
-        node.Children.Add(line);
-        node.Children.Add(Label($"speedmenu-current-{i}", row.Current, 16, styles.Small));
-        return node;
+        var slot = new UiNode($"speedmenu-row-{i}") { Placement = new(UiLength.Fill, RowHeight), Pickable = false };
+        var node = new UiNode($"speedmenu-cell-{i}") { Placement = new(278, 78, Left: 6), Pickable = false };
+        node.Children.Add(new($"speedmenu-portrait-{i}", UiNodeKind.Image) { Placement = new(64, 64, Left: 6, Top: 6), PortraitOf = row.Id });
+        node.Children.Add(Text($"speedmenu-name-{i}", row.Name, 10, 24, styles.Text));
+        node.Children.Add(Text($"speedmenu-speed-{i}", row.Speeds, 37, 23, styles.Text));
+        slot.Children.Add(node);
+        return slot;
     }
+
+    /// <summary>
+    /// A row label, 196 wide at x 80.
+    /// </summary>
+    static UiNode Text(string id, string text, float top, float height, string style) =>
+        new(id, UiNodeKind.Label) { Placement = new(196, height, Left: 80, Top: top), Text = text, Style = style, Pickable = false };
 
     /// <summary>
     /// A full-width label.

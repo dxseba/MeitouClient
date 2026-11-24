@@ -5,9 +5,9 @@ using Meitou.Simulation;
 namespace Meitou.SpeedMenu;
 
 /// <summary>
-/// One row of the panel: the character's name, its "current mph (max max)" line and its "Current speed" line.
+/// One row of the panel: the character (its portrait), its name and its "current mph (max max)" line.
 /// </summary>
-sealed record SpeedRow(CharacterId Id, string Name, string Speeds, string Current);
+sealed record SpeedRow(CharacterId Id, string Name, string Speeds);
 
 /// <summary>
 /// Sorts the selected characters' published speeds once a frame (<c>ModContext.AddFrame</c>, on the host's thread) for the panel. The order is
@@ -68,8 +68,7 @@ static class SpeedRows
     static SpeedRow Row(CharacterId id, Runner runner)
     {
         float current = Mph(runner.Speed), max = Mph(runner.MaxSpeed);
-        return new(id, runner.Name, string.Format(CultureInfo.InvariantCulture, "{0:0.0} mph ({1:0.0} max)", current, max),
-            string.Format(CultureInfo.InvariantCulture, "Current speed: {0:0.0} mph", current));
+        return new(id, runner.Name, string.Format(CultureInfo.InvariantCulture, "{0:0.0} mph ({1:0.0} max)", current, max));
     }
 
     /// <summary>
