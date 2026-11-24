@@ -51,6 +51,12 @@ sealed partial class PosterIndex
     public int Count => _posters.Count;
 
     /// <summary>
+    /// Every poster and its targets, by ITEM id.
+    /// </summary>
+    public IEnumerable<(string Poster, PosterTargets Targets)> All =>
+        _posters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => (p.Key, p.Value));
+
+    /// <summary>
     /// Whether some poster names <paramref name="record"/>.
     /// </summary>
     public bool IsTarget(string record) => _targets.Contains(record);

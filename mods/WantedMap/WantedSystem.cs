@@ -25,12 +25,20 @@ readonly record struct PosterProgress(int Total, int Done, int Captive);
 
 /// <summary>
 /// Matches the posters the player's characters carry (their inventory and backpack) to their targets (<see cref="PosterIndex"/>) and publishes
-/// their markers every 60th tick: loaded targets where they stand, off-screen ones at their platoon, never-seen ones at their home town, the
-/// recently dead where they died. Deaths and the targets seen so far are remembered per playthrough (saved with the world).
+/// their markers every <c>ScanSeconds</c> of game time (a world scan every <c>WorldScanSeconds</c>, <see cref="TargetFinder"/>): loaded targets
+/// where they stand, off-screen ones at their platoon, never-seen ones at their home town, the recently dead where they died. Deaths and the targets seen so far are remembered per playthrough (saved with the world).
 /// </summary>
-sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings settings) : ICharacterDeathObserver, IModSaveData
+sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings settings, Action<string> log)
+    : ICharacterDeathObserver, IModSaveData
 {
     const int Version = 2;
+
+    /// <summary>
+    /// Where each target was found at the last world scan (null: not found); runtime only, so a loaded game starts with a world scan.
+    /// </summary>
+    readonly Dictionary<string, TargetHandle?> _found = new(StringComparer.Ordinal);
+
+    long _lastWorldScan = -1;
 
     /// <summary>
     /// Deaths of targets by CHARACTER id: where and the game hours when.
@@ -75,20 +83,46 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
 
     public void SlowWorld(World world)
     {
-        if (world.Tick % 60 != 0) return;
+        if (world.Tick % Ticks(world, settings.ScanSeconds) != 0) return;
 
         double hours = settings.DeadMarkerHours;
         foreach (var id in _deaths.Where(d => world.GameHours - d.Value.Hours > hours).Select(d => d.Key).ToList()) _deaths.Remove(id);
         var progress = new Dictionary<string, PosterProgress>(StringComparer.Ordinal);
-        Markers = settings.Enabled ? Publish(world, progress) : [];
+        Markers = settings.Enabled ? Publish(world, progress, WorldScan(world)) : [];
         Progress = progress;
+        if (settings.Debug) Report(world);
     }
 
-    List<TargetMarker> Publish(World world, Dictionary<string, PosterProgress> progress)
+    static long Ticks(World world, float seconds) => Math.Max(1, (long)MathF.Round(seconds / world.TickSeconds));
+
+    /// <summary>
+    /// Whether this scan searches the world again (the first one, then every <c>WorldScanSeconds</c>).
+    /// </summary>
+    bool WorldScan(World world)
+    {
+        if (_lastWorldScan >= 0 && world.Tick - _lastWorldScan < Ticks(world, settings.WorldScanSeconds)) return false;
+
+        _lastWorldScan = world.Tick;
+        _found.Clear();
+        return true;
+    }
+
+    /// <summary>
+    /// <c>Debug</c>: the markers of a world scan, one line each, to the mod log.
+    /// </summary>
+    void Report(World world)
+    {
+        if (_lastWorldScan != world.Tick) return;
+
+        log($"world scan at tick {world.Tick}: {Markers.Count} markers, {_found.Count(f => f.Value is not null)} of {_found.Count} targets found");
+        foreach (var m in Markers) log($"  {m.Target} '{m.Name}': {m.State} at {m.At.X:0}, {m.At.Y:0}");
+    }
+
+    List<TargetMarker> Publish(World world, Dictionary<string, PosterProgress> progress, bool worldScan)
     {
         var markers = new List<TargetMarker>();
         var table = world.Characters;
-        var finder = new TargetFinder(world);
+        var finder = new TargetFinder(world, _found, worldScan);
         for (int slot = 0; slot < table.HighWater; slot++)
         {
             if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: true, Inventory: { } inventory }) continue;
@@ -132,12 +166,12 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
     /// home town (<c>TownFallback</c>) unless <paramref name="hideHome"/> (a unique dead or imprisoned); a target seen before and now nowhere
     /// counts as dead and is not shown.
     /// </summary>
-    (TargetState State, Vector2 At, string? Name)? Locate(string id, (TargetState State, Vector2 At, string? Name)? found, bool hideHome)
+    (TargetState State, Vector2 At, string? Name)? Locate(string id, FoundTarget? found, bool hideHome)
     {
         if (found is { } here)
         {
             if (settings.RememberSeen) _seen.Add(id);
-            return here;
+            return (here.State, here.At, here.Name);
         }
 
         if (_deaths.TryGetValue(id, out var death)) return settings.DeadMarkerHours > 0 ? (TargetState.Dead, death.At, null) : null;
@@ -179,61 +213,5 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
 
         _seen.Clear();
         for (int i = reader.ReadInt32(); i > 0; i--) _seen.Add(reader.ReadString());
-    }
-}
-
-/// <summary>
-/// Finds targets in the world by record: loaded characters (a prisoner apart), the members of stored platoons, and squad templates' platoons.
-/// </summary>
-sealed class TargetFinder(World world)
-{
-    public (TargetState State, Vector2 At, string? Name)? Character(string record)
-    {
-        var table = world.Characters;
-        for (int slot = 0; slot < table.HighWater; slot++)
-        {
-            if (!table.Next[slot].Alive || table.Cold(slot) is not { IsPlayer: false } cold || cold.RecordId != record) continue;
-            if (cold.Medical is { Dead: true }) continue;
-
-            var at = table.Next[slot].Position;
-            return (cold.IsImprisoned ? TargetState.Prisoner : TargetState.Exact, new(at.X, at.Z), cold.Name);
-        }
-
-        foreach (var platoon in world.Platoons.All)
-        {
-            if (platoon.Dead || platoon.Stored?.Members.FirstOrDefault(m => m.Cold.RecordId == record) is not { } member) continue;
-
-            bool prisoner = member.Cold.IsImprisoned || platoon.Imprisoned;
-            return (prisoner ? TargetState.Prisoner : TargetState.Away, platoon.Position, member.Cold.Name);
-        }
-
-        return null;
-    }
-
-    public (TargetState State, Vector2 At, string? Name)? Squad(string template)
-    {
-        foreach (var platoon in world.Platoons.All)
-        {
-            if (platoon.Dead || platoon.TemplateId != template) continue;
-            if (platoon.SquadId >= 0 && Member(platoon.SquadId) is { } at) return (TargetState.Exact, at, null);
-
-            return (platoon.Imprisoned ? TargetState.Prisoner : TargetState.Away, platoon.Position, null);
-        }
-
-        return null;
-    }
-
-    Vector2? Member(int squad)
-    {
-        var table = world.Characters;
-        for (int slot = 0; slot < table.HighWater; slot++)
-        {
-            if (!table.Next[slot].Alive || table.Cold(slot) is not { } cold || cold.SquadId != squad) continue;
-
-            var p = table.Next[slot].Position;
-            return new(p.X, p.Z);
-        }
-
-        return null;
     }
 }

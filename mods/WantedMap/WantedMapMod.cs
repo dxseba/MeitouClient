@@ -24,11 +24,43 @@ public sealed class WantedMapMod : IMod
         var files = new OriginalFiles(context);
         var posters = PosterIndex.Build(context.Data, files, stopWords);
         var towns = new TownPlaces(context.Population);
-        context.AddSystem("wanted", _ => Running = new WantedSystem(posters, towns, Settings), SystemAnchor.End);
+        context.AddSystem("wanted", _ => Running = new WantedSystem(posters, towns, Settings, context.Log), SystemAnchor.End);
         context.AddUi(new WantedMarkers(new PosterBadge(files)));
         context.Log($"Wanted Map initialized: {posters.Count} posters matched");
+        if (Settings.Debug) LogTable(context, posters);
+    }
+
+    /// <summary>
+    /// The markers the world map showed last, for other mods (the original's <c>WantedMap_GetMarkers</c> export): a mod that declares this one
+    /// as a dependency gets it with <c>context.Dependency&lt;WantedMapMod&gt;("dxseba.wantedmap")</c>. Safe on any thread; empty until the map
+    /// has been open.
+    /// </summary>
+    public IReadOnlyList<WantedMapMarker> GetMarkers() => WantedMarkers.Shown;
+
+    /// <summary>
+    /// <c>Debug</c>: the poster-to-target table (the original's <c>WantedMap_runtime_table.txt</c>), to the mod log.
+    /// </summary>
+    static void LogTable(ModContext context, PosterIndex posters)
+    {
+        foreach (var (poster, targets) in posters.All)
+        {
+            var names = targets.Characters.Concat(targets.Squads).Select(t => $"{t} '{posters.NameOf(t)}'");
+            context.Log($"poster {poster}: {string.Join(", ", names)}");
+        }
     }
 }
+
+/// <summary>
+/// A marker the world map shows (<see cref="WantedMapMod.GetMarkers"/>): its map point (world X, Z), colour, the target's state, the target's
+/// record id and the label.
+/// </summary>
+public sealed record WantedMapMarker(Vector2 At, Vector4 Colour, WantedState State, string Target, string Label);
+
+/// <summary>
+/// A target's state on the map: on the spot (red), its squad away (orange), at home before it first appeared (yellow), a prisoner (blue), dead
+/// (grey).
+/// </summary>
+public enum WantedState { Exact, Away, Home, Prisoner, Dead }
 
 /// <summary>
 /// The original's <c>WantedMap.ini</c> keys (<c>WantedMap.defaults.ini</c> defaults; labels and hints from its en_GB catalog).
@@ -81,6 +113,25 @@ public sealed class WantedSettings
     [Setting("Stop words", Hint = "Comma-separated words that do not count when a poster's reward is matched to a name. Applies at the next start.",
         MaxLength = 1024)]
     public string StopWords { get; set; } = "the,of,and,wanted,king,boss,leader,из,банды,и,король,лидер,лидеры,глава";
+
+    /// <summary>
+    /// <c>ScanSeconds</c>, default 2: how often the posters are checked and the markers placed (game seconds here).
+    /// </summary>
+    [Setting("Poster check, seconds", Hint = "How often the posters are checked and the markers moved.", Min = 0.5, Max = 60, Step = 0.5)]
+    public float ScanSeconds { get; set; } = 2;
+
+    /// <summary>
+    /// <c>WorldScanSeconds</c>, default 30: how often the targets are searched for in the whole world; between, only the found ones move.
+    /// </summary>
+    [Setting("World search, seconds", Hint = "How often the targets are searched for in the whole world; between searches only the found ones move.",
+        Min = 1, Max = 600, Step = 1)]
+    public float WorldScanSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// <c>Debug</c>, default 0: the poster table at start and each world search's markers, to the mod log.
+    /// </summary>
+    [Setting("Debug", Hint = "Writes the poster-to-target table and the markers of each world search to the log.")]
+    public bool Debug { get; set; }
 }
 
 /// <summary>
@@ -109,33 +160,56 @@ sealed class WantedMarkers(PosterBadge badge) : IUiExtension
     /// </summary>
     static readonly string[] ItemScreens = ["inventory", "bag", "loot", "loot-bag"];
 
+    /// <summary>
+    /// The markers last shown, for <see cref="WantedMapMod.GetMarkers"/>.
+    /// </summary>
+    internal static volatile IReadOnlyList<WantedMapMarker> Shown = [];
+
     static IEnumerable<UiMapMarker> Markers(UiMapContext map)
     {
         var settings = WantedMapMod.Settings;
-        if (!settings.Enabled || WantedMapMod.Running?.Markers is not { Count: > 0 } markers) return [];
+        if (!settings.Enabled || WantedMapMod.Running?.Markers is not { Count: > 0 } markers)
+        {
+            Shown = [];
+            return [];
+        }
 
         // Nothing selected keeps the markers of the last selection (the original's README).
         var selected = map.Snapshot.Characters.Where(c => c.Selected).Select(c => c.Id).ToHashSet();
         if (selected.Count > 0) s_lastSelected = selected;
         else selected = s_lastSelected;
 
-        var shown = markers.Where(m => settings.AllCharacters || selected.Contains(m.Carrier)).DistinctBy(m => m.Target, StringComparer.Ordinal);
+        var shown = markers.Where(m => settings.AllCharacters || selected.Contains(m.Carrier))
+            .DistinctBy(m => m.Target, StringComparer.Ordinal)
+            .ToList();
+        Shown = [.. shown.Select(Exported)];
         return shown.Select(m => Marker(m, settings.ShowLabels)).ToList();
     }
+
+    static WantedMapMarker Exported(TargetMarker m)
+    {
+        var (_, colour, word) = Look(m.State);
+        return new(m.At, colour, (WantedState)m.State, m.Target, word.Length > 0 ? $"{m.Name} ({word})" : m.Name);
+    }
+
+    /// <summary>
+    /// A state's marker group, colour and state word (the original's catalog: dead, imprisoned, approx., lives here).
+    /// </summary>
+    static (string Group, Vector4 Colour, string Word) Look(TargetState state) => state switch
+    {
+        TargetState.Exact => ("Character", Red, ""),
+        TargetState.Away => ("Movement", Orange, "approx."),
+        TargetState.Home => ("Movement", Yellow, "lives here"),
+        TargetState.Prisoner => ("Character", Blue, "imprisoned"),
+        _ => ("Character", Grey, "dead"),
+    };
 
     /// <summary>
     /// The marker; its label the name and the state word of the original's catalog (dead, imprisoned, approx., lives here).
     /// </summary>
     static UiMapMarker Marker(TargetMarker m, bool labels)
     {
-        var (group, colour, word) = m.State switch
-        {
-            TargetState.Exact => ("Character", Red, ""),
-            TargetState.Away => ("Movement", Orange, "approx."),
-            TargetState.Home => ("Movement", Yellow, "lives here"),
-            TargetState.Prisoner => ("Character", Blue, "imprisoned"),
-            _ => ("Character", Grey, "dead"),
-        };
+        var (group, colour, word) = Look(m.State);
 
         string label = word.Length > 0 ? $"{m.Name} ({word})" : m.Name;
         string tooltip = word.Length > 0 ? $"Wanted\t{m.Name}\nState\t{word}" : $"Wanted\t{m.Name}";
