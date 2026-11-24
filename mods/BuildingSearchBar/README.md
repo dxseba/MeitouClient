@@ -5,7 +5,7 @@ Port of *Building Search Bar* (workshop 3786979230, GPLv3), rebuilt from its des
 - **SEARCH window** while the build window is open (also the Shift+F12 level build, which uses the same window): "Search", a text box (up
   to 40 characters), a clear (X) and a Next (>) button, a status line and a results list. Results are the buildings the build window offers
   (its listed categories, their groups and each group's variants; unresearched buildings are not offered) whose name, group, category or
-  string id contains the query, ignoring case, in the window's own order, at most 80, each shown as "Name [group]". Clicking one, or Next
+  string id contains the query, ignoring case, in the window's own order, at most 80, each shown as "Name [category]". Clicking one, or Next
   (wrapping round, its row scrolled into view: `UiRegistration.ScrollTo`), chooses that building in the build window's lists (category, group, variant), as clicks there would; the status reads
   `n` matches, or `i/n` once one was chosen. The build window's own lists are not filtered. The caption's fold button shrinks the window to
   a SEARCH button, which opens it again. Closing the build window clears the search.
@@ -17,8 +17,11 @@ Port of *Building Search Bar* (workshop 3786979230, GPLv3), rebuilt from its des
 - **Verified** (original DLL, decompiled): widget names and sizes (window `BuildSearch_Window` `Kenshi_WindowCX` 468x430 captioned
   "SEARCH"; toggle `Kenshi_Button1` 170x26; label "Search" 16,16 56x24; `Kenshi_EditBox` 92,16 286x30; clear 384,16 and next 420,16 30x30;
   status 16,52 436x22; results `Kenshi_ListBoxEmpty` 16,76 436x306); the placement rule above; the list cap of 80; a result's text is the
-  name plus ` [` field `]` when that field is set; the status `i/n` or `n`; Next wraps; the index is rebuilt from the build window's visible
+  name plus ` [` field `]` when that field is set (the category, below); the status `i/n` or `n`; Next wraps; the index is rebuilt from the build window's visible
   categories and groups; the haystack is lower-cased (ASCII `tolower`). Translations (en, de, es, fr, ja, ko, pt, ru, zh) hold only
   "SEARCH" and "Search".
-- **Differences**: texts are English only.
-- **Unknown**: which field the original shows in brackets (group or category; the port shows the group); look and typing in game untested.
+- **Bracketed field**: **Observed** (decompiled DLL): a result keeps the category name the index copied from the build window's category
+  object and its group's list row name separately; the row text appends the category (` [` ... `]`, only when not empty).
+- **Missing**: the original's translations of "SEARCH" and "Search" (its `.mo` catalogues, readable from the installed original): Meitou has
+  no per-mod translation API yet, so the texts are English (engine gap).
+- **Unknown**: look and typing in game untested.

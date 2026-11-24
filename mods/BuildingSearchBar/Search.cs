@@ -131,9 +131,9 @@ static class Search
 sealed record SearchEntry(UiBuildEntry Entry)
 {
     /// <summary>
-    /// The result row's text: the name, then the group in brackets when it has one other than the name.
+    /// The result row's text, as the original's: the name, then the build window's category in brackets when it has one.
     /// </summary>
-    public string Caption => Entry.Group.Length > 0 && Entry.Group != Entry.Name ? $"{Entry.Name} [{Entry.Group}]" : Entry.Name;
+    public string Caption => Entry.Category.Length > 0 ? $"{Entry.Name} [{Entry.Category}]" : Entry.Name;
 
     /// <summary>
     /// Whether the query is in the name, group, category or string id, ignoring case.
