@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.coloredstats",
+  "apiVersion": 2,
+  "assemblies": ["ColoredStats.dll"],
+  "entry": "Meitou.ColoredStats.ColoredStatsMod",
+  "gameVersion": ">=0.22.2"
+}
