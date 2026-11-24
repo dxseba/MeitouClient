@@ -251,6 +251,11 @@ sealed class DurabilityConfig
     public bool GradeWear { get; private set; } = true;
 
     /// <summary>
+    /// <c>Verbose</c> (0): the original's diagnostic lines, written to the mod log (<see cref="VerboseLog"/>).
+    /// </summary>
+    public bool Verbose { get; private set; }
+
+    /// <summary>
     /// See the property above.
     /// </summary>
     public int[] WeaponGrades { get; } = [100, 95, 85, 75, 65, 55, 50, 45, 35, 30, 25, 15, 10, 5];
@@ -341,6 +346,7 @@ sealed class DurabilityConfig
             case "ArmourDebuffEnabled": ArmourDebuff = on; break;
             case "ArmourBonusEnabled": ArmourBonus = on; break;
             case "GradeWearEnabled": GradeWear = on; break;
+            case "Verbose": Verbose = on; break;
             default: return false;
         }
 

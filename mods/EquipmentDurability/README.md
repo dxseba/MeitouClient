@@ -4,7 +4,7 @@ Port of *Equipment Durability* (workshop 3834344700, "Durability" 1.2.0 by its s
 `Durability.cpp` (GPL-3.0) and README; no code was copied.
 
 - **Settings**: `Durability.cfg` in the mod folder, written with the defaults when missing and read at start, with the original's keys and defaults, so
-  the original's cfg works unchanged (`Verbose` and `TooltipAfterRow` are read by nothing here).
+  the original's cfg works unchanged (`TooltipAfterRow` is read by nothing here).
 - **Durability**: an integer per weapon, crossbow and armour piece with coverage (not locked armour such as shackles), in `ItemInstance.ModTag` as
   `dur=<n>` of the shared `dxseba;key=value` tag (`ItemTag`; saved and copied with the item). Rolled once in the class's range (`min-max/cap`, the cap
   is the maximum): Katana 15-267/500, Sabre 35-399/700, Hacker 45-445/800, Heavy 98-533/1000, Blunt 25-350/600, Polearm 35-399/700, crossbows
@@ -38,6 +38,10 @@ Port of *Equipment Durability* (workshop 3834344700, "Durability" 1.2.0 by its s
   item, since a loose sound plays only from the mod's own folder) plays on the interface as the work begins
   (`RepairSoundTiming = start`) or as the repair is applied (`end`; an instant repair plays it then).
 - **Breaking** (`BreakWeapons = 1`): the piece is removed and the owner's fighter and look are made again (`CharacterRefresh.Refresh`, Equipment).
+- **Log**: the settings line at start, repairs, cancels and breaks, as the original's; with `Verbose = 1` also its diagnostics, each capped per
+  session as the original's: rolls (60), wear by a hit, block, shot or armour hit (40, and any with 5 or fewer points left), a blow's damage
+  change (30) and reload times (12). Its other verbose lines (ignored weapons, worn armour factors, body part hits, tooltip rows, weapon
+  sections, menu and item listings) are not written. **Verified** (original source: the caps and conditions); the lines are **Unknown** in play.
 - **Missing** (engine): the tooltip row's place after "Sell value" (`TooltipAfterRow`; mod lines sit after the game's rows, before the
   description); stopping the sound when a repair is cancelled (a posted sound cannot be stopped); "anything that stops the animation" as a cancel
   (the clip is a combat move the game's own actions replace; the port's cancels are the original's listed ones).

@@ -17,7 +17,8 @@ namespace Meitou.EquipmentDurability;
 /// its first use, on its first tooltip (<see cref="RollOrder"/>, as the original) and when the world makes it (<see cref="IItemCreatedObserver"/>: loot,
 /// crafted, shop stock and spawn kit, so a trader's stock, which no tooltip command can name, shows a value).
 /// </summary>
-sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Action<string> sound)
+sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngPurpose purpose, Action<string> log, Action<string> sound,
+    VerboseLog verbose)
     : ICombatHitObserver, ICombatHitFilter, IArmourFilter, ICombatDefenceObserver, IItemUseObserver, IItemCreatedObserver, ICombatSpeedFilter,
         IStateHashed
 {
@@ -41,7 +42,7 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     /// <summary>
     /// The gear rules.
     /// </summary>
-    readonly Condition _condition = new(config, data);
+    readonly Condition _condition = new(config, data) { Verbose = verbose };
 
     /// <summary>
     /// The repairs.
@@ -149,6 +150,8 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         float factor = _condition.DamageFactor(dur, cap);
         if (factor is > 0.999f and < 1.001f) return;
 
+        verbose.Damage(factor);
+
         var p = hit.Packet;
         hit.Packet = p with { Cut = p.Cut * factor, Blunt = p.Blunt * factor, Pierce = p.Pierce * factor };
     }
@@ -191,6 +194,7 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         float changed = time + delta;
         if (delta < 0 && changed < time * 0.25f) changed = time * 0.25f;
         changed = MathF.Max(changed, 0.1f);
+        verbose.Reload(time, changed);
         return ask.Rate * time / changed;
     }
 
@@ -219,13 +223,13 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         switch (use.Kind)
         {
             case UseKind.Hit:
-                Wear(world, use.Who, cold, Gear.InHand(cold), config.PerHit);
+                Wear(world, use.Who, cold, Gear.InHand(cold), config.PerHit, "hit");
                 break;
             case UseKind.Block:
-                Wear(world, use.Who, cold, Gear.InHand(cold), config.PerBlock);
+                Wear(world, use.Who, cold, Gear.InHand(cold), config.PerBlock, "block");
                 break;
             case UseKind.Shot:
-                Wear(world, use.Who, cold, Gear.Crossbow(inventory), config.PerShot);
+                Wear(world, use.Who, cold, Gear.Crossbow(inventory), config.PerShot, "shot");
                 break;
             case UseKind.ArmourHit:
                 WearArmour(world, use.Who, cold, use.Part);
@@ -244,15 +248,15 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         foreach (var piece in Gear.Worn(cold.Inventory).ToList())
         {
             if (data.Combat.Armour(piece.Record)?.Coverage.Any(e => e.PartStringId == partId) == true)
-                Wear(world, id, cold, piece, config.PerArmourHit);
+                Wear(world, id, cold, piece, config.PerArmourHit, "armour hit");
         }
     }
 
     /// <summary>
     /// The original's <c>OnPlayerWear</c>: rolls the item if new, takes <paramref name="amount"/> unless its grade spares this use, and destroys it at
-    /// 0 with <c>BreakWeapons</c>.
+    /// 0 with <c>BreakWeapons</c>. <paramref name="what"/> names the use for the diagnostics.
     /// </summary>
-    void Wear(World world, CharacterId id, CharacterCold owner, ItemInstance? item, int amount)
+    void Wear(World world, CharacterId id, CharacterCold owner, ItemInstance? item, int amount, string what)
     {
         if (item is null || !_condition.Tracked(item, out var c)) return;
 
@@ -261,6 +265,7 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         {
             dur = Math.Max(0, dur - amount);
             Condition.Set(item, dur);
+            verbose.Worn(what, item, dur);
         }
 
         if (dur <= 0 && config.Break) _repairs.Destroy(owner, item);

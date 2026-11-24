@@ -27,6 +27,8 @@ public sealed class EquipmentDurabilityMod : IMod
     public void Initialize(ModContext context)
     {
         Config = DurabilityConfig.Load(context.Folder, context.Log);
+        var verbose = new VerboseLog(Config, context.Log);
+        verbose.Settings();
         if (!Config.Enabled)
         {
             context.Log("Enabled = 0 in " + DurabilityConfig.FileName + ": doing nothing");
@@ -34,7 +36,8 @@ public sealed class EquipmentDurabilityMod : IMod
         }
 
         context.AddSystem("durability",
-            _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log, s => context.PostInterfaceSound(s)),
+            _ => Running = new DurabilitySystem(Config, context.Population, context.RngPurpose, context.Log, s => context.PostInterfaceSound(s),
+                verbose),
             SystemAnchor.End);
         if (Config.Repair) TakeOriginalSound(context, Config.RepairSound);
         if (Config.Repair) context.AddCombatMove(RepairMove);

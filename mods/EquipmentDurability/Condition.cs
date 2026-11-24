@@ -154,6 +154,11 @@ sealed class Condition(DurabilityConfig config, PopulationData data)
         item.ModTag = ItemTag.Put(item.ModTag, Key, Math.Max(0, value).ToString(CultureInfo.InvariantCulture));
 
     /// <summary>
+    /// The diagnostics a roll is written to (null: none).
+    /// </summary>
+    public VerboseLog? Verbose { get; init; }
+
+    /// <summary>
     /// The item's durability, rolling it first when it has none (a player-crafted item at its cap with <c>CraftedFullDurability</c>), as the original's
     /// <c>GetOrRoll</c>; <paramref name="roll"/> is the 64-bit roll to use.
     /// </summary>
@@ -165,6 +170,7 @@ sealed class Condition(DurabilityConfig config, PopulationData data)
         bool full = config.CraftedFull && item.Crafter.Length > 0;
         int rolled = full ? range.Cap : range.Min + Rng.Int(roll, range.Max - range.Min + 1);
         Set(item, rolled);
+        Verbose?.Rolled(item, rolled, range, c, full);
         return rolled;
     }
 
