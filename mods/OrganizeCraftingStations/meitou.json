@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.organizecraftingstations",
+  "apiVersion": 2,
+  "assemblies": ["OrganizeCraftingStations.dll"],
+  "entry": "Meitou.OrganizeCraftingStations.OrganizeCraftingStationsMod",
+  "gameVersion": ">=0.22.2"
+}
