@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.guardbreakbash",
+  "apiVersion": 2,
+  "assemblies": ["GuardBreakBash.dll"],
+  "entry": "Meitou.GuardBreakBash.GuardBreakBashMod",
+  "gameVersion": ">=0.22.2"
+}
