@@ -34,4 +34,8 @@ public sealed class MentorsSettings
     [Setting("Hotkey radius", Hint = "Radius: the Mentors window key opens training with the nearest teacher this close (game units).", Min = 20,
         Max = 2000, Step = 10)]
     public int Radius { get; set; } = 500;
+
+    [Setting("Trace dialogue",
+        Hint = "TraceDialogue: write every step of the training reply and the hotkey to the mod log (for troubleshooting only).")]
+    public bool TraceDialogue { get; set; }
 }

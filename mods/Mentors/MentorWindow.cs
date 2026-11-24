@@ -62,7 +62,8 @@ sealed class MentorWindow(ModContext context) : IUiExtension
     UiNode Header(LessonOffer offer)
     {
         var row = Row("mentors-header");
-        row.Children.Add(Label("mentors-title", $"{offer.TeacherName} ({offer.Profession})", Width - 12 - 70 - 4, _styles.Text));
+        string title = offer.TeacherName == "" ? "Mentors" : $"{offer.TeacherName} ({offer.Profession})";
+        row.Children.Add(Label("mentors-title", title, Width - 12 - 70 - 4, _styles.Text));
         row.Children.Add(Button("mentors-close", "Close", 70, _close, "", true));
         return row;
     }

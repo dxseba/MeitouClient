@@ -22,8 +22,17 @@ public sealed class MentorsMod : IMod
     /// <summary>The merged game data (record names, for the trades).</summary>
     internal static Meitou.Data.GameDatabase? Data;
 
+    static ModContext? s_context;
+
+    /// <summary>The original's <c>TraceDialogue</c>: one "[trace] " line in the mod log when the setting is on.</summary>
+    internal static void Trace(string text)
+    {
+        if (Settings.TraceDialogue) s_context?.Log("[trace] " + text);
+    }
+
     public void Initialize(ModContext context)
     {
+        s_context = context;
         Data = context.Data;
         Professions.Load(context);
         context.AddSettings(Settings);
@@ -50,10 +59,15 @@ sealed class TeachReply : IUiExtension
     static IEnumerable<UiDialogueReply> Replies(UiDialogueContext talk)
     {
         if (!MentorsMod.Settings.Enabled || talk.Player is not { IsPlayer: true } student || talk.Npc is not { } teacher) return [];
-        if (!Teachers.CanTeach(teacher, student)) return [];
 
+        bool teaches = Teachers.CanTeach(teacher, student);
+        MentorsMod.Trace($"offer? teacher {teacher.Name}, student {student.Name}, {(teaches ? "can teach" : "nothing to teach")}");
+        if (!teaches) return [];
+
+        MentorsMod.Trace("training reply added to dialogue with " + teacher.Name);
         return [new UiDialogueReply(Text, () =>
         {
+            MentorsMod.Trace($"training reply clicked: teacher {teacher.Name}, student {student.Name}");
             talk.Enqueue(new OpenLessonsOrder(student.Id, teacher.Id) { Tick = talk.Tick });
             if (MentorsMod.Settings.CloseDialogue) talk.Leave();
         })];
@@ -90,12 +104,19 @@ static class Teachers
 }
 
 /// <summary>
-/// Ctrl+Shift with the "Mentors window" key (the original's Ctrl+Shift+T; unbound by default, as the game holds T): closes the open window, or
-/// opens it for the first selected character on the inspected character (the HUD's shown one) when it can teach, else on the nearest character
-/// within <see cref="MentorsSettings.Radius"/> who can teach it something (the original's "selected NPC, or the nearest one who can teach").
+/// Ctrl+Shift with the "Mentors window" key (the original's Ctrl+Shift+T): closes the open window, or opens it for the first selected character
+/// on the inspected character (the HUD's shown one) when it can teach, else on the nearest character within <see cref="MentorsSettings.Radius"/>
+/// who can teach it something. Without a teacher the window opens with the original's note (<b>Verified</b>, DLL code and strings): no
+/// selected character, the inspected NPC is no teacher or has nothing left to teach (with Require profession), or nobody near.
 /// </summary>
 static class LessonShortcut
 {
+    const string NoStudent = "Select your character and press Ctrl+Shift+T next to an NPC.";
+    const string Nobody = "Nobody nearby can teach you anything. Select an NPC or come closer.";
+    const string NoTrade = " is no teacher. Teachers need a fitting trade: guards teach combat, ninjas stealth and assassination, farmers farming, "
+        + "miners labouring, traders attributes.";
+    const string NoMore = " cannot teach you any more of their trade.";
+
     public static void Pressed(ModKeyContext key)
     {
         if (!MentorsMod.Settings.Enabled) return;
@@ -106,9 +127,33 @@ static class LessonShortcut
             return;
         }
 
-        if (key.Selected.Count == 0 || (Inspected(key) ?? Nearest(key.Snapshot, key.Selected[0])) is not { } teacher) return;
+        if (key.Selected.Count == 0)
+        {
+            key.Enqueue(new OpenLessonsOrder(CharacterId.None, CharacterId.None) { Tick = key.Tick, Note = NoStudent });
+            return;
+        }
 
-        key.Enqueue(new OpenLessonsOrder(key.Selected[0], teacher) { Tick = key.Tick });
+        var student = key.Selected[0];
+        var teacher = Inspected(key) ?? Nearest(key.Snapshot, student);
+        MentorsMod.Trace($"hotkey: student {student}, teacher {teacher?.ToString() ?? "none"}");
+        if (teacher is { } found)
+        {
+            key.Enqueue(new OpenLessonsOrder(student, found) { Tick = key.Tick });
+            return;
+        }
+
+        key.Enqueue(new OpenLessonsOrder(student, CharacterId.None) { Tick = key.Tick, Note = WhyNot(key) });
+    }
+
+    /// <summary>The note for a press without a teacher: about the inspected NPC when the trades decide, else "nobody nearby".</summary>
+    static string WhyNot(ModKeyContext key)
+    {
+        if (!MentorsMod.Settings.RequireProfession || key.Frame?.Shown is not { } shown) return Nobody;
+        if (key.Snapshot.Characters.FirstOrDefault(c => c.Id == shown) is not { IsPlayer: false } npc) return Nobody;
+
+        var field = Professions.Of(MentorsMod.Data?.Find(npc.RecordId)?.BaseName ?? "", trader: false, default);
+        MentorsMod.Trace($"hotkey: no teacher, selected {npc.Name} ({field?.Name ?? "no trade"})");
+        return field is null ? npc.Name + NoTrade : $"{npc.Name} ({field.Name}){NoMore}";
     }
 
     /// <summary>The character the HUD shows (an inspected NPC) when it can teach the first selected one.</summary>
@@ -138,7 +183,11 @@ static class LessonShortcut
 }
 
 /// <summary><paramref name="Student"/> asks <paramref name="Teacher"/> what it can teach; the window shows the offer.</summary>
-public sealed record OpenLessonsOrder(CharacterId Student, CharacterId Teacher) : SimCommand;
+public sealed record OpenLessonsOrder(CharacterId Student, CharacterId Teacher) : SimCommand
+{
+    /// <summary>The status line to open with (the hotkey's note when it found no teacher, <see cref="CharacterId.None"/>).</summary>
+    public string Note { get; init; } = "";
+}
 
 /// <summary>The open offer's student buys <paramref name="Levels"/> levels of <paramref name="Stat"/>.</summary>
 public sealed record BuyLessonOrder(CharacterId Student, CharacterId Teacher, StatsEnumerated Stat, int Levels) : SimCommand;

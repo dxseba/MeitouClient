@@ -91,7 +91,7 @@ sealed class MentorSystem(MentorsSettings settings, GameDatabase data) : ITickSy
         {
             case OpenLessonsOrder open:
                 _open = (open.Student, open.Teacher);
-                _status = "";
+                _status = open.Note;
                 break;
             case CloseLessonsOrder:
                 _open = null;
@@ -107,6 +107,12 @@ sealed class MentorSystem(MentorsSettings settings, GameDatabase data) : ITickSy
     void Publish(World world)
     {
         var (studentId, teacherId) = _open!.Value;
+        if (teacherId == CharacterId.None)
+        {
+            Offer = NoTeacher(world, studentId);
+            return;
+        }
+
         if (Pair(world, studentId, teacherId) is not var (student, teacher))
         {
             _open = null;
@@ -119,6 +125,14 @@ sealed class MentorSystem(MentorsSettings settings, GameDatabase data) : ITickSy
         string status = _status != "" ? _status : lessons.Count == 0 ? "Nothing left to teach." : "";
         string trade = field is null ? "none" : $"{field.Name} ({field.Covers})";
         Offer = new(studentId, student.Name, teacherId, teacher.Name, trade, world.Player.Money, lessons, status);
+    }
+
+    /// <summary>The original's window without a teacher: the hotkey's note (who is no teacher, or nobody near) as the status line.</summary>
+    LessonOffer NoTeacher(World world, CharacterId studentId)
+    {
+        var table = world.Characters;
+        string name = table.TryResolveNext(studentId, out int slot) && table.Cold(slot) is { } student ? student.Name : "";
+        return new(studentId, name, CharacterId.None, "", "", world.Player.Money, [], _status);
     }
 
     static (CharacterCold Student, CharacterCold Teacher)? Pair(World world, CharacterId studentId, CharacterId teacherId)

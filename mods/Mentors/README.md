@@ -7,6 +7,14 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
   a character who can teach the player's character (`AddDialogueReplies`) opens training; with *Close dialogue* (`CloseDialogue`, on) the
   conversation ends. The *Mentors window* key (Ctrl+Shift+T by default, a chord, so the game's T stays Toggle research) opens it on the inspected
   NPC (the HUD's shown character) when it can teach, else on the nearest teacher within *Hotkey radius* (`Radius`, 500), or closes it.
+  Without a teacher the window opens with the original's note (**Verified**, DLL code and strings): "Select your character and press
+  Ctrl+Shift+T next to an NPC." (nobody selected); with *Require profession*, about the inspected non-player NPC: "<name> is no teacher.
+  Teachers need a fitting trade: ..." (no trade) or "<name> (<trade>) cannot teach you any more of their trade."; else "Nobody nearby can
+  teach you anything. Select an NPC or come closer."
+- **Trace dialogue** (`TraceDialogue`, off): "[trace] " lines in the mod log for the reply offered, added and clicked and the hotkey's choice
+  (port: its own steps; the original traces the game's dialogue calls it hooks).
+- **characters.txt** (**Observed**, shipped file and DLL strings): the original maps CHARACTER string ids to English names (647 lines) so a
+  translated game still finds trades; the port reads the untranslated record name (`BaseName`), the same unless a mod renames a record.
 - **Who can teach** (**Verified**): a player character learns from a living non-player character that is not a slave (state 1) and not hostile;
   port also: conscious, not imprisoned or carried (an unconscious check in the original is **Observed** only, an unnamed virtual call).
 - **Trades**: the original maps the teacher's lower-cased English CHARACTER record name to one of 21 trades: 6 whole names compared first, then
@@ -39,6 +47,7 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
 
 ## Missing
 
-- The original's trades when it is not installed (the port's heuristic is used).
-- `OnlyPlayerStartedTalk`: the reply shows in every conversation with a teacher; the dialogue context does not say who started the talk.
-- Russian texts.
+- The original's trades when it is not installed (the port's heuristic is used): they are its author's table, not shipped.
+- `OnlyPlayerStartedTalk`: the reply shows in every conversation with a teacher; the dialogue context does not say who started the talk
+  (engine gap).
+- Russian texts: no per-mod translation API (engine gap).
