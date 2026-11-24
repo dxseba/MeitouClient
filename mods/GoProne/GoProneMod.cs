@@ -14,7 +14,8 @@ public sealed class GoProneMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSystem("prone", _ => new ProneSystem(context.Enqueue), SystemAnchor.End);
-        context.AddKeyAction("toggle", "Toggle prone", Pressed);
+        var action = context.AddKeyAction("toggle", "Toggle prone", Pressed);
+        action.After = Game.Host.Input.InputAction.ToggleSneak;
         context.Log("Go Prone initialized");
     }
 

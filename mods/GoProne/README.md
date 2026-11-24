@@ -5,14 +5,16 @@ Port of *Go Prone* (Genpretz, Nexus 1830), from the original's DLL (`Go Prone.dl
 - **Toggle prone** (`AddKeyAction`, unbound by default): the selected player characters lie down in the staying-low posture
   (`MedicalState.StayingLow`, [ragdolls](../../docs/game/ragdolls.md) "Staying low": stealth x2, sight x0.5, crawl speed 7, grounded clips)
   and start sneaking; pressed while any of them is staying low, they stand (posture 0, the engine's get-up as for a speed order) and keep
-  sneaking. Characters crawling with a leg down, playing dead or out cold are left as they are. A chord such as Ctrl+Z can be bound on the
+  sneaking. Its Controls row sits right after "Toggle stealth mode" (`ModKeyAction.After`), as the original's. Characters crawling with a
+  leg down, playing dead or out cold are left as they are. A chord such as Ctrl+Z can be bound on the
   Controls page. The engine ends the posture as it ends staying low (a speed order, sneak off, a leg down, a melee attack, a caught thief's
   watcher); it is not saved, as in the game.
 
 ## Facts (Verified: decompile of `Go Prone.dll`, `startPlugin` and its hooks, unless marked)
 
 - Adds the input command `toggle_prone` with no key or modifiers (`InputHandler::loadConfig` hook), so it is unbound until the player binds it.
-- Its Controls line ("Toggle prone"; looked up as a translatable message, **Observed**, no catalog shipped) is inserted right after the "Toggle stealth mode" (`toggle_sneak`)
+- Its Controls line ("Toggle prone"; looked up as a translatable message, **Observed**, no catalog shipped; the port's label goes through the game's lookup
+  too) is inserted right after the "Toggle stealth mode" (`toggle_sneak`)
   line (`DatapanelGUI::addCustomLine` hook).
 - On the command (`PlayerInterface::playerControl` hook): down = not `PlayerInterface::selectedCharactersLayingLow()`. For each selected
   character whose posture (vfunc `0x368`) is not 2, 3 or 4: down sets stealth on, then posture 1; up sets posture 0, then stealth on. Then the
@@ -29,5 +31,4 @@ Port of *Go Prone* (Genpretz, Nexus 1830), from the original's DLL (`Go Prone.dl
 
 ## Missing
 
-- The Controls row comes after the game's rows (Meitou places mod rows there), not right after "Toggle stealth mode". Engine gap.
 - **Unknown**: not checked in game.
