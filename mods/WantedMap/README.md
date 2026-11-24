@@ -21,6 +21,11 @@ this mod's folder, else from the installed original (`OriginalFiles`: its Worksh
 - **Settings** (`WantedMap.defaults.ini`): Enabled 1, AllInventories 0, ShowLabels 1, TownFallback 1, RememberSeen 1, DeadMarkerHours 24 (0
   none), ScanSeconds 2, WorldScanSeconds 30, Debug 0, StopWords `the,of,and,wanted,king,boss,leader,из,банды,и,король,лидер,лидеры,глава`
   (a text setting here, used when the posters are matched at start). **Verified**.
+- **Translations**: the installed original's `wanted_map` catalogues (en_GB, ru_RU, zh_CN; `context.AddTranslations`, read from its folder,
+  not shipped) translate the settings' labels and the hints that keep the original's English, and the markers' state words (dead,
+  imprisoned, approx., lives here) through `context.Tr`. **Verified** (installed `.mo` files: those messages, en_GB identity). Hints the port
+  words differently because its behaviour differs (RememberSeen kept in the save, both scan intervals on game time whether the map is open
+  or not, Debug to the mod log) stay English; the tooltip's "Wanted" / "State" go to the game's catalogue. Shown in game **Unknown**.
 - **Badge** on a poster's item cell (inventory, bag, loot): none until a target is dead or captive; `done/total` (colour 1, 0.42, 0.36; box
   3 px in, 18 high, top 20 above the cell's bottom) while some are left; when all are, `wantedmap_captive.png` (any captive) or
   `wantedmap_done.png`, 2/5 of the cell's smaller side held to 14 to 28 px, 2 px from its lower left; no picture, no badge. **Verified**

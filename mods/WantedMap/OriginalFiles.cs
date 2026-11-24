@@ -38,6 +38,17 @@ sealed class OriginalFiles
         return null;
     }
 
+    /// <summary>
+    /// The installed original's folder (its Workshop folder beside this one, else the code-less mod named "WantedMap"); null when absent.
+    /// </summary>
+    public static string? InstalledFolder(ModContext context)
+    {
+        string? beside = Path.GetDirectoryName(Path.GetFullPath(context.Folder)) is { } parent ? Path.Combine(parent, OriginalItem) : null;
+        if (beside is not null && Directory.Exists(beside)) return beside;
+
+        return Installed(context);
+    }
+
     static IEnumerable<string> Folders(ModContext context)
     {
         yield return context.Folder;

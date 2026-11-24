@@ -18,6 +18,7 @@ public sealed class WantedMapMod : IMod
     public void Initialize(ModContext context)
     {
         context.AddSettings(Settings);
+        AddTranslations(context);
 
         var stopWords = Settings.StopWords.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(w => w.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
@@ -25,9 +26,20 @@ public sealed class WantedMapMod : IMod
         var posters = PosterIndex.Build(context.Data, files, stopWords);
         var towns = new TownPlaces(context.Population);
         context.AddSystem("wanted", _ => Running = new WantedSystem(posters, towns, Settings, context.Log), SystemAnchor.End);
-        context.AddUi(new WantedMarkers(new PosterBadge(files)));
+        context.AddUi(new WantedMarkers(new PosterBadge(files), context.Tr));
         context.Log($"Wanted Map initialized: {posters.Count} posters matched");
         if (Settings.Debug) LogTable(context, posters);
+    }
+
+    /// <summary>
+    /// The original's <c>wanted_map</c> catalogues (en_GB, ru_RU, zh_CN), read from the installed original's folder: the settings' labels and
+    /// hints that keep its English, and the markers' state words.
+    /// </summary>
+    static void AddTranslations(ModContext context)
+    {
+        string? folder = OriginalFiles.InstalledFolder(context);
+        bool added = folder is not null && context.AddTranslations("wanted_map", folder);
+        if (!added) context.Log($"no wanted_map catalogue for {context.Language}; texts stay English");
     }
 
     /// <summary>
@@ -110,7 +122,9 @@ public sealed class WantedSettings
     /// <summary>
     /// <c>[Match] StopWords</c>: words that do not link a reward to a name. Read when the posters are matched, at start.
     /// </summary>
-    [Setting("Stop words", Hint = "Comma-separated words that do not count when a poster's reward is matched to a name. Applies at the next start.",
+    [Setting("Words ignored in names",
+        Hint = "Comma-separated words that do not count when a poster's name is compared with a character's name, such as king or leader. "
+            + "Any language.",
         MaxLength = 1024)]
     public string StopWords { get; set; } = "the,of,and,wanted,king,boss,leader,из,банды,и,король,лидер,лидеры,глава";
 
@@ -123,21 +137,21 @@ public sealed class WantedSettings
     /// <summary>
     /// <c>WorldScanSeconds</c>, default 30: how often the targets are searched for in the whole world; between, only the found ones move.
     /// </summary>
-    [Setting("World search, seconds", Hint = "How often the targets are searched for in the whole world; between searches only the found ones move.",
+    [Setting("Target search, seconds", Hint = "How often the targets are searched for in the whole world; between searches only the found ones move.",
         Min = 1, Max = 600, Step = 1)]
     public float WorldScanSeconds { get; set; } = 30;
 
     /// <summary>
     /// <c>Debug</c>, default 0: the poster table at start and each world search's markers, to the mod log.
     /// </summary>
-    [Setting("Debug", Hint = "Writes the poster-to-target table and the markers of each world search to the log.")]
+    [Setting("Detailed log", Hint = "Writes the poster-to-target table and the markers of each world search to the log.")]
     public bool Debug { get; set; }
 }
 
 /// <summary>
 /// The map markers, filtered to the posters the selected characters carry.
 /// </summary>
-sealed class WantedMarkers(PosterBadge badge) : IUiExtension
+sealed class WantedMarkers(PosterBadge badge, Func<string, string> tr) : IUiExtension
 {
     static readonly Vector4 Red = new(.90f, .20f, .15f, 1), Orange = new(.95f, .55f, .15f, 1), Yellow = new(.95f, .85f, .20f, 1),
         Blue = new(.30f, .55f, .95f, 1), Grey = new(.60f, .60f, .60f, 1);
@@ -165,7 +179,7 @@ sealed class WantedMarkers(PosterBadge badge) : IUiExtension
     /// </summary>
     internal static volatile IReadOnlyList<WantedMapMarker> Shown = [];
 
-    static IEnumerable<UiMapMarker> Markers(UiMapContext map)
+    IEnumerable<UiMapMarker> Markers(UiMapContext map)
     {
         var settings = WantedMapMod.Settings;
         if (!settings.Enabled || WantedMapMod.Running?.Markers is not { Count: > 0 } markers)
@@ -186,9 +200,10 @@ sealed class WantedMarkers(PosterBadge badge) : IUiExtension
         return shown.Select(m => Marker(m, settings.ShowLabels)).ToList();
     }
 
-    static WantedMapMarker Exported(TargetMarker m)
+    WantedMapMarker Exported(TargetMarker m)
     {
-        var (_, colour, word) = Look(m.State);
+        var (_, colour, english) = Look(m.State);
+        string word = Word(english);
         return new(m.At, colour, (WantedState)m.State, m.Target, word.Length > 0 ? $"{m.Name} ({word})" : m.Name);
     }
 
@@ -207,12 +222,18 @@ sealed class WantedMarkers(PosterBadge badge) : IUiExtension
     /// <summary>
     /// The marker; its label the name and the state word of the original's catalog (dead, imprisoned, approx., lives here).
     /// </summary>
-    static UiMapMarker Marker(TargetMarker m, bool labels)
+    UiMapMarker Marker(TargetMarker m, bool labels)
     {
-        var (group, colour, word) = Look(m.State);
+        var (group, colour, english) = Look(m.State);
+        string word = Word(english);
 
         string label = word.Length > 0 ? $"{m.Name} ({word})" : m.Name;
-        string tooltip = word.Length > 0 ? $"Wanted\t{m.Name}\nState\t{word}" : $"Wanted\t{m.Name}";
+        string tooltip = word.Length > 0 ? $"{tr("Wanted")}\t{m.Name}\n{tr("State")}\t{word}" : $"{tr("Wanted")}\t{m.Name}";
         return new(m.At, group, colour, labels ? label : null, tooltip);
     }
+
+    /// <summary>
+    /// A state word in the game's language (the original's catalogue), empty for none.
+    /// </summary>
+    string Word(string english) => english.Length > 0 ? tr(english) : "";
 }
