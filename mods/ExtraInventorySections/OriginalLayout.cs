@@ -28,7 +28,7 @@ static class OriginalLayout
     /// </summary>
     public static Dictionary<string, SectionPlace> Read(ModContext context, IReadOnlyList<(string Widget, string Caption)> sections)
     {
-        if (Find(context) is not { } path)
+        if (LayoutPath(context) is not { } path)
         {
             context.Log($"the original mod ({OriginalName}, Nexus 1838) is not installed: the sections use the places in the settings");
             return [];
@@ -71,7 +71,8 @@ static class OriginalLayout
 
     static MyGuiWidget? Named(MyGuiWidget parent, string name) => parent.Children.FirstOrDefault(c => c.Name == name);
 
-    static string? Find(ModContext context)
+    /// <summary>The installed original's character window layout, or null (logged once by <see cref="Read"/>).</summary>
+    public static string? LayoutPath(ModContext context)
     {
         try
         {

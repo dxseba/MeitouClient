@@ -1,18 +1,23 @@
-# Extra Inventory Sections (partial port)
+# Extra Inventory Sections (port)
 
 Port of *Extra Inventory Sections* (Genpretz, Nexus 1838), from the original's DLL (`Extra Inventory Sections.dll`, Ghidra decompile) and
 files, on the engine's mod equipment slots (`ModContext.AddEquipmentSlot`, [docs/modding.md](../../docs/modding.md) "Equipment slots").
 
-- **Sections**, named as the original's (so saves keep its names): `eyes_eyes` 3x1 cells for ARMOUR/ITEM records with FCS slot ATTACH_EYES (4),
-  `gloves` 2x2 for ATTACH_GLOVES (10), `neck` 2x2 for ATTACH_NECK (11). Each is worn gear like a vanilla clothing slot (armour stats, look,
+- **Sections**, named and sized as the original's (so saves keep its names): `eyes_eyes` 3x1 for ARMOUR/ITEM records of FCS
+  slot ATTACH_EYES (4); `eyes_belts` 3x1 and `eyes_hats` 3x1, second belt (14) and hat (3) sections (`Secondary`: filled only by a drag or
+  the loot window, while picking up, equipping and NPC kits keep using the vanilla `belt` and `head`); `gloves` 2x2 for ATTACH_GLOVES (10),
+  up to four items (`MaxItems = 4`); `neck` 2x2 for ATTACH_NECK (11). Each is worn gear like a vanilla clothing slot (armour stats, look,
   trade, looting, locks); animals get none.
-- **Places and captions** (setting *Original's places*, on): read at start from the installed original's
-  `gui/layout/Custom_InventoryCharacterWindow.layout` (the mod "Extra Inventory Sections Plugin" in Kenshi's mods, found by `ModList.Discover`;
-  nothing of it is shipped): each section widget's corner in the window at 1920x1080 (the `Kenshi_WindowCXP` client inset 3, 41) and the
-  captions of `lbEyes`, `lbGloves`, `lbNeck`. Without the original, or with the setting off, the six *X*/*Y* settings (defaults: the free
-  band between the vanilla data panel and the main grid's title, with "EYES", "HANDS", "NECK"). Restart after a change.
-- **Labels** (setting *Section labels*, on): the caption centred just above each section in the character and loot windows (`AddScreenControls`
-  `Above` the section's widget), font `Kenshi_PaintedTextFont_Medium` in the `Kenshi_TextboxPaintedText` template's colour.
+- **NPC gear**: the eyes, hands and neck sections are `RollFromClothing`: a generated character rolls one more item each for slots 4, 10 and
+  11 from its CHARACTER `clothing` list after the game's slots, in that order, as the original's `chooseMyClothing` hook does.
+- **Window** (setting *Original's window*, on): the installed original's `gui/layout/Custom_InventoryCharacterWindow.layout` (the mod "Extra
+  Inventory Sections Plugin" in Kenshi's mods, found by `ModList.Discover`; nothing of it is shipped) replaces
+  `Kenshi_InventoryCharacterWindow.layout` (`AddLayoutReplacement`) for the character and loot windows, so the window is the original's
+  taller, reflowed one, each section at its widget and the layout's own captions. Without the original, or with the setting off, the vanilla
+  window with the sections at the ten *X*/*Y* settings (defaults: the free band between the vanilla data panel and the main grid's title,
+  second belt and hat stacked under the eyes) and, with *Section labels* (on), "EYES", "HANDS", "NECK" centred above eyes, hands and neck
+  (`AddScreenControls` `Above` the section's widget; font `Kenshi_PaintedTextFont_Medium` in the `Kenshi_TextboxPaintedText` template's
+  colour; with the layout replaced it carries them). Restart after a change.
 
 ## Facts (Verified: decompile of `Extra Inventory Sections.dll`, `startPlugin` and its hooks, and its data table, unless marked)
 
@@ -34,10 +39,8 @@ files, on the engine's mod equipment slots (`ModContext.AddEquipmentSlot`, [docs
 
 ## Missing
 
-- `eyes_hats` and `eyes_belts` (second hat and belt sections): `AddEquipmentSlot` refuses the vanilla FCS slots 3 and 14. Engine gap.
-- `gloves` holds one item, not four: a mod slot holds one item. Engine gap.
-- Generated NPCs get no eyes, hands or neck items: the character generator rolls clothing for the vanilla slots only. Engine gap.
-- The window keeps the vanilla layout (not the original's taller, reflowed one): there is no layout replacement for mods. Engine gap.
-- In a save made with this port's former section names (`eyes`, `hands`) those items are moved into the character's grids on load
-  ([save](../../docs/formats/save.md)); wear them again. Vanilla data has few or no items of these slots: the sections are for item mods.
-- **Unknown**: not checked in game, including whether the places taken from the original's layout clear the vanilla window's widgets.
+- Nothing of the original's behaviour. In a save made with this port's former section names (`eyes`, `hands`) those items are moved into
+  the character's grids on load ([save](../../docs/formats/save.md)); wear them again. Vanilla data has few or no items of these slots: the
+  sections are for item mods.
+- **Unknown**: not checked in game: the replaced window, the four-item hands section, the secondary sections and NPC rolls; and whether the
+  fallback places clear the vanilla window's widgets.

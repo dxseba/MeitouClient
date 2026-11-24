@@ -5,9 +5,10 @@ using Meitou.Simulation.Items;
 namespace Meitou.ExtraInventorySections;
 
 /// <summary>
-/// Port of Extra Inventory Sections (Genpretz, Nexus 1838): the original's eyes, gloves and neck inventory sections through the engine's mod slots
-/// (<c>AddEquipmentSlot</c>), taking the ARMOUR and ITEM records of FCS slot ATTACH_EYES (4), ATTACH_GLOVES (10) and ATTACH_NECK (11), at the
-/// places and with the captions of the installed original's character window layout (else the settings' places).
+/// Port of Extra Inventory Sections (Genpretz, Nexus 1838): the original's five inventory sections through the engine's mod slots
+/// (<c>AddEquipmentSlot</c>): eyes (FCS slot 4), hands (10, up to four items) and neck (11), worn by generated NPCs from their clothing lists,
+/// and a second hat (3) and belt (14) filled by hand, in the installed original's character window layout (else the vanilla one at the
+/// settings' places).
 /// </summary>
 public sealed class ExtraInventorySectionsMod : IMod
 {
@@ -18,22 +19,47 @@ public sealed class ExtraInventorySectionsMod : IMod
 
         var widgets = Sections.All.Select(s => (s.Section, s.CaptionWidget)).ToList();
         var original = settings.OriginalPlaces ? OriginalLayout.Read(context, widgets) : [];
-        var captions = new List<(string Section, string Caption)>();
-        foreach (var section in Sections.All)
-        {
-            var (x, y) = section.Fallback(settings);
-            var place = original.GetValueOrDefault(section.Section);
-            context.AddEquipmentSlot(new ModSlot(section.Section, section.FcsSlot, section.Width, section.Height, place?.X ?? x, place?.Y ?? y));
-            captions.Add((section.Section, place?.Caption ?? section.Caption));
-        }
+        bool replaced = settings.OriginalPlaces && ReplaceWindow(context);
+        var captions = AddSlots(context, settings, original);
 
-        if (settings.Labels)
+        if (settings.Labels && !replaced)
         {
             context.AddFrame(frame => SectionLabels.UiScale = frame.UiScale);
             context.AddUi(new SectionLabels(captions));
         }
 
         context.Log("Extra Inventory Sections initialized");
+    }
+
+    /// <summary>Adds the five sections; answers the captions of those that have one.</summary>
+    static List<(string Section, string Caption)> AddSlots(ModContext context, SectionSettings settings, Dictionary<string, SectionPlace> original)
+    {
+        var captions = new List<(string Section, string Caption)>();
+        foreach (var section in Sections.All)
+        {
+            var (x, y) = section.Fallback(settings);
+            var place = original.GetValueOrDefault(section.Section);
+            context.AddEquipmentSlot(new ModSlot(section.Section, section.FcsSlot, section.Width, section.Height, place?.X ?? x, place?.Y ?? y)
+            {
+                MaxItems = section.MaxItems, Secondary = section.Secondary, RollFromClothing = !section.Secondary,
+            });
+
+            if (section.Caption is { } fallback) captions.Add((section.Section, place?.Caption ?? fallback));
+        }
+
+        return captions;
+    }
+
+    /// <summary>
+    /// Replaces the character window's layout with the installed original's, as the original's <c>BaseLayout::initialise</c> hook does; the
+    /// slots then take its widgets' places and the layout carries the captions. False without the original.
+    /// </summary>
+    static bool ReplaceWindow(ModContext context)
+    {
+        if (OriginalLayout.LayoutPath(context) is not { } path) return false;
+
+        context.AddLayoutReplacement("Kenshi_InventoryCharacterWindow.layout", path);
+        return true;
     }
 }
 
@@ -42,21 +68,25 @@ public sealed class ExtraInventorySectionsMod : IMod
 /// original's DLL), its caption widget in the original's layout and a caption of the port's own when that layout is missing.
 /// </summary>
 sealed record Sections(
-    string Section, int FcsSlot, int Width, int Height, string CaptionWidget, string Caption, Func<SectionSettings, (int, int)> Fallback)
+    string Section, int FcsSlot, int Width, int Height, int MaxItems, bool Secondary, string CaptionWidget, string? Caption,
+    Func<SectionSettings, (int, int)> Fallback)
 {
     public static readonly Sections[] All =
     [
-        new("eyes_eyes", 4, 3, 1, "lbEyes", "EYES", s => (s.EyesX, s.EyesY)),
-        new("gloves", 10, 2, 2, "lbGloves", "HANDS", s => (s.HandsX, s.HandsY)),
-        new("neck", 11, 2, 2, "lbNeck", "NECK", s => (s.NeckX, s.NeckY)),
+        new("eyes_eyes", 4, 3, 1, 1, false, "lbEyes", "EYES", s => (s.EyesX, s.EyesY)),
+        new("eyes_belts", 14, 3, 1, 1, true, "", null, s => (s.BeltsX, s.BeltsY)),
+        new("eyes_hats", 3, 3, 1, 1, true, "", null, s => (s.HatsX, s.HatsY)),
+        new("gloves", 10, 2, 2, 4, false, "lbGloves", "HANDS", s => (s.HandsX, s.HandsY)),
+        new("neck", 11, 2, 2, 1, false, "lbNeck", "NECK", s => (s.NeckX, s.NeckY)),
     ];
 }
 
 /// <summary>Where each section sits, in layout pixels from the character window's top-left corner at UI scale 1 (takes effect after a restart).</summary>
 public sealed class SectionSettings
 {
-    [Setting("Original's places",
-        Hint = "Places and names the sections as the installed original's layout does; off, or without it, the places below. Restart to apply.")]
+    [Setting("Original's window",
+        Hint = "Uses the installed original's character window layout, with its places and captions; off, or without it, the vanilla window "
+            + "and the places below. Restart to apply.")]
     public bool OriginalPlaces { get; set; } = true;
 
     [Setting("Section labels", Hint = "Names each section above its cells. Restart to apply.")]
@@ -67,6 +97,18 @@ public sealed class SectionSettings
 
     [Setting("Eyes Y", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Eyes")]
     public int EyesY { get; set; } = 240;
+
+    [Setting("Second belt X", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Eyes")]
+    public int BeltsX { get; set; } = 280;
+
+    [Setting("Second belt Y", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Eyes")]
+    public int BeltsY { get; set; } = 267;
+
+    [Setting("Second hat X", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Eyes")]
+    public int HatsX { get; set; } = 280;
+
+    [Setting("Second hat Y", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Eyes")]
+    public int HatsY { get; set; } = 294;
 
     [Setting("Hands X", Hint = "Restart to apply.", Min = 0, Max = 800, SubGroup = "Hands")]
     public int HandsX { get; set; } = 362;
