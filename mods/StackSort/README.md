@@ -3,8 +3,8 @@
 Port of *StackSort* (workshop 3813810734). The original's strip `<  StackSort [n]  H/W  >` covers the ARRANGE button of a player character's
 inventory and bag windows (`AddScreenControls("inventory" / "bag", "ArrangeButton", ...)`); a press sends the mod's `StackSortArrange`, a paused
 command (`IPausedCommand`) that its `StackSortSystem` (`IPausedCommandHandler`) runs through StackSort's cycle (between ticks while paused too):
-like items grouped, split stacks merged (*Merge stacks*), and the best *Layouts in the cycle* (5) of six candidate layouts (three sort keys,
-filled by rows or by columns) offered, ranked for the goal: Height (used rows, top first) or Width (used columns, left first).
+split stacks merged (*Merge stacks*), then the original's search lays the grid out and the best *Layouts in the cycle* (5) are offered, one
+per target (rows kept free at the bottom for Height, columns at the right for Width).
 
 - **Strip**: *StackSort [n]* applies the best layout and further presses cycle forward (`n` the shown layout); `<` and `>` step back and forward;
   *H/W* switches the goal and sorts again; a right click on *StackSort [n]* (`UiPointerEvents.Buttons`) restores the layout before the first press, as
@@ -19,8 +19,30 @@ filled by rows or by columns) offered, ranked for the goal: Height (used rows, t
   keys, ranges and defaults, the caption `StackSort [{n}]` with `{n}` the layout number. **Verified** (DLL decompiled): the strip's buttons
   (`Kenshi_Button1`) in the order back, sort, goal, forward, at ARRANGE's top and height, centred on it, shifted by `body_x_offset` for the
   character's own window only; ARRANGE is hidden.
-- **Missing**: the original's search (restarted late-acceptance hill climbing, `first_pass_*` / `refine_*` budgets) and its background
-  precomputation on open (layouts are computed on the press by this port's heuristic); `num_workers`,
-  `mutation_debounce_ms`, `resnapshots_per_frame` and `log_level`.
+- **Log and cfg checks**: `log_level` (1) is the *Log level* setting's default: 1 writes each sort (items, layouts found, the layout applied,
+  an undo, another window's arrange) to the mod log, 2 also each offered target's score and rectangle, 0 none. A cfg line that is a section header, has no
+  `=`, names an unknown key or holds a value that does not parse or lies outside its range is logged and ignored, and once a game runs the
+  player is told how many (`WARN_CONFIG` from the language file, as the original's one-time message). **Verified** (original cfg comments
+  and DLL: the keys, ranges, the -1 of the search budget keys, the one-time `showPlayerAMessage` with the count); the lines are this port's.
+- **Search** (`Search/`, rebuilt from the decompiled `Packer::Search::PackAnnealed` as facts): per target, restarted
+  late-acceptance hill climbing over item orders, each decoded top row first (least waste against same-record contact) and scored by the
+  largest empty rectangle (area squared, a bonus when at least the target tall), the free space's concentration, stranded cells and the
+  clustering of like and related items (same record type, item function, food crop / trade item flags); then path relinking between elite
+  orders and equal-footprint swaps. The Width goal searches the transposed grid. The targets 1 .. size - 1 are swept warm-started, those not
+  already ideal refined, and ranked by score for the cycle. Budgets are the original's iteration counts (first pass 16 x 4000, plateau 1500;
+  refine 24 x 8000, history 200, plateau 2000; `first_pass_*` / `refine_*` cfg keys, -1 compiled); no wall clock. Seeds come from the item
+  count and target, so a grid always gets the same layouts. **Verified** (decompile): the formulas, weights, move mix, budgets, seeds, sweep,
+  refine rule and ranking. **Observed** (scratch program over 5 synthetic grids, both goals): runs repeat exactly; the search's rectangle
+  holds all or all but 2 free cells where the old heuristic's held 75-96 %, with more like items touching; 0.2-2.3 s per grid and goal on 4
+  workers. The heuristic (six candidates: three sort keys, rows or columns) remains the fallback when no target is complete.
+- **Precompute**: the search reads a copy of the grid (merged on the copy with *Merge stacks*), never the live inventory. While a strip is
+  drawn, its grid is swept in the background once unchanged for `mutation_debounce_ms` (150, as steps of the tick length), at most
+  `resnapshots_per_frame` (3) grids started per step, `num_workers` (4) sweeps at once and threads per refinement; a press uses the result,
+  waits for a running sweep or computes it, so timing never changes a layout. Every other arrange searches with `sync_restarts` x `sync_iters`
+  (4 x 1000) and no refinement (grids over 400 cells or 80 items: the heuristic).
+- **Missing**: bit-identical layouts. The decoder scans every free spot instead of the original's skyline with a waste list, the hole move's
+  item choice is this port's (the decompile's is not read out), and two strip-regrouping passes and a comparison with a second packer
+  after a reserved block are not ported (their details are not read out). A press before its sweep is done waits (up to about 2 s on 4 workers)
+  where the original searches the shown target alone; that keeps the layout independent of timing.
 - **Observed** (2026-11-18, windowed sandbox, user play, earlier version on ARRANGE itself): ARRANGE grouped like items; cycling, the goal switch
   and undo work. The strip is not checked in game.

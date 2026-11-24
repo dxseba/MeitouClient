@@ -1,5 +1,6 @@
 using System.Globalization;
 using Meitou.Localisation;
+using Meitou.StackSort.Search;
 
 namespace Meitou.StackSort;
 
@@ -33,7 +34,13 @@ sealed class OriginalFiles
     /// </summary>
     readonly Dictionary<string, string> _captions;
 
-    OriginalFiles(Dictionary<string, string> config, Dictionary<string, string> captions) => (_config, _captions) = (config, captions);
+    OriginalFiles(Dictionary<string, string> config, Dictionary<string, string> captions, List<string> problems) =>
+        (_config, _captions, Problems) = (config, captions, problems);
+
+    /// <summary>
+    /// The cfg's ignored lines (<see cref="CfgProblems"/>), one text each.
+    /// </summary>
+    public IReadOnlyList<string> Problems { get; }
 
     /// <summary>
     /// Reads the original's files beside <paramref name="folder"/>.
@@ -43,12 +50,12 @@ sealed class OriginalFiles
         string? root = Path.GetDirectoryName(Path.GetFullPath(folder)) is { } parent
             ? Folders.Select(name => Path.Combine(parent, name)).FirstOrDefault(Directory.Exists)
             : null;
-        if (root is null) return new([], new(English));
+        if (root is null) return new([], new(English), []);
 
-        var config = Pairs(Path.Combine(root, "StackSort.cfg"));
+        string cfg = Path.Combine(root, "StackSort.cfg");
         var captions = new Dictionary<string, string>(English);
         foreach (var (key, value) in Pairs(Path.Combine(root, "lang", LanguageFile() + ".txt"))) captions[key] = value;
-        return new(config, captions);
+        return new(Pairs(cfg), captions, CfgProblems.Of(cfg));
     }
 
     /// <summary>
@@ -95,6 +102,67 @@ sealed class OriginalFiles
     /// <c>top_targets</c>, 1-10 (default 5).
     /// </summary>
     public int TopTargets => Number("top_targets", 1, 10, 5);
+
+    /// <summary>
+    /// <c>log_level</c>, 0-2 (default 1): 0 errors only, 1 normal, 2 also each candidate layout.
+    /// </summary>
+    public int LogLevel => Number("log_level", 0, 2, 1);
+
+    /// <summary>
+    /// The player's notice of <paramref name="count"/> ignored cfg problems: the language file's <c>WARN_CONFIG</c> with <c>{n}</c> replaced.
+    /// </summary>
+    public string ConfigWarning(int count)
+    {
+        string n = count.ToString(CultureInfo.InvariantCulture);
+        return _captions.TryGetValue("WARN_CONFIG", out var text)
+            ? text.Replace("{n}", n, StringComparison.Ordinal)
+            : $"StackSort: {n} line(s) of StackSort.cfg ignored (see the mod log)";
+    }
+
+    /// <summary>
+    /// The search budgets (StackSort.md "Budgets"): <c>first_pass_restarts</c> / <c>first_pass_iters</c> (compiled 16 / 4000),
+    /// <c>refine_restarts</c> / <c>refine_iters</c> / <c>refine_lahc_history</c> / <c>refine_plateau</c> (24 / 8000 / 200 / 2000) and
+    /// <c>refine_item_threshold</c> (20); a key left out or at -1 keeps the compiled value. <c>num_workers</c> (4) threads refine the targets.
+    /// </summary>
+    public SweepBudget Budget
+    {
+        get
+        {
+            var first = SearchParams.FirstPass with
+            {
+                Restarts = Number("first_pass_restarts", 1, 256, 16), Iterations = Number("first_pass_iters", 100, 1_000_000, 4000),
+            };
+            var refine = first with
+            {
+                Restarts = Number("refine_restarts", 1, 256, 24), Iterations = Number("refine_iters", 100, 1_000_000, 8000),
+                History = Number("refine_lahc_history", 1, 100_000, 200), Plateau = Number("refine_plateau", 1, 1_000_000, 2000),
+            };
+            return new(first, refine, Number("refine_item_threshold", 1, 1000, 20), Workers);
+        }
+    }
+
+    /// <summary>
+    /// The synchronous budget (<c>sync_restarts</c> 4, <c>sync_iters</c> 1000): every arrange other than the strip's, which has no precomputed
+    /// result to wait for, is searched with it and no refinement.
+    /// </summary>
+    public SweepBudget SyncBudget =>
+        new(SearchParams.FirstPass with { Restarts = Number("sync_restarts", 1, 8, 4), Iterations = Number("sync_iters", 100, 2000, 1000) },
+            null, Workers: Workers);
+
+    /// <summary>
+    /// <c>num_workers</c>, 1-8 (default 4): background sweeps at once, and threads per refinement.
+    /// </summary>
+    public int Workers => Number("num_workers", 1, 8, 4);
+
+    /// <summary>
+    /// <c>mutation_debounce_ms</c>, 0-5000 (default 150): how long an open window's grid must stay unchanged before its precompute starts.
+    /// </summary>
+    public int DebounceMs => Number("mutation_debounce_ms", 0, 5000, 150);
+
+    /// <summary>
+    /// <c>resnapshots_per_frame</c>, 1-16 (default 3): precomputes started per simulation step at most.
+    /// </summary>
+    public int ResnapshotsPerStep => Number("resnapshots_per_frame", 1, 16, 3);
 
     /// <summary>
     /// The button strip's geometry in pixels: <c>arrow_button_width</c> (30), <c>dim_button_width</c> (40), <c>sort_button_width</c> (180),

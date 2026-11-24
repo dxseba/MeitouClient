@@ -18,14 +18,47 @@ public sealed class StackSortMod : IMod
     /// </summary>
     internal static OriginalFiles Original { get; private set; } = null!;
 
+    /// <summary>
+    /// The mod log.
+    /// </summary>
+    static Action<string> s_log = _ => { };
+
+    /// <summary>
+    /// Whether this session told the player of the cfg's problems (the original tells once, when a game first runs).
+    /// </summary>
+    static bool s_warned;
+
+    /// <summary>
+    /// Writes <paramref name="text"/> to the mod log when <see cref="StackSortSettings.LogLevel"/> is at least <paramref name="level"/>.
+    /// </summary>
+    internal static void Log(int level, Func<string> text)
+    {
+        if (Settings.LogLevel >= level) s_log(text());
+    }
+
+    /// <summary>
+    /// Posts the cfg warning once a session when the cfg had problems.
+    /// </summary>
+    internal static void WarnOnce(World world)
+    {
+        if (s_warned || Original.Problems.Count == 0) return;
+
+        s_warned = true;
+        world.Post(Original.ConfigWarning(Original.Problems.Count));
+    }
+
     public void Initialize(ModContext context)
     {
         Original = OriginalFiles.Load(context.Folder);
         Settings.WidthGoal = Original.WidthGoal;
         Settings.Consolidate = Original.Consolidate;
         Settings.TopTargets = Original.TopTargets;
+        Settings.LogLevel = Original.LogLevel;
+        s_log = context.Log;
+        foreach (string problem in Original.Problems) context.Log(problem);
+
         context.AddSettings(Settings);
-        context.AddSystem("stacksort", _ => new StackSortSystem(), SystemAnchor.End);
+        context.AddSystem("stacksort", build => new StackSortSystem(new ItemFacts(build.Data)), SystemAnchor.End);
         context.AddUi(new StackSortUi(Original.Strip));
         context.Log("StackSort initialized");
     }
@@ -42,8 +75,13 @@ public sealed record StackSortArrange(CharacterId Character, bool Bag, ArrangeMo
 /// other arrange (a machine's, container's or the trade stock's ARRANGE, making room for a held item, the stock grid being built) with the best
 /// layout for the <c>Width goal</c> setting.
 /// </summary>
-sealed class StackSortSystem : IPausedCommandHandler, IInventoryArrangeFilter
+sealed class StackSortSystem(ItemFacts facts) : IPausedCommandHandler, IInventoryArrangeFilter, IWorldReady
 {
+    /// <summary>
+    /// Tells the player of the cfg's ignored lines, once a session.
+    /// </summary>
+    public void Ready(World world, bool fromSave) => StackSortMod.WarnOnce(world);
+
     /// <summary>
     /// The best layout for the setting's goal; null (the game's arrange) when off, when nothing fits, and for a character window's ARRANGE, which
     /// the strip covers. With <c>Merge stacks</c> the engine merges the partial stacks first.
@@ -55,19 +93,32 @@ sealed class StackSortSystem : IPausedCommandHandler, IInventoryArrangeFilter
         if (ask.Owner.Holder == ItemHolder.Character && ask.Reason == InventoryArrangeReason.Button) return null;
         if (settings.Consolidate && !ask.Merged) return InventoryArrangement.MergeFirst;
 
-        var grids = ask.Grids.Select(g => new Packer.Grid(g.Grid, g.Section, [.. g.Grid.Items])).ToList();
-        var layouts = Packer.Layouts(grids, settings.WidthGoal ? Goal.Width : Goal.Height, 1, merge: false);
-        return layouts.Count == 0 ? null : new InventoryArrangement(Packer.Placements(layouts[0]));
+        var grids = ask.Grids.Select(g => Packer.Of(g.Grid, g.Section)).ToList();
+        var goal = settings.WidthGoal ? Goal.Width : Goal.Height;
+        var layouts = LayoutSearch.Layouts(grids, facts, goal, 1, StackSortMod.Original.SyncBudget, sync: true);
+        var reason = ask.Reason;
+        StackSortMod.Log(1, () => $"{reason} arrange: {grids.Sum(g => g.Items.Length)} items, target={goal}, {Fit(layouts.Count)}");
+        return layouts.Count == 0 ? null : new InventoryArrangement(Packer.Placements(grids, layouts[0]));
     }
 
+    /// <summary>
+    /// Whether a layout was found, for the log.
+    /// </summary>
+    static string Fit(int layouts) => layouts == 0 ? "no layout fits, the game's arrange" : "best layout applied";
+
+    /// <summary>
+    /// Applies the strip's presses, then starts the precompute of open windows' grids that have settled (<see cref="Precompute.Step"/>).
+    /// </summary>
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         if (!StackSortMod.Settings.Enabled) return;
 
         foreach (var command in commands)
         {
-            if (command is StackSortArrange arrange) LayoutCycle.Run(world, arrange.Character, arrange.Bag, arrange.Mode);
+            if (command is StackSortArrange arrange) LayoutCycle.Run(world, arrange.Character, arrange.Bag, arrange.Mode, facts);
         }
+
+        Precompute.Step(world, facts);
     }
 }
 
@@ -78,7 +129,7 @@ sealed class StackSortSystem : IPausedCommandHandler, IInventoryArrangeFilter
 public enum ArrangeMode { Next, Previous, SwitchGoal, Undo }
 
 /// <summary>
-/// The mod's settings; the last three take their defaults from the installed original's StackSort.cfg.
+/// The mod's settings; all but the first take their defaults from the installed original's StackSort.cfg.
 /// </summary>
 public sealed class StackSortSettings
 {
@@ -105,4 +156,10 @@ public sealed class StackSortSettings
     /// </summary>
     [Setting("Layouts in the cycle", Hint = "top_targets: how many layouts a click cycles through.", Min = 1, Max = 10)]
     public int TopTargets { get; set; } = 5;
+
+    /// <summary>
+    /// <c>log_level</c> (1).
+    /// </summary>
+    [Setting("Log level", Hint = "log_level: 0 errors only, 1 normal, 2 also every candidate layout (written to the mod log).", Min = 0, Max = 2)]
+    public int LogLevel { get; set; } = 1;
 }

@@ -50,6 +50,7 @@ sealed class StackSortUi(StripGeometry strip) : IUiExtension
     {
         if (!StackSortMod.Settings.Enabled || context.Character is not { IsPlayer: true } owner) return null;
 
+        Precompute.Open[(owner.Id, bag)] = Environment.TickCount64;
         _enqueue = context.Enqueue;
         _tick = () => context.Tick;
         float offset = bag ? 0 : strip.BodyOffset;

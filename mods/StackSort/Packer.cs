@@ -1,66 +1,62 @@
+using Meitou.Data.Fcs;
 using Meitou.Simulation.Items;
+using Meitou.Simulation.Population;
+using Meitou.StackSort.Search;
 
 namespace Meitou.StackSort;
 
-/// <summary>Which way a layout keeps its free space: Height packs the rows towards the top, Width the columns towards the left.</summary>
+/// <summary>Which way a layout keeps its free space: Height in a block of rows at the bottom, Width in a block of columns at the right.</summary>
 public enum Goal { Height, Width }
 
 /// <summary>
-/// Builds candidate layouts of an inventory's grids: each groups items of one record together, merges partial stacks through the auto-add, and
-/// fills row by row (top first) or column by column (left first). The candidates are ranked for a <see cref="Goal"/>. Pure functions of the
-/// inventory, so they stay deterministic.
+/// The bridge between live grids and the pure search: copies a grid into a <see cref="PackProblem"/> (a read), merges stacks and applies a
+/// chosen layout (the command's effects). Nothing here computes a layout on the live inventory.
 /// </summary>
 static class Packer
 {
-    static readonly Func<ItemInstance, long>[] GroupKeys =
-    [
-        i => i.Width * (long)i.Height,
-        i => i.Height,
-        i => i.Width,
-    ];
-
+    /// <summary>
+    /// A grid section of an inventory and its items in list order when taken.
+    /// </summary>
     public readonly record struct Grid(Inventory Inventory, string Section, ItemInstance[] Items);
+
+    /// <summary>
+    /// The state of a grid's items, to undo a sort: the inventory's list and each item's cell, units and charges.
+    /// </summary>
     public readonly record struct ItemState(Grid Grid, ItemInstance[] Kept, (ItemInstance Item, int X, int Y, int Quantity, float Charges)[] Values);
-
-    /// <summary>The best layout for <paramref name="goal"/> applied (true), or the inventory unchanged (false) when nothing fits.</summary>
-    public static bool Pack(Inventory root, bool? bag = null, Goal goal = Goal.Height, bool merge = true)
-    {
-        var grids = Grids(root, bag);
-        var layouts = Layouts(grids, goal, 1, merge);
-        if (layouts.Count == 0) return false;
-
-        Restore(layouts[0]);
-        return true;
-    }
 
     /// <summary>The main grid and the worn bag's (<paramref name="bag"/> null), or only the bag's (true) or the main grid (false).</summary>
     public static List<Grid> Grids(Inventory root, bool? bag)
     {
         var grids = new List<Grid>();
-        if (bag != true) grids.Add(new(root, "main", [.. root.Items]));
-        if (bag != false && root.Backpack?.Contents is { } contents) grids.Add(new(contents, "backpack_content", [.. contents.Items]));
+        if (bag != true) grids.Add(Of(root, "main"));
+        if (bag != false && root.Backpack?.Contents is { } contents) grids.Add(Of(contents, "backpack_content"));
         return grids;
     }
 
-    /// <summary>
-    /// Up to <paramref name="offered"/> distinct layouts (the original's <c>top_targets</c>), best first for <paramref name="goal"/>; partial
-    /// stacks merged with <paramref name="merge"/> (<c>consolidate_stacks</c>). The grids are left as they were.
-    /// </summary>
-    public static List<ItemState[]> Layouts(List<Grid> grids, Goal goal, int offered, bool merge)
-    {
-        var original = Snapshot(grids);
-        var found = new List<(long Score, ItemState[] State, string Key)>();
-        foreach (var key in GroupKeys)
-        {
-            foreach (bool columns in new[] { false, true })
-            {
-                if (TryLayout(grids, key, columns, merge)) found.Add((Score(grids, goal), Snapshot(grids), Signature(grids)));
-                Restore(original);
-            }
-        }
+    public static Grid Of(Inventory inventory, string section) => new(inventory, section, [.. inventory.Items.Where(i => i.Section == section)]);
 
-        return [.. found.DistinctBy(f => f.Key).OrderBy(f => f.Score).Take(offered).Select(f => f.State)];
+    /// <summary>
+    /// A grid as a search problem: each item's footprint as it lies, its group (one per record, by first appearance), record type (-1 for
+    /// plain items), item function (-1 for none) and flags (<see cref="ItemFacts"/>).
+    /// </summary>
+    public static PackProblem Problem(Grid grid, ItemFacts facts)
+    {
+        var groups = new Dictionary<string, int>(StringComparer.Ordinal);
+        var items = grid.Items.Select(i =>
+            new PackItem(i.Width, i.Height, GroupOf(groups, i.Record), TypeOf(i), FunctionOf(i), facts.Flags(i.Record)));
+        return new PackProblem(grid.Inventory.Width, grid.Inventory.Height, [.. items], [.. grid.Items.Select(i => i.Record)],
+            [.. grid.Items.Select(i => i.Quantity)]);
     }
+
+    static int GroupOf(Dictionary<string, int> groups, string record)
+    {
+        if (!groups.TryGetValue(record, out int group)) groups[record] = group = groups.Count;
+        return group;
+    }
+
+    static int TypeOf(ItemInstance item) => item.Type == FcsRecordType.Item ? -1 : (int)item.Type;
+
+    static int FunctionOf(ItemInstance item) => item.ItemFunction == 0 ? -1 : item.ItemFunction;
 
     public static ItemState[] Snapshot(List<Grid> grids) =>
         [.. grids.Select(g => new ItemState(g, [.. g.Inventory.Items], [.. g.Items.Select(i => (i, i.X, i.Y, i.Quantity, i.Charges))]))];
@@ -75,96 +71,73 @@ static class Packer
         }
     }
 
-    /// <summary>A layout as an arrange filter's answer: each grid section's items at their cells in the layout.</summary>
-    public static List<ItemPlacement> Placements(ItemState[] layout) =>
-        [.. layout.SelectMany(s => s.Values.Where(v => v.Item.Section == s.Grid.Section).Select(v => new ItemPlacement(v.Item, v.X, v.Y)))];
+    /// <summary>
+    /// The grids' items at their cells in <paramref name="layouts"/> (one per grid), in placement order (row, then column).
+    /// </summary>
+    public static List<ItemPlacement> Placements(List<Grid> grids, IReadOnlyList<PackLayout> layouts) =>
+        [.. grids.SelectMany((g, n) => g.Items.Select((item, i) => new ItemPlacement(item, layouts[n].X[i], layouts[n].Y[i])))
+            .OrderBy(p => p.Y).ThenBy(p => p.X)];
 
-    /// <summary>A layout's place in the grids, to tell layouts apart and to notice an inventory changed since.</summary>
-    public static string Signature(List<Grid> grids) =>
-        string.Join(";", grids.SelectMany(g => g.Inventory.Items.Where(i => i.Section == g.Section).Select(i => $"{i.Record}@{i.X},{i.Y}x{i.Quantity}")));
-
-    /// <summary>Groups by record; the groups by the largest key of their items, then record id; items in a group by the key, then quantity.</summary>
-    static bool TryLayout(List<Grid> grids, Func<ItemInstance, long> key, bool columns, bool merge)
+    /// <summary>
+    /// Moves the grids' items to <paramref name="layouts"/> and lists each grid's items in placement order, after its other sections' items.
+    /// </summary>
+    public static void Apply(List<Grid> grids, IReadOnlyList<PackLayout> layouts)
     {
-        foreach (var grid in grids)
+        for (int n = 0; n < grids.Count; n++)
         {
-            var items = grid.Items.Where(i => i.Section == grid.Section)
-                .GroupBy(i => i.Record, StringComparer.Ordinal)
-                .OrderByDescending(g => g.Max(key)).ThenBy(g => g.Key, StringComparer.Ordinal)
-                .SelectMany(g => g.OrderByDescending(key).ThenByDescending(i => i.Quantity))
-                .ToArray();
-
-            grid.Inventory.Items.RemoveAll(i => i.Section == grid.Section);
-            foreach (var item in items)
+            var (inventory, section, items) = grids[n];
+            var layout = layouts[n];
+            inventory.Items.RemoveAll(i => i.Section == section);
+            foreach (int i in Enumerable.Range(0, items.Length).OrderBy(i => layout.Y[i]).ThenBy(i => layout.X[i]))
             {
-                if (item.Width <= 0 || item.Height <= 0 || !Add(grid, item, merge)) return false;
+                (items[i].X, items[i].Y) = (layout.X[i], layout.Y[i]);
+                inventory.Items.Add(items[i]);
             }
-
-            if (columns && !ByColumns(grid)) return false;
         }
-        return true;
     }
 
     /// <summary>
-    /// Adds an item: through the auto-add (topping up partial stacks) with <paramref name="merge"/>, else on the first free cell by rows.
+    /// Merges the grids' partial stacks before the first sort (<c>consolidate_stacks</c>, the command's own effect): each grid's items in list
+    /// order through the inventory's auto-add, which tops up earlier stacks and puts what is left on a free cell. When an item finds no room
+    /// the grids are put back unmerged. Returns the grids as they are now.
     /// </summary>
-    static bool Add(Grid grid, ItemInstance item, bool merge)
+    public static List<Grid> Merge(Inventory root, bool bag)
     {
-        if (merge) return grid.Inventory.AddTo(grid.Section, item);
-
-        var inventory = grid.Inventory;
-        for (int y = 0; y + item.Height <= inventory.Height; y++)
+        var grids = Grids(root, bag);
+        var before = Snapshot(grids);
+        foreach (var (inventory, section, items) in grids)
         {
-            for (int x = 0; x + item.Width <= inventory.Width; x++)
+            inventory.Items.RemoveAll(i => i.Section == section);
+            if (items.Any(item => !inventory.AddTo(section, item)))
             {
-                if (!inventory.IsFree(grid.Section, x, y, item.Width, item.Height)) continue;
-
-                (item.X, item.Y, item.Section) = (x, y, grid.Section);
-                inventory.Items.Add(item);
-                return true;
+                Restore(before);
+                break;
             }
         }
-
-        return false;
+        return Grids(root, bag);
     }
 
-    /// <summary>Lays the merged items out again column by column, left first, in their row-filled order.</summary>
-    static bool ByColumns(Grid grid)
+    /// <summary>A layout's place in the grids, to tell layouts apart and to notice an inventory changed since.</summary>
+    public static string Signature(List<Grid> grids) =>
+        string.Join(";", grids.SelectMany(g => g.Inventory.Items.Where(i => i.Section == g.Section).Select(Cell)));
+
+    static string Cell(ItemInstance i) => $"{i.Record}@{i.X},{i.Y}x{i.Quantity}";
+}
+
+/// <summary>
+/// The record facts the search's affinity reads (StackSort.md "Score"): flag 1 for a <c>food crop</c> record, 2 for a <c>trade item</c>. Read on
+/// the simulation's thread, cached per record.
+/// </summary>
+sealed class ItemFacts(PopulationData? data)
+{
+    readonly Dictionary<string, int> _flags = new(StringComparer.Ordinal);
+
+    public int Flags(string record)
     {
-        var inventory = grid.Inventory;
-        var placed = inventory.Items.Where(i => i.Section == grid.Section).OrderBy(i => i.Y).ThenBy(i => i.X).ToList();
-        inventory.Items.RemoveAll(i => i.Section == grid.Section);
-        foreach (var item in placed)
-        {
-            if (!PlaceInColumns(inventory, grid.Section, item)) return false;
-        }
-        return true;
+        if (_flags.TryGetValue(record, out int flags)) return flags;
+
+        var r = data?.Db.Find(record);
+        flags = (r?.GetBool("food crop") == true ? 1 : 0) | (r?.GetBool("trade item") == true ? 2 : 0);
+        return _flags[record] = flags;
     }
-
-    static bool PlaceInColumns(Inventory inventory, string section, ItemInstance item)
-    {
-        for (int x = 0; x + item.Width <= inventory.Width; x++)
-        {
-            for (int y = 0; y + item.Height <= inventory.Height; y++)
-            {
-                if (!inventory.IsFree(section, x, y, item.Width, item.Height)) continue;
-
-                (item.X, item.Y, item.Section) = (x, y, section);
-                inventory.Items.Add(item);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>Lower is better: the used rows (Height) or used columns (Width), the other as a tie-break.</summary>
-    static long Score(List<Grid> grids, Goal goal)
-    {
-        long rows = grids.Sum(g => Used(g, i => i.Y + i.Height));
-        long columns = grids.Sum(g => Used(g, i => i.X + i.Width));
-        return goal == Goal.Height ? rows * 1000 + columns : columns * 1000 + rows;
-    }
-
-    static int Used(Grid g, Func<ItemInstance, int> end) =>
-        g.Inventory.Items.Where(i => i.Section == g.Section).Select(end).DefaultIfEmpty(0).Max();
 }
