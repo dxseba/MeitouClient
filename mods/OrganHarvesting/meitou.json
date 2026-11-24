@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.organharvesting",
+  "apiVersion": 3,
+  "assemblies": ["OrganHarvesting.dll"],
+  "entry": "Meitou.OrganHarvesting.OrganHarvestingMod",
+  "gameVersion": ">=0.22.2"
+}
