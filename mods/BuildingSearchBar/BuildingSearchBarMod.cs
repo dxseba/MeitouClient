@@ -11,6 +11,9 @@ public sealed class BuildingSearchBarMod : IMod
 {
     public void Initialize(ModContext context)
     {
+        // "SEARCH" and "Search" in the game's language, from the installed original's search_bar catalogues.
+        if (OriginalFolder.Find(context) is { } original) context.AddTranslations("search_bar", original);
+
         Search.Bind(context.Interface);
         context.AddFrame(_ => Search.Frame());
         context.AddUi(new SearchWindow());

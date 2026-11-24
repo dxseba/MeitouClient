@@ -22,6 +22,9 @@ Port of *Building Search Bar* (workshop 3786979230, GPLv3), rebuilt from its des
   "SEARCH" and "Search".
 - **Bracketed field**: **Observed** (decompiled DLL): a result keeps the category name the index copied from the build window's category
   object and its group's list row name separately; the row text appends the category (` [` ... `]`, only when not empty).
-- **Missing**: the original's translations of "SEARCH" and "Search" (its `.mo` catalogues, readable from the installed original): Meitou has
-  no per-mod translation API yet, so the texts are English (engine gap).
+- **Translations**: `context.AddTranslations("search_bar", <installed original>)` (`OriginalFolder`: the Workshop folder 3786979230 beside
+  this one, else the code-less mod "Search bar") reads the original's catalogue for the game's language, so the window's "SEARCH" and
+  "Search" show through it; nothing of it is shipped. **Verified** (installed `locale/*/LC_MESSAGES/search_bar.po`: two messages each, e.g.
+  de "SUCHE" / "Suche"); shown in game **Unknown**.
+- **Missing**: nothing known.
 - **Unknown**: look and typing in game untested.
