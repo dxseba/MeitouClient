@@ -136,8 +136,11 @@ sealed class RepairMenu : IUiExtension
     static IEnumerable<UiMenuVerb> Verbs(UiMenuContext menu)
     {
         var config = EquipmentDurabilityMod.Config;
-        if (EquipmentDurabilityMod.Running is not { } running || !menu.Target.IsPlayer) return [];
-        if (Repairer(menu, running.ToolHolders, config.RepairOthers) is not { } repairer) return [];
+        if (EquipmentDurabilityMod.Running is not { } running) return [];
+
+        var found = menu.Target.IsPlayer ? Repairer(menu, running.ToolHolders, config.RepairOthers) : null;
+        Diagnose(running, menu, found is not null);
+        if (found is not { } repairer) return [];
 
         var owner = menu.Target.Id;
         var texts = UiText.Current;
@@ -148,6 +151,17 @@ sealed class RepairMenu : IUiExtension
         string armour = config.RepairArmourText == "Repair Armour" ? texts.RepairArmour : config.RepairArmourText;
         rows.Add(new(armour, () => menu.Enqueue(new RepairOrder(repairer, owner, true) { Tick = menu.Tick })));
         return rows;
+    }
+
+    /// <summary>
+    /// The diagnostics' menu line, and the selected character's item listing (the original's, written by the world's slow step).
+    /// </summary>
+    static void Diagnose(DurabilitySystem running, UiMenuContext menu, bool adding)
+    {
+        if (!running.Verbose.On) return;
+
+        running.Verbose.Menu(menu.Target.Name, menu.Target.IsPlayer, adding);
+        if (menu.Selected.Count > 0) running.AskListing(menu.Selected[0]);
     }
 
     static CharacterId? Repairer(UiMenuContext menu, IReadOnlySet<CharacterId> holders, bool others)

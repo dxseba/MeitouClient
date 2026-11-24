@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay.Bodies;
@@ -47,7 +48,12 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     /// <summary>
     /// The repairs.
     /// </summary>
-    readonly Repairs _repairs = new(config, data, purpose, log, sound);
+    readonly Repairs _repairs = new(config, data, purpose, log, sound) { Verbose = verbose };
+
+    /// <summary>
+    /// The selected characters whose items a menu asked to list (the diagnostics' item listing), written in the slow step.
+    /// </summary>
+    readonly ConcurrentQueue<CharacterId> _listings = new();
 
     /// <summary>
     /// Draws made in this slow step (keys the rolls, so they follow the step's fixed order).
@@ -78,6 +84,33 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     /// A record's type (the merged data is read only after the load, so any thread may ask).
     /// </summary>
     public FcsRecordType? Type(string record) => data.Db.Find(record)?.Type;
+
+    /// <summary>
+    /// The diagnostics, for the interface.
+    /// </summary>
+    public VerboseLog Verbose => verbose;
+
+    /// <summary>
+    /// A menu asks to list <paramref name="selected"/>'s items in the diagnostics (written in the slow step, which may read the world); any thread.
+    /// </summary>
+    public void AskListing(CharacterId selected)
+    {
+        if (verbose.WantsListing) _listings.Enqueue(selected);
+    }
+
+    /// <summary>
+    /// Writes the item listings the menus asked for, of player characters only (the original lists a selected player character's).
+    /// </summary>
+    void WriteListings(World world)
+    {
+        while (_listings.TryDequeue(out var id))
+        {
+            if (!world.Characters.TryResolveNext(id, out int slot) || world.Characters.Cold(slot) is not { IsPlayer: true, Inventory: { } items } cold)
+                continue;
+
+            verbose.Listing(cold.Name, items.Items, record => data.Db.Find(record)?.Name);
+        }
+    }
 
     public void HitResolved(World world, in CombatHit hit)
     {
@@ -119,6 +152,7 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
 
         _repairs.Step(world, _condition);
         if (world.Tick % 10 == 0) ToolHolders = _repairs.Holders(world);
+        if (!_listings.IsEmpty) WriteListings(world);
     }
 
     public void Hash(ref StateHasher hasher)
@@ -171,7 +205,9 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         if (factor is > 0.999f and < 1.001f) return ask.Piece;
 
         var p = ask.Piece;
-        return p with { CutDefence = Math.Clamp(p.CutDefence * factor, 0, 0.9f), BluntDefence = Math.Clamp(p.BluntDefence * factor, 0, 0.8f) };
+        var changed = p with { CutDefence = Math.Clamp(p.CutDefence * factor, 0, 0.9f), BluntDefence = Math.Clamp(p.BluntDefence * factor, 0, 0.8f) };
+        verbose.Armour(item, dur, cap, p, changed);
+        return changed;
     }
 
     /// <summary>
@@ -226,9 +262,11 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
                 Wear(world, use.Who, cold, Gear.InHand(cold), config.PerHit, "hit");
                 break;
             case UseKind.Block:
+                verbose.Block();
                 Wear(world, use.Who, cold, Gear.InHand(cold), config.PerBlock, "block");
                 break;
             case UseKind.Shot:
+                verbose.Shot();
                 Wear(world, use.Who, cold, Gear.Crossbow(inventory), config.PerShot, "shot");
                 break;
             case UseKind.ArmourHit:
@@ -244,13 +282,21 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
     {
         if (cold.Medical?.Parts is not { } parts || part < 0 || part >= parts.Count) return;
 
-        string partId = parts[part].Template.StringId;
+        var template = parts[part].Template;
+        string partName = template.Name.Length > 0 ? template.Name : template.StringId;
         foreach (var piece in Gear.Worn(cold.Inventory).ToList())
         {
-            if (data.Combat.Armour(piece.Record)?.Coverage.Any(e => e.PartStringId == partId) == true)
-                Wear(world, id, cold, piece, config.PerArmourHit, "armour hit");
+            bool? covers = Covers(piece, template.StringId);
+            verbose.PartHit(partName, piece, covers);
+            if (covers == true) Wear(world, id, cold, piece, config.PerArmourHit, "armour hit");
         }
     }
+
+    /// <summary>
+    /// Whether the piece's coverage lists the part; null when it has no coverage list (such a piece has no durability).
+    /// </summary>
+    bool? Covers(ItemInstance piece, string partId) =>
+        data.Combat.Armour(piece.Record)?.Coverage is { Count: > 0 } coverage ? coverage.Any(e => e.PartStringId == partId) : null;
 
     /// <summary>
     /// The original's <c>OnPlayerWear</c>: rolls the item if new, takes <paramref name="amount"/> unless its grade spares this use, and destroys it at

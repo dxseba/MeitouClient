@@ -132,7 +132,10 @@ sealed class Condition(DurabilityConfig config, PopulationData data)
         string material = combat.WeaponMaterial(item.MaterialId)?.Name ?? "";
         string maker = combat.Manufacturer(item.CompanyId)?.Name ?? "";
         string text = string.Join(" | ", item.Name, material, maker).ToLowerInvariant();
-        return words.Any(w => text.Contains(w, StringComparison.Ordinal));
+        if (!words.Any(w => text.Contains(w, StringComparison.Ordinal))) return false;
+
+        Verbose?.Ignored(item, text);
+        return true;
     }
 
     #endregion
@@ -154,7 +157,7 @@ sealed class Condition(DurabilityConfig config, PopulationData data)
         item.ModTag = ItemTag.Put(item.ModTag, Key, Math.Max(0, value).ToString(CultureInfo.InvariantCulture));
 
     /// <summary>
-    /// The diagnostics a roll is written to (null: none).
+    /// The diagnostics rolls and ignored gear are written to (null: none).
     /// </summary>
     public VerboseLog? Verbose { get; init; }
 

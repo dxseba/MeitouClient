@@ -46,11 +46,17 @@ Port of *Equipment Durability* (workshop 3834344700, "Durability" 1.2.0 by its s
   once the game lets it; each time the game keeps it off (`CombatSystem.ModMoveBlockOf` not `None`) is counted and logged (first time and
   the count as the repair ends). The README's and cfg's "anything that stops the animation cancels" is not what its code does.
 - **Breaking** (`BreakWeapons = 1`): the piece is removed and the owner's fighter and look are made again (`CharacterRefresh.Refresh`, Equipment).
-- **Log**: the settings line at start, repairs, cancels and breaks, as the original's; with `Verbose = 1` also its diagnostics, each capped per
-  session as the original's: rolls (60), wear by a hit, block, shot or armour hit (40, and any with 5 or fewer points left), a blow's damage
-  change (30) and reload times (12). Its other verbose lines (ignored weapons, worn armour factors, body part hits, tooltip rows, weapon
-  sections, menu and item listings) are not written. **Verified** (original source: the caps and conditions); the lines are **Unknown** in play.
-- **Missing**: nothing known beyond the Verbose lines above.
+- **Log**: the settings line at start, repairs, cancels and breaks, as the original's; with `Verbose = 1` also its diagnostics, in the port's
+  own words, each capped per session as the original's: rolls (60), wear by a hit, block, shot or armour hit (40, and any with 5 or fewer points
+  left), a blow's damage change (30), a worn armour piece's cut and blunt change in a melee hit (20), each worn piece asked about a melee hit's
+  body part and whether it covers it (40), shots and blocks (10 each), reload times (12), gear the ignore list leaves out (20, once per item),
+  the weapon slots a weapon repair looks at (8), the armour slots an applied armour repair skips or picks (uncapped), character menus with
+  whether repair rows were added (12) and the selected player character's items, name | record name | record id, up to 60 (3 listings).
+  Not written, having no counterpart: the tooltip's game rows (a mod does not see them; they served to find a translated "Sell value" label,
+  which Meitou does not need), a menu's game option count and menus of non-characters (a mod sees only its own rows on character menus), and
+  item copy, save and load lines (the value lives in the item's tag, which the engine copies and saves with it). **Verified** (original
+  source: the caps and conditions); the lines are **Unknown** in play.
+- **Missing**: nothing known.
 - **Observed** differences: the repair timer runs on game time (the original's on real time, so equal at x1 speed); a shot is counted per bolt loaded
   (the engine reports reloads); armour wear and effects follow melee hits only, as the original's `hitByMeleeAttack` hook.
 - **Verified** against the original's source (read, not copied): ranges, grade tables, formulas, repair rules, texts. **Unknown**: not checked in game.

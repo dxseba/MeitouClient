@@ -363,7 +363,7 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
     bool Repair(World world, CharacterCold repairer, CharacterCold owner, bool armour, Condition rules, bool commit)
     {
         if (repairer.Inventory is not { } tools || FindTool(tools) is not { } tool || owner.Inventory is not { } inventory) return false;
-        if (Target(world, owner, inventory, armour, rules) is not { } target) return false;
+        if (Target(world, owner, inventory, armour, rules, commit) is not { } target) return false;
 
         if (!commit) return true;
         if (!tools.RemoveOne(tool)) return false;
@@ -387,19 +387,61 @@ sealed class Repairs(DurabilityConfig config, PopulationData data, RngPurpose pu
         return level > 0 ? (int)(level * config.SmithPerLevel) : 0;
     }
 
-    (ItemInstance Item, GearClass Class, int Dur, int Cap)? Target(World world, CharacterCold owner, Inventory inventory, bool armour, Condition rules)
+    /// <summary>
+    /// The diagnostics the weapon sections and armour slots a repair looks at are written to (null: none).
+    /// </summary>
+    public VerboseLog? Verbose { get; init; }
+
+    /// <summary>
+    /// The original's armour slot names, in <see cref="Condition.ArmourSections"/> order, for the diagnostics.
+    /// </summary>
+    static readonly string[] ArmourSlotNames = ["helmet", "chest", "shirt", "legs", "boots"];
+
+    /// <summary>
+    /// The first piece below its cap in the owner's weapon or armour sections, rolled first if new; null when none.
+    /// </summary>
+    (ItemInstance Item, GearClass Class, int Dur, int Cap)? Target(World world, CharacterCold owner, Inventory inventory, bool armour, Condition rules,
+        bool commit)
     {
         string[] sections = armour ? Condition.ArmourSections : Condition.WeaponSections;
-        foreach (string section in sections)
+        if (!armour) LogWeaponSections(inventory);
+
+        for (int k = 0; k < sections.Length; k++)
         {
-            if (Gear.In(inventory, section) is not { } item || !rules.Tracked(item, out var c) || Condition.IsArmour(c) != armour) continue;
+            var item = Gear.In(inventory, sections[k]);
+            if (armour && commit) LogArmourSlot(k, item, rules, picked: false);
+            if (item is null || !rules.Tracked(item, out var c) || Condition.IsArmour(c) != armour) continue;
 
             int cap = rules.RangeOf(c).Cap;
-            int dur = rules.GetOrRoll(item, c, Rng.Hash(world.Seed, Rng.StableHash(item.Record) ^ (ulong)world.Tick << 20, purpose, (ulong)Array.IndexOf(sections, section)));
-            if (dur < cap) return (item, c, dur, cap);
+            int dur = rules.GetOrRoll(item, c, Rng.Hash(world.Seed, Rng.StableHash(item.Record) ^ (ulong)world.Tick << 20, purpose, (ulong)k));
+            if (dur >= cap) continue;
+
+            if (armour && commit) LogArmourSlot(k, item, rules, picked: true);
+            return (item, c, dur, cap);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The diagnostics' weapon sections: each weapon slot and what it holds (the original lists them on every weapon repair look).
+    /// </summary>
+    void LogWeaponSections(Inventory inventory)
+    {
+        if (Verbose is not { On: true } verbose) return;
+
+        for (int k = 0; k < Condition.WeaponSections.Length; k++)
+            verbose.WeaponSection(k + 1, Condition.WeaponSections[k], Gear.In(inventory, Condition.WeaponSections[k]));
+    }
+
+    /// <summary>
+    /// The diagnostics' armour slot lines as a repair is applied: a slot with no armour piece of a class ("nothing to repair"), or the slot picked.
+    /// </summary>
+    void LogArmourSlot(int k, ItemInstance? item, Condition rules, bool picked)
+    {
+        if (Verbose is not { On: true } verbose) return;
+        if (picked) verbose.ArmourSlot(ArmourSlotNames[k], true);
+        else if (item is null || rules.ClassOf(item) is not { } c || !Condition.IsArmour(c)) verbose.ArmourSlot(ArmourSlotNames[k], false);
     }
 
     /// <summary>
