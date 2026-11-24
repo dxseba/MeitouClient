@@ -29,6 +29,11 @@ sealed class BirthSystem(BirthSettings settings, IReadOnlyList<BirthKind> kinds,
     static readonly float[] Rings = [12, 20, 30, 45];
 
     /// <summary>
+    /// A birth goes past the squad and faction size caps, as the original's <c>createRandomCharacter</c> checks none.
+    /// </summary>
+    static readonly SpawnOptions Birthing = new(IgnoreCaps: true);
+
+    /// <summary>
     /// The births ordered since the last slow step.
     /// </summary>
     readonly List<GiveBirthOrder> _orders = [];
@@ -91,7 +96,7 @@ sealed class BirthSystem(BirthSettings settings, IReadOnlyList<BirthKind> kinds,
         if (Spawn(world, queen.SquadId, table.Next[slot].Position, template) is not { } newborn)
         {
             world.Post($"{queen.Name} cannot give birth here.");
-            log($"QueenBirth: no newborn from {template} (no walkable point, or the squad or faction is full)");
+            log($"QueenBirth: no newborn from {template} (no walkable point)");
             return;
         }
 
@@ -118,14 +123,14 @@ sealed class BirthSystem(BirthSettings settings, IReadOnlyList<BirthKind> kinds,
     }
 
     /// <summary>
-    /// The newborn at the original's point beside the queen, else on the first walkable point of the rings; null when none takes it (the
-    /// squad or faction is full, docs: <c>SpawnIntoPlayerSquad</c>).
+    /// The newborn at the original's point beside the queen, else on the first walkable point of the rings, past the size caps; null when none
+    /// takes it.
     /// </summary>
     static CharacterId? Spawn(World world, int squad, Vector3 at, string template)
     {
         if (world.Systems.OfType<PopulationSystem>().FirstOrDefault() is not { } population) return null;
 
-        var first = population.SpawnIntoPlayerSquad(world, squad, template, new Vector2(at.X + BirthOffset, at.Z));
+        var first = population.SpawnIntoPlayerSquad(world, squad, template, new Vector2(at.X + BirthOffset, at.Z), Birthing);
         if (first != CharacterId.None) return first;
 
         foreach (float radius in Rings)
@@ -134,7 +139,7 @@ sealed class BirthSystem(BirthSettings settings, IReadOnlyList<BirthKind> kinds,
             {
                 float angle = k * MathF.PI / 4;
                 var point = new Vector2(at.X + radius * MathF.Cos(angle), at.Z + radius * MathF.Sin(angle));
-                var id = population.SpawnIntoPlayerSquad(world, squad, template, point);
+                var id = population.SpawnIntoPlayerSquad(world, squad, template, point, Birthing);
                 if (id != CharacterId.None) return id;
             }
         }
