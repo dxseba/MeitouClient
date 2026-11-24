@@ -8,7 +8,7 @@ namespace Meitou.ElementalEnchantment;
 /// <summary>
 /// Port of Elemental Enchantment (workshop 3832978749): each character has one elemental level and picks a main element (fire, lightning, wind,
 /// water, ice) in its ENCHANTMENT window, and from level 50 a secondary one at a share; they add to its blows and speed, train with landed hits
-/// by its aptitude, and show on its blade or hands and on its hits. Bosses listed in the optional bosses.json fight enchanted; a worn ward protects and,
+/// by its aptitude, and show on its blade or hands and on its hits. Bosses (from the installed original's plugin, or bosses.json) fight enchanted; a worn ward protects and,
 /// with two different elements, resonates.
 /// </summary>
 public sealed class ElementalEnchantmentMod : IMod
@@ -22,7 +22,7 @@ public sealed class ElementalEnchantmentMod : IMod
         context.AddSettings(Settings);
         var skill = context.AddSkill(Skill());
         context.AddSystem("elements", _ => Running = new ElementSystem(Settings, skill), SystemAnchor.End);
-        EnchantData.Load(context.Folder, context.Log);
+        EnchantData.Load(context);
         if (EnchantData.Recalibrator is { } recalibrator) context.AddItemUse(recalibrator, Recalibrate);
 
         var window = new EnchantWindow(context, Settings);

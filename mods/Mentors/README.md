@@ -1,7 +1,7 @@
 # Mentors (port)
 
 Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0.5). Lesson rules from the original DLL (decompiled) and its
-`Mentors.ini`; no source is published. Trades are the port's own.
+`Mentors.ini`; no source is published. Its trade table is read from the installed original at load time, never shipped.
 
 - **Opening** (**Verified**, DLL strings and `Mentors.ini`): the player reply "Could you teach me something? [training]" in a conversation with
   a character who can teach the player's character (`AddDialogueReplies`) opens training; with *Close dialogue* (`CloseDialogue`, on) the
@@ -9,12 +9,19 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
   NPC (the HUD's shown character) when it can teach, else on the nearest teacher within *Hotkey radius* (`Radius`, 500), or closes it.
 - **Who can teach** (**Verified**): a player character learns from a living non-player character that is not a slave (state 1) and not hostile;
   port also: conscious, not imprisoned or carried (an unconscious check in the original is **Observed** only, an unnamed virtual call).
-- **Trades**: the original maps the teacher's English CHARACTER record name to one of 21 trades with a curated table (whole names, then an
-  ordered word list; **Verified** shape, DLL rdata). That table is its author's content and is not shipped. Port default: its own heuristic
-  (`Professions.cs`): trader words first (with extra skills by the goods named), then field words (ninja, thief, smith, doctor, guard, farmer,
-  miner, wanderer...), then a shop (trader) or the law-enforcement NPC class (fighter); others teach nothing. `RequireProfession=0`: everyone
-  teaches all 33 skills.
-- **trades.json** (optional, in this mod's folder) replaces the heuristic: `trades` (name -> `covers` text and `skills`, `StatsEnumerated`
+- **Trades**: the original maps the teacher's lower-cased English CHARACTER record name to one of 21 trades: 6 whole names compared first, then
+  101 words in order, the first the name contains wins (**Verified**, DLL code and rdata). Source, first found: this folder's `trades.json`;
+  the table in the installed original's `Mentors.dll` (Workshop folder `3834394158` beside this one, else the code-less mod "Mentors");
+  else the port's heuristic (`Professions.cs`: trader words with goods skills, field words, shop, law-enforcement class; others teach
+  nothing). Each fallback logs one line. `RequireProfession=0`: everyone teaches all 33 skills.
+- **DLL layout** (**Verified**, Ghidra and a byte dump of 0.5's `.rdata`): a match list of 16-byte entries (pointer to an ASCII lower-case
+  text, u32 trade index, u32 0), the whole names first; the code's lookup `lea`s point at its start and at the first word (the counts are
+  code constants). A trade array of 0x60-byte records: pointers to the Russian name, English name, Russian and English covers texts (UTF-16),
+  then 16 u32 stat numbers (`StatsEnumerated`) ending in 0; index 0 is an empty sentinel. Reader (`OriginalTrades.cs`, `PeImage.cs`): PE
+  sections and VA -> file offset; the unique longest run of valid match entries in `.rdata`, split at the one `lea` target inside it; the
+  unique code-referenced sentinel followed by exactly max-index valid trades (printable texts, teachable stats). Any mismatch: not used.
+  **Observed** (2026-11-24, scratch program on the installed 0.5 DLL): 6 names, 101 words, 21 trades; byte-flipped copies rejected.
+- **trades.json** (optional, in this mod's folder) replaces both: `trades` (name -> `covers` text and `skills`, `StatsEnumerated`
   names), `exact` (a whole lower-case record name -> trade, checked first), `words` (ordered `[word, trade]`; the first word the lower-case name
   contains wins). Example (made up):
   `{ "trades": { "brewer": { "covers": "cooking and labouring", "skills": ["Cooking", "Labouring"] } }, "exact": { "old tom": "brewer" },
@@ -32,6 +39,6 @@ Port of *KENSHI: MENTORS* (workshop 3834394158, RE_Kenshi plugin `Mentors.dll` 0
 
 ## Missing
 
-- The original's exact trade per NPC (its authored table; supply a `trades.json` to change the port's).
+- The original's trades when it is not installed (the port's heuristic is used).
 - `OnlyPlayerStartedTalk`: the reply shows in every conversation with a teacher; the dialogue context does not say who started the talk.
 - Russian texts.

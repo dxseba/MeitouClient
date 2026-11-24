@@ -20,12 +20,26 @@ particles load when that mod is enabled beside this one.
   most 20x) x the main element's aptitude %, hundredths carried. **Aptitude**: 60% each, the favoured element 100% and its two neighbours on
   the ring Fire, Wind, Ice, Water, Lightning 80%; 1 in 100 characters 100% in all (rolled from the lasting id); *All elemental aptitudes 100%*
   flattens it. *Recruit ability chance* (100%) decides whether a new character has elemental ability at all.
-- **Bosses**: CHARACTER records listed in an optional `bosses.json` in this mod's folder fight with a fixed main, secondary and level (the
-  port ships no list; the original's own table lives in its DLL). Absent or invalid: no enchanted bosses, logged once at start. Format, record
-  id to `[main, secondary or "None", level]`:
+- **Where the record lists come from** (the port ships none): the bosses, the wards and the recalibrator are read at start from the installed
+  original's plugin (`plugin/ElementalEnchantmentTest.dll` in Workshop folder 3832978749 beside this mod, else in the code-less mod named
+  "Elemental Enchantment"), read as bytes and never loaded (`PluginTables`, `PeImage`). A valid `bosses.json` / `items.json` in this mod's
+  folder overrides the plugin's bosses / wards and recalibrator. Each part the plugin does not yield (not installed, or a shape or value that
+  does not match) is none, logged once.
+  - Plugin layout (**Observed**, Ghidra decompile and the bytes of the Workshop build): the bosses are a static array of 24-byte rows in
+    `.rdata` (id pointer, main, secondary, level, padding; elements in the port's `Element` numbering), indexed by a small accessor that
+    bounds-checks against the count; the wards are not data but one check function (id length, a shared tail string, a first character
+    mapped to an element); the recalibrator is a literal compared in the item-use handler. The reader finds each by its instruction pattern
+    in `.text` (exactly one match required), follows the RIP-relative address, and checks every id (`<n>-<file>.mod/.base`, the length the
+    code checks, the record type where the loaded data has the id: a boss row naming another type is left out, a ward or the recalibrator naming
+    a non-ITEM rejects that part), element range, distinct main/secondary and ward elements, level 1..100.
+  - Reader **Observed**: a scratch program run against the installed DLL returned 70 bosses, 5 wards and the recalibrator, identical (hash)
+    to an independent byte-level extraction; a copy with one corrupted level was rejected. `mod-check` on autosave0 (base game plus the enabled mods): one boss row
+    names a FACTION_CAMPAIGN there and is left out; the wards and the recalibrator pass.
+- **Bosses**: the listed CHARACTER records fight with a fixed main, secondary and level. Override format, record id to
+  `[main, secondary or "None", level]`:
   `{ "1234-example.mod": ["Fire", "Lightning", 80],`
   `  "5678-example.mod": ["Ice", "None", 45] }`
-- **Wards and recalibrator** come from an optional `items.json` in the same folder (none without it):
+- **Wards and recalibrator** override format (`items.json`):
   `{ "wards": { "11-example.mod": "Fire", "12-example.mod": "Ice" }, "recalibrator": "13-example.mod" }`.
   A listed ward worn in an equipment slot takes *Device damage reduction* (10%, 0 to 30) off incoming cut, blunt and pierce (none at effect
   strength 0). Main, secondary and ward all different is a **resonance**: per element in it, at r = *Resonance strength* x effect strength

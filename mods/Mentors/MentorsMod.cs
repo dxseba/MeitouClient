@@ -8,8 +8,8 @@ using Meitou.Simulation;
 namespace Meitou.Mentors;
 
 /// <summary>
-/// Port of KENSHI: MENTORS (workshop 3834394158), lesson rules from its DLL, trades the port's own: the player reply "Could you teach me something?
-/// [training]" opens a training window with the skills the teacher's trade covers, bought 1 or 5 lessons at a time; Ctrl+Shift with the "Mentors
+/// Port of KENSHI: MENTORS (workshop 3834394158), lesson rules from its DLL, trades read from the installed original (<see cref="Professions"/>):
+/// the player reply "Could you teach me something? [training]" opens a training window with the skills the teacher's trade covers, bought 1 or 5 lessons at a time; Ctrl+Shift with the "Mentors
 /// window" key opens it on the inspected or nearest teacher, or closes it.
 /// </summary>
 public sealed class MentorsMod : IMod
@@ -25,7 +25,7 @@ public sealed class MentorsMod : IMod
     public void Initialize(ModContext context)
     {
         Data = context.Data;
-        Professions.Load(context.Folder, context.Log);
+        Professions.Load(context);
         context.AddSettings(Settings);
         context.AddSystem("mentors", _ => Running = new MentorSystem(Settings, context.Data), SystemAnchor.End);
         context.AddUi(new TeachReply());

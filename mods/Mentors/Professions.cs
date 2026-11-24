@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Bodies;
+using Meitou.Modding;
 using static Meitou.Data.Gameplay.Bodies.StatsEnumerated;
 
 namespace Meitou.Mentors;
@@ -13,9 +14,9 @@ sealed record Profession(string Name, string Covers, IReadOnlyList<StatsEnumerat
 sealed record Teachable(StatsEnumerated Stat, string Label, bool Attribute);
 
 /// <summary>
-/// Who teaches what. The port's own heuristic (not the original's table, which is its author's and is not shipped): words in the teacher's
-/// CHARACTER record name, trader words first, then its shop and its NPC class; ordinary townspeople teach nothing. A <c>trades.json</c> in the mod
-/// folder replaces it (<see cref="Load"/>, format in the README).
+/// Who teaches what: a <c>trades.json</c> in the mod folder (format in the README), else the original's table read from its installed DLL (not
+/// shipped), else the port's own heuristic: words in the teacher's CHARACTER record name, trader words first, then its shop and its NPC class;
+/// ordinary townspeople teach nothing (<see cref="Load"/>).
 /// </summary>
 static class Professions
 {
@@ -63,7 +64,7 @@ static class Professions
         .. StatsInfo.RecordStats.Where(s => s is not (HiveMedic or Vet) && !Attributes.Contains(s)).Select(s => new Teachable(s, Label(s), false)),
     ];
 
-    /// <summary>The <c>trades.json</c> table when one was loaded; null: the heuristic.</summary>
+    /// <summary>The <c>trades.json</c> or original table when one was loaded; null: the heuristic.</summary>
     static TradeTable? s_table;
 
     /// <summary>The teacher's trade; null when it teaches nothing.</summary>
@@ -122,20 +123,31 @@ static class Professions
         return text.ToString();
     }
 
-    /// <summary>Reads <c>trades.json</c> from <paramref name="folder"/> when it exists; a file that does not read leaves the heuristic, logged.</summary>
-    public static void Load(string folder, Action<string> log)
+    /// <summary>
+    /// The trade table: this mod folder's <c>trades.json</c>, else the installed original's (<see cref="OriginalTrades"/>), else the heuristic
+    /// (logged once).
+    /// </summary>
+    public static void Load(ModContext context)
+    {
+        s_table = ReadJson(context.Folder, context.Log) ?? OriginalTrades.Load(context);
+    }
+
+    /// <summary>Reads <c>trades.json</c> from <paramref name="folder"/> when it exists; null when there is none or it does not read (logged).</summary>
+    static TradeTable? ReadJson(string folder, Action<string> log)
     {
         string path = Path.Combine(folder, "trades.json");
-        if (!File.Exists(path)) return;
+        if (!File.Exists(path)) return null;
 
         try
         {
-            s_table = TradeTable.Read(path, log);
-            log($"trades.json read: {s_table.Count} trades");
+            var table = TradeTable.Read(path, log);
+            log($"trades.json read: {table.Count} trades");
+            return table;
         }
         catch (Exception e) when (e is JsonException or IOException or InvalidOperationException)
         {
-            log($"trades.json not read, using the built-in trades: {e.Message}");
+            log($"trades.json not read: {e.Message}");
+            return null;
         }
     }
 }
@@ -152,6 +164,12 @@ sealed class TradeTable
     readonly List<(string Word, Profession Trade)> _words = [];
 
     public int Count => _trades.Count;
+
+    public void Add(Profession trade) => _trades[trade.Name] = trade;
+
+    public void AddExact(string name, Profession trade) => _exact[name.ToLowerInvariant()] = trade;
+
+    public void AddWord(string word, Profession trade) => _words.Add((word.ToLowerInvariant(), trade));
 
     public Profession? Of(string name)
     {
