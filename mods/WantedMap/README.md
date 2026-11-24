@@ -4,7 +4,9 @@ Port of *Wanted Map (QoL)* (workshop 3813761812): select a character carrying wa
 (`UiRegistration.AddMapMarkers`) marks their targets: red on the spot, orange at a far squad's position ("approx."), yellow at the home town of a
 target not seen yet ("lives here"), blue as a prisoner, grey where it died ("dead") for *DeadMarkerHours*. `PosterIndex` links posters to
 targets once at start; `WantedSystem` (every 60th tick) finds the targets and remembers deaths and seen targets in the save; `PosterBadge` marks
-poster item cells (`UiScreens.ItemCells` screen controls).
+poster item cells (`UiScreens.ItemCells` screen controls). The original's own files (the override file and the badge pictures) are read from
+this mod's folder, else from the installed original (`OriginalFiles`: its Workshop folder beside this one, else the code-less mod named
+`WantedMap`); none of them is shipped.
 
 ## Facts
 
@@ -24,12 +26,12 @@ poster item cells (`UiScreens.ItemCells` screen controls).
   `wantedmap_done.png`, 2/5 of the cell's smaller side held to 14 to 28 px, 2 px from its lower left; no picture, no badge. **Verified**
   (original DLL (decompiled), the colour from its constants). Meitou: counts only posters a player character carries; "dead" is a death seen
   or a target seen before and now gone (RememberSeen); the count's text alignment and font are Meitou's (**Unknown** in the original).
+- **Unique states**: a unique CHARACTER target not found in the world counts by the engine's unique table (`World.Uniques`, the state the
+  `NPC is` world states test): dead is done, imprisoned is done and captive, and neither gets the home marker. **Observed** (port code); the
+  original's exact rule is **Unknown**.
 - A target seen before (RememberSeen) and now nowhere counts as dead and gets no marker. **Observed** (original README).
 - **Unknown**: not run in game; how many vanilla posters the rules match.
 
 ## Missing
 
-- The original's `WantedMap_overrides.txt` (its data, not shipped): put one in this mod's folder to use it.
-- World states (`WORLD_EVENT_STATE` `NPC is`) as a source of dead / alive / imprisoned.
-- The badge pictures (`wantedmap_done.png`, `wantedmap_captive.png`, the original's art): put them in this mod's `gui/gfx`.
 - ScanSeconds / WorldScanSeconds (the port scans every 60 ticks), Debug and the runtime table, `WantedMap_GetMarkers` for other plugins.

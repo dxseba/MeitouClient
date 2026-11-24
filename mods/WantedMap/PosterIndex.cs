@@ -55,14 +55,14 @@ sealed partial class PosterIndex
     /// </summary>
     public bool IsTarget(string record) => _targets.Contains(record);
 
-    public static PosterIndex Build(GameDatabase data, string folder, IReadOnlyCollection<string> stopWords)
+    public static PosterIndex Build(GameDatabase data, OriginalFiles files, IReadOnlyCollection<string> stopWords)
     {
         var index = new PosterIndex();
         var characters = data.OfType(FcsRecordType.Character).OrderBy(r => r.StringId, StringComparer.Ordinal).ToList();
         var squads = data.OfType(FcsRecordType.SquadTemplate).OrderBy(r => r.StringId, StringComparer.Ordinal).ToList();
         foreach (var r in characters.Concat(squads)) index._names[r.StringId] = r.Name;
 
-        var overrides = ReadOverrides(Path.Combine(folder, "WantedMap_overrides.txt"));
+        var overrides = ReadOverrides(files.Find("WantedMap_overrides.txt"));
         var books = data.OfType(FcsRecordType.Item).Where(r => r.GetInt("item function") == BookFunction)
             .OrderBy(r => r.StringId, StringComparer.Ordinal).ToList();
         var matcher = new Matcher(characters, squads, stopWords);
@@ -99,13 +99,13 @@ sealed partial class PosterIndex
     }
 
     /// <summary>
-    /// <c>WantedMap_overrides.txt</c> in the mod's folder (the user's own; the original's file is not shipped): <c>poster id | target ids</c>,
+    /// <c>WantedMap_overrides.txt</c> (this mod's folder, else the installed original's; null: neither has one): <c>poster id | target ids</c>,
     /// comma-separated, <c>#</c> comments.
     /// </summary>
-    static Dictionary<string, IReadOnlyList<string>> ReadOverrides(string path)
+    static Dictionary<string, IReadOnlyList<string>> ReadOverrides(string? path)
     {
         var map = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-        if (!File.Exists(path)) return map;
+        if (path is null) return map;
 
         foreach (var raw in File.ReadLines(path))
         {

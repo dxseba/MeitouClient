@@ -97,7 +97,7 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
             var held = inventory.Searched(carriedBags: false).Select(i => i.Record).Distinct(StringComparer.Ordinal);
             foreach (var record in held)
             {
-                if (posters.Of(record) is { } poster) progress[record] = AddPoster(markers, carrier, poster, finder);
+                if (posters.Of(record) is { } poster) progress[record] = AddPoster(markers, carrier, poster, finder, world.Uniques);
             }
         }
 
@@ -105,19 +105,23 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
     }
 
     /// <summary>
-    /// Adds the markers of <paramref name="poster"/>'s targets and answers its progress.
+    /// Adds the markers of <paramref name="poster"/>'s targets and answers its progress. A unique target not found in the world counts by its
+    /// unique state (the original's <c>NPC is</c> world states): dead is done, imprisoned is done and captive, and neither is shown at home.
     /// </summary>
-    PosterProgress AddPoster(List<TargetMarker> markers, CharacterId carrier, PosterTargets poster, TargetFinder finder)
+    PosterProgress AddPoster(List<TargetMarker> markers, CharacterId carrier, PosterTargets poster, TargetFinder finder, UniqueCharacters uniques)
     {
         int done = 0, captive = 0;
         foreach (var (id, squad) in poster.Characters.Select(c => (c, false)).Concat(poster.Squads.Select(q => (q, true))))
         {
             var found = squad ? finder.Squad(id) : finder.Character(id);
-            bool gone = found is null && (_deaths.ContainsKey(id) || settings.RememberSeen && _seen.Contains(id));
-            if (Locate(id, found) is { } m) markers.Add(new(carrier, id, (squad ? null : m.Name) ?? posters.NameOf(id), m.State, m.At));
+            var unique = found is null && !squad ? uniques.Find(id)?.State : null;
+            bool held = found?.State == TargetState.Prisoner || unique == UniqueState.Imprisoned;
+            bool gone = found is null && (unique == UniqueState.Dead || _deaths.ContainsKey(id) || settings.RememberSeen && _seen.Contains(id));
+            bool hideHome = unique is UniqueState.Dead or UniqueState.Imprisoned;
+            if (Locate(id, found, hideHome) is { } m) markers.Add(new(carrier, id, (squad ? null : m.Name) ?? posters.NameOf(id), m.State, m.At));
 
-            if (found?.State == TargetState.Prisoner) captive++;
-            if (gone || found?.State == TargetState.Prisoner) done++;
+            if (held) captive++;
+            if (gone || held) done++;
         }
 
         return new(poster.Characters.Count + poster.Squads.Count, done, captive);
@@ -125,9 +129,10 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
 
     /// <summary>
     /// Where target <paramref name="id"/> is shown: where it was found; else where it died, for <c>DeadMarkerHours</c>; else, never seen, at its
-    /// home town (<c>TownFallback</c>); a target seen before and now nowhere counts as dead and is not shown.
+    /// home town (<c>TownFallback</c>) unless <paramref name="hideHome"/> (a unique dead or imprisoned); a target seen before and now nowhere
+    /// counts as dead and is not shown.
     /// </summary>
-    (TargetState State, Vector2 At, string? Name)? Locate(string id, (TargetState State, Vector2 At, string? Name)? found)
+    (TargetState State, Vector2 At, string? Name)? Locate(string id, (TargetState State, Vector2 At, string? Name)? found, bool hideHome)
     {
         if (found is { } here)
         {
@@ -136,7 +141,7 @@ sealed class WantedSystem(PosterIndex posters, TownPlaces towns, WantedSettings 
         }
 
         if (_deaths.TryGetValue(id, out var death)) return settings.DeadMarkerHours > 0 ? (TargetState.Dead, death.At, null) : null;
-        if (settings.RememberSeen && _seen.Contains(id) || !settings.TownFallback) return null;
+        if (hideHome || settings.RememberSeen && _seen.Contains(id) || !settings.TownFallback) return null;
 
         return posters.HomesOf(id).Select(towns.Of).OfType<Vector2>().FirstOrDefault() is var home && home != default
             ? (TargetState.Home, home, null)

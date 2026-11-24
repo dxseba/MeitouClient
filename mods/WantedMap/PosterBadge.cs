@@ -7,9 +7,9 @@ namespace Meitou.WantedMap;
 /// The poster badge on an item cell (the original's <c>InventoryIcon</c> hook, <b>Verified</b> original DLL (decompiled)): nothing until a target
 /// is dead or captive; then "done/total" in the cell's lower part while some are left, and once all are, <c>wantedmap_captive.png</c> (any
 /// captive) or <c>wantedmap_done.png</c> in its lower left corner, a side of 2/5 of the cell's smaller side held to 14 to 28 px. Without the
-/// picture there is no badge, as in the original. The pictures are the original's and not shipped: put them in this mod's <c>gui/gfx</c>.
+/// picture there is no badge, as in the original. The pictures are the original's, read from its installed folder (<see cref="OriginalFiles"/>).
 /// </summary>
-sealed class PosterBadge(string folder)
+sealed class PosterBadge(OriginalFiles files)
 {
     /// <summary>
     /// The count's colour (the DLL's constants 1, 0.42, 0.36).
@@ -46,13 +46,12 @@ sealed class PosterBadge(string folder)
     }
 
     /// <summary>
-    /// The picture in this mod's <c>gui/gfx</c> or folder; null when absent.
+    /// The picture in a folder's <c>gui/gfx</c> or the folder itself; null when absent.
     /// </summary>
     string? Find(string name)
     {
         if (_pictures.TryGetValue(name, out var known)) return known;
 
-        string[] candidates = [Path.Combine(folder, "gui", "gfx", name), Path.Combine(folder, name)];
-        return _pictures[name] = candidates.FirstOrDefault(File.Exists);
+        return _pictures[name] = files.Find(Path.Combine("gui", "gfx", name), name);
     }
 }

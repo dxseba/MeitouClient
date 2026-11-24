@@ -21,10 +21,11 @@ public sealed class WantedMapMod : IMod
 
         var stopWords = Settings.StopWords.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(w => w.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
-        var posters = PosterIndex.Build(context.Data, context.Folder, stopWords);
+        var files = new OriginalFiles(context);
+        var posters = PosterIndex.Build(context.Data, files, stopWords);
         var towns = new TownPlaces(context.Population);
         context.AddSystem("wanted", _ => Running = new WantedSystem(posters, towns, Settings), SystemAnchor.End);
-        context.AddUi(new WantedMarkers(new PosterBadge(context.Folder)));
+        context.AddUi(new WantedMarkers(new PosterBadge(files)));
         context.Log($"Wanted Map initialized: {posters.Count} posters matched");
     }
 }
