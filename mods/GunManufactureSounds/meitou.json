@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.gunmanufacturesounds",
+  "apiVersion": 2,
+  "assemblies": ["GunManufactureSounds.dll"],
+  "entry": "Meitou.GunManufactureSounds.GunManufactureSoundsMod",
+  "gameVersion": ">=0.22.2"
+}
