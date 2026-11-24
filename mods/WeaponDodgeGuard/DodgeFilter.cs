@@ -15,7 +15,7 @@ namespace Meitou.WeaponDodgeGuard;
 /// Chance scale and clamped to the minimum and maximum; on success its block becomes a dodge technique (<see cref="DodgeTechniques"/>), else the
 /// guard stands. Any thread: reads the defender and attacker as the tick settled them; the cooldown is per defender, written from its own asks.
 /// </summary>
-sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose) : ICombatDefenceFilter
+sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose, DodgeLog log) : ICombatDefenceFilter, IStateHashed
 {
     /// <summary>
     /// The last weapon-dodge tick per defender (for the cooldown).
@@ -30,33 +30,92 @@ sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose) : IComba
     public int Defence(World world, in DefenceChoiceAsk ask)
     {
         if (!WeaponDodgeGuardMod.Settings.Enabled || ask.Stumbling || CombatOf(world) is not { } combat) return ask.Technique;
-        if (!StandingBlock(combat, ask.Technique) || Dodge(world, combat, ask) is not { } pick) return ask.Technique;
 
+        log.Discovered(combat.Techniques);
+        if (Turned(combat, ask.Technique) is { } early)
+        {
+            log.Choice(world, ask, new DodgeDecision(null, early), true, combat.Techniques);
+            return ask.Technique;
+        }
+
+        var decision = Dodge(world, combat, ask);
+        log.Choice(world, ask, decision, false, combat.Techniques);
+        if (decision.Pick is not { } pick) return ask.Technique;
+
+        log.Selected(combat.Techniques, pick);
         if (WeaponDodgeGuardMod.Settings.CooldownMs > 0) _lastDodge[ask.Defender] = world.Tick;
         return pick;
     }
 
     /// <summary>
-    /// The dodge technique the defender takes up instead of its guard, or null when the gate or the roll keeps the guard.
+    /// Why the game's pick is kept before the fighter is looked at (the original's decision names), or null for a standing block.
     /// </summary>
-    int? Dodge(World world, CombatSystem combat, in DefenceChoiceAsk ask)
+    static string? Turned(CombatSystem combat, int pick)
+    {
+        if (pick < 0 || pick >= combat.Techniques.Count) return "vanilla-returned-null";
+        if (combat.Techniques[pick].IsDodge) return "vanilla-dodge-preserved";
+
+        return StandingBlock(combat, pick) ? null : "not-standing-block";
+    }
+
+    /// <summary>
+    /// The dodge technique the defender takes up instead of its guard, or none when the gate or the roll keeps the guard; with the reason.
+    /// </summary>
+    DodgeDecision Dodge(World world, CombatSystem combat, in DefenceChoiceAsk ask)
     {
         var table = world.Characters;
-        if (!table.IsAlive(ask.Defender) || table.Cold(ask.Defender.Slot) is not { Fighter: { CanBlock: true } fighter, Medical: { } medical } cold)
+        if (!table.IsAlive(ask.Defender) || table.Cold(ask.Defender.Slot) is not { Fighter: { } fighter, Medical: { } medical } cold)
         {
-            return null;
+            return new(null, "missing-character");
         }
 
-        if (!Eligible(cold, medical) || CoolingDown(world, ask.Defender)) return null;
-        if (!table.IsAlive(ask.Attacker) || table.Cold(ask.Attacker.Slot) is not { } attacker) return null;
+        if (!fighter.CanBlock) return new(null, "unarmed-vanilla-controls");
+        if (Ineligible(cold, medical) is { } reason) return new(null, reason);
+        if (CoolingDown(world, ask.Defender)) return new(null, "dodge-cooldown-block-fallback");
+        if (!table.IsAlive(ask.Attacker) || table.Cold(ask.Attacker.Slot) is not { } attacker) return new(null, "missing-character");
 
         float dodge = EffectiveDodge(cold, fighter, medical);
-        if (WeaponDodgeGuardMod.Settings.Adaptive && dodge < EffectiveMeleeDefence(cold, fighter)) return null;
+        if (WeaponDodgeGuardMod.Settings.Adaptive && !DodgeFirst(world, ask.Defender, cold, fighter, dodge))
+        {
+            return new(null, "adaptive-priority-defense-higher", dodge);
+        }
 
-        ulong roll = Rng.Hash(world.Seed, Rng.Key(ask.Defender), purpose, (ulong)(uint)ask.Tick);
-        if (Rng.Float(roll) * 100 >= Chance(dodge, attacker)) return null;
+        return Roll(world, combat, ask, dodge, Chance(dodge, attacker));
+    }
 
-        return DodgeTechniques.Pick(combat.Techniques, dodge, Rng.Float(Rng.Mix(roll)));
+    DodgeDecision Roll(World world, CombatSystem combat, in DefenceChoiceAsk ask, float dodge, float chance)
+    {
+        ulong hash = Rng.Hash(world.Seed, Rng.Key(ask.Defender), purpose, (ulong)(uint)ask.Tick);
+        float roll = Rng.Float(hash) * 100;
+        if (roll >= chance) return new(null, "dodge-roll-failed-block-fallback", dodge, chance, roll);
+
+        int? pick = DodgeTechniques.Pick(combat.Techniques, dodge, Rng.Float(Rng.Mix(hash)));
+        return new(pick, pick is null ? "dodge-technique-invalid-block-fallback" : "dodge-selected", dodge, chance, roll);
+    }
+
+    /// <summary>
+    /// Adaptive priority: the dodge comes first while the effective dodge is at least the effective melee defence.
+    /// </summary>
+    bool DodgeFirst(World world, CharacterId who, CharacterCold cold, Fighter fighter, float dodge)
+    {
+        float defence = EffectiveMeleeDefence(cold, fighter);
+        log.Priority(world, who, dodge, defence);
+        return dodge >= defence;
+    }
+
+    /// <summary>
+    /// The cooldowns in the state hash, in defender order (written only in the combat phase, read here between ticks).
+    /// </summary>
+    public void Hash(ref StateHasher hasher)
+    {
+        var entries = _lastDodge.ToArray();
+        Array.Sort(entries, (a, b) => (a.Key.Slot, a.Key.Generation).CompareTo((b.Key.Slot, b.Key.Generation)));
+        hasher.Add(entries.Length);
+        foreach (var (who, tick) in entries)
+        {
+            hasher.Add(who);
+            hasher.Add(tick);
+        }
     }
 
     CombatSystem? CombatOf(World world) => _combat ??= world.Systems.OfType<CombatSystem>().FirstOrDefault();
@@ -67,12 +126,12 @@ sealed class DodgeFilter(CombatConstants constants, RngPurpose purpose) : IComba
     static bool StandingBlock(CombatSystem combat, int pick) =>
         pick >= 0 && pick < combat.Techniques.Count && combat.Techniques[pick] is { IsBlock: true, IsDodge: false, IsProne: false };
 
-    static bool Eligible(CharacterCold cold, MedicalState medical)
+    static string? Ineligible(CharacterCold cold, MedicalState medical)
     {
         var settings = WeaponDodgeGuardMod.Settings;
-        if (settings.RequireStanding && medical.Prone) return false;
+        if (settings.RequireStanding && medical.Prone) return "character-not-standing";
 
-        return settings.AllowInDefensiveMode || !Orders.Has(cold, CharacterOrders.Block);
+        return settings.AllowInDefensiveMode || !Orders.Has(cold, CharacterOrders.Block) ? null : "defensive-mode-block-only";
     }
 
     /// <summary>

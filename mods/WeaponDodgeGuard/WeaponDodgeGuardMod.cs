@@ -20,8 +20,16 @@ public sealed class WeaponDodgeGuardMod : IMod
         context.AddSettings(Settings);
         Purpose = context.RngPurpose;
         var constants = CombatConstants.FromDatabase(context.Data);   // the combat system's own (CombatDatabase.Constants)
-        context.AddSystem("weapon-dodge-guard", _ => new DodgeFilter(constants, Purpose), SystemAnchor.End);
+        var log = new DodgeLog(context.Log);
+        log.Started();
+        context.AddSystem("weapon-dodge-guard", _ => NewFilter(constants, log), SystemAnchor.End);
         context.Log("Weapon Dodge & Guard initialized");
+    }
+
+    static DodgeFilter NewFilter(CombatConstants constants, DodgeLog log)
+    {
+        log.NewWorld();
+        return new DodgeFilter(constants, Purpose, log);
     }
 }
 
@@ -117,4 +125,40 @@ public sealed class DodgeSettings
     /// </summary>
     [Setting("Blocked animations", Hint = "Comma-separated dodge technique names never used (BlockedAnimations).", MaxLength = 1024)]
     public string Blocked { get; set; } = "";
+
+    /// <summary>
+    /// <c>[Logging] Verbose</c>, 0: the settings at start, and the choices turned away before the fighter is looked at.
+    /// </summary>
+    [Setting("Verbose log", SubGroup = "Logging", Hint = "The settings at start, and every pick of the game that is no standing block.")]
+    public bool Verbose { get; set; }
+
+    /// <summary>
+    /// <c>[Logging] LogSelections</c>, 0.
+    /// </summary>
+    [Setting("Log selections", SubGroup = "Logging", Hint = "Each weapon dodge decision: who, why, the chance and the roll.")]
+    public bool LogSelections { get; set; }
+
+    /// <summary>
+    /// <c>[Priority] LogDecisions</c>, 0.
+    /// </summary>
+    [Setting("Log priority decisions", SubGroup = "Logging", Hint = "Adaptive priority's comparison of dodge and melee defence.")]
+    public bool LogDecisions { get; set; }
+
+    /// <summary>
+    /// <c>[Animations] LogDiscoveredTechniques</c>, 0.
+    /// </summary>
+    [Setting("Log discovered techniques", SubGroup = "Logging", Hint = "The standing dodge techniques found, once a game.")]
+    public bool LogDiscoveredTechniques { get; set; }
+
+    /// <summary>
+    /// <c>[Animations] LogSelectedAnimation</c>, 0.
+    /// </summary>
+    [Setting("Log selected animation", SubGroup = "Logging", Hint = "The dodge technique of each weapon dodge.")]
+    public bool LogSelectedAnimation { get; set; }
+
+    /// <summary>
+    /// <c>[Logging] MaxLines</c>, 500: lines a session, then one saying the limit is reached.
+    /// </summary>
+    [Setting("Most log lines", SubGroup = "Logging", Min = 1, Max = 100000, Step = 50)]
+    public int MaxLines { get; set; } = 500;
 }
