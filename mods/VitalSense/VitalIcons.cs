@@ -24,14 +24,14 @@ sealed class VitalIcons(IReadOnlyList<string> folders, Action<string> log)
     readonly string? _gameGfx = GameInstall.Locate() is { } install ? Path.Combine(install.DataDirectory, "gui", "gfx") : null;
 
     /// <summary>
-    /// <paramref name="state"/>'s icon file and crop; null without one (no install for the atlas).
+    /// <paramref name="state"/>'s icon file and crop, and whether it is the atlas cell; null without one (no install for the atlas).
     /// </summary>
-    public (string File, UiImageCrop? Crop)? Of(VitalState state)
+    public (string File, UiImageCrop? Crop, bool Atlas)? Of(VitalState state)
     {
         var (texture, size) = VitalSenseMod.Settings.Icon(state);
-        if (texture.Length > 0 && Lookup(texture) is { } picture) return (picture, UiImageCrop.Pixels(0, 0, size, size));
+        if (texture.Length > 0 && Lookup(texture) is { } picture) return (picture, UiImageCrop.Pixels(0, 0, size, size), false);
 
-        return Lookup("Kenshi_UI.png") is { } atlas ? (atlas, AtlasCell(state)) : null;
+        return Lookup("Kenshi_UI.png") is { } atlas ? (atlas, AtlasCell(state), true) : null;
     }
 
     /// <summary>
@@ -50,8 +50,11 @@ sealed class VitalIcons(IReadOnlyList<string> folders, Action<string> log)
 
     /// <summary>
     /// The DLL's fallback cells (<b>Verified</b>, original DLL (decompiled)): dying and dead the 34 px cell at 108, 49; playing dead the 38 by 27
-    /// stealth tag at 80, 126; unconscious and recovery coma the Knockout pointer (<c>pic_PointerKnockout</c>, 32 px at 45, 122).
+    /// stealth tag at 80, 126; unconscious and recovery coma the Knockout pointer (<c>pic_PointerKnockout</c>, 32 px at 45, 122). The DLL colours
+    /// the dying, playing dead and dead cells with the relation colour (<see cref="TintedCell"/>).
     /// </summary>
+    public static bool TintedCell(VitalState state) => state is VitalState.Dying or VitalState.PlayingDead or VitalState.Dead;
+
     static UiImageCrop AtlasCell(VitalState state) => state switch
     {
         VitalState.Dying or VitalState.Dead => UiImageCrop.Pixels(108, 49, 34, 34),

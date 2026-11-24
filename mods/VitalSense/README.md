@@ -9,8 +9,8 @@ the tint (`VitalTint`, the engine's `Tint`, through walls). No Harmony.
 
 - **State** (first match): dead DE; then only an unconscious character: playing dead PD; recovery coma RC (coma flag, `!canGetUpWakeUp`, no KO
   timer, not `isProbablyDying`, blood above the KO point `pointOfNoReturn`, no blood-loss trauma); dying DY (blood at or under the KO point, or
-  the coma flag); else ZZ. **Verified** (original DLL (decompiled)). Meitou stand-ins: `WakesWithin(0)` for `canGetUpWakeUp`, the health word's
-  Dying for `isProbablyDying` (its rule is not known).
+  the coma flag); else ZZ. **Verified** (original DLL (decompiled)). Meitou: `MedicalState.CanGetUpWakeUp` and `ProbablyDying`, the engine's
+  reads named after those tests.
 - **Relation**: the player's characters squad; hostile to an own character enemy; an animal ally if of the player's faction, else neutral; else
   ally when allied, else neutral; a medically dead non-player character takes the enemy colour. Colours squad #40FF40, ally #DEE85A, enemy
   #FF3333, neutral #FFA64D. **Verified** (original DLL (decompiled); `mod-config.defaults.json`). Meitou: "hostile" is the snapshot's
@@ -48,8 +48,13 @@ the tint (`VitalTint`, the engine's `Tint`, through walls). No Harmony.
   (Alt), a bindable *Vital Sense highlight* action whose binding can be a chord (the modifier requirements), or *Always on*.
 - **Observed**: nothing in play yet (placement, colours, tint, cost at 256 markers with outlines).
 
+- **Atlas cells**: the DLL colours the `Kenshi_UI.png` cells of dying, playing dead and dead with the relation colour (`setColour`); Meitou
+  sets the same colour as the image node's `Tint` (only on an atlas cell, not on a configured picture). **Verified** (decompile, per the
+  earlier comparison); its look is **Unknown** (not seen in play).
+- **Translations**: settings labels, hints and the bounty position choices are the msgids of the original's gettext catalogues
+  (`vital_sense`: en_GB, ru_RU, zh_CN), read from the installed original (`AddTranslations`). **Verified** (catalogue msgids read). *Always
+  on* and *Text outline* are Meitou's and English; the sub-group names are Meitou's.
+
 ## Missing
 
-- The DLL colours the atlas glyphs of dying, playing dead and dead with the relation colour; an image node has no colour, so they keep the
-  atlas' (engine gap).
 - The update interval runs on game time (the original's on the wall clock), so it slows and speeds with the game.

@@ -85,9 +85,10 @@ public sealed class VitalMarkersUi : IUiExtension
     }
 
     /// <summary>
-    /// The icon, over the glow (24 px round its 18, 3 px out) for a character with a bounty.
+    /// The icon, over the glow (24 px round its 18, 3 px out) for a character with a bounty; a dying, playing dead or dead atlas cell in the
+    /// relation colour (the DLL's <c>setColour</c>).
     /// </summary>
-    float AddIcon(UiNode root, int i, Marker m, (string File, UiImageCrop? Crop) source, float left, float top)
+    float AddIcon(UiNode root, int i, Marker m, (string File, UiImageCrop? Crop, bool Atlas) source, float left, float top)
     {
         if (m.Tier >= 0 && VitalSenseMod.Settings.ShowGlow && _icons.Glow() is { } glow)
         {
@@ -96,7 +97,9 @@ public sealed class VitalMarkersUi : IUiExtension
         }
 
         var at = new UiPlacement(Icon, Icon, Left: left, Top: top);
-        root.Children.Add(new UiNode("vitalsense-icon-" + i, UiNodeKind.Image) { Placement = at, Image = source.File, ImageCrop = source.Crop });
+        Vector4? tint = source.Atlas && VitalIcons.TintedCell(m.State) ? VitalColours.Of(m.Relation) : null;
+        var icon = new UiNode("vitalsense-icon-" + i, UiNodeKind.Image) { Placement = at, Image = source.File, ImageCrop = source.Crop, Tint = tint };
+        root.Children.Add(icon);
         return left + Icon + Gap;
     }
 

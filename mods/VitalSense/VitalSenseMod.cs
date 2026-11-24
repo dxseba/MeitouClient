@@ -8,7 +8,8 @@ namespace Meitou.VitalSense;
 /// <summary>
 /// Port of Vital Sense (workshop 3813852288, GPL-3.0): while the Highlight key (Alt) is held, a state marker over each downed or dead character
 /// near the camera (ZZ unconscious, RC recovery coma, DY dying, PD playing dead, DE dead) in its relation's colour, with a "$" before it coloured by
-/// the bounty tier, and a body tint (the engine's <c>Tint</c>, as the original's shader colour override).
+/// the bounty tier, and a body tint (the engine's <c>Tint</c>, as the original's shader colour override). Its settings show through the installed
+/// original's catalogues (<c>vital_sense</c>: en_GB, ru_RU, zh_CN).
 /// </summary>
 public sealed class VitalSenseMod : IMod
 {
@@ -19,11 +20,14 @@ public sealed class VitalSenseMod : IMod
 
     public void Initialize(ModContext context)
     {
+        string? original = OriginalFolder.Find(context);
+        if (original is not null) context.AddTranslations("vital_sense", original);
+
         context.AddSettings(Settings);
         context.AddSystem("vitals", build => Build(build, context.Log), SystemAnchor.End);
         VitalTint.Install(context);
         VitalMarkers.Install(context);
-        string[] folders = OriginalFolder.Find(context) is { } original ? [context.Folder, original] : [context.Folder];
+        string[] folders = original is not null ? [context.Folder, original] : [context.Folder];
         context.AddUi(new VitalMarkersUi(new VitalIcons(folders, context.Log)));
         context.Log("Vital Sense initialized");
     }

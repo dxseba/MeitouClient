@@ -27,43 +27,19 @@ static class VitalRule
         if (med.PlayingDead) return VitalState.PlayingDead;
 
         bool pastNoReturn = koPoint is { } ko && med.Blood <= ko;
-        if (RecoveryComa(med, koPoint, pastNoReturn)) return VitalState.RecoveryComa;
+        if (RecoveryComa(med, pastNoReturn)) return VitalState.RecoveryComa;
 
         return pastNoReturn || med.Coma ? VitalState.Dying : VitalState.Unconscious;
     }
 
     /// <summary>
-    /// <c>canGetUpWakeUp</c> is taken as <see cref="MedicalState.WakesWithin"/> now; <c>isProbablyDying</c>, whose rule is not known, as the health
-    /// word's Dying (<see cref="HealthWordDying"/>).
+    /// The coma flag, <c>!canGetUpWakeUp</c> (<see cref="MedicalState.CanGetUpWakeUp"/>), no KO timer, not <c>isProbablyDying</c>
+    /// (<see cref="MedicalState.ProbablyDying"/>), blood above the KO point and no blood-loss trauma.
     /// </summary>
-    static bool RecoveryComa(MedicalState med, float? koPoint, bool pastNoReturn)
+    static bool RecoveryComa(MedicalState med, bool pastNoReturn)
     {
-        if (!med.Coma || med.WakesWithin(0) || med.KoTimer > 0) return false;
+        if (!med.Coma || med.CanGetUpWakeUp || med.KoTimer > 0) return false;
 
-        return !pastNoReturn && !med.BloodKo && !HealthWordDying(med, koPoint);
-    }
-
-    /// <summary>
-    /// The health word's Dying (docs/game/ui-screens.md "Health word choice"): a vital part below 0 and not at or above the KO point, or blood at
-    /// or under 0 with a non-vital part destroyed past its maximum.
-    /// </summary>
-    static bool HealthWordDying(MedicalState med, float? koPoint)
-    {
-        int worst = 0;
-        foreach (var part in med.Parts)
-        {
-            float health = part.Flesh + part.Bandage;
-            if (health - part.Stun <= -part.MaxHp)
-            {
-                if (!part.Template.Vital && worst == 0) worst = 1;
-            }
-            else if (health < 0)
-            {
-                bool aboveKo = koPoint is { } ko && health >= ko;
-                worst = Math.Max(worst, part.Template.Vital && !aboveKo ? 3 : 2);
-            }
-        }
-
-        return worst == 3 || worst == 1 && med.Blood <= 0;
+        return !pastNoReturn && !med.BloodKo && !med.ProbablyDying;
     }
 }
