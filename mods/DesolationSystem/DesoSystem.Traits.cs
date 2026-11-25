@@ -17,7 +17,8 @@ sealed partial class DesoSystem
     /// <summary>Squads with a Prosthetic Tuning character in them (serial step).</summary>
     HashSet<int> TunedSquads { get; set; } = [];
 
-    static readonly MethodInfo? JoinPlayer = AccessTools.Method(typeof(DialogueSystem), "JoinPlayer");
+    static readonly MethodInfo? JoinPlayer =
+        AccessTools.Method(typeof(DialogueSystem), "JoinPlayer", [typeof(World), typeof(PopulationData), typeof(int)]);
 
     void Refresh(World world, CharacterCold cold, CharacterStats s)
     {
