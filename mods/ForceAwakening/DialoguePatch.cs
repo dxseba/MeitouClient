@@ -23,7 +23,7 @@ static class DialoguePatch
     {
         s_context = context;
         var check = AccessTools.Method(typeof(DialogueSystem), "LastChecksPass");
-        var say = AccessTools.Method(typeof(DialogueSystem), "Say");
+        var say = LineSay();
         if (check is null || say is null)
         {
             context.LogError("DialogueSystem.LastChecksPass or Say not found: the bounty contracts are off (the port needs an update)");
@@ -33,6 +33,11 @@ static class DialoguePatch
         context.Harmony.Patch(check, postfix: new HarmonyMethod(typeof(DialoguePatch), nameof(CheckPostfix)));
         context.Harmony.Patch(say, prefix: new HarmonyMethod(typeof(DialoguePatch), nameof(SayPrefix)));
     }
+
+    /// <summary>The conversation overload of <c>DialogueSystem.Say</c> (the one taking the spoken line), not the ambient bark one.</summary>
+    static System.Reflection.MethodInfo? LineSay() =>
+        AccessTools.GetDeclaredMethods(typeof(DialogueSystem))
+            .FirstOrDefault(m => m.Name == "Say" && m.GetParameters().Any(p => p.ParameterType == typeof(DialogueNode)));
 
 #pragma warning disable IDE1006 // Harmony's injected parameter names
     static void CheckPostfix(DialogueNode node, ref bool __result)

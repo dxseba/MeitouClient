@@ -38,7 +38,7 @@ sealed partial class ForceSystem
         var cover = new Cover(world.Seed, Rng.Key(id), purpose, (ulong)world.Tick);
         float toughness = cold.Stats?[StatsEnumerated.Toughness] ?? 0;
         var armour = cold.Fighter is { } fighter ? fighter.Armour : default;
-        var (part, _, _) = HitResolver.LandDetailed(medical, ctx, packet, armour, cover, toughness, false, true, population.Combat.Constants, events);
+        var (part, _, _, _) = HitResolver.LandDetailed(medical, ctx, packet, armour, cover, toughness, false, true, population.Combat.Constants, events);
         if (part < 0) return;
 
         foreach (var e in events)
