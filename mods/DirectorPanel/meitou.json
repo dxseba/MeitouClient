@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.directorpanel",
+  "apiVersion": 2,
+  "assemblies": ["DirectorPanel.dll"],
+  "entry": "Meitou.DirectorPanel.DirectorPanelMod",
+  "gameVersion": ">=0.22.2"
+}
