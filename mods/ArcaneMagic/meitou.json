@@ -1,0 +1,9 @@
+{
+  // Port of Arcane Magic - Wizards of Kenshi (Workshop 3784221846); the original is a required item for its data (Focus, Magi, factions, towns,
+  // animations), which must be enabled. Its plugin (plugin/ArcaneMagicNative.dll) is never loaded.
+  "id": "dxseba.arcanemagic",
+  "apiVersion": 2,
+  "assemblies": ["ArcaneMagic.dll"],
+  "entry": "Meitou.ArcaneMagic.ArcaneMagicMod",
+  "gameVersion": ">=0.22.2"
+}
