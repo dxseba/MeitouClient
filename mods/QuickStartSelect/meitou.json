@@ -1,0 +1,8 @@
+{
+  // Port of Quick Start Select (Workshop 3813761725); the original is a required item for its translations (locale/*/quick_start_select.mo).
+  "id": "dxseba.quickstartselect",
+  "apiVersion": 2,
+  "assemblies": ["QuickStartSelect.dll"],
+  "entry": "Meitou.QuickStartSelect.QuickStartSelectMod",
+  "gameVersion": ">=0.22.2"
+}
