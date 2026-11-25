@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.forceawakening",
+  "apiVersion": 2,
+  "assemblies": ["ForceAwakening.dll"],
+  "entry": "Meitou.ForceAwakening.ForceAwakeningMod",
+  "gameVersion": ">=0.22.2"
+}
