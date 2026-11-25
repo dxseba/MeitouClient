@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.buildmodegizmo",
+  "apiVersion": 2,
+  "assemblies": ["BuildModeGizmo.dll"],
+  "entry": "Meitou.BuildModeGizmo.BuildModeGizmoMod",
+  "gameVersion": ">=0.22.2"
+}
