@@ -1,0 +1,9 @@
+{
+  // Port of Kenshi Cheat Menu (9 Languages) (Workshop 3833747223); the original is a required item for its translations (read from its
+  // CheatMenu.dll at start). Its plugin is never loaded.
+  "id": "dxseba.cheatmenu",
+  "apiVersion": 2,
+  "assemblies": ["CheatMenu.dll"],
+  "entry": "Meitou.CheatMenu.CheatMenuMod",
+  "gameVersion": ">=0.22.2"
+}
