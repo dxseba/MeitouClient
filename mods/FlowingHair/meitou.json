@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.flowinghair",
+  "apiVersion": 2,
+  "assemblies": ["FlowingHair.dll"],
+  "entry": "Meitou.FlowingHair.FlowingHairMod",
+  "gameVersion": ">=0.22.2"
+}
