@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>DynamicWasteland</AssemblyName>
+    <RootNamespace>Meitou.DynamicWasteland</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />
+    <ProjectReference Include="../../src/Meitou.Simulation/Meitou.Simulation.csproj" Private="false" />
+    <ProjectReference Include="../../src/Meitou.Core/Meitou.Core.csproj" Private="false" />
+    <ProjectReference Include="../../src/Meitou.Data/Meitou.Data.csproj" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="meitou.json;README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

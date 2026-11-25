@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.dynamicwasteland",
+  "apiVersion": 2,
+  "assemblies": ["DynamicWasteland.dll"],
+  "entry": "Meitou.DynamicWasteland.DynamicWastelandMod",
+  "gameVersion": ">=0.22.2"
+}
