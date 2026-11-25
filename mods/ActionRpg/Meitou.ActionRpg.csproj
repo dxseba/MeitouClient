@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ActionRpg</AssemblyName>
+    <RootNamespace>Meitou.ActionRpg</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The direct control core is the Direct Control port's, compiled in again (README "Port choices"). -->
+    <Compile Include="../DirectControl/Core/**/*.cs" LinkBase="Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />
+    <ProjectReference Include="../../src/Meitou.Simulation/Meitou.Simulation.csproj" Private="false" />
+    <ProjectReference Include="../../src/Meitou.Core/Meitou.Core.csproj" Private="false" />
+    <ProjectReference Include="../../src/Meitou.Data/Meitou.Data.csproj" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="meitou.json;README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
