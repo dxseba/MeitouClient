@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.mercenarie",
+  "apiVersion": 2,
+  "assemblies": ["Mercenarie.dll"],
+  "entry": "Meitou.Mercenarie.MercenarieMod",
+  "gameVersion": ">=0.22.2"
+}
