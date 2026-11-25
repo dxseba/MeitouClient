@@ -83,6 +83,10 @@
     <Project Path="mods/DesolationSystem/Meitou.DesolationSystem.csproj" />
     <Project Path="mods/CheatMenu/Meitou.CheatMenu.csproj" />
     <Project Path="mods/DirectorPanel/Meitou.DirectorPanel.csproj" />
+    <Project Path="mods/QuestsContracts/Meitou.QuestsContracts.csproj" />
+    <Project Path="mods/SlaverMod/Meitou.SlaverMod.csproj" />
+    <Project Path="mods/Mercenarie/Meitou.Mercenarie.csproj" />
+    <Project Path="mods/SentientSands/Meitou.SentientSands.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
