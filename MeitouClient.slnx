@@ -74,6 +74,9 @@
     <Project Path="mods/Earthworks/Meitou.Earthworks.csproj" />
     <Project Path="mods/CityBuilder/Meitou.CityBuilder.csproj" />
     <Project Path="mods/DynamicWasteland/Meitou.DynamicWasteland.csproj" />
+    <Project Path="mods/DirectControl/Meitou.DirectControl.csproj" />
+    <Project Path="mods/ActionRpg/Meitou.ActionRpg.csproj" />
+    <Project Path="mods/BuildModeGizmo/Meitou.BuildModeGizmo.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
