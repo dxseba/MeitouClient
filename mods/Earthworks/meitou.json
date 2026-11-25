@@ -1,0 +1,8 @@
+{
+  // Port of Earthworks (Workshop 3829117994); the original is a required item: its Earthworks.mod brings the three Earthworks buildings.
+  "id": "dxseba.earthworks",
+  "apiVersion": 2,
+  "assemblies": ["Earthworks.dll"],
+  "entry": "Meitou.Earthworks.EarthworksMod",
+  "gameVersion": ">=0.22.2"
+}
