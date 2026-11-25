@@ -141,7 +141,7 @@ platoon `+0x1d8`; [whose](factions-squads-towns.md#whose-template-a-home-carries
 [squad leader](factions-squads-towns.md#squad-leader)), which keeps the member it falls back on as the backup. So a take out of a building that is no interior furniture (the wells, the outdoor farms, mines, refineries
 and wind generators: `is interior furniture` False in gamedata.base; the indoor farms, rain collectors and generators are True), out of interior
 furniture standing outdoors or out of furniture in a building nobody lives in is never a crime and has no roll; `isStealing` alone still marks the
-item. A building window's codes: the right click sets Theft 3 unless the owner character is down, when the loot permission decides
+item when the building it stands in has residents ([stolen ownership](#stolen-ownership)). A building window's codes: the right click sets Theft 3 unless the owner character is down, when the loot permission decides
 (`FUN_140793940`, which allows any subject that is no character, so no crime, but the roll follows); the drag sets Looting 10 (its downed-owner
 branch needs a character subject, vfunc `0x20` = 1); the give Theft 3. The roll's object is the window's subject (right click: the GUI's `+0x50`;
 drag: slot 16 `FUN_14070d010`), but the give passes the owner character, so a give out of a building's window rolls as a take out of that
@@ -195,7 +195,7 @@ keeps its damage, wear and stun on the item; a refused right-click move leaves i
 **Observed** item+0x140=from-owner, +0x160=current holder. Backpack uses its owning character's
 faction. Same faction/lawless holder (faction `fundamental type` 8 or `not real`) is not stolen (**Verified**, `FUN_14079e550`; it is tested before the state checks, whatever the strictness); strict1 can use set/nonmatching original-owner
 handle even if unresolved, strict0 also requires resolution. Dropping ownerless items can set
-dropper as owner. The save's `ownedby` is item+0x140 (**Observed**, `Item` vfunc 75/76); preserve handles, not a boolean only. A mark naming only a faction (goods of a building
+dropper as owner. The save's `ownedby` is item+0x140 (**Observed**, `Item` vfunc 75/76); preserve handles, not a boolean only. A mark naming only a faction (a loose item of a building
 nobody lives in) or a robbed character the save does not hold has no handle; Meitou keeps the faction in `meitou stolen from` ([save.md](../formats/save.md#zone-files)).
 
 A take from the inventory window (right click `RClickAutoTrade` `FUN_140713d20`, drag `FUN_140715560`) books its Theft/Looting, rolls
@@ -214,7 +214,8 @@ The mark does not ask `isItOkForMeToLoot` (that only picks the crime), so a band
 The hand `notifyTheftFrom` writes (`FUN_140792780`, `FUN_140792680`, **Verified** by decompile and disassembly): a character source's own hand, so each robbed
 body gives its own owner; for a BUILDING source a hand kept on the building (`+0xd0`, of the building it is mounted on or inside when it has one,
 `FUN_1400d5fa0`), the null hand when that one's type is 0; a `ShopTraderClass` (0x5b) hand gives the null hand. With a null hand the item stays ownerless
-(`FUN_140792800` writes only onto an ownerless item). **Verified** (harness, 1.0.65, Stack): the building's hand names a character (item `+0x148` type 1 after
+(`FUN_140792800` writes only onto an ownerless item): goods out of a building nobody lives in are not stolen and no shop asks to fence them
+(**Observed**, plain game: a town mine's ore has no fencing chance). Meitou: `CrimeSystem.GoodsMark` (the resident squad's leader, whatever its faction; none without residents). **Verified** (harness, 1.0.65, Stack): the building's hand names a character (item `+0x148` type 1 after
 the take): a clothes shop's goods read "Stolen from: Clothing trader holy", a home's chest "Stolen from: Holy Citizen", a knocked-out guard's kit
 "Stolen from: Holy Sentinel"; the player's own clean item put into such a container shows no owner there and is marked the same way when taken back.
 How the marks stack: [stack test](ui-screens.md#6-inventory-trade-dialogue-build).
@@ -270,7 +271,7 @@ TaskData (`FUN_140319a60`) holds a **target finder** at `+0x160` and the player 
 
 **Character finder** (`FUN_1408cd2d0(task, out, include, exclude, allowBed)`, **Verified** by decompile; rescue 105/148 call it with masks 1 / 0x4010 and `allowBed` 0,
 kidnap 132 with 0x4008 / 0x811 and `allowBed` 1): walks the owner's sensed list, keeping entries whose category word has a bit of `include` and none of `exclude`
-(bit 0 = SENSE_ALLY = not the owner's enemy and slot 126 `FUN_1407923d0` friendly, bit 4 dead, bit 14 crawling, [sense tags](perception.md#sense-tags-who-is-an-enemy)); the nearest (squared XZ distance) passing all of these wins: the target is down (ragdolled or carried, `FUN_1407d1440`, or the byte
+(bit 0 = SENSE_ALLY = not the owner's enemy and slot 126 `FUN_1407923d0` friendly, bit 3 down, bit 4 dead, bit 11 robot race, bit 14 crawling; so kidnap never takes a skeleton, [sense tags](perception.md#sense-tags-who-is-an-enemy)); the nearest (squared XZ distance) passing all of these wins: the target is down (ragdolled or carried, `FUN_1407d1440`, or the byte
 `+0x5b8`) or, only when `allowBed`, in a bed (`+0x2f8 == 1`); not carried (`+0x3d4`), not dead, special state 0 (not caged; bed 1 when allowed), not an animal
 (slot `0x248` is `asAnimal`), and not worked by a squad mate (`FUN_1402690e0`, `Blackboard::howManyGuysWorkingOnThisSubTarget`: the squad blackboard's entries whose worker is neither the asker nor the target and whose sub-target is the target; **Verified**, a count every finder tests, not a give-up list). Rescue (`include` 1) also requires
 the target to share the owner's faction (vfunc `0x58`), tested only when the global `+0x112` (Rescue Allies, [squad AI options](ai-tasks.md#squad-ai-options)) is clear **and** the owner's
@@ -420,7 +421,8 @@ A per-character status update lets a state above 1 run down from that stamp. Wit
 - **State 3 and elapsed / 24 above 4.0:** the state becomes 0 and the owner is cleared.
 - **State 2 and elapsed above 12.0:** the state becomes 3 and `+0x8` is stamped again.
 
-These writes are direct, not through the setter. State 1 never takes this path.
+These writes are direct, not through the setter. State 1 never takes this path. The status tooltip's "Time remaining:" counts down to these thresholds
+([status rows](ui-screens.md)).
 
 **Verified** by disassembly of a Kenshi 1.0.65 `kenshi_x64.exe`, sha256 `504b362c…cd3e`. In that build, the setter is `FUN_1405a3eb0`, the rule is `FUN_1405a44c0`, and its only caller is the vtable-reached `FUN_1405a4750`. Its constants are 24.0, 4.0 and 12.0. The other addresses in this file come from another build.
 

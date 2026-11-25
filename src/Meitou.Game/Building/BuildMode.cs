@@ -1410,7 +1410,7 @@ sealed class BuildMode(PlayerInterface player)
             if (bounds is { } outline && !WorldPicking.RayPassesXz(ray, site.Position, SiteReach(host, site.Record, outline), ground)) continue;
 
             // Not drawn above the viewed floor of an opened house, so not picked there, as a bed or a container (FurnitureUse).
-            if (player.Furniture.AboveViewedFloor?.Invoke(site.Position) == true) continue;
+            if (player.Furniture.SiteAboveViewedFloor(site)) continue;
 
             if (SiteRayT(host, ray, site, bounds, terrain) is not { } hit || hit >= ground) continue;
 
@@ -1594,8 +1594,8 @@ sealed class BuildMode(PlayerInterface player)
     }
 
     /// <summary>
-    /// A finished machine's verbs: a storage's Auto-Haul and Inventory, a furnace's Inventory, a corpse machine's Corpse Disposal, a turret's Man
-    /// Turret.
+    /// A finished machine's verbs: a storage's Auto-Haul and Inventory, a furnace's and a research bench's Inventory, a corpse machine's Corpse
+    /// Disposal, a turret's Man Turret.
     /// </summary>
     void AddMachineVerbs(List<(string, Action)> verbs, BuildingSnapshot site, IReadOnlyList<CharacterId> selection,
         Simulation.Production.MachineSnapshot machine, bool own)
@@ -1621,6 +1621,9 @@ sealed class BuildMode(PlayerInterface player)
             }));
         }
         else if (machine.Function == MachineData.ItemFurnaceFunction) verbs.Add(("Inventory", () => OpenStorage(site)));
+        // A research bench's Use (87) is followed by Inventory (26), as for every building with an inventory (FUN_1407a6bc0, Verified): the
+        // research cost is paid from the benches' inventories only (#1342).
+        else if (ProductionWindows.MachineScreen(machine) == "bench") verbs.Add(("Inventory", () => OpenStorage(site)));
 
         // A corpse machine (function 11) offers Corpse Disposal (136): with Shift the Corpse disposal job (137 and its finder 138), else order 136
         // for every selected character, its queue cleared (FUN_1407fa650 → FUN_1407f9e20).

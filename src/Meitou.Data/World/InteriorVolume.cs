@@ -259,6 +259,11 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     public int FloorAt(Vector3 feet) => _floors?.Value.FloorAt(feet) ?? 0;
 
     /// <summary>
+    /// What <see cref="FloorAt"/>'s ray meets of the building's floor collision: the floor and the hit's height; null when it meets none.
+    /// </summary>
+    public (int Floor, float Y)? SurfaceUnder(Vector3 feet) => _floors?.Value.SurfaceUnder(feet);
+
+    /// <summary>
     /// The interior mask collision's triangles in world space (three corners each): the indoor space itself, concave where the building is.
     /// </summary>
     Vector3[] _maskCorners = [];
@@ -274,10 +279,8 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     /// </summary>
     public float? MaskHit(Vector3 origin, Vector3 direction, float maxDistance)
     {
-        if (_maskCorners.Length == 0) return null;
-        var min = new Vector3(Footprint.Min(p => p.X), YMin, Footprint.Min(p => p.Y));
-        var max = new Vector3(Footprint.Max(p => p.X), YMax, Footprint.Max(p => p.Y));
-        if (!FloorSurfaces.RayBox(origin, direction, min, max, maxDistance)) return null;
+        if (_maskCorners.Length == 0 || !RayMeetsBounds(origin, direction, maxDistance)) return null;
+
         float? best = null;
         for (int i = 0; i + 2 < _maskCorners.Length; i += 3)
         {
@@ -286,6 +289,36 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
                 best = t;
         }
         return best;
+    }
+
+    /// <summary>
+    /// How much nearer than a point the building's collision has to be met on the ray to stand before it, world units: the roof under a bed or an
+    /// item is met just past the hit on it (engine choice).
+    /// </summary>
+    const float StructureMargin = 1;
+
+    /// <summary>
+    /// Whether the point <paramref name="distance"/> along the ray, inside the volume, lies in the open on the building: none of its floors or roofs
+    /// over it (<see cref="Covered"/>) and none of its collision on the ray before it: there the original's ray meets furniture drawn on an open
+    /// roof before the building (docs/game/ui-input.md "Character picking"; #1376), so the <see cref="MaskHit"/> met on the way to it is no wall.
+    /// False while the building's collision is not known.
+    /// </summary>
+    public bool InTheOpen(Vector3 origin, Vector3 direction, float distance)
+    {
+        var at = origin + direction * distance;
+        if (_floors is null || !Contains(at) || Covered(at)) return false;
+
+        return _floors.Value.FirstHit(origin, direction, distance - StructureMargin) is null;
+    }
+
+    /// <summary>
+    /// Whether the picking ray reaches the volume's box within the given distance, using the footprint bounds shared by all rays to the room.
+    /// </summary>
+    bool RayMeetsBounds(Vector3 origin, Vector3 direction, float maxDistance)
+    {
+        var min = new Vector3(_edges.Min.X, YMin, _edges.Min.Y);
+        var max = new Vector3(_edges.Max.X, YMax, _edges.Max.Y);
+        return FloorSurfaces.RayBox(origin, direction, min, max, maxDistance);
     }
 
     /// <summary>
@@ -362,11 +395,9 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     /// </summary>
     public (float Distance, Vector3 Position)? MoveHit(Vector3 origin, Vector3 direction, int floor, float maxDistance)
     {
-        if (Footprint.Length < 3 || _floors is null) return null;
-        var min = new Vector3(Footprint.Min(p => p.X), YMin, Footprint.Min(p => p.Y));
-        var max = new Vector3(Footprint.Max(p => p.X), YMax, Footprint.Max(p => p.Y));
-        return FloorSurfaces.RayBox(origin, direction, min, max, maxDistance)
-            ? _floors.Value.MoveHit(origin, direction, floor, maxDistance) : null;
+        if (_floors is null || !RayMeetsBounds(origin, direction, maxDistance)) return null;
+
+        return _floors.Value.MoveHit(origin, direction, floor, maxDistance);
     }
 
     /// <summary>
@@ -689,7 +720,12 @@ public sealed partial class FloorSurfaces
     /// floor; stairs give the floor above theirs when the hit is in their top <see cref="StairsTop"/>, else their own (game: hits on stairs lower
     /// down give nothing and the character keeps its floor; here, without a kept floor, their own). Nothing hit: 0.
     /// </summary>
-    public int FloorAt(Vector3 feet)
+    public int FloorAt(Vector3 feet) => SurfaceUnder(feet)?.Floor ?? 0;
+
+    /// <summary>
+    /// What <see cref="FloorAt"/>'s ray meets: the floor it gives and the height of the hit; null when it meets no floor part.
+    /// </summary>
+    public (int Floor, float Y)? SurfaceUnder(Vector3 feet)
     {
         float top = feet.Y + RayStart, best = float.NegativeInfinity;
         int floor = 0;
@@ -705,7 +741,8 @@ public sealed partial class FloorSurfaces
                     : Math.Min(3, s.Floor + (s.YMax - s.YMin > 1e-3f && (s.YMax - y) <= StairsTop * (s.YMax - s.YMin) ? 1 : 0));
             }
         }
-        return floor;
+
+        return best > float.NegativeInfinity ? (floor, best) : null;
     }
 
     /// <summary>

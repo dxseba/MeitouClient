@@ -554,7 +554,8 @@ public sealed partial class World
         s.Slave = cold is { SlaveState: >= 1 and <= 3 }
             ? new SlaveView(cold.SlaveState,
                 population is { Factions: { } factions } && (uint)cold.SlaveOwner < (uint)factions.Count ? ShownName(factions[cold.SlaveOwner]) : "",
-                SystemOf<Kidnap.CaptiveSystem>()?.LooksLikeSlaveLevel(cold) ?? 0)
+                SystemOf<Kidnap.CaptiveSystem>()?.LooksLikeSlaveLevel(cold) ?? 0, Locks.FixtureRegistry.SlaveHoursLeft(this, cold),
+                cold.RecentlyWanted > 0)
             : null;
         s.Disguise = detailed && cold!.Faction == Player.Faction && (cold.DisguiseLevel > 0 || cold.RecentlyWanted > 0)
             ? DisguiseOf(cold, state[i].Position, population)
@@ -646,7 +647,7 @@ public sealed partial class World
         s.ShacklesLocked = shown && Locks.LockSystem.WornShackles(cold) is not null;
         s.CanBeShackled = shown && cold is { IsPlayer: false } && Locks.LockSystem.CanBeShackled(cold, true);
         s.CarriesShackles = selected && Locks.LockSystem.CarriedShackles(cold) is not null;
-        s.HasMedkit = selected && cold is not null && SystemOf<FirstAid.FirstAidSystem>()?.MedkitAtHand(this, i, cold) == true;
+        s.HasMedkit = selected && cold is not null && FirstAid.FirstAidSystem.MedkitAtHand(cold);
         s.HasSplintKit = selected && cold is not null && FirstAid.FirstAidSystem.SplintKitAtHand(cold);
         s.Orders = cold?.Orders ?? CharacterOrders.None;
         s.RunSpeed = cold?.RunSpeed ?? SpeedMode.Free;

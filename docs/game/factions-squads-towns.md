@@ -158,6 +158,10 @@ World-state replacement towns and faction ownership affect both population and b
   `19.29:14` keeps its 46 entries; a reload stands `20.29:1019` with its 11 layout objects, and a second save writes the same zone files. A
   second override of the registered town (the takeover's other variant) gives the same-named homes (`20.28:97` Faction HQ, `19.29:22` Bar,
   `19.29:8` Weapon Shop) new machines for their objects, one each as before.
+- Name: the original keeps the town's own name. KenshiExtensionPlugin (RE_Kenshi plugin, workshop 3638161797; GPL source
+  `Lucius64/KenshiExtensionPlugin` `bugfix/MiscFix.cpp`, its "Fix town override" setting, on by default) adds the TOWN bool `town name override`
+  (its `fcs.def`): a replacement with it set renames the town to the replacement's name, at the override and when the town state loads
+  (**Verified** against that source). Meitou (`TownSite.Replace`) applies the field whenever the data sets it; the `unexplored name` stays the town's own.
 - `updatedTownOverrides`: while a town is in it, the check answers "repopulate" at once (no new choice), so each load trims the zone again. The pass that places
   residents after zones load (`FUN_140a0e760`, ZoneManager state 2) places them for the collected towns not of the player's faction and erases them (`FUN_140a22ef0`).
   Nothing else touches it, and it is not saved.
@@ -865,9 +869,13 @@ turret finder uses it so far (the others read the squad's home, which a player s
   (`FUN_1409b2ab0`, a ray from 1000 above), else the position. So the Hub, whose gate set holds only its two `Defensive Gate IV`, gets a point beyond one of
   them while it has a door, else its town position, and Skinhouse HQ, which has no gateway building (its first wall with an interior, a `Defensive Wall IV` 3700 from its centre, is none), takes the gateless branch
   (**Verified**, the data).
+  A gate's `amInsideTownWalls` is its own code, the gate-code pass's second code, its outer side's (**Verified**: `FUN_1402f03e0` gives the building the second code,
+  [gate codes](pathfinding.md#gate-codes) "Applying"; `FUN_140929560` tests that, not the code under the gate's origin). **Observed** (Meitou's pass, a Meitou save of
+  #1399 with the Hub's two gates stood up by The Hub Re-Established's residents, `gatecode0` 1 on both): they label [1, 0] with both origins in region 1, so the
+  point is beyond the first, not the town position inside the walls (where 273 would lift the intruders 274 drops).
   Meitou: `TownExit` (Town +0x38 and +0x290 alike: the patrols, the intruder errand 274, the travel rows 53 / 130, the war point and the homeward walks; placed towns by
-  their level buildings in list order, a player town by its complete sites; engine readings: list order for the set's, and the town position for the door point of a
-  town without gates).
+  their level buildings in list order, a player town by its complete sites; a gate's own code from the last labelling that listed it, unknown counting as outside; engine
+  readings: list order for the set's, and the town position for the door point of a town without gates).
   The move: `CharMovement::setPatrolInput` (`FUN_14065eaa0`, vtable +0xa0) in mode 3 (a `PatrolInfo` with a biome group) draws the point
   above and sends the character to it exactly; it redraws (up to 10 times) only a point whose ground is present and below 95 when the
   byte at +0x79 of the object at Character +0x2e0 is set (a race flag, water below 95: **Observed**), else accepts it (**Verified**). The
@@ -889,7 +897,10 @@ turret finder uses it so far (the others read the squad's home, which a player s
   `IsPublic`, `OwnerOf`) and, for an animal, the animal terms (`AdmitsAnimal`: both `Locks.AnimalEntry.MayEnter` and `AnimalEntry.Allows`); the walk
   goes to the drawn point. **Observed** (headless, #803 save, Sho-Battai): before, a Merchant Nomad on
   goal 36 walked into Lord Nagata's private Bughouse, the noble's guards shooed it and the noble house fought it as a trespasser; after, no
-  patroller enters it.
+  patroller enters it. The player's term is the building's faction (vfunc `0x58`) having `+0x250` set, an alternative to `isPublic`, so
+  a building of the player's faction with an open door takes anyone's patrol draws whatever its Open to public toggle; only a closed door keeps
+  patrols out (**Verified**, `FUN_14065eaa0`). **Observed** (#1400 save, the Hub's bought Old Storm House `20.32:34-Newwworld-INGAME`, Private,
+  its door opened by the purchase; headless, 18,000 ticks): a Vagrants Bar Thug Drunk on goal 36 walked in.
   A loaded patrol draws again when the task's update finds the move ended (`FUN_1405c6b30` mode 1 returns unless the mover reports
   idle, reached or failed), so the squad walks up to 200 outside the gate, stops, and turns to the next sector or town. Off screen a new
   point is picked within 500 of the last (`FUN_1407ee790`).

@@ -201,7 +201,7 @@ sealed class WorldPicking(PlayerInterface player)
         foreach (var site in player.Session.CurrentSnapshot.Buildings)
         {
             // Not drawn above the viewed floor of an opened house: no face there.
-            if (HasRooms?.Invoke(site.Id) == true || player.Furniture.AboveViewedFloor?.Invoke(site.Position) == true) continue;
+            if (HasRooms?.Invoke(site.Id) == true || player.Furniture.SiteAboveViewedFloor(site)) continue;
             if (host.Placement.Footprint(site.Record) is not { } footprint) continue;
 
             var mesh = ClosedMeshOf(site.Record, site.Id, site.Destroyed);
@@ -536,7 +536,7 @@ sealed class WorldPicking(PlayerInterface player)
             Offer(Picked.Character, PickWhereAt(p, c => c.Id == order.Target)?.T ?? 0);
         }
         else if (PickWhereAt(p, _ => true) is { } any && player.Session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == any.Id) is { } held
-            && player.ContextMenuWindow.Verbs(held).Count > 0)
+            && player.ContextMenuWindow.HasMenu(held))
         {
             Offer(Picked.Character, any.T);   // no quick order, but a held click opens its menu
         }
