@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.sentientsands",
+  "apiVersion": 2,
+  "assemblies": ["SentientSands.dll"],
+  "entry": "Meitou.SentientSands.SentientSandsMod",
+  "gameVersion": ">=0.22.2"
+}
