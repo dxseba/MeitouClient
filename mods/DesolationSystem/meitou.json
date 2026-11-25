@@ -1,0 +1,8 @@
+{
+  "id": "dxseba.desolationsystem",
+  "apiVersion": 2,
+  "assemblies": ["DesolationSystem.dll"],
+  "entry": "Meitou.DesolationSystem.DesolationSystemMod",
+  "gameVersion": ">=0.22.2",
+  "incompatible": ["dxseba.attackspeeduncapped"]
+}
