@@ -1,0 +1,8 @@
+{
+  "id": "dxseba.directcontrol",
+  "apiVersion": 2,
+  "assemblies": ["DirectControl.dll"],
+  "entry": "Meitou.DirectControl.DirectControlMod",
+  "gameVersion": ">=0.22.2",
+  "incompatible": ["dxseba.actionrpg"]
+}
