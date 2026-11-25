@@ -80,6 +80,9 @@
     <Project Path="mods/Nitoryu/Meitou.Nitoryu.csproj" />
     <Project Path="mods/ForceAwakening/Meitou.ForceAwakening.csproj" />
     <Project Path="mods/ArcaneMagic/Meitou.ArcaneMagic.csproj" />
+    <Project Path="mods/DesolationSystem/Meitou.DesolationSystem.csproj" />
+    <Project Path="mods/CheatMenu/Meitou.CheatMenu.csproj" />
+    <Project Path="mods/DirectorPanel/Meitou.DirectorPanel.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
