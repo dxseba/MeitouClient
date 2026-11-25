@@ -3,7 +3,7 @@
   "apiVersion": 2,
   "assemblies": ["BestMinimap.dll"],
   "entry": "Meitou.BestMinimap.BestMinimapMod",
-  "gameVersion": ">=0.22.2",
+  "gameVersion": ">=0.23.1",
   "dependencies": [
     { "id": "dxseba.mapmarkers", "optional": true },
     { "id": "dxseba.wantedmap", "optional": true }

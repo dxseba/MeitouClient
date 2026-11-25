@@ -5,5 +5,5 @@
   "apiVersion": 2,
   "assemblies": ["CheatMenu.dll"],
   "entry": "Meitou.CheatMenu.CheatMenuMod",
-  "gameVersion": ">=0.22.2"
+  "gameVersion": ">=0.23.1"
 }

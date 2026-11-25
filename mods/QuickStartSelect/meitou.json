@@ -4,5 +4,5 @@
   "apiVersion": 2,
   "assemblies": ["QuickStartSelect.dll"],
   "entry": "Meitou.QuickStartSelect.QuickStartSelectMod",
-  "gameVersion": ">=0.22.2"
+  "gameVersion": ">=0.23.1"
 }

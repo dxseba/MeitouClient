@@ -3,5 +3,5 @@
   "apiVersion": 2,
   "assemblies": ["AdvancedMedicAi.dll"],
   "entry": "Meitou.AdvancedMedicAi.AdvancedMedicAiMod",
-  "gameVersion": ">=0.22.2"
+  "gameVersion": ">=0.23.1"
 }

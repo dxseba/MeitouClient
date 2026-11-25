@@ -5,5 +5,5 @@
   "apiVersion": 2,
   "assemblies": ["ArcaneMagic.dll"],
   "entry": "Meitou.ArcaneMagic.ArcaneMagicMod",
-  "gameVersion": ">=0.22.2"
+  "gameVersion": ">=0.23.1"
 }

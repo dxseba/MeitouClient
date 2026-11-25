@@ -3,5 +3,5 @@
   "apiVersion": 3,
   "assemblies": ["OrganHarvesting.dll"],
   "entry": "Meitou.OrganHarvesting.OrganHarvestingMod",
-  "gameVersion": ">=0.22.2"
+  "gameVersion": ">=0.23.1"
 }
