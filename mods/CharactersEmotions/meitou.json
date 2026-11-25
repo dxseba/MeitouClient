@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.charactersemotions",
+  "apiVersion": 2,
+  "assemblies": ["CharactersEmotions.dll"],
+  "entry": "Meitou.CharactersEmotions.CharactersEmotionsMod",
+  "gameVersion": ">=0.22.2"
+}
