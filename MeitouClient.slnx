@@ -70,6 +70,8 @@
     <Project Path="mods/CharactersEmotions/Meitou.CharactersEmotions.csproj" />
     <Project Path="mods/FlowingHair/Meitou.FlowingHair.csproj" />
     <Project Path="mods/Transmog/Meitou.Transmog.csproj" />
+    <Project Path="mods/QuickStartSelect/Meitou.QuickStartSelect.csproj" />
+    <Project Path="mods/Earthworks/Meitou.Earthworks.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
