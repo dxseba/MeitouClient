@@ -1,0 +1,8 @@
+{
+  "id": "dxseba.nitoryu",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "assemblies": ["Nitoryu.dll"],
+  "entry": "Meitou.Nitoryu.NitoryuMod",
+  "gameVersion": ">=0.22.2"
+}
