@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.slavermod",
+  "apiVersion": 2,
+  "assemblies": ["SlaverMod.dll"],
+  "entry": "Meitou.SlaverMod.SlaverModMod",
+  "gameVersion": ">=0.22.2"
+}
