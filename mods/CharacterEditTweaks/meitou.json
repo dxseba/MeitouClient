@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.characteredittweaks",
+  "apiVersion": 2,
+  "assemblies": ["CharacterEditTweaks.dll"],
+  "entry": "Meitou.CharacterEditTweaks.CharacterEditTweaksMod",
+  "gameVersion": ">=0.22.2"
+}
