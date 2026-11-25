@@ -66,6 +66,10 @@
     <Project Path="mods/OrganizeCraftingStations/Meitou.OrganizeCraftingStations.csproj" />
     <Project Path="mods/OrganizeTrader/Meitou.OrganizeTrader.csproj" />
     <Project Path="mods/ShopCounterRestock/Meitou.ShopCounterRestock.csproj" />
+    <Project Path="mods/CharacterEditTweaks/Meitou.CharacterEditTweaks.csproj" />
+    <Project Path="mods/CharactersEmotions/Meitou.CharactersEmotions.csproj" />
+    <Project Path="mods/FlowingHair/Meitou.FlowingHair.csproj" />
+    <Project Path="mods/Transmog/Meitou.Transmog.csproj" />
   </Folder>
   <Folder Name="/services/">
     <Project Path="services/Meitou.Reports/Meitou.Reports.csproj" />
