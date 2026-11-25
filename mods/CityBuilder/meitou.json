@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.citybuilder",
+  "apiVersion": 2,
+  "assemblies": ["CityBuilder.dll"],
+  "entry": "Meitou.CityBuilder.CityBuilderMod",
+  "gameVersion": ">=0.22.2"
+}
