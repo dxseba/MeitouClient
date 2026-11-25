@@ -1,0 +1,7 @@
+{
+  "id": "dxseba.transmog",
+  "apiVersion": 2,
+  "assemblies": ["Transmog.dll"],
+  "entry": "Meitou.Transmog.TransmogMod",
+  "gameVersion": ">=0.22.2"
+}
