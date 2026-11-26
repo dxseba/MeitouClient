@@ -3,6 +3,7 @@
     <AssemblyName>Sparring</AssemblyName>
     <RootNamespace>Meitou.Sparring</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouSparring</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

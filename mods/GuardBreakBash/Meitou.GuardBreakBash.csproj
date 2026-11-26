@@ -3,6 +3,7 @@
     <AssemblyName>GuardBreakBash</AssemblyName>
     <RootNamespace>Meitou.GuardBreakBash</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouGuardBreakBash</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

@@ -3,6 +3,7 @@
     <AssemblyName>SleepFix</AssemblyName>
     <RootNamespace>Meitou.SleepFix</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouSleepFix</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

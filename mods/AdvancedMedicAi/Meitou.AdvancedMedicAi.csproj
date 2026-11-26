@@ -3,6 +3,7 @@
     <AssemblyName>AdvancedMedicAi</AssemblyName>
     <RootNamespace>Meitou.AdvancedMedicAi</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouAdvancedMedicAi</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

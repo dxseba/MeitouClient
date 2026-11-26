@@ -3,6 +3,7 @@
     <AssemblyName>WeaponDodgeGuard</AssemblyName>
     <RootNamespace>Meitou.WeaponDodgeGuard</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouWeaponDodgeGuard</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

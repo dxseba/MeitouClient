@@ -3,6 +3,7 @@
     <AssemblyName>DynamicWasteland</AssemblyName>
     <RootNamespace>Meitou.DynamicWasteland</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouDynamicWasteland</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

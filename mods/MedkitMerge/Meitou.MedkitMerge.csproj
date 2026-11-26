@@ -3,6 +3,7 @@
     <AssemblyName>MedkitMerge</AssemblyName>
     <RootNamespace>Meitou.MedkitMerge</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouMedkitMerge</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

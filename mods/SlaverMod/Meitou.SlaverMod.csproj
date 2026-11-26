@@ -3,6 +3,7 @@
     <AssemblyName>SlaverMod</AssemblyName>
     <RootNamespace>Meitou.SlaverMod</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouSlaverMod</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

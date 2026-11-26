@@ -3,6 +3,7 @@
     <AssemblyName>Disarm</AssemblyName>
     <RootNamespace>Meitou.Disarm</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouDisarm</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

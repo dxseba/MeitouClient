@@ -3,6 +3,7 @@
     <AssemblyName>LevelUpNotify</AssemblyName>
     <RootNamespace>Meitou.LevelUpNotify</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouLevelUpNotify</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

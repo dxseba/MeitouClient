@@ -3,6 +3,7 @@
     <AssemblyName>GateFix</AssemblyName>
     <RootNamespace>Meitou.GateFix</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouGateFix</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

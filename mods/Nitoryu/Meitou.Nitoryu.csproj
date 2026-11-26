@@ -3,6 +3,7 @@
     <AssemblyName>Nitoryu</AssemblyName>
     <RootNamespace>Meitou.Nitoryu</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouNitoryu</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

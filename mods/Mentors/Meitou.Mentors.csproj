@@ -3,6 +3,7 @@
     <AssemblyName>Mentors</AssemblyName>
     <RootNamespace>Meitou.Mentors</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouMentors</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

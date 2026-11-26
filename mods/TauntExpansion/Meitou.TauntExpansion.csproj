@@ -3,6 +3,7 @@
     <AssemblyName>TauntExpansion</AssemblyName>
     <RootNamespace>Meitou.TauntExpansion</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouTauntExpansion</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

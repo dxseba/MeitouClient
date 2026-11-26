@@ -3,6 +3,7 @@
     <AssemblyName>KenshiCompact</AssemblyName>
     <RootNamespace>Meitou.KenshiCompact</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouKenshiCompact</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

@@ -3,6 +3,7 @@
     <AssemblyName>GunManufactureSounds</AssemblyName>
     <RootNamespace>Meitou.GunManufactureSounds</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouGunManufactureSounds</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

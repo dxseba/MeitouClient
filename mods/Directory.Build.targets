@@ -1,0 +1,45 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <WorkshopTitle Condition="'$(WorkshopTitle)' == ''">[Meitou Client] $(ModFolderName) Port</WorkshopTitle>
+  </PropertyGroup>
+
+  <!-- Writes the port's .mod (see Directory.Build.props) into the output folder, and removes a stale one of the folder's own name. -->
+  <Target Name="WriteWorkshopMod" AfterTargets="Build">
+    <Delete Files="$(OutDir)$(ModFolderName).mod" Condition="'$(WorkshopModName)' != '$(ModFolderName)'" />
+    <WriteKenshiMod Path="$(OutDir)$(WorkshopModName).mod" Author="$(WorkshopAuthor)" Description="$(WorkshopTitle)" />
+  </Target>
+
+  <!--
+    An empty Kenshi .mod: header 16, version 1, then the author, description, dependencies and references as length-prefixed strings,
+    then no records and no deletions (FCS format, docs/formats/fcs-mod.md).
+  -->
+  <UsingTask TaskName="WriteKenshiMod" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Path ParameterType="System.String" Required="true" />
+      <Author ParameterType="System.String" Required="true" />
+      <Description ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        using (var w = new BinaryWriter(File.Create(Path)))
+        {
+            w.Write(16);
+            w.Write(1);
+            foreach (var text in new[] { Author, Description, "", "" })
+            {
+                var bytes = Encoding.UTF8.GetBytes(text);
+                w.Write(bytes.Length);
+                w.Write(bytes);
+            }
+
+            w.Write(0);
+            w.Write(0);
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+</Project>

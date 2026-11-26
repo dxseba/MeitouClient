@@ -3,6 +3,7 @@
     <AssemblyName>BuildModeGizmo</AssemblyName>
     <RootNamespace>Meitou.BuildModeGizmo</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouBuildModeGizmo</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

@@ -3,6 +3,7 @@
     <AssemblyName>ArcaneMagic</AssemblyName>
     <RootNamespace>Meitou.ArcaneMagic</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouArcaneMagic</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

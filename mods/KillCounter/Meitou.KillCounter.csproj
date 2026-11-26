@@ -3,6 +3,7 @@
     <AssemblyName>KillCounter</AssemblyName>
     <RootNamespace>Meitou.KillCounter</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouKillCounter</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

@@ -3,6 +3,7 @@
     <AssemblyName>SquadAutonomy</AssemblyName>
     <RootNamespace>Meitou.SquadAutonomy</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouSquadAutonomy</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

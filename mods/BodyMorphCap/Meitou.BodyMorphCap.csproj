@@ -3,6 +3,7 @@
     <AssemblyName>BodyMorphCap</AssemblyName>
     <RootNamespace>Meitou.BodyMorphCap</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouBodyMorphCap</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

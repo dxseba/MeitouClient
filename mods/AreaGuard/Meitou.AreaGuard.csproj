@@ -3,6 +3,7 @@
     <AssemblyName>AreaGuard</AssemblyName>
     <RootNamespace>Meitou.AreaGuard</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouAreaGuard</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

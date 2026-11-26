@@ -3,6 +3,7 @@
     <AssemblyName>BestMinimap</AssemblyName>
     <RootNamespace>Meitou.BestMinimap</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouBestMinimap</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

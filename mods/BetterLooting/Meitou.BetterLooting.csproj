@@ -3,6 +3,7 @@
     <AssemblyName>BetterLooting</AssemblyName>
     <RootNamespace>Meitou.BetterLooting</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouBetterLooting</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

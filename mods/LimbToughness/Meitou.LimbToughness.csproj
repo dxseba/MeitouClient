@@ -3,6 +3,7 @@
     <AssemblyName>LimbToughness</AssemblyName>
     <RootNamespace>Meitou.LimbToughness</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouLimbToughness</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

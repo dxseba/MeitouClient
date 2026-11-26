@@ -3,6 +3,7 @@
     <AssemblyName>WantedMap</AssemblyName>
     <RootNamespace>Meitou.WantedMap</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouWantedMap</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

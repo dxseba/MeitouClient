@@ -3,6 +3,7 @@
     <AssemblyName>CharactersEmotions</AssemblyName>
     <RootNamespace>Meitou.CharactersEmotions</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouCharactersEmotions</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

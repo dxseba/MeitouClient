@@ -3,6 +3,7 @@
     <AssemblyName>Struggle</AssemblyName>
     <RootNamespace>Meitou.Struggle</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouStruggle</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

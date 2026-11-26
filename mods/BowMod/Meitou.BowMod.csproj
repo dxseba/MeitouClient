@@ -3,6 +3,7 @@
     <AssemblyName>BowMod</AssemblyName>
     <RootNamespace>Meitou.BowMod</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouBowMod</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

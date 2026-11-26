@@ -3,6 +3,7 @@
     <AssemblyName>PersistentPrisoners</AssemblyName>
     <RootNamespace>Meitou.PersistentPrisoners</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouPersistentPrisoners</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

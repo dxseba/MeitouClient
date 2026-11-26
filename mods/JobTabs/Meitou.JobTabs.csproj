@@ -3,6 +3,7 @@
     <AssemblyName>JobTabs</AssemblyName>
     <RootNamespace>Meitou.JobTabs</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouJobTabs</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

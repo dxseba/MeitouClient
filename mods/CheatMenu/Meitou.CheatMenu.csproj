@@ -3,6 +3,7 @@
     <AssemblyName>CheatMenu</AssemblyName>
     <RootNamespace>Meitou.CheatMenu</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouCheatMenu</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

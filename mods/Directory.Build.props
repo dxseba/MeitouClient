@@ -1,0 +1,14 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!--
+    Workshop package of a port: the build writes <WorkshopModName>.mod (the entry a player enables in mods.cfg) next to the DLL.
+    Meitou keys mods by .mod file name, and a later Workshop item replaces an earlier one of the same name. So a port whose original
+    ships a .mod of the same name must set WorkshopModName to Meitou<Mod>, or it hides the original's data and files.
+  -->
+  <PropertyGroup>
+    <ModFolderName>$([System.IO.Path]::GetFileName('$(MSBuildProjectDirectory)'))</ModFolderName>
+    <WorkshopModName Condition="'$(WorkshopModName)' == ''">$(ModFolderName)</WorkshopModName>
+    <WorkshopAuthor Condition="'$(WorkshopAuthor)' == ''">dxseba</WorkshopAuthor>
+  </PropertyGroup>
+</Project>

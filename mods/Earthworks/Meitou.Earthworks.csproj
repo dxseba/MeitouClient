@@ -3,6 +3,7 @@
     <AssemblyName>Earthworks</AssemblyName>
     <RootNamespace>Meitou.Earthworks</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouEarthworks</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

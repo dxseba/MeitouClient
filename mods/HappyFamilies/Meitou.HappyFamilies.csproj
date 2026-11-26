@@ -3,6 +3,7 @@
     <AssemblyName>HappyFamilies</AssemblyName>
     <RootNamespace>Meitou.HappyFamilies</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouHappyFamilies</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

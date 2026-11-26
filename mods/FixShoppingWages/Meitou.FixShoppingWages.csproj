@@ -3,6 +3,7 @@
     <AssemblyName>FixShoppingWages</AssemblyName>
     <RootNamespace>Meitou.FixShoppingWages</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouFixShoppingWages</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

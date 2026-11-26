@@ -3,6 +3,7 @@
     <AssemblyName>ShopCounterRestock</AssemblyName>
     <RootNamespace>Meitou.ShopCounterRestock</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouShopCounterRestock</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

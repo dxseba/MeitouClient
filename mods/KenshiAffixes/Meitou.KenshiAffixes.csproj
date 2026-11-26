@@ -3,6 +3,7 @@
     <AssemblyName>KenshiAffixes</AssemblyName>
     <RootNamespace>Meitou.KenshiAffixes</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouKenshiAffixes</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

@@ -3,6 +3,7 @@
     <AssemblyName>ItemMarkers</AssemblyName>
     <RootNamespace>Meitou.ItemMarkers</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouItemMarkers</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />

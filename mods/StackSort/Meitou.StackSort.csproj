@@ -3,6 +3,7 @@
     <AssemblyName>StackSort</AssemblyName>
     <RootNamespace>Meitou.StackSort</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <WorkshopModName>MeitouStackSort</WorkshopModName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Meitou.Game/Meitou.Game.csproj" Private="false" />
