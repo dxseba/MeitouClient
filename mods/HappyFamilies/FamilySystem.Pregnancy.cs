@@ -61,18 +61,19 @@ sealed partial class FamilySystem
     }
 
     /// <summary>
-    /// In a bed: each other occupant of a bed of the same bed building who is a man and passes the couple check is a try, 30% a pregnancy, else no
-    /// further try for 0.1 to 0.2 days.
+    /// In a bed: each other occupant of the same bed who is a man and passes the couple check is a try, 30% a pregnancy, else no further try for 0.1
+    /// to 0.2 days. As the original, which asks the bed she is in for its current operators: a bed holds two only when its <c>max operators</c> says so
+    /// (a double-bed mod), <see cref="Fixture.Occupants"/>.
     /// </summary>
     void TryConceive(World world, int slot, ulong id)
     {
         var cold = world.Characters.Cold(slot)!;
-        if (cold.InSomething != HeldState.Bed || cold.InWhat is not { } bedId || world.Fixtures.Find(bedId) is not { } bed) return;
+        if (cold.InSomething != HeldState.Bed || cold.InWhat is not { } bedId || world.Fixtures.Find(bedId) is not { Kind: FixtureKind.Bed } bed) return;
 
-        foreach (var other in world.Fixtures.OfBuilding(bed.Building))
+        var table = world.Characters;
+        foreach (var other in bed.Occupants.ToArray())
         {
-            if (other.Kind != FixtureKind.Bed || !world.Characters.TryResolveNext(other.Occupant, out int man) || man == slot) continue;
-            if (world.Characters.Cold(man) is not { InSomething: HeldState.Bed } held || held.InWhat != other.Id) continue;
+            if (!FixtureRegistry.Holds(table, bed, other) || !table.TryResolveNext(other, out int man) || man == slot) continue;
             if (Human(world, man) is not { Appearance.Female: false }) continue;
 
             Try(world, slot, id, man);

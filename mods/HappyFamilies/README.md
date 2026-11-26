@@ -4,8 +4,9 @@ Port of *Happy Families (Natural Childbirth) [RE_Kenshi]* (workshop 3800064617):
 `HappyFamilies.mod`. The behaviour is rewritten in C# from what the script does; the `.mod` (five `HF_Random<race>` CHARACTER templates) loads
 as data from the original, a required item.
 
-- **Conceiving:** every 30 ticks, a woman of the player's faction lying in a bed may conceive with each man lying in another bed of the same bed
-  building (a double bed or bunks; any faction): 30% a pregnancy, else no further try for 0.1 to 0.2 game days. Refused (no try) when the
+- **Conceiving:** every 30 ticks, a woman of the player's faction lying in a bed may conceive with each man lying in the same bed (any
+  faction; `Fixture.Occupants`): 30% a pregnancy, else no further try for 0.1 to 0.2 game days. A bed holds two only when its `max operators`
+  says so, as in the original: a double-bed mod; base beds hold one. Refused (no try) when the
   last failed try is too recent, her squad or the faction has no room, either race is not one of the five, either is still a child, or they share
   an ancestor within four generations.
 - **Pregnancy:** half a game day; her Stomach slider grows by up to 200 and with a third left she says "I think I'm pregnant...". At the end the
@@ -26,6 +27,9 @@ as data from the original, a required item.
   character's look record are read (Facts); parents are found by their handle text.
 
 ## Facts (Verified: reading `BaseScript.lua` and `HappyFamilies.mod`'s strings, unless marked)
+
+- The father is any man among the current operators of the building the mother is in (`inWhat:getBuilding()`, its useable stuff's
+  `currentOperators`): the bed itself, so both lie in the same bed. Base beds have `max operators` 1, so the mod needs a double-bed mod.
 
 - Times in game days: pregnancy 0.5, childhood 10 (`TimeMultiplier` 1); retry 0.1 to 0.2; chance 0.3; child health factor 0.3; belly +200 x
   progress over the pre-pregnancy Stomach; the "pregnant" line at a third of the time left. The Workshop text's "~1 ingame day" is not the code.
@@ -59,8 +63,6 @@ as data from the original, a required item.
 
 ## Port choices
 
-- A bed fixture holds one occupant in Meitou, so "sharing a bed" is lying in beds of the same bed building (the original reads the bed
-  building's operators, which a shared-bed mod makes several).
 - Look edits go through the recruit editor's path, which sanitises slider values to the race's limits (the original keeps any value).
 - Family data is kept in the mod's save data, not in the look. Importing an original save: **Unknown** whether Kenshi writes the script's keys
   into the saved look record and whether a character's runtime handle equals its saved one (the log line counts lineages whose own handle
