@@ -38,11 +38,14 @@ Linux runs DLSS through NGX (`Upscalers/Ngx.cs`): NVIDIA's NGX client library (t
 built into `libmeitou_ngx.so` by `tools/scripts/build-ngx-shim.sh`) over the driver's `libnvidia-ngx.so.1`, with the DLSS
 model `libnvidia-ngx-dlss.so.<version>`; each file is looked for in `MEITOU_DLSS_PATH`, then beside the executable, and
 NGX gets the same two folders to find the model. The client library is linked on Ubuntu 22.04 for releases, so it
-loads on glibc 2.35 and newer; on an older glibc the game logs the loader's error and runs without DLSS. FSR on Linux needs our build of the FidelityFX library ("Frame generation"); our patch changes no shader or
-upscaler logic. FFX's Vulkan backend reports shader model 5.1, so the FSR 3 upscaler never forces wave64 there; its one choice by GPU is
-the history reprojection, a Lanczos lookup table on cards with 32-64 lane subgroups (AMD) and the computed kernel elsewhere (FFX 1.1.4
-`ffx_fsr3upscaler.cpp`, `ffx_vk.cpp`). **Verified** (2026-11-24, RTX 4070, the lookup table forced in a debug build, native scale,
-mean |Laplacian| 19.95 against 19.94): the table path is as sharp. `MEITOU_NGX_LOG=1` prints NGX's whole log (its verbose level).
+loads on glibc 2.35 and newer; on an older glibc the game logs the loader's error and runs without DLSS. FSR on Linux needs our build of the FidelityFX library ("Frame generation"); our patch changes no shader, and of the
+upscaler logic only the history reprojection's kernel. FFX's Vulkan backend reports shader model 5.1, so the FSR 3 upscaler never forces wave64
+there; its one choice by GPU is that kernel: AMD's code takes a Lanczos lookup table on cards with 32-64 lane subgroups (AMD, RADV) and the
+computed kernel elsewhere (FFX 1.1.4 `ffx_fsr3upscaler.cpp`, `ffx_vk.cpp`); our patch takes the computed one everywhere. **Verified** (2026-11-25,
+RTX 4070, issue #1423's save, 2560x1362, Quality, still camera, mean |Laplacian|): AMD's branch forced, the table smears the world (4.42, the
+computed kernel 7.90); the patched branch forced, 7.90. The table read point-sampled or with `texelFetch` gives 7.16 and the computed weight in
+its place 7.90, so its weights go wrong only between table entries, with linear filtering. At native scale the table path is as sharp (19.95
+against 19.94, 2026-11-24). `MEITOU_NGX_LOG=1` prints NGX's whole log (its verbose level).
 NGX is loaded only when the model and the client library are in one of those folders and `MEITOU_DLSS` is not `0`, and
 handed only a device on NVIDIA's own driver (not NVK); without DLSS (other GPU, no NVIDIA driver, no libffi) it is shut
 down at once and the game runs on. Builds copy both to the output folder, never into a publish; the Linux release zip
@@ -95,10 +98,15 @@ swapchain code needs Vulkan headers 1.3.237+, so the script uses Khronos' 1.3.29
   samples (**Observed**: validation VUID-vkCmdDraw-None-09600 otherwise).
 - **Teardown:** the frame-generation context is destroyed before the swapchain context, also when a failed swapchain remake falls
   back to the plain swapchain.
-- **Queues:** AMD's swapchain takes four queues (game, present, image acquire, async compute); we take them all from the graphics
-  family and need at least 3. **Observed** (Iris Xe, Windows, 2026-10-30): the family has 1 queue, so frame generation stays off
-  with a log line. Typical AMD and Intel drivers also expose one graphics queue; AMD's samples take
-  present and async compute from other families.
+- **Queues:** AMD's swapchain takes four roles (game, present, image acquire, async compute), each on its own queue: it rejects any two on one
+  (FFX 1.1.4 `FrameInterpolationSwapchainVK.cpp`), and async compute may be left empty, as it is used only for asynchronous work, which we never
+  allow. The game is the graphics queue; the others come from the graphics family's further queues, then from a compute family without graphics
+  (`VulkanDevice.ComputeQueues`, made only for what the graphics family lacks); present takes the first whose family can present to the
+  window. RADV has one graphics queue, and its compute family has several that can present (Mesa `radv_physical_device.c`, `wsi_common.c`: any
+  family with graphics, compute or transfer). `MEITOU_GRAPHICS_QUEUES=<n>` caps the graphics family's queues. **Observed** (RTX 4070, Linux,
+  gamescope, 2026-11-25): capped at 2, image acquire and async compute on compute family 2, frame generation active, no errors; capped at 1 it
+  stays off with a log line, as NVIDIA's compute family cannot present. Present on a compute queue (RADV) is untested.
+  **Observed** (Iris Xe, Windows, 2026-10-30, before compute queues were taken): one graphics queue, frame generation stayed off.
 - **DLSS:** on Windows DLSS goes through Streamline whichever frame generation runs (NGX, `meitou_ngx.dll`, only where Streamline does not
   load). Under AMD's swapchain Streamline does not see the presents: it logs once "presentCommon() was not observed", and DLSS goes on
   working (**Observed**, 2026-11-17: the picture at the same-state floor, no growth over 96 s). Before the runtime switch, FSR 3 took NGX and
@@ -277,7 +285,7 @@ for its block, so reeds, grass and ruins' windows were cut in steps of 2 and 4 p
 Game HDR exposure is the reference; tone mapping/grading are Meitou controls, not original facts.
 Both auto-exposure ping-pong targets are seeded before smoothing starts, and the adaptation reads
 the previous frame's output rather than the target it is writing; either mistake flickers dark/bright.
-**Indoor exposure** (`PostProcess.IndoorExposure`, Meitou, with Indoor GI): the game's band minimum is set for a room lit evenly by its ambient. While GI is active, Indoor GI is on and the interior view is not empty (`WorldFrame.Draw`), the adaptation's lower bound is the smoothed mean luminance times `IndoorExposureScale` 2.9, kept within `IndoorExposureFloor` 1/3 of the minimum and the minimum (`PostProcessShaders.Adapt` `uIndoor`, `MergedKernels` `ExposurePush`); a held exposure is left alone. The lower bound goes no lower than the night's minimum times 1/3 whatever the hour (`IndoorExposureMin`: a room's lamps are the same by day, when a third of the day's minimum left the room 2.4 times darker than at midnight). In the merged kernel the rooms are exposed apart: taps on a room's pixel (below) make the rooms' mean, the others alone set the adapted luminance by the game's rule (held when next to none is in view), and the rooms' pixels are scaled by `adapted / rooms' adapted`, at most `IndoorExposureMaxGain` 8, in the scene colour before the upscaler (`MergedKernels.InteriorGain`; the gain lives in the exposure state buffer: kept while no room is in view, taken at once by a room coming into view, then eased with the adaptation). Looking into a building no longer changes the exposure of what is outside (the user: "je n'aime pas que l'exposition change a l'exterieur quand on regarde a l'interieur"). The unmerged passes keep one exposure for the picture. **Observed** (the editor's bar at night, 4 lamps: minimum 1 x night darkness 0.42, mean before exposure 0.14, so the exposure was fixed at the minimum): the minimum no longer pins a lamp-lit room to one exposure; the scale 2.9 is the minimum over the mean the room had under the game's ambient (0.1435). **Unknown**: other interiors, a lit room by day.
+**Indoor exposure** (`PostProcess.IndoorExposure`, Meitou, with Indoor GI): the game's band minimum is set for a room lit evenly by its ambient. While GI is active, Indoor GI is on and the interior view is not empty (`WorldFrame.Draw`), the adaptation's lower bound is the smoothed mean luminance times `IndoorExposureScale` 2.9, kept within `IndoorExposureFloor` 1/3 of the minimum and the minimum (`PostProcessShaders.Adapt` `uIndoor`, `MergedKernels` `ExposurePush`); a held exposure is left alone. The lower bound goes no lower than the night's minimum times 1/3 whatever the hour (`IndoorExposureMin`: a room's lamps are the same by day, when a third of the day's minimum left the room 2.4 times darker than at midnight). In the merged kernel the rooms are exposed apart: taps on a room's pixel (below) make the rooms' mean, the others alone set the adapted luminance by the game's rule (held when next to none is in view; the band's minimum when there is nothing to hold, as after the targets are remade by an anti-aliasing switch: holding the new target's 0 left the picture black), and the rooms' pixels are scaled by `adapted / rooms' adapted`, at most `IndoorExposureMaxGain` 8, in the scene colour before the upscaler, or before the chain reads the scene without one (`MergedKernels.InteriorGain`; the gain lives in the exposure state buffer: kept while no room is in view, taken at once by a room coming into view, then eased with the adaptation). Looking into a building no longer changes the exposure of what is outside (the user: "je n'aime pas que l'exposition change a l'exterieur quand on regarde a l'interieur"). The unmerged passes keep one exposure for the picture. **Observed** (the editor's bar at night, 4 lamps: minimum 1 x night darkness 0.42, mean before exposure 0.14, so the exposure was fixed at the minimum): the minimum no longer pins a lamp-lit room to one exposure; the scale 2.9 is the minimum over the mean the room had under the game's ambient (0.1435). **Observed** (Heft's Armory with the interior view held, dust storm, headless Vulkan): anti-aliasing off, FXAA and SMAA expose the room as TAA and DLSS do. **Unknown**: other interiors, a lit room by day.
 - A room's pixel (`Gi.RoomMaskPass`, `PostProcess.RunRoomMask`, an R32F mask at the render size, made while an interior is in view and the traced scene exists): lit as an interior (surface bit 9) and under a part the floor view hides. One ray straight up from the pixel, 0.3 units off its drawn plane (from the depth), against the objects of the traced scene, which keeps the hidden floors; it passes every shown part and stops at a record with `GeometryRecord.Interior` bit 1 (`WorldObjectRenderer.RayHidden`: `InteriorHidden` or `StandsAbove`). Where it finds none, six rays 40 degrees from the upright, round it, look again (`RoomMaskPass.TiltDegrees`): under a stairwell's opening the upright ray left the room through it, so the stairs and the floor under them took the street's exposure, a dark band the opening's shape (**Observed**, save lamp, the Storm House, the stairs and the floor under the opening dark before, lit after). An open roof has none beside it either (**Observed**, same save, the Storm House's roof furniture at view 1: the same with the gain and without). So what stands on an open roof or terrace, furniture in a building seen from outside and a building held open with every floor shown (the 10 s after its last occupant left) are no rooms. With the eye itself inside a viewed building and under its cover (`WorldObjectRenderer.EyeIndoors`: the character editor's bar, whose every floor is shown) every interior pixel is a room's, no ray asked. The own shell of a building in the interior view (`WorldObjectRenderer.ViewedShell`, the instance's half in its fourth value) is split by its triangles' planes (`atmoStreet`, `BuildingLodShaders`; not the shading normal: a smooth bevel and a rough stone's normal map left lines and speckles): a steep face that does not face the upright through the building's origin (an outer wall) and every face turned up (a plinth, a ledge, the top of a wall the view cuts) are the street's, lit as the outside (no bit 9, surface bit 30 set: the traced sun's rays pass what the view hides, `TracedSunShaders`) and so no room's pixel. **Observed** (saves The boys 123, lamp, grass-through interior): lit as the room these took the room's gain (light squares and rims on the outside, the user's images 98 and 99); lit as the outside under the hidden floors they were black. A building whose rooms are its shell (`InteriorVolume.ShellHoldsRooms`: a mask mesh and an `interior` list that draws nothing; the Ash Dome, the Ash Dome Ruin and the Ancient Factory, **Verified** by a scan of the merged records) keeps its faces turned up in the room (the instance's three quarters): **Observed** (issue #1027, the Ash Dome at floor 0) as the street's, its floor took the dark dome's outdoor probes in full and was black at any hour, lit with Indirect light off. **Observed** (save lamp, the Hub's tower by day, `door.sh`; Squin's square, `squin.sh`): with bit 9 alone as the test the furniture and characters on every roof were scaled by the room's gain (blown white on the tower's terrace, awnings 2.8 times the street's level in Squin) while any interior was in view or held; the tops of the walls the view cuts were black (now the room's). Cost: 1.06 ms at 2560x1440 with a room over the whole picture (save heavy-scene, RTX 4090).
 Night grading weights scotopic luminance (Jensen2001 night-sky model evaluated at sRGB primaries)
 using measured scene luminance/adaptation; daylight contribution must fade to zero. Night red
@@ -439,13 +447,25 @@ grain 0.6 together darken the corners, tint the picture and show the grain.
 
 ## SMAA
 
-Meitou's non-temporal alternative to FXAA (`--smaa`, or anti-aliasing "SMAA" in settings). It runs on the
-composite's LDR picture instead of FXAA, before the heat haze, and only when no upscaler runs. Passes
-(`PostProcessShaders.Smaa*`): luma edges (threshold 0.1, local contrast adaptation 2); blending weights;
-neighbourhood blend. The weights use SMAA 1x's orthogonal L/U/Z revectorization (16-pixel search per side,
-U shapes smoothed below 32 pixels). Unlike reference SMAA, it computes areas analytically instead of using
-AreaTex/SearchTex. It has no diagonal or corner patterns, as SMAA's low/medium presets.
-**Observed**: 0.6 ms at 1280×720 on the low-end laptop; smooths the stair-steps on The Hub's walls and ridges.
+Meitou's non-temporal alternative to FXAA (`--smaa`, or anti-aliasing "SMAA" in settings): SMAA 1x as
+reference SMAA computes it, ported from the Dust framework's D3D11 passes. It runs on the composite's LDR
+picture instead of FXAA, before the heat haze, and only when no upscaler runs. Passes
+(`PostProcessShaders.Smaa*`, lookup textures in `SmaaLookup`):
+- edges: luma (Rec. 709 weights) steps to the left and top neighbour of at least the quality's threshold
+  and at least half the largest step round the pixel (local contrast adaptation 2);
+- weights: each edge searched both ways, 2 pixels per bilinear fetch, up to the quality's fetches; SearchTex
+  (64×16 R8) corrects the last fetch to the edge's end, AreaTex (160×560 RG8, orthogonal part, subsample row 0)
+  gives the coverage from the two ends' crossing edges and the square-rooted distances. No diagonal or corner
+  patterns. The edges target is sampled bilinearly here;
+- neighbourhood blend: the axis with the larger weight, two bilinear taps moved by the weights.
+"SMAA quality" (`PostOptions.SmaaQuality`, shown only while SMAA is chosen) takes SMAA's presets' threshold
+and search length: Low 0.15 / 4, Medium 0.1 / 8, High 0.1 / 16 (default), Ultra 0.05 / 32. Dust ships 0.05;
+on The Hub it changed 9.1 % of the pixels against 6.4 % at 0.1, the extra ones ground-texture blur
+(**Observed**, viewer at 2560×1440). With FXAA or SMAA chosen the picture renders at native size
+(`UpscaleOptions.Spatial`): the render scale and sharpness rows show only with an upscaler (render scale also
+with no anti-aliasing, as plain scaling).
+The tables are the bytes of SMAA's `AreaTex.h` / `SearchTex.h` (MIT), embedded from `assets/smaa`; the
+engine has no RG8 format, so AreaTex is widened to RGBA8 on upload.
 
 ## Tried: UI depth stamp (removed)
 

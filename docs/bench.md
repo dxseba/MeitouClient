@@ -102,8 +102,8 @@ numbers from untraced runs.
 ## Play benchmark
 
 `MeitouClient --load <save> --play-bench <dir>` plays a scripted session in the real game (frame limit and VSync off) and quits
-(`PlayBench`). Segments: settle, idle, orbit, zoom to the farthest, pan, a 30 s travel at 3000 units/s, return, time x2
-and x5, talk, trade, container, doors, pick-up, paths (a squad or each member sent 20-200 m in a random direction every 0.5 s), walk,
+(`PlayBench`), the fps counter shown from the start (Shift+F9 hides it).
+Segments: settle, idle, orbit, zoom to the farthest, pan, a 30 s travel at 3000 units/s, return, time x2 and x5, talk, trade, container, doors, pick-up, paths (a squad or each member sent 20-200 m in a random direction every 0.5 s), walk,
 fight (six spawned enemies, `--scene-npc`), loot, the panels opened cold then warm (with limbs and build), a grazing horizon view, the overview, flights (each player character in turn, twice, 6 s each, as a double click on its portrait: a character flight when they are on).
 Each interaction targets the nearest candidate within 150 m and retries every 3 s; a modal message box is closed and logged.
 `MEITOU_BENCH_ONLY=settle,zoom` keeps only the named segments (the run is deterministic from the save, so a hitch comes back at its tick).
@@ -258,8 +258,11 @@ keys with `_` for `-` and no `_ms`). Read back from frames.csv: percentile = sor
 Version and fingerprint: `BenchmarkSpec.Version` is bumped by hand when the workload changes (tiers, fixed settings, default settings,
 a scenario's start, segments, groups or save, metrics), never for faster code. The fingerprint is SHA-256 of `BenchmarkSpec.CanonicalText`:
 the version, metric text, the scenario (start, save and hash, segments with seconds,
-groups), fixed settings, the default `UserConfig` as compact JSON and each tier's table values and switches; nothing from the machine.
-So it is per scenario, and a version with two fingerprints is a missed bump. `applied` is SHA-256 of the settings panel's sliders and
+groups), fixed settings, the benchmark's `UserConfig` as compact JSON without the `[BenchmarkNeutral]` settings (ones the benchmark overrides,
+Metal's, and ones no run reads: file bookkeeping, menus the script never opens, key bindings) and each tier's table values and switches;
+nothing from the machine. So it is per scenario, and a version with two fingerprints is a missed bump. A fingerprint that changed without the
+workload is retired in the service's `BenchFingerprints`, which maps submissions and stored sessions to its replacement: version 1 builds up to
+0.23.1 hashed every setting, so each release that added one had its own (**Verified**: all six recomputed from the 0.23.1 text minus the added keys). `applied` is SHA-256 of the settings panel's sliders and
 switches after the tier (`key=value\n`, sorted), which differs by device (ray queries, DLSS).
 
 Detailed logs/screenshots belong outside the repository. Evidence for original-game claims

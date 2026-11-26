@@ -37,7 +37,7 @@ public sealed class MyMod : IMod
     public void Initialize(ModContext c)
     {
         c.AddSystem("counter", ctx => new CounterSystem(), SystemAnchor.AfterPart(StandardParts.Combat));
-        c.AddDialogueCondition(1000, check => check.Matches(/* computed answer */ true));
+        c.AddDialogueCondition(1100, check => check.Matches(/* computed answer */ true));
         c.Harmony.PatchAll(typeof(MyMod).Assembly);
     }
 }
@@ -188,7 +188,8 @@ is the consent, as in RimWorld: the game loads every enabled code mod's code, wi
 
 Only where a Harmony patch would break an invariant without an error; everything else is Harmony. A new point is added when a patch
 in the wild keeps breaking, not ahead of demand. Mod codes start at `SimulationExtensions.FirstModCode` (1000); a code another mod
-holds refuses the second mod.
+holds refuses the second mod. The game holds the codes of BFrizz's Extra Extensions, which it builds in: dialogue conditions 1000-1006 and record
+type 1000 (VARIABLE) refuse a mod as taken by `BFrizz_Extra_Extensions` ([dialogue](game/dialogue.md#extra-extensions-conditions)).
 
 - **Tick systems:** `AddSystem(name, factory, anchor)`. `SystemAnchor.Before(part)` goes before the first system of that
   `StandardParts` member, `AfterPart(part)` after its last, `End` after all; a part the world does not build puts the system at the
@@ -475,6 +476,19 @@ holds refuses the second mod.
   main grid), for a mod's own button too; `Arrange(root)` and `Arrange(root, bag)` stay the game's and never ask the filters. Engine API, not in
   the original. **Observed** with a scratch program (placement, order, rotation, each invalid answer, throw, merge, hash, inert without a
   filter); no test yet.
+- **Storage priority:** a registered system implementing `IStoragePriority` (`Meitou.Simulation.Items`) is asked `Priority(World, CharacterId who,
+  string storage, StorageUse use, string? record)` at the same searches as `IStorageFilter`, for each storage the filters allow, and answers a
+  `StoragePriority`: `Forbidden`, `Low`, `Deferred`, `Normal` (the default), `Preferred`, `Important`, `High`, `Critical`. The search takes the
+  highest priority and, among equals, the storage it takes without one (the nearest, its own tie rule); `Forbidden` passes the storage over as a
+  refusal does. Take and put are asked apart, so a store can be the last place things are put and the first they are taken from (put `Low`, take
+  `Critical`: an overstock store). Systems combine as: any `Forbidden` wins, else the first answer other than `Normal` in system order (mods in
+  load order); an answer outside the levels counts as `Normal`. The player sets each storage's own put and take level on its panel
+  (`Machine.PutPriority`, `Machine.TakePriority`, saved with the building, [save](formats/save.md)): its `Forbidden` wins too, and a level other than
+  `Normal` comes before the systems' answers, which apply where the player left a storage at `Normal`. A squad's kept ditch trip keeps its storage while it still takes something (only
+  `Forbidden` ends it). `world.StorageRank(who, storage, use, record)` gives the filters' and priority systems' combined answer (`Forbidden` for
+  a refusal), so a mod ranks its own storage picks as the game's searches do. Same threading, paused-order and fault rules as `IStorageFilter`;
+  one that throws answers `Normal`. Without a priority system or a storage's own level every search is the original's. Engine API, not in the
+  original.
 - **World ready:** a registered system implementing `IWorldReady` receives `Ready(World, bool fromSave)` once, between ticks before the first
   (`world.Start` then says how: `WorldStartKind.NewGame`, `Load` or `Import`, with `SaveFolder` the full path of the save read, null for a new
   game; `Unknown` for a world the game host did not start; not saved, hashed or read by the engine, so a mod reads a file of its own or the
@@ -665,6 +679,10 @@ holds refuses the second mod.
 - **Sleep clock:** `CharacterCold.BedUsedHours` is the game hours of the last update of a bed the character lay in (status `+0xc0`, stamped by
   `Task_UseBed`'s update, which row 98's desire reads; **Observed** as the original's last-slept time): hours since it slept are
   `world.GameHours - BedUsedHours`. Derived, not saved (0 after a load until it sleeps).
+- **Bed occupants:** `world.Fixtures.Find(bedId)` (a character's bed is `CharacterCold.InWhat` while `InSomething` is `HeldState.Bed`) gives the
+  bed `Fixture`: `Occupants` (read-only, entry order; an entry may be stale) and `Capacity` (its `max operators`, at least 1);
+  `FixtureRegistry.Holds(table, bed, id)` tells whether one is still in it, `HeldCount` how many are, `IsFree` / `IsFreeFor` whether there is room.
+  So a mod finds who else shares a double bed. Read only: entering and leaving go through `EnterBed` / `LeaveBed`. Engine API.
 - **Items created:** a registered system implementing `IItemCreatedObserver` (`Meitou.Simulation.Items`) receives `Created(World, in
   ItemCreated)` for each item the world makes of an `ItemCreatedKind`: `Loot` (a camp's ground items, a town's artifacts for its buildings'
   containers), `Crafted` (a bench's finished item, `Character` the crafter), `ShopStock` (each unit and special item of a shop's fill, before
@@ -709,9 +727,9 @@ holds refuses the second mod.
   Engine API, not yet checked in a running world.
 - **Dialogue codes:** `AddDialogueCondition(code, handler)` and `AddDialogueEffect(code, handler)`, named from FCS data in a
   DIALOG_ACTION's `condition name` / `action name`. A condition gets `DialogueCheck` (world, speaker, the subject `who` picked, the
-  condition) with `Matches(bool)` and `Compare(double)` that apply the vanilla value and `compare by` rules; it only reads (it also runs
-  for interface previews). An effect gets `DialogueAct` (world, speaker, target, effect) in a serial step. An unregistered code
-  computes "no" / does nothing, as an unknown vanilla code. A handler that throws is logged once with the mod id and code; that call computes
+  condition, its DIALOG_ACTION's `tag` included) with `Matches(bool)` and `Compare(double)` that apply the vanilla value and `compare by` rules; it only reads (it also runs
+  for interface previews). An effect gets `DialogueAct` (world, speaker, target, effect) in a serial step. An unregistered condition
+  passes and an unregistered effect does nothing, as an unknown vanilla code ([conditions](game/dialogue.md#conditions)). A handler that throws is logged once with the mod id and code; that call computes
   "no" / does nothing more, and the handler is still asked later (the interface asks conditions too, so a drop would depend on what it asked).
 - **World states:** `AddWorldState(record)` claims a WORLD_EVENT_STATE of the merged data (`ModWorldState`, `src/Meitou.Simulation/Factions`; a
   record of another type, or one another mod claimed, refuses the mod, and so loses all its registrations, not only the claim: two mods that
@@ -929,7 +947,8 @@ holds refuses the second mod.
   under Meitou keys (`meitou mjob<k>`, [save](formats/save.md)), out of the original's `pjob` list, with its building id but not a character
   target; a load puts it back while the type is registered and drops it otherwise.
   `AddJobOffer(new ModJobOffer(type, buildings, caption, takers))` (engine API, not in the original; after the type's `AddJobType`, one offer per
-  type) lets the player give such a job: the menu of a finished building of the player's faction whose record is in `buildings` (the one with
+  type) lets the player give such a job: the menu of a finished building of the player's faction (any faction's with
+  `Owners = ModJobOwners.Any`; the mod decides what using another's costs) whose record is in `buildings` (the one with
   its Dismantle, [ui-input](game/ui-input.md#context-menu-verbs); a built bed's too, a cage's own rows not) ends with `caption`, translated as
   the game's rows, for a selection holding a character `takers` allows (`ModJobTakers.People`, `Animals` or both), an animals-only selection
   included. Choosing it, Shift or not, queues the game's `AddJob`, which tests the building again and gives each selected living player
@@ -937,9 +956,10 @@ holds refuses the second mod.
   mod checks the job's building as it checks that the job is listed; the same building changes nothing); the jobs switch turns on and the
   character plans again. Refused: a type the mod has not claimed, a second offer for a type, no building, a blank one or one that is no
   BUILDING of the loaded data, a caption that is blank, over 32 characters, holds a control character or is the label of one of the game's
-  verbs, takers that are none or other than people and animals. **Observed** (2026-11-22, scratch world with a headless interface): an
-  animals-only selection is shown the row and takes the job, a person selected with it does not for an animals offer, a second building moves
-  the job in its place between two game jobs, and another record's, another faction's or an unfinished building gives nothing.
+  verbs, takers that are none or other than people and animals, an `Owners` that is neither. **Observed** (2026-11-22, scratch world with a
+  headless interface): an animals-only selection is shown the row and takes the job, a person selected with it does not for an animals offer, a second building moves
+  the job in its place between two game jobs, and another record's, another faction's (for the default `Owners`) or an unfinished building
+  gives nothing.
 - **Item use:** `AddItemUse(record, handler)`, one mod per item record string id. A right click on such an item in a player character's own
   inventory window (or its bag), with no other character's window open and no trade, runs `handler(ItemUse)` (world, user, item, that
   character's inventory) in the player system's serial step, before the click would equip or move it (`ItemUses`, `src/Meitou.Simulation/Player`),
@@ -977,6 +997,17 @@ holds refuses the second mod.
   `IWorldReady` run, an NPC when its platoon is made. A character the save does not write loses its id, which is never given again. An import starts
   with none. Until a mod asks (or a save with ids loads) nothing is held, hashed or written; then the ids enter the state hash. Engine API, not in
   the original.
+- **Character tags:** `world.CharacterTags` (`CharacterTags`) keeps one free string per mod id on a character, so several mods mark one
+  character without overwriting each other (a rival, a war leader, the mod that named a character). `Set(character, context.Id, tag)` sets it
+  (null or empty removes it; an empty mod id throws; false for a character not in the world) and gives the character its lasting id (Character
+  ids, above) when it has none, so it runs where `GetOrGive` may and throws where `GetOrGive` would. Tags are kept by lasting id, so a tag goes
+  where the id goes (saves and loads, squad moves, renames, an NPC's platoon leaving the world and coming back), and a new character in a reused
+  slot starts with none. `Get(character or LastingId, mod)` reads one (null: none) and `Of(character or LastingId)` every mod's, by mod id in
+  ordinal order; reads run in any phase, and the `LastingId` forms also for a character out of the world. `Find(mod, tag)` is the character in
+  the world with that mod's tag (the lowest lasting id when several have it; none when none in the world has), `FindIds(mod, tag)` the lasting ids
+  of all, in or out of the world (`LastingIds.KeptIds` tells which are gone for good); both scan every tagged character, so call them at a load or
+  an event, not per character per tick. Saved with the ids in `meitou-mods/character-ids.json` ([save](formats/save.md#character-ids)); the tags
+  of living characters in the world enter the state hash once any tag is set or loaded. Engine API, not in the original.
 - **Character save fields:** `world.SaveFields` (`CharacterSaveFields`, `Meitou.Simulation.Saving`) keeps a mod's per-character values in
   the vanilla save, under keys of its choosing (an original plugin's own, so a save taken to the original keeps them):
   `SetInt`/`SetFloat`/`SetBool`/`SetString(character, CharacterSaveRecord, key, value)` and `Remove`, read back with `Int`/`Float`/`Bool`/
@@ -1031,7 +1062,9 @@ holds refuses the second mod.
   `Tint` (RGBA, each 0 to 1) is multiplied into a node's picture (image, portrait) and skin, as MyGUI's `Widget::setColour`; its text keeps
   `TextColour`. `PortraitOf = characterId` on an image node draws that character's live portrait as the squad bar does (current gear and
   pose): the cell the host already draws it in (squad bar, squads screen, character trade row), else a free one after those and before the
-  conversation's; a character not in the snapshot or past the free cells shows nothing. A root of `UiSlots.Overlay` picks its layer with
+  conversation's; a character not in the snapshot or past the free cells shows nothing. The overlay, screen controls and screen overrides
+  (`UiWidgetOverride.PortraitOf`) share the cells each frame: one cell per character however many ask, and a cell no one asks for is free the
+  next frame. A root of `UiSlots.Overlay` picks its layer with
   `Layer` (`UiOverlayLayer`): `Hud` (default: over the HUD, under the windows), `Back` (under the HUD and windows, over the name tags,
   floaters and speech; the original's `Back` layer) or `Popup` (over the windows, under the right-click menu and tooltips); input follows the
   drawing order. `UiFrameContext.Measure(text, font, scale)` (also `UiScreenContext.Frame`) answers a caption's size in pixels as the painter
@@ -1045,7 +1078,8 @@ holds refuses the second mod.
   (its own hinting failures do not change the font's); the line height and baseline stay the font's own, and no kerning applies between
   fallback glyphs. False when the file does not exist or was added already; a file FreeType cannot open, or one with no outlines, is skipped
   for every font and logged once. Text drawn before is drawn again with it. Kept for the process. Cost: once per character and font size the first time it is drawn, nothing for characters
-  the game's font has. With none added nothing changes. Engine API, not in the original.
+  the game's font has. In Meitou mode the Kenshi folder's language fonts follow the added ones ([mygui](formats/mygui.md)); in Faithful mode
+  only the added ones are asked, and with none nothing changes. Engine API, not in the original.
 - **Interface actions:** `context.Interface` (`ModInterface`) acts on the game's screens from the host's thread (a UI action, key action, menu
   row, hit feed): `OpenScreen(ModScreen kind, ScreenTarget target)` opens `CharacterEditor` (a recruit's edit, free with race and gender kept,
   of `target.Characters`; false while no listed character is in the snapshot yet, so a mod opening it on a character made this tick tries again
@@ -1096,7 +1130,9 @@ holds refuses the second mod.
   screen controls, the source is asked for each arranged widget whose name matches `widgetPattern` (exact, or `*` and `?` wildcards; at most
   512 widgets per source and frame), with `UiScreenContext` (`Widget` the widget, `AnchorWidget`/`Anchor` its name and rectangle, `Item` for an
   item cell, `Character` for a portrait or the screen's) and answers a `UiWidgetOverride` (null: no change): `Caption` (its text, at most 4096
-  characters, inline `#RRGGBB` tags as in the game's texts), `TextColour` (RGBA, each 0 to 1, before the skin's) or `Visible` false (left out:
+  characters, inline `#RRGGBB` tags as in the game's texts), `TextColour` (RGBA, each 0 to 1, before the skin's), `PortraitOf` (a
+  `CharacterId`: the widget's own picture is replaced by that character's live portrait, cells shared as for an image node's `PortraitOf`
+  under "Interface", so a layout's image box shows a recruit's own face) or `Visible` false (left out:
   not drawn, not clicked; its children are widgets of their own). Sources apply in registration order, each seeing the last one's changes.
   `UiScreenContext.State` is what a screen keeps to itself, by key: the stats window's `selected` (the stat its description shows: a stat's
   number as in its rows' `stat:N` actions, a mod skill's `mod:N`, empty for none) and `race-bonus-line` (the race XP bonus paragraph its
@@ -1269,19 +1305,33 @@ holds refuses the second mod.
   - `Name`: a name of its own rather than its record's, where the game shows it: a character's (rolled from a name list, or given by the
     player), a squad's, an outpost's, the player's faction's once he renames it. `Field` says what it names (`character`, `squad`, `outpost`,
     `faction`, `place`), `Key` is the record it was made from ("" none). Put on one line and cut to 80 characters.
+  - A character's name, asked as either kind, also says which character and where: `Character` is its lasting id's value (Character ids,
+    below; 0 when no mod has given it one, and for every other text) and `Place` a `ShownPlace`: `Label` (above its head), `Squad` (the squad
+    bar and lists), `Panel` (its own panels: the status panel, inventory, stats, the jobs list), `Window` (trade, slaves for sale, crafting,
+    prospecting, faction information, a confirm), `Tooltip`, `Menu` (the right-click menu's title), `Notice` (notices, floaters, the event
+    log), `Dialogue` (the conversation window and log, bubbles, choices, a name a token fills in), `Unknown` otherwise. So a mod gives one
+    character a title ("Captain {n} of Stoat") by giving it a lasting id, keeping the title under that id and answering for that `Character`
+    in the places it picks; every other character's name is untouched. A name passed only as text (a crafter in a tooltip) has `Character` 0.
   - `DialogueLine`: a dialogue line's text, in speech bubbles, the conversation window (the line, the choice buttons and the log) and the
     message log. `Key` is the line's record string id and `Text` the text it was given (one of its texts, picked as the game picks it), before its
     tokens: return a text with the tokens you want (`/YOURNAME/`, a word swap's `/NAME/`), and each takes the value the game's own text got for
     the token of that name (in order; a token the game's text did not have is empty). A word swap's line is asked too, under its own id. The
     game's text still decides everything: whether a choice is offered, how long a bubble stays, the dialogue log. A character's name built from
     tokens is not asked; the names tokens fill in (`/MYNAME/`, `/YOURNAME/`, `/TARGETFACTION/`, `/PLAYERFACTION/`) are asked on their own, as a `Record` or `Name`.
-  Display only: records, saves, the state hash and every decision keep the game's text. The answer for a kind, key, text, tag and field is kept until
-  `registration.RefreshText()`, which a mod calls when its answers change (a word learned, an item identified, a save loaded whose state its
+  Display only: records, saves, the state hash and every decision keep the game's text. The answer for a kind, key, text, tag, field, character and
+  place is kept until `registration.RefreshText()`, which a mod calls when its answers change (a word learned, an item identified, a save loaded whose state its
   answers read); text already handed out (a line said, a notice posted) keeps what it got. So a source runs once per text shown, not per frame,
   but it may be asked on any thread (messages and dialogue are made on the simulation's threads), one call at a time (other text waits meanwhile, so
   keep it quick and never wait on the game): read only the context and the mod's own state, safely across threads. Texts other than names are cut to 4,000 characters. A source that throws is reported once
   and dropped. With no source, text shows as before at the cost of one check per lookup; with one, a shown text costs one dictionary lookup
   after its first time. Engine API, not in the original.
+- **Building panel bars:** in `Register`, `registration.AddBuildingRows(context => bars)` adds bars to the medical-bars column of a selected
+  complete building, placed piece or piece of furniture, right under its Condition (and a farm's crop bars), drawn as the Condition bar is.
+  Each `UiBuildingRow` has a name on the bar, a fraction (0 to 1, clamped) for how full it is, a number-column value ("" none) and a tooltip
+  or null; texts are shown as given, put on one line and cut to 80 characters. At most 6 bars from all sources together, in registration
+  order. The source gets the same `UiBuildingContext` as the buttons and the same rules (host thread, possibly every frame, cheap, never
+  touches the world); bars show state and have no press. A source that throws, or returns a bar without a name, is logged once and dropped
+  for the session. Engine API, not in the original.
 - **Item tooltip lines:** in `Register`, `registration.AddItemTooltipLines(context => lines)` adds `UiItemTooltipLine`s (a label and an
   optional value) to an item's tooltip, after the game's own rows and before the record's description. The source gets `UiItemTooltipContext`:
   the item's record string id, name, code-mod tag (`ItemInstance.ModTag`, so a mod shows what it keeps on the item: a condition, rolled
@@ -1722,7 +1772,7 @@ holds refuses the second mod.
   `AiSystem.WeighsGoal(world, slot, type)` (the lists the chooser weighs: the role's list of the running package, the obeyed squad's
   slave list, the race's `AI Goals`, in the hour's window), or per squad `PopulationSystem.GoalDuty(world, squad, role, type)` (public, from
   `world.Systems`; the running package's role list in the hour's window, a campaign squad's phase package included) or `GoalsOf`, the role from
-  `AiSystem.RoleOf(squad, id, cold)`. Only the chooser moves them: a chooser goal of that type (below), which the chooser weighs against the
+  `AiSystem.RoleOf(world, squad, id, cold)` (a member standing in for a leader who is down takes the leader's). Only the chooser moves them: a chooser goal of that type (below), which the chooser weighs against the
   package's other goals, or an order (Ordering characters, below).
 - **Chooser goals and jobs** (`Meitou.Simulation.Ai`, [rules](simulation.md#engine-goals) "Code mods' goals"; **Observed**, by reading
   `ChooserRegistry`, `ModGoal`, `DutyGoals` and `AiSystem`): `AddGoalType(type, name)` and `AddJobType(type, name)` claim task type numbers from
@@ -1900,7 +1950,8 @@ holds refuses the second mod.
 ## Data mods
 
 Some shapes need no code: a race's anatomy of any length, extra or missing parts, and parts of a new type such as a tail are plain records
-([bodies of other shapes](game/character-stats.md#bodies-of-other-shapes-meitou)).
+([bodies of other shapes](game/character-stats.md#bodies-of-other-shapes-meitou)). A WEAPON of the unarmed `skill category` fights as fists with
+martial arts and is worn on the body's skeleton ([worn unarmed weapons](characters.md#worn-unarmed-weapons)).
 
 ## Fixed record ids
 
@@ -2021,6 +2072,23 @@ come back. Last, it runs the game without mods: if that differs too, the fault i
 - Harmony patches non-public members; compiling against them takes the [reference package](#reference-package)'s publicized set, or a
   publicizer package (BepInEx.AssemblyPublicizer.MSBuild with `Publicize="true"`) on a release folder's assemblies. Compatibility is per game
   version ([Why this shape](#why-this-shape)): public names change too, as after v0.17.1, and internals change without notice.
+
+### API compatibility
+
+- A public method or constructor that gains a parameter keeps its old signature as an overload forwarding to the new one. C# fills a default
+  in at the call site, so a mod's source still compiles against the new one while its built DLL asks for the old signature and throws
+  `MissingMethodException`. The old copy drops any defaults it had (both carrying them makes a short call ambiguous, CS0121); a positional
+  record keeps its old constructor and `Deconstruct`. A member whose old form cannot be forwarded (a changed type, a removed behaviour) is
+  removed on purpose.
+- The build checks the public surface of the four assemblies in the [reference package](#reference-package) (`Directory.Build.props`,
+  `Directory.Build.targets`): ApiCompat (`Microsoft.DotNet.ApiCompat.Task`) compares each against its reference assembly in the
+  `Meitou.References` of the release `MeitouApiBaseline` names, downloaded at restore, and fails on a public type or member that is gone. A
+  removal meant to stay is listed in that project's `CompatibilitySuppressions.xml`: `dotnet build -p:ApiCompatGenerateSuppressionFile=true`
+  rewrites the files, whose diff is the review; delete their `<Left>`/`<Right>` lines (the builder's paths), so an entry matches every
+  configuration and framework. **Verified** (2026-11-26, the `Meitou.References` 0.23.0 package against master): a member
+  replaced by a version with an added optional parameter (`Inventory.HasRoomFor(ItemInstance)`) is reported as removed (CP0002).
+- `MeitouApiBaseline` is the last full release: `release.yml` refuses a release while it names an older one. Raise it once a release's
+  package is on nuget.org and regenerate the suppression files.
 
 ## Platforms
 

@@ -1509,8 +1509,6 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
             squad.Money += price;
         }
 
-        string what = Units(units, item.ShownName());
-        world.Post(Loc.Tr(sell ? "{1} sold {2} for c.{3}" : "{1} bought {2} for c.{3}", world.ShownName(cold), what, price));
         _heldDeal = world.TradeObservers.Active ? new HeldDeal(c, t, sell, item.Record, units, price, buyback) : null;
         return receipt;
     }
@@ -1585,7 +1583,6 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
 
         world.Player.Money -= price;
         squad.Money += price;
-        world.Post(Loc.Tr("{1} bought {2} for c.{3}", world.ShownName(cold), Units(placed, item.ShownName()), price));
         ReportDeal(world, c, t, false, item.Record, placed, price, buyback);
     }
 
@@ -1721,7 +1718,6 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
 
         squad.Money -= price;
         world.Player.Money += price;
-        world.Post(Loc.Tr("{1} sold {2} for c.{3}", world.ShownName(cold), Units(placed, item.ShownName()), price));
         ReportDeal(world, c, t, true, item.Record, placed, price, buyback);
     }
 
@@ -1958,11 +1954,6 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         else item.Quantity -= units;
     }
 
-    /// <summary>
-    /// "N x name", or the name alone for one.
-    /// </summary>
-    static string Units(int n, string name) => n == 1 ? name : $"{n} x {name}";
-
     #endregion
 
     #region The trade view
@@ -2017,7 +2008,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
                 Charges = item.Charges,
                 MaxCharges = item.MaxCharges,
                 StolenFrom = stolen ? item.StolenFrom : -1,
-                StolenOwner = stolen ? world.ShownOwnerNameOf(item.Owner) : null,
+                StolenOwner = stolen ? world.ShownOwnerNameOf(item.Owner, ShownPlace.Tooltip) : null,
                 Unique = item.Unique,
                 FenceChance = odds is { } shown ? Math.Clamp(shown, 0, 1) : null,
                 FenceOdds = odds is < 1 ? Math.Max(odds.Value, 0) : null,
@@ -2031,7 +2022,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
             goodsOf[world.Characters.IdOf(seller)] = Goods(world.Characters.Cold(seller)!, item => View(item.Item, item.Index, true, seller));
 
         var held = HeldView(world, goodsOf, (item, sell, seller) => View(item, -1, sell, seller), c);
-        string name = world.ShownName(world.Characters.Cold(t)!);
+        string name = world.ShownName(world.Characters.Cold(t)!, ShownPlace.Window);
         return new TradeView(_customer, _trader, name, squad.Money, world.Player.Money, shop.Window.Width, shop.Window.Height, stock,
             goodsOf[_customer], shop.Terms.BuysStolen, shop.Terms.BuysIllegal)
         {

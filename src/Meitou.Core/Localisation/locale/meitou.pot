@@ -418,6 +418,10 @@ msgid "Adds a generated frame between rendered ones: nearly twice the frame rate
 msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
+msgid "Adds high altitude clouds to the skybox. From ImpulseSpecifix's Dynamic Skies."
+msgstr ""
+
+#: src/Meitou.Game/Settings/SettingHints.cs
 msgid "Adjust the blue shift of colours in low light."
 msgstr ""
 
@@ -477,6 +481,14 @@ msgstr ""
 msgid "Also keeps the surroundings of your other squads' members loaded, not only the squad on the squad bar. Costs more video memory."
 msgstr ""
 
+#: src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/SettingHints.cs
+msgid "Altocumulus amount"
+msgstr ""
+
+#: src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/SettingHints.cs
+msgid "Altocumulus density"
+msgstr ""
+
 #: src/Meitou.Game/SettingsMenu.cs
 msgid "Always on"
 msgstr ""
@@ -527,6 +539,10 @@ msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
 msgid "An animal in a cage or on a pole breathes, looks around and lies down when knocked out. In the game it stands frozen there, since the cage's poses are for people only."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "An item dragged out of a knocked-out or dead character's inventory onto the ground drops there, as a take from that character: it can be seen as theft, and a body whose meat or parts are dropped is butchered. In the game it goes back to the body."
 msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
@@ -913,7 +929,7 @@ msgstr ""
 msgid "Built into Meitou: {1}; this mod is not run"
 msgstr ""
 
-#: src/Meitou.Game/PlayerInterface.cs src/Meitou.Game/Title/FrontendScreens.cs src/Meitou.Game/Ui/StackSplitDialog.cs
+#: src/Meitou.Game/Building/RenameBuildingDialog.cs src/Meitou.Game/PlayerInterface.cs src/Meitou.Game/Title/FrontendScreens.cs src/Meitou.Game/Ui/StackSplitDialog.cs
 msgid "CANCEL"
 msgstr ""
 
@@ -1121,6 +1137,14 @@ msgstr ""
 msgid "Choose which parts of the scene appear in reflections."
 msgstr ""
 
+#: src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/SettingHints.cs
+msgid "Cirrus amount"
+msgstr ""
+
+#: src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/SettingHints.cs
+msgid "Cirrus density"
+msgstr ""
+
 #: src/Meitou.Game/Settings/GamePages.cs
 msgid "Clear cache"
 msgstr ""
@@ -1231,6 +1255,22 @@ msgstr ""
 
 #: src/Meitou.Game/Host/Photo/PhotoMode.cs
 msgid "Contrast"
+msgstr ""
+
+#: src/Meitou.Game/Settings/SettingHints.cs
+msgid "Controls the coverage of the thicker Altocumulus clouds."
+msgstr ""
+
+#: src/Meitou.Game/Settings/SettingHints.cs
+msgid "Controls the coverage of the thinner Cirrus clouds."
+msgstr ""
+
+#: src/Meitou.Game/Settings/SettingHints.cs
+msgid "Controls the density (thickness/visibility) of the Altocumulus clouds."
+msgstr ""
+
+#: src/Meitou.Game/Settings/SettingHints.cs
+msgid "Controls the density (thickness/visibility) of the Cirrus clouds."
 msgstr ""
 
 #: src/Meitou.Game/Ui/HudPanels.cs
@@ -1387,6 +1427,10 @@ msgstr ""
 
 #: src/Meitou.Game/SettingsMenu.cs
 msgid "Default settings restored."
+msgstr ""
+
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Deferred"
 msgstr ""
 
 #: launcher/Meitou.Launcher/GraphicsPage.cs launcher/Meitou.Launcher/MainWindow.axaml src/Meitou.Game/Settings/LookBar.cs
@@ -1579,6 +1623,10 @@ msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
 msgid "Draw the interface at the screen's size over a stretched picture (virtual Retina pixels, or a smaller render resolution), so it stays sharp. Off: it is drawn at the render size with the picture."
+msgstr ""
+
+#: src/Meitou.Game/Settings/GamePages.cs
+msgid "Drop from loot"
 msgstr ""
 
 #: src/Meitou.Game/Settings/GamePages.cs
@@ -1925,6 +1973,10 @@ msgstr ""
 msgid "For a window: on renders in its real pixels. Off renders in virtual Retina pixels, one per point (a quarter of the pixels on a 2x display) and stretches to the window. No effect on a display without Retina. Full screen has Render resolution."
 msgstr ""
 
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Forbidden"
+msgstr ""
+
 #: src/Meitou.Game/Host/Photo/PhotoMode.cs
 msgid "Forward"
 msgstr ""
@@ -2043,6 +2095,10 @@ msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
 msgid "Give orders and open menus (the game's right button)."
+msgstr ""
+
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Give the building a name of your own, shown on its panel, its inventory and the jobs that use it."
 msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
@@ -2229,6 +2285,10 @@ msgstr ""
 msgid "Hardware must be probed before submitting."
 msgstr ""
 
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Haulers and workers put things into the storage of the highest put priority first, the nearest among equals. Forbidden: never. Click to raise, right-click or Shift+click to lower."
+msgstr ""
+
 #: src/Meitou.Game/Ui/HudPanels.cs
 msgid "Hauling"
 msgstr ""
@@ -2301,8 +2361,12 @@ msgstr ""
 msgid "Hide other factions' hats"
 msgstr ""
 
-#: launcher/Meitou.Launcher/Benchmarks/BenchmarkTiers.cs src/Meitou.Data/Textures/TextureQuality.cs src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/GameplaySettings.cs src/Meitou.Game/Settings/LauncherSchema.cs src/Meitou.Game/Settings/QualityTiers.cs
+#: launcher/Meitou.Launcher/Benchmarks/BenchmarkTiers.cs src/Meitou.Data/Textures/TextureQuality.cs src/Meitou.Game/Building/BuildingSelection.cs src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/GameplaySettings.cs src/Meitou.Game/Settings/LauncherSchema.cs src/Meitou.Game/Settings/QualityTiers.cs
 msgid "High"
+msgstr ""
+
+#: src/Meitou.Game/Rendering/Frame/Enhancements.cs src/Meitou.Game/Settings/FeatureGrouping.cs src/Meitou.Game/Settings/LookPresets.cs src/Meitou.Game/Settings/SettingHints.cs src/Meitou.Game/SettingsMenu.cs
+msgid "High Altitude Clouds"
 msgstr ""
 
 #: src/Meitou.Game/Settings/LookPresets.cs
@@ -2315,6 +2379,10 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml.cs
 msgid "High: keeps the most textures, terrain and objects resident. Best on a 16 GB-or-larger Mac with other memory-heavy apps closed."
+msgstr ""
+
+#: src/Meitou.Game/Settings/SettingHints.cs
+msgid "Higher finds fainter and longer edges and costs more; Ultra also softens texture detail."
 msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs
@@ -2525,6 +2593,10 @@ msgstr ""
 msgid "Import this save into a new game? Unsaved progress will be lost."
 msgstr ""
 
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Important"
+msgstr ""
+
 #: src/Meitou.Game/Settings/LookPresets.cs src/Meitou.Game/SettingsMenu.cs
 msgid "Impostor"
 msgstr ""
@@ -2611,10 +2683,6 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml
 msgid "Install latest"
-msgstr ""
-
-#: launcher/Meitou.Launcher/Benchmarks/BenchmarkPage.cs
-msgid "Install the build to see all the benchmarks it has."
 msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml.cs
@@ -2861,6 +2929,10 @@ msgstr ""
 msgid "Leave fading tracks on the ground after walking through fresh blood."
 msgstr ""
 
+#: src/Meitou.Game/Building/RenameBuildingDialog.cs
+msgid "Leave it empty for the building's own name."
+msgstr ""
+
 #: src/Meitou.Game/Settings/GamePages.cs
 msgid "Leaves the hats and helmets of your characters out of the picture, so their faces and hair show; they stay worn and protect as before. Portraits only: in the interface's portraits. On: in the world too. Off: hats are drawn everywhere, as in the game."
 msgstr ""
@@ -3010,7 +3082,7 @@ msgstr ""
 msgid "Loot into backpack"
 msgstr ""
 
-#: launcher/Meitou.Launcher/Benchmarks/BenchmarkTiers.cs src/Meitou.Data/Textures/TextureQuality.cs src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/LauncherSchema.cs src/Meitou.Game/Settings/QualityTiers.cs
+#: launcher/Meitou.Launcher/Benchmarks/BenchmarkTiers.cs src/Meitou.Data/Textures/TextureQuality.cs src/Meitou.Game/Building/BuildingSelection.cs src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/LauncherSchema.cs src/Meitou.Game/Settings/QualityTiers.cs
 msgid "Low"
 msgstr ""
 
@@ -3370,6 +3442,10 @@ msgstr ""
 msgid "Mod list saved: {1} enabled."
 msgstr ""
 
+#: src/Meitou.Game/Ui/RecordModsText.cs
+msgid "Mod: {1}"
+msgstr ""
+
 #: src/Meitou.Game/Title/DataLoadErrors.cs
 msgid "Modifications to the GLOBAL_CONSTANTS will be lost, you'll have to set them again, sorry!"
 msgstr ""
@@ -3392,6 +3468,10 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/ModsFromSave.cs
 msgid "Mods of the save '{1}' applied."
+msgstr ""
+
+#: src/Meitou.Game/Ui/RecordModsText.cs
+msgid "Mods: {1}"
 msgstr ""
 
 #: src/Meitou.Game/Mods/ModReport.cs
@@ -3488,6 +3568,14 @@ msgstr ""
 
 #: src/Meitou.Game/Settings/ModsPage.cs
 msgid "Name A-Z"
+msgstr ""
+
+#: src/Meitou.Game/Settings/LauncherSchema.cs
+msgid "Native"
+msgstr ""
+
+#: src/Meitou.Game/Settings/LauncherSchema.cs
+msgid "Native AA"
 msgstr ""
 
 #: launcher/Meitou.Launcher/Benchmarks/BenchmarkPlatform.cs
@@ -4077,6 +4165,10 @@ msgstr ""
 msgid "Post FX"
 msgstr ""
 
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Preferred"
+msgstr ""
+
 #: launcher/Meitou.Launcher/MainWindow.axaml.cs
 msgid "Preset '{1}' applied."
 msgstr ""
@@ -4159,6 +4251,10 @@ msgstr ""
 
 #: src/Meitou.Game/Ui/ContextMenuWindow.cs
 msgid "Put on Shackles"
+msgstr ""
+
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Put priority:"
 msgstr ""
 
 #: src/Meitou.Game/Title/FrontendScreens.cs
@@ -4315,6 +4411,10 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml.cs
 msgid "Remove"
+msgstr ""
+
+#: src/Meitou.Game/Building/BuildingSelection.cs src/Meitou.Game/Building/RenameBuildingDialog.cs
+msgid "Rename"
 msgstr ""
 
 #: src/Meitou.Game/Settings/SettingHints.cs src/Meitou.Game/SettingsMenu.cs
@@ -4475,6 +4575,10 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml
 msgid "SETTINGS"
+msgstr ""
+
+#: src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/Settings/SettingHints.cs
+msgid "SMAA quality"
 msgstr ""
 
 #: src/Meitou.Game/SettingsMenu.cs
@@ -5289,8 +5393,16 @@ msgstr ""
 msgid "Take"
 msgstr ""
 
+#: src/Meitou.Game/Ui/ContextMenuWindow.cs
+msgid "Take off Shackles"
+msgstr ""
+
 #: src/Meitou.Game/Host/Photo/PhotoPanel.cs
 msgid "Take picture"
+msgstr ""
+
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Take priority:"
 msgstr ""
 
 #: launcher/Meitou.Launcher/MainWindow.axaml
@@ -5779,10 +5891,6 @@ msgstr ""
 
 #: src/Meitou.Game/Rendering/Frame/WorldFrame.cs src/Meitou.Game/SettingsMenu.cs
 msgid "Time speed"
-msgstr ""
-
-#: src/Meitou.Game/Ui/ProductionWindows.cs
-msgid "Time:"
 msgstr ""
 
 #: src/Meitou.Game/Host/Photo/PhotoMode.cs
@@ -6309,6 +6417,10 @@ msgstr ""
 msgid "Workers"
 msgstr ""
 
+#: src/Meitou.Game/Building/BuildingSelection.cs
+msgid "Workers and builders take things from the storage of the highest take priority first, the nearest among equals. Forbidden: never. Click to raise, right-click or Shift+click to lower."
+msgstr ""
+
 #: launcher/Meitou.Launcher/MainWindow.axaml.cs
 msgid "Workshop synchronised: {1} of {2} mods installed."
 msgstr ""
@@ -6369,6 +6481,10 @@ msgstr ""
 
 #: src/Meitou.Game/Rendering/Frame/Enhancements.cs
 msgid "against banding in smooth gradients; the game has none"
+msgstr ""
+
+#: src/Meitou.Game/Rendering/Frame/Enhancements.cs
+msgid "altocumulus and cirrus"
 msgstr ""
 
 #: src/Meitou.Game/Ui/MarkerImagePaths.cs
@@ -6896,6 +7012,10 @@ msgid "the game's shadows stop at the cascades' resolution, so small objects flo
 msgstr ""
 
 #: src/Meitou.Game/Rendering/Frame/Enhancements.cs
+msgid "the game's sky has only its one low cloud layer; Meitou can add altocumulus 10 km up and faint cirrus 26 km up that drift and change shape over time, bend down to a real horizon, glow at sunset after the land is dark and hide the stars at night; the lower clouds pass in front of them (Vulkan; docs/render-clouds.md \"High clouds\")"
+msgstr ""
+
+#: src/Meitou.Game/Rendering/Frame/Enhancements.cs
 msgid "the game's sun shadows come from cascaded maps, soft or blocky by their texels; Meitou traces a ray to the sun from every lit pixel at every distance, softened by the sun's real size, the same every frame: a shadow is as sharp as it is close to its caster, characters shadow themselves exactly and grass shadows the ground (needs a GPU with ray tracing and Indirect light; off by default)"
 msgstr ""
 
@@ -7001,10 +7121,6 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/Benchmarks/BenchmarkPage.cs
 msgid "{1} at {2}: run {3} of {4}, launch {5} of {6}"
-msgstr ""
-
-#: src/Meitou.Simulation/Trading/TradeSystem.cs
-msgid "{1} bought {2} for c.{3}"
 msgstr ""
 
 #: launcher/Meitou.Launcher/GraphicsPage.cs
@@ -7171,10 +7287,6 @@ msgstr ""
 
 #: launcher/Meitou.Launcher/Benchmarks/BenchmarkRunner.cs
 msgid "{1} skipped: this build has no such benchmark."
-msgstr ""
-
-#: src/Meitou.Simulation/Trading/TradeSystem.cs
-msgid "{1} sold {2} for c.{3}"
 msgstr ""
 
 #: src/Meitou.Game/Mods/GameMods.cs

@@ -73,6 +73,15 @@ public sealed class CharacterAnimation
     internal object? PlaysFor;
 
     /// <summary>
+    /// The clip lengths of this body (<see cref="AnimationLengths.ForPerson"/>), for the appearance <see cref="LengthsFor"/>.
+    /// </summary>
+    internal AnimationLengths? BodyLengths;
+    /// <summary>
+    /// The appearance <see cref="BodyLengths"/> was taken for; another appearance takes them again.
+    /// </summary>
+    internal object? LengthsFor;
+
+    /// <summary>
     /// Cycles per second the phase advances: written whenever the lower movement blend is picked (<b>Verified</b> <c>@ 14051d8e0</c>,
     /// <c>@ 14051d000</c>), kept while no such pick runs (standing out of combat, a technique): the legs go on stepping through their fade-out.
     /// </summary>
@@ -331,6 +340,18 @@ public sealed class AnimationSystem(
         ref sbyte known = ref a.Plays[index];
         if (known == 0) known = (sbyte)(Rigs.Plays(look, Library.Definitions[index].Name) ? 1 : -1);
         return known > 0;
+    }
+
+    /// <summary>
+    /// The clip lengths of a person's body: its linked animation files' clips before the base skeletons' (<see cref="AnimationLengths.ForPerson"/>),
+    /// as its rig plays them, so a looping clip's time wraps where the drawn clip ends. Kept per appearance. The one-shot ends (an action, a lift)
+    /// stay on <see cref="Lengths"/>, the table their timers in the combat and carry systems read.
+    /// </summary>
+    AnimationLengths LengthsOf(CharacterAnimation a, CharacterCold cold)
+    {
+        var look = cold.Appearance;
+        if (!ReferenceEquals(a.LengthsFor, look) || a.BodyLengths is null) (a.LengthsFor, a.BodyLengths) = (look, Lengths.ForPerson(look));
+        return a.BodyLengths;
     }
 
     /// <summary>
@@ -1122,7 +1143,7 @@ public sealed class AnimationSystem(
 
         if (Rigs is not null) DropUnplayable(a, cold, wanted, ref legs);
 
-        var root = Settle(a, wanted, legs, lift, liftTime, technique, fight, speed, dt, Lengths, 1, seed, key, tick, legsShare);
+        var root = Settle(a, wanted, legs, lift, liftTime, technique, fight, speed, dt, LengthsOf(a, cold), 1, seed, key, tick, legsShare);
         FinishPostures(a, cold);
         return root;
     }
@@ -1809,12 +1830,12 @@ public sealed class AnimationSystem(
 
     /// <summary>
     /// One tick of an animal's animation (docs/simulation.md "Animation", animals): its own clips only. Moving, the movement clips of its list by
-    /// speed (unsynched: F x <c>play speed</c> x v clip seconds per second, F = 1 / its size: the humanoid F = (2 - H) / g with H = 1 and g the size,
-    /// an <b>engine reading</b>); standing (in a fight too), one of its idles; a creature technique the combat system plays, over everything; down,
-    /// its <c>gotosleep</c> once, then <c>sleep</c> (or the fall's last frame held); no hit reactions (no animal record has <c>stumbles</c>) and no
-    /// getting up (none exists: it fades back to standing). Standing in a job's clip (a spider eating a body), its own clip of that name.
-    /// Root motion of an attack is scaled by the size. F and the movement clips' speeds follow the live size, so an animal that ages (or is set
-    /// by <c>animalage</c>) plays slower and takes its run at a higher speed as it grows.
+    /// speed (unsynched: F x <c>play speed</c> x v clip seconds per second, F = 1 / its size: the humanoid F = (2 - H) / g with H = 1 and g the
+    /// size, an <b>engine reading</b>); standing (in a fight too), one of its idles; a creature technique the combat system plays, over everything;
+    /// down or asleep on the ground, its <c>gotosleep</c> once, then <c>sleep</c> (or the fall's last frame held); no hit reactions (no animal
+    /// record has <c>stumbles</c>) and no getting up (none exists: it fades back to standing). Standing in a job's clip (a spider eating a body),
+    /// its own clip of that name. Root motion of an attack is scaled by the size. F and the movement clips' speeds follow the live size, so an
+    /// animal that ages (or is set by <c>animalage</c>) plays slower and takes its run at a higher speed as it grows.
     /// </summary>
     Vector2 UpdateAnimal(CharacterAnimation a, CharacterCold cold, AnimalPlan plan, float speed, float dt, ulong seed, ulong key, long tick,
         List<(int Index, float Weight)> wanted, in CombatView fight, RagdollView ragdoll, CharacterTask task)
@@ -1826,14 +1847,18 @@ public sealed class AnimationSystem(
         bool down = cold.Medical?.Incapacitated ?? false;
         bool caged = cold.InSomething == Locks.HeldState.Imprisoned;
 
+        // Asleep on the ground it lies as a downed one does, its fall once and then its lying clip: Task_SleepOnFloor names the sleeponfloor
+        // records (FUN_140348170, Verified), a Skimmer's its burrowed sleep.
+        bool lies = down || !carried && task == CharacterTask.Rest && cold.Ai?.Behaviour == Ai.AiBehaviour.Sleep;
+
         // Held in a cage or on a pole, an animal is left as it is: the original shows a still frame there, no idle and no fall
         // (docs/game/locks.md "Cages and beds"). With the fix it stands in its idles, or lies down at once while down (the fixture refuses the
         // ragdoll).
         if (caged && !_cagedAnimalFix) return Vector2.Zero;
         if (!caged && HoldsForRagdoll(a, down, carried, ragdoll)) return Vector2.Zero;
-        if (down && !a.WasDown && !carried && !ragdoll.Has && !caged) StartAction(a, plan.Fall, false);
-        if (carried || !down || caged) a.Action = -1;   // the fall is an animal's only one-shot clip
-        a.WasDown = down;
+        if (lies && !a.WasDown && !carried && !ragdoll.Has && !caged) StartAction(a, plan.Fall, false);
+        if (carried || !lies || caged) a.Action = -1;   // the fall is an animal's only one-shot clip
+        a.WasDown = lies;
         if (caged) speed = 0;
         int technique = down || caged ? -1 : fight.Technique;
         if (a.Action >= 0)
@@ -1845,7 +1870,7 @@ public sealed class AnimationSystem(
         wanted.Clear();
         float v = MathF.Abs(speed);
         if (a.Action >= 0) wanted.Add((a.Action, 1));
-        else if (down && plan.Lying >= 0)
+        else if (lies && plan.Lying >= 0 && (down || technique < 0))
         {
             wanted.Add((plan.Lying, 1));
             a.Idle = -1;

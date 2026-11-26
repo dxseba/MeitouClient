@@ -105,6 +105,16 @@ public enum SoundKind : byte
     /// same wherever the camera is.
     /// </summary>
     PostedInterface,
+    /// <summary>
+    /// The player took open shackles off one of its characters: the interface's <c>Item_Drop</c> with <c>Inventory_Items</c> of
+    /// <see cref="SoundEvent.Item"/> (the exe's drag out of the slot into the inventory grid).
+    /// </summary>
+    ShacklesOff,
+    /// <summary>
+    /// A melee blow beat the victim's whole squad (<c>FUN_1404394f0</c>): an animal striker's <c>VO_Creature_Victory</c>;
+    /// <see cref="SoundEvent.Subject"/> is the striker, <see cref="SoundEvent.Other"/> the victim.
+    /// </summary>
+    Victory,
 }
 
 /// <summary>
@@ -245,6 +255,36 @@ public readonly record struct SoundEvent(SoundKind Kind, CharacterId Subject, Ch
     /// A code mod's handle on its event (<see cref="SoundHandle.Bind"/>); null for the game's own kinds.
     /// </summary>
     public SoundHandle? Handle { get; init; }
+
+    /// <summary>
+    /// The signature before <c>ShootSound</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public SoundEvent(
+        SoundKind kind, CharacterId subject, CharacterId other, Vector3 position, bool heavy, bool attackerUnarmed, bool attackerRobot, bool armoured,
+        bool fatal, string? item, int armour)
+        : this(kind, subject, other, position, heavy, attackerUnarmed, attackerRobot, armoured, fatal, item, armour, 3)
+    {
+    }
+
+    /// <summary>
+    /// The signature before <c>ShootSound</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void Deconstruct(
+        out SoundKind kind, out CharacterId subject, out CharacterId other, out Vector3 position, out bool heavy, out bool attackerUnarmed,
+        out bool attackerRobot, out bool armoured, out bool fatal, out string? item, out int armour)
+    {
+        kind = Kind;
+        subject = Subject;
+        other = Other;
+        position = Position;
+        heavy = Heavy;
+        attackerUnarmed = AttackerUnarmed;
+        attackerRobot = AttackerRobot;
+        armoured = Armoured;
+        fatal = Fatal;
+        item = Item;
+        armour = Armour;
+    }
 }
 
 /// <summary>

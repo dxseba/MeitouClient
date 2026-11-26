@@ -446,6 +446,12 @@ public sealed class CharacterAppearance
     public int HiddenParts { get; private set; }
 
     /// <summary>
+    /// The hands whose body vertices are hidden, bit 0 the left and bit 1 the right: both when a worn unarmed weapon's <c>hide hands</c> is
+    /// true (engine extension, docs/characters.md "Worn unarmed weapons").
+    /// </summary>
+    public int HiddenHands { get; private set; }
+
+    /// <summary>
     /// The head is shaven: no hair, and a mesh with <c>bone_horns_top_short</c> has its horns cut (<see cref="CharacterOptions.Shaved"/>, else the
     /// CHARACTER's <c>shaved</c>).
     /// </summary>
@@ -1096,6 +1102,12 @@ public sealed class CharacterAppearance
     void AddWeapon(GameRecord weapon, bool female, string slot, bool drawn, int backCount, GameRecord? model = null, bool both = false,
             bool back = false)
     {
+        if (IsWornWeapon(weapon))
+        {
+            AddWornWeapon(weapon, female, model);
+            return;
+        }
+
         if (slot == "back" && backCount > 0) slot = "back2";
         string Field(string f) => f == "mesh" && female && weapon.GetPath("mesh female").Length > 0 ? "mesh female" : f;
         bool bare = weapon.GetPath("bare sword").Length > 0;
@@ -1129,6 +1141,38 @@ public sealed class CharacterAppearance
             Shown = !(both && bare) ? WeaponShown.Always : back ? WeaponShown.BackSheathed : WeaponShown.Sheathed,
             Local = local
         });
+    }
+
+    /// <summary>
+    /// Whether a WEAPON is worn on the body instead of hung and drawn (engine extension, docs/characters.md "Worn unarmed weapons"): one of the
+    /// unarmed <c>skill category</c>, which a fight uses as fists and so never draws.
+    /// </summary>
+    public static bool IsWornWeapon(GameRecord weapon) =>
+        weapon.Type == FcsRecordType.Weapon && Gameplay.Combat.WeaponData.IsUnarmedRecord(weapon);
+
+    /// <summary>
+    /// A worn unarmed weapon (<see cref="IsWornWeapon"/>): its <c>mesh</c> (by gender) skinned to the body's skeleton like armour, shown whether
+    /// the character fights or not, in its grade's model; with <c>hide hands</c>, the body's hands are hidden (<see cref="HiddenHands"/>).
+    /// </summary>
+    void AddWornWeapon(GameRecord weapon, bool female, GameRecord? model)
+    {
+        string field = female && weapon.GetPath("mesh female").Length > 0 ? "mesh female" : "mesh";
+        if (weapon.GetPath(field) is not { Length: > 0 } mesh)
+        {
+            Notes.Add($"'{weapon.Name}' has no mesh");
+            return;
+        }
+
+        Parts.Add(new CharacterPart
+        {
+            Record = weapon,
+            Mesh = mesh,
+            Field = field,
+            Mode = AttachMode.SharedSkeleton,
+            Slot = AttachSlot.Weapon,
+            Material = model,
+        });
+        if (weapon.GetBool("hide hands")) HiddenHands = 3;
     }
 
     /// <summary>
@@ -1249,6 +1293,7 @@ public sealed class CharacterAppearance
             HairColour = HairColour,
             HiddenLimbs = HiddenLimbs,
             HiddenParts = HiddenParts,
+            HiddenHands = HiddenHands,
             Headless = Headless,
         };
         copy.Parts.AddRange(Parts);
@@ -1378,13 +1423,20 @@ public sealed class CharacterAppearance
 
     /// <summary>
     /// Hair colour: body file sliders <c>Hair Colour</c>, <c>Hair Saturation</c>, <c>Hair Brightness</c> (each × 0.01) as
-    /// hue, saturation, brightness (Ogre's ColourValue::setHSB). Without a body file: the race's likeliest
-    /// <c>hair colors</c> COLOR_DATA <c>color 1</c> (viewer choice; the game's randomiser was not traced).
+    /// hue, saturation, brightness (Ogre's ColourValue::setHSB), a slider the file lacks at the default appearance's 50 (a legacy body has no
+    /// <c>Hair Colour</c>). Without a body file: the race's likeliest <c>hair colors</c> COLOR_DATA <c>color 1</c> (viewer choice; the game's
+    /// randomiser was not traced).
     /// </summary>
     static Vector3 HairColourOf(GameDatabase db, GameRecord race, AppearanceFile? body, Random? random)
     {
-        if (body is not null && body.Floats.ContainsKey("Hair Colour"))
-            return FromHsb(body.Get("Hair Colour") * 0.01f, body.Get("Hair Saturation") * 0.01f, body.Get("Hair Brightness") * 0.01f);
+        // The game lays a body file over a default appearance (FUN_140072c50) whose three hair sliders are 50.
+        const float defaultSlider = 50;
+        if (body is not null)
+        {
+            float hue = body.Get("Hair Colour", defaultSlider) * 0.01f;
+            return FromHsb(hue, body.Get("Hair Saturation", defaultSlider) * 0.01f, body.Get("Hair Brightness", defaultSlider) * 0.01f);
+        }
+
         var colours = race.GetReferences("hair colors").Select(r => (Item: db.Find(r.TargetStringId),
                 Weight: r.Values.Value0)).Where(c => c.Item is not null).ToList();
         if (colours.Count == 0) return new Vector3(0.3f, 0.22f, 0.15f);

@@ -75,14 +75,15 @@ public sealed class PickUps : ITaskHandler, IOrderOwner
 
     /// <summary>
     /// The act-out a pick-up or a container's opening works in where the character stands (<see cref="CharacterTask.Idle"/>) is done once the
-    /// item is taken or the container opened.
+    /// item is taken, or the container opened and its window closed again (the pause, <see cref="InventoryPause"/>).
     /// </summary>
     bool ITaskHandler.Done(World world, int slot, CharacterTask task)
     {
         var table = world.Characters;
         if (table.Next[slot].Task != (byte)task) return true;
         return task == CharacterTask.Idle && table.Cold(slot)!.PickingUpItem is null
-                && !(world.Player.OpeningContainer is not null && world.Player.ContainerWalker == table.IdOf(slot));
+                && !(world.Player.OpeningContainer is not null && world.Player.ContainerWalker == table.IdOf(slot))
+                && !(world.Player.OpenContainer is { } open && ContainerAccess.Holds(world, slot, open));
     }
 
     /// <summary>
@@ -266,7 +267,7 @@ public sealed class PickUps : ITaskHandler, IOrderOwner
 
                 // The notice is for the player's own characters (engine choice): an NPC or animal whose goal keeps trying an item it has no
                 // room for (ground food, a weapon while unarmed) would post it at every try (#683).
-                if (c.IsPlayer) world.Post($"{world.ShownName(c)}: Not enough room in my inventory");
+                if (c.IsPlayer) world.Post($"{world.ShownName(c, ShownPlace.Notice)}: Not enough room in my inventory");
             }
         }
     }

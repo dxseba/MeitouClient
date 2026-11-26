@@ -229,6 +229,7 @@ public sealed partial class World : IDisposable
         GameHours = settings.StartHours;
         Walkability = walkability;
         LastingIds = new LastingIds(this);
+        CharacterTags = new CharacterTags(this);
         SaveFields = new Saving.CharacterSaveFields(this);
         this._systems = [.. systems ?? []];
         foreach (var system in this._systems) ModFaults.Add(system);
@@ -252,6 +253,7 @@ public sealed partial class World : IDisposable
             ArmourFilters.Register(this._systems[k], k);
             CombatDefenceObservers.Register(this._systems[k], k);
             StorageFilters.Register(this._systems[k], k);
+            StoragePriorities.Register(this._systems[k], k);
             ItemUseObservers.Register(this._systems[k], k);
             GoodsTakenObservers.Register(this._systems[k], k);
             TownSwitchObservers.Register(this._systems[k], k);
@@ -530,6 +532,11 @@ public sealed partial class World : IDisposable
     /// </summary>
     public bool TakeIntoBackpack { get; set; }
     /// <summary>
+    /// An item dragged out of a non-player character's open loot window onto the ground drops there, as a take from that character (Advanced
+    /// settings, Meitou, on by default); off, it goes back, as in the game (docs/game/ui-screens.md "Over no window").
+    /// </summary>
+    public bool DropFromLoot { get; set; } = true;
+    /// <summary>
     /// The player: faction, money, selection.
     /// </summary>
     public PlayerState Player { get; } = new();
@@ -585,6 +592,11 @@ public sealed partial class World : IDisposable
     /// The systems asked about a storage the game picks for a character (<see cref="Items.IStorageFilter"/>).
     /// </summary>
     internal Items.StorageFilters StorageFilters { get; } = new();
+
+    /// <summary>
+    /// The systems asked how much a character prefers a storage the game picks for it (<see cref="Items.IStoragePriority"/>).
+    /// </summary>
+    internal Items.StoragePriorities StoragePriorities { get; } = new();
     /// <summary>
     /// The systems observing changed faction relations (<see cref="IRelationChangeObserver"/>).
     /// </summary>
@@ -684,9 +696,17 @@ public sealed partial class World : IDisposable
     /// </summary>
     public UniqueCharacters Uniques { get; } = new();
     /// <summary>
+    /// BFrizz's Extra Extensions variables, as lines and the save set them (docs/game/dialogue.md "Variables").
+    /// </summary>
+    public WorldVariables Variables { get; } = new();
+    /// <summary>
     /// The characters' lasting ids, which code mods key their data per character by (docs/modding.md "Character ids").
     /// </summary>
     public LastingIds LastingIds { get; }
+    /// <summary>
+    /// The code mods' tags on characters, one per mod, kept by lasting id (docs/modding.md "Character tags").
+    /// </summary>
+    public CharacterTags CharacterTags { get; }
     /// <summary>
     /// The code mods' per-character fields in the vanilla save (docs/modding.md "Character save fields").
     /// </summary>
@@ -782,11 +802,44 @@ public sealed partial class World : IDisposable
     internal void ParallelFor(int count, Action<int> body) => _pool.ForEach(count, body);
 
     /// <summary>
-    /// Whether the storage filters let <paramref name="who"/> use <paramref name="storage"/> for <paramref name="record"/> (null: not one item,
-    /// such as any food); true without a filter. Thread-safe, for the game's own storage searches.
+    /// Whether <paramref name="who"/> may use <paramref name="storage"/> for <paramref name="record"/> (null: not one item, such as any food): the
+    /// storage filters allow it and no priority system forbids it; true without either. Thread-safe, for the game's own storage searches.
     /// </summary>
     internal bool StorageAllows(CharacterCold who, string storage, Items.StorageUse use, string? record) =>
-        !StorageFilters.Active || StorageFilters.Allows(this, who.Id, storage, use, record);
+        StorageRank(who.Id, storage, use, record) != Items.StoragePriority.Forbidden;
+
+    /// <summary>
+    /// How much <paramref name="who"/> prefers <paramref name="storage"/> for <paramref name="record"/> (null: not one item) when the game picks a
+    /// storage for it: <see cref="Items.StoragePriority.Forbidden"/> when a storage filter refuses it (<see cref="Items.IStorageFilter"/>) or the
+    /// storage's own setting or a priority system forbids it; else the storage's own setting on its panel (<see cref="Production.Machine.PutPriority"/>,
+    /// <see cref="Production.Machine.TakePriority"/>) unless Normal, then the priority systems' answer (<see cref="Items.IStoragePriority"/>), Normal
+    /// without one. Thread-safe;
+    /// a mod ranks its own storage picks with it as the game's searches do (docs/modding.md "Storage priority").
+    /// </summary>
+    public Items.StoragePriority StorageRank(CharacterId who, string storage, Items.StorageUse use, string? record)
+    {
+        if (StorageFilters.Active && !StorageFilters.Allows(this, who, storage, use, record)) return Items.StoragePriority.Forbidden;
+
+        var own = Machines.AnyStoragePriority && Machines.Find(storage) is { } m ? m.PriorityFor(use) : Items.StoragePriority.Normal;
+        if (own == Items.StoragePriority.Forbidden) return own;
+
+        var modded = StoragePriorities.Of(this, who, storage, use, record);
+        return modded == Items.StoragePriority.Forbidden || own == Items.StoragePriority.Normal ? modded : own;
+    }
+
+    /// <summary>
+    /// <see cref="StorageRank(CharacterId, string, Items.StorageUse, string?)"/> for a character's cold record, the game's own searches' form.
+    /// </summary>
+    internal Items.StoragePriority StorageRank(CharacterCold who, string storage, Items.StorageUse use, string? record) =>
+        StorageRank(who.Id, storage, use, record);
+
+    /// <summary>
+    /// Whether a storage farther than the best a search has found could still outrank it: a priority system is registered or a storage has a
+    /// priority of its own, and the best is below <see cref="Items.StoragePriority.Critical"/>. Without either a search keeps the original's
+    /// nearest-first shortcuts.
+    /// </summary>
+    internal bool StorageMayOutrank(Items.StoragePriority best) =>
+        (StoragePriorities.Active || Machines.AnyStoragePriority) && best < Items.StoragePriority.Critical;
 
     /// <summary>
     /// Game seconds per game hour (docs/game/game-loop.md "The clock", Verified; the engine's <c>GameClock</c> has the same).
@@ -926,6 +979,7 @@ public sealed partial class World : IDisposable
         ArmourFilters.Register(system, _systems.Count - 1);
         CombatDefenceObservers.Register(system, _systems.Count - 1);
         StorageFilters.Register(system, _systems.Count - 1);
+        StoragePriorities.Register(system, _systems.Count - 1);
         ItemUseObservers.Register(system, _systems.Count - 1);
         GoodsTakenObservers.Register(system, _systems.Count - 1);
         TownSwitchObservers.Register(system, _systems.Count - 1);
@@ -1102,6 +1156,11 @@ public sealed partial class World : IDisposable
 
         prof?.Lap(TickProfile.Publish);
     }
+
+    /// <summary>
+    /// The signature before <c>views</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void RunTick(bool publish) => RunTick(publish, true);
 
     /// <summary>
     /// Phase 1: the due commands, then each system's inputs.
@@ -1545,8 +1604,14 @@ public sealed partial class World : IDisposable
         // only once a mod asked for a character id or a save held some
         ("lasting ids", static (World w, ref StateHasher h) => { if (w.LastingIds.Any) w.LastingIds.Hash(ref h); }),
 
+        // only once a mod set a character tag or a save held some
+        ("character tags", static (World w, ref StateHasher h) => { if (w.CharacterTags.Any) w.CharacterTags.Hash(ref h); }),
+
         // only once a code mod set a character save field
         ("save fields", static (World w, ref StateHasher h) => { if (w.SaveFields.Any) w.SaveFields.Hash(ref h); }),
+
+        // only once a variable was set
+        ("variables", static (World w, ref StateHasher h) => { if (w.Variables.Count > 0) w.Variables.Hash(ref h); }),
 
         // only while a code mod's world state has a value
         ("mod states", static (World w, ref StateHasher h) => w.HashModStates(ref h)),
@@ -1622,6 +1687,7 @@ public sealed partial class World : IDisposable
         ArmourFilters.HashFaults(ref h);
         CombatDefenceObservers.HashFaults(ref h);
         StorageFilters.HashFaults(ref h);
+        StoragePriorities.HashFaults(ref h);
         ItemUseObservers.HashFaults(ref h);
         GoodsTakenObservers.HashFaults(ref h);
         TownSwitchObservers.HashFaults(ref h);

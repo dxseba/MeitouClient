@@ -340,7 +340,7 @@ to Jobs; the saved `chase mode` flag is that switch (**Verified**, [perma-jobs](
     at the top (align 8), same box. Meitou (`ProgressLine`): the bar over the line's row with the text centred, from a manned turret's gun (No Power!: a power consumer
     whose machine has no power) else the crossbow (`CombatSystem.RangedLineOf`); defensive `Defensive`, "In defensive combat mode the character will not even try to attack, focusing entirely on defense for a +20 skill bonus."; else
     `Normal` (no tooltip). The weather notice also shows here ([weather](../formats/weather.md), **Observed**). Meitou: all of them;
-    `Goal:` the AI goal package's name, else Aimless (Meitou: a fleeing NPC, whatever started the run, shows "Running away", 35's name; else when the AI is not running the character, its movement task's name, e.g. Moving, Attacking, else Aimless), tooltip "Current goal of this character."; `Encumbrance:` (int)((1 - f) × 100) "%" with f the encumbrance factor in 0..1, Bad from 50 %.
+    `Goal:` the name of the goal the AI chose (AI `+0x1c0`, set by the goal scorer `FUN_14050df10`; read by `FUN_14050f3c0`, **Verified** decompile), not its running plan step, so a sleeper whose goal is 153 reads Going to bed while it lies in bed; else Aimless (Meitou: a fleeing NPC, whatever started the run, shows "Running away", 35's name; else when the AI is not running the character, its movement task's name, e.g. Moving, Attacking, else Aimless), tooltip "Current goal of this character."; `Encumbrance:` (int)((1 - f) × 100) "%" with f the encumbrance factor in 0..1, Bad from 50 %.
     Its row tooltip (**Verified**, decompile): Title `Encumbrance:` | Title the percent (Bad from 50 %) and ` (word)`, the burden word as the inventory's (Weightless, Lightweight, then Moderate, Heavy, Overloaded with their own Title tag; dead: Dead);
     `Athletics XP:` and `Strength XP:` as the extended lines; `Run Speed Penalty:` and `Stealth Penalty:` both the percent. Meitou: one leading tag per text (the word takes the percent's colour); the XP rows only where the extended stats are known.
     Then, alive, the "Current Skill" line (**Verified**: decompile of the HUD update `1405d4260` panel 3, 2026-10-26; vanilla screenshot "Labouring 1" while operating a machine):
@@ -522,7 +522,9 @@ to Jobs; the saved `chase mode` flag is that switch (**Verified**, [perma-jobs](
   **Verified** in `Kenshi_MainPanel.layout`; its frame is invisible and disabled and the exe never names `BehaviorSlider`: dead layout, **Verified** by byte search) and a jobs list ([ai.md](ai.md#packages-and-goals)) with the hint "To add jobs, hold shift key when
   giving an order". Jobs list (`JobsPanel`, an ItemBox of class `OrdersItemBox`): "assigned player jobs and
   orders for the selected character"; each row has an X that removes the job, top rows take priority and rows can be dragged to reorder (tutorial strings,
-  **Verified** in the exe). Its rows are the job list alone (`+0x88`, count `+0x90`, through `FUN_1405c8f30` / `FUN_1405c8f10`, **Verified** `FUN_1407263b0`): neither the order
+  **Verified** in the exe). While a row is dragged, the ItemBox draws its cell again under the pointer on its drag layer, keeping where it was taken, and the row
+  stays in the list (MyGUI `ItemBox::updateDropItems`; the cell's update `FUN_140723ee0` sets only the text and the alpha, so the copy looks like
+  the row; **Verified**). Meitou: `OrdersPanel.AddJobDrag`. Its rows are the job list alone (`+0x88`, count `+0x90`, through `FUN_1405c8f30` / `FUN_1405c8f10`, **Verified** `FUN_1407263b0`): neither the order
   queue nor the second list is shown. Empty, `JobsPanelInfo` shows "[No jobs assigned]" and the hint. Rows (**Verified**, `FUN_14072b540`, `FUN_1407263b0`,
   `FUN_140724cb0`, `FUN_140729d50`, `FUN_140723ee0`): an `OrderCellView` of `Kenshi_OrdersPanelOrder.layout` (300 × 20: a `Kenshi_ConnectBarSkin` bar,
   `OrderText` `Kenshi_TextboxStandardText` 10 px in and 35 px short of the right, `RemoveButton` `Kenshi_Button1` 30 px wide at the right, red "X"), int(24 ×
@@ -586,6 +588,8 @@ the next (**Observed**: the delegate's body is not read). Nothing new comes up w
 sits above another one instead.
 
 Meitou (`MessageRoller`, both UI modes): its own notices (Saved, Loaded, errors) share the queue, errors in `Bad` red; always at the HUD's spot; real-time timers.
+A sale or purchase posts no message (**Verified**: neither 1.0.68's `kenshi_x64.exe` nor its interface catalog `locale/en_GB/LC_MESSAGES/main.pot`
+holds a "sold"/"bought" line; their only "for c." text is the building purchase prompt).
 
 ### Dialogue log
 
@@ -694,6 +698,13 @@ How a building gets selected: [ui-input](ui-input.md#building-picking-and-select
     function 19 is not among them); its members are ordered GO_HOMEBUILDING (19) on the new home, or with no home found PATROL (22) and the platoon's
     +0x115 (`persistent`) set to 0 (`FUN_1407ebdd0`), each order with the clear flag (**Verified**, disassembly; [order givers](ai-tasks.md#order-givers)); `FUN_14038a720` and `FUN_1404d2dd0` with the building;
     "Building purchased!". Meitou: [house purchases](../simulation.md#town-house-purchases).
+  - Meitou's addition, not in the original: a complete storage of the player's gets `Put priority:` and `Take priority:` buttons (width 0.4)
+    naming its [storage priority](../modding.md) level (Forbidden in BadBright, above Normal in Good); a click raises the level, a right-click
+    or Shift+click lowers it, each wrapping (`General_Click`; `SetStoragePriority`).
+  - Meitou's addition, not in the original: a building the player built gets a `Rename` button (Main) after Dismantle. It opens the message box
+    titled RENAME with a text box (at most 40 characters) holding the building's name; RENAME sends `RenameSite`, Cancel or Esc changes nothing.
+    The name, trimmed and without control characters, replaces the record's name in the panel title, the context menu and inventory titles and
+    the job list (`Hauling to: <name>`); an empty one gives back the record's name. Saved as [`meitou custom name`](../formats/save.md).
   - 4 is the medical panel's section (**Observed**: `MedicalDatapanel`'s constructor `FUN_140726a70` passes 4 to `FUN_1406fd7d0`; it finds the
     `LifeBarN` widgets and their `Value`, `Yellow`, `Green`, `White`, `Datapanel`, `Tooltip`, `Robot` and `Crushed` children (and one more whose name string was not read), and `HealthText`). The
     header word is slot 114 (`FUN_1402fe040`: Normal / Broken / Under construction with a tooltip); the rows slot 115 (`FUN_140302380`): `Condition`, or
@@ -1206,12 +1217,25 @@ Overview tab 2 (`ResearchTab`), part of `ManagementScreen` (constructor `FUN_140
 
 ### Craft tab
 
-Overview tab 3 (`CraftingQueue`, constructor `FUN_1402bf0f0`; Meitou: `ProductionWindows`; the rules are in [buildings-production](buildings-production.md#crafting)). A layout with a
+Overview tab 3 (`CraftingQueue`, constructor `FUN_1402bf0f0`; Meitou: `ProductionWindows`; the rules are in [buildings-production](buildings-production.md#crafting)). STATIONS
+(`CraftingStationsList`, filled by `FUN_1402bed80`) lists every loaded building of functionality 6 (crafting) whose faction is the player's or an ally of it
+(`FUN_140a00690` over all towns with the player's faction, `FUN_1406b2630`: the same faction or relation 50 or more), each by its name (**Verified**,
+decompile); a town bench of any other faction is not listed. Meitou: `ProductionSystem.CraftStationsView` (#1445). A layout with a
 `QueuePanel` (older ones, e.g. the Dark UI mod's, which have no `CraftQueue`) gets a `CraftQueue` ItemBox created inside it, skin `Kenshi_ItemBoxEmpty`, align
 stretch; the research tab does the same with `ResearchQueueList` in `ResearchQueuePanel` (`FUN_14049f5b0`) (**Verified**, decompile; Meitou: `QueueBox`, #463). The skin `Kenshi_ItemBoxEmpty` (`gui/templates/kenshi_templates.xml`) gives the box a `VScroll` 15 wide (`Kenshi_ScrollBarV`), so a queue taller than the box scrolls (**Observed**, the template); Meitou: `QueueView` draws that bar when the queue overflows and scrolls the rows with its arrows, track, thumb and the wheel (#1224). `CraftQueue` is an
 ItemBox of the bench's queue (building `+0x498` deque, filled by `FUN_1402b5ca0`, the ITEMS click `FUN_1402b9770` and the save loader); its tooltip callback `FUN_1402be650` sets the hovered index
 and calls `FUN_1402bcf60`, which writes into `QueueDescriptionPanel2` (the ingredients and the item's own tooltip rows come from `FUN_1402b6b40`, Panel 1 and 2). A hovered ITEMS row
-has a different description, `FUN_1402b79b0` ("Estimated Craft Time:", "-Materials Cost:", "-Fabrics Cost:"; **Verified** strings; Meitou's option description is not that).
+has a different description, `FUN_1402b79b0` (`mouseOverCraftList`, **Verified**, decompile 2026-11-24):
+- It makes the item the row crafts with the item factory (`FUN_140580750`): armour at the quality `FUN_14082e6b0` gives level 40 with no critical (Standard),
+  everything else at 0; a weapon of the row's model (user strings `id` / `id2`, the `PLAYER_WEAPONS` manufacturer). Panel 2 gets `Estimated Craft Time:` (the
+  item's hours, vfunc `0x328`, truncated; "{1,num} hr" / "{1,num} hrs"), then for armour (type 3) `-Materials Cost:` (`FUN_1402b7800`: `total coverage` x 0.01)
+  and `-Fabrics Cost:` (that x `fabrics amount`), for a weapon (type 2) `-Materials Costs:` (`material cost`). `FUN_1402b6b40` (item, true) then writes the
+  item's first tooltip rows (vfunc `0x278`; armour and type 15 drop the fourth) and an `Ingredients` row listing each ingredient " x{1,num}" to Panel 1 and,
+  unless the item is a weapon, its second tooltip rows (vfunc `0x280`) to Panel 2; the item is then destroyed. No smith rows.
+- Meitou (`ProductionWindows.OptionDescription`, the product from `CraftOptionView.Product`): Panel 1 takes the item tooltip's rows up to its weight, the
+  row's level and the inputs one per line; Panel 2 the rest of the tooltip without its paragraphs. Meitou's additions: while the bench has a smith,
+  armour, crossbows and robotic limbs show at the quality he makes (with his `-Predicted Result:` grade), and `-Critical Success Chance:` for the row's
+  level; a locked row reads "Needs research" in Bad.
 - **Queue entry description** (`FUN_1402bcf60`, **Verified** unless marked): `State:` "In production..." and, by the bench's status (building `+0x468`), a second `State:` row in Bad: 0 "Out of resources",
   1 "Output full", 3 "Upgrade required" (any other status adds none). An entry whose bench hand (entry `+0x18`, copied from the building in `FUN_1402b5ca0`) is null reads `State:`
   "Not assigned to a craft bench" in Bad instead and skips the status row; Meitou's entries always have a bench, so it never shows. Status 3 is set by `FUN_1402b5680` for an empty queue, or for a
@@ -1314,7 +1338,12 @@ unless marked; Meitou: `SquadPanel`, commands in `SquadManagement`.
     with a buy-back receipt, a stack of the kind takes what it has room for (a full one nothing) and a kind that does not stack is swapped.
   - Over no window (`FUN_1407136a0`): a character picked under the pointer other than the source owner is given the item (a live animal's grid takes nothing, [animals](animals.md#pack-animals); Meitou, engine choice as a pick-up: what no grid takes goes into a free slot that takes it, e.g. a 10x1 polearm into `back`; no trade;
     range checked; "No room for that item." or the container message; from a non-player owner "Got caught stealing." may follow); otherwise it is dropped on the ground only from the player's
-    own windows or a window of a player-faction owner, else it goes back.
+    own windows or a window of a player-faction owner, else it goes back. The gate is the window's drop flag (+9), which the trade/loot opener (`FUN_1407918a0`) sets
+    for the other party only when it is of the player's faction and not dead (**Verified**, decompile). A knocked-out Mercenary Captain's inventory item and equipped sword
+    dragged onto the ground go back to his loot window while the looter's own pants drop (**Observed**, original 1.0.65 via KenshiHarness). Meitou, with Drop from loot (Advanced settings, `World.DropFromLoot`, on): an
+    open character loot window drops too, after the pickpocket roll as a take, marking the theft and butchering a downed body whose death item is
+    dropped (`HeldItems.DropHeldItem`); off, as the game.
+  - Closing its window (**Verified**, decompile: the window removal `FUN_1406e53d0` returns the held item through `FUN_14070dbd0` when the removed window is `MouseInventory+0x68`, its source): the item goes back to its origin; other open windows do not keep it. **Observed** (#1482, the reporter's video of the original): an item lifted from the inventory goes back when the inventory closes, one lifted from a copper node's window stays on the mouse. Meitou: `InventoryWindows.ValidateInventoryDrag`, the source being any open window showing its owner.
   - Back to origin (`FUN_14070d860`): its old cell if still free, else auto-added to that inventory, else that inventory is arranged and it is tried again, else it is dropped on the ground.
     For a live animal the auto-add leaves its shut grid out: Raw Meat swapped out of a pack beast's Garru Backpack and sent back with Esc, its cell now taken, goes into a free
     cell of the bag, though the hidden grid has room (**Observed**, original 1.0.68). Meitou: `HeldItems.ReturnHeldItem` adds with
@@ -1522,7 +1551,9 @@ unless marked; Meitou: `SquadPanel`, commands in `SquadManagement`.
     The name is the item's string id, `.`, the instance's material string id and, only when the item has a colour record, its `dont colorise` is false and the material has a non-empty `color map`,
     `.` and the colour's string id (FUN_140845e80 and FUN_140847bf0, **Verified**). The folder is made on the player's machine, so it holds only items they have seen (**Observed**: 842 files,
     all of that form; 116 with a colour; also mod items; `data/icons/buildings/` holds BUILDING pictures, see "Building icons"). Every picture of a base-game record is of a drawn kind
-    (test `Every_picture_the_game_saved_of_a_base_game_item_is_of_a_kind_it_draws`) except limbs.mod's eight severed limbs (ITEM with a static icon). The colour is
+    (test `Every_picture_the_game_saved_of_a_base_game_item_is_of_a_kind_it_draws`) except limbs.mod's eight severed limbs (ITEM with a static icon). The group also holds each enabled mod's `icons`
+    folder (resources.cfg lists `./data/icons` in `[Icons]`; mod folders join the group of the matching data folder), so a picture a mod ships as `icons/<item>.<material>.png` is that item's
+    icon and the game never draws it. The colour is
     mostly not the record's own `color` reference (15 of 116 are), so it is the instance's colour ([clothing colours](../characters.md#clothing-colours)).
     A WEAPON's material is a manufacturer's model: the 19 saved Katana (476) pictures are named by exactly the `weapon models` (MATERIAL_SPECS_WEAPON) of the WEAPON_MANUFACTURERs
     whose `weapon types` list it (**Observed**, `meitou-tools icons` against the saved pictures). `meitou-tools icons <folder>` draws every item's icon by these names (a weapon once a model).
@@ -1540,7 +1571,8 @@ unless marked; Meitou: `SquadPanel`, commands in `SquadManagement`.
     vertex colours takes `RTTIcons_Coloured`, which multiplies the albedo by them. A missing texture map is white; the dye's alpha is the COLOR_DATA top byte (0 in every record:
     no `paint factor`); the binormal is cross(T, N) x tangent w, stored binormals ignored; the cut-out is the material's `alpha threshold` / 255 (default 128); mip bias -0.5
     (rtticons.hlsl, rtticons.material, FUN_140846060, FUN_140841a50, **Verified** in the source and decompile; fitted against 22 saved pictures with a CPU model, mean error 3.4/255).
-  - **Meitou's order** (`ItemIcons.Choose`): a drawn kind takes the game's saved picture of exactly that item, material and colour (`ItemIcons.ColourOf`, below), then Meitou's own saved one
+  - **Meitou's order** (`ItemIcons.Choose`): a drawn kind takes the game's saved picture of exactly that item, material and colour (`ItemIcons.ColourOf`, below), then a mod's picture of that name (`ItemIconFiles.ModIconFolders`; also with the
+    `icons` switch on Meitou, a mod's picture being drawn by its author), then Meitou's own saved one
     (`%LOCALAPPDATA%\Meitou\icons`, same names, emptied when its `version` file is not `GameHost.IconVersion`; an item without a material of its own is named by its first), else is drawn by `CharacterRenderer`
     (below); the other kinds take their static file, else `default_icon.png`; with nothing (or while the picture loads), the cell shows the item's name.
   - **Meitou's drawing** (`CharacterRenderer.Icons.cs`, `ItemIconStyle`): the item's mesh through the character shader's item mode with the lighting above (a negative `FogDistance` in the view
@@ -1733,7 +1765,7 @@ Code: `UiTooltips` (data, layout), `TooltipRuntime` (hover runtime, item rows, H
 - **Meitou item rows:** name and stack count, `Buyback` while moving the item back would undo a transfer of the open trade, the grade line right under it (a weapon's model name in the `ItemGrade` colour of its `level`'s grade, armour's / crossbow's / prosthetic's `{n} Grade`; a brief tooltip puts the model before the name instead), the kind markers (`[Ammunition]`, `[Research Artifact]`, `[Unique]`, `[Book]`, `[Food]`, `Possibly Edible` with `-Only for:`), food's and special food's `Nutrition` and `Ingredients`, `Stolen from:` with the robbed character's name while that character is in the world, the faction's for a mark naming only a faction (standing for the original's non-character owner), else `Stolen`, for a weapon the class, `Cutting damage`, `Blunt damage` (the
   stats' multipliers as two decimals, **Observed** reading), `Blood loss` (the record's bleed multiplier), the signed percent rows (`Armour penetration`, `Damage vs`), the attack, defence and indoors modifiers and the weight in whole kg;
   for armour the weight class; for a prosthetic (`FUN_1407a9080`, **Verified**) its grade (from its `level`), `-Max HP`, `-----STATS-----`, a row per stat multiplier not 1 at that level as int((m - 1) x 100) `+N%` / `N%`, `-Unarmed damage bonus` when not 0 and a `----------------` rule (Buyback and Stolen marks sit after the grade); the weight; `Value` and `Sell value` with the mark-up while trading (none on a buyback price, an exact refund), outside a trade the prices with no trader (no town or culture factor); `Avg. Price` for a trade item and, while trading, its `Price mark-up`; `Charges` and `Quality`
-  as above (quality whenever it is not 1: a new ITEM carries its record's `quality`, **Verified** `FUN_14075faf0` line "quality" read for record type ITEM, default 100 for the other kinds; base-game ITEMs are 1 except 20-100 on some tools and kits); last, every non-armour item's description, and a weapon's model, manufacturer or crafter rows (the model's colour by the six weapon level bands above; Meitou has five grade colours, Specialist and Masterwork share the last). **Not shown (Unknown data or format):**
+  as above (quality whenever it is not 1: a new ITEM carries its record's `quality`, **Verified** `FUN_14075faf0` line "quality" read for record type ITEM, default 100 for the other kinds; base-game ITEMs are 1 except 20-100 on some tools and kits); last, every non-armour item's description, and a weapon's model, manufacturer or crafter rows (the model's colour by the six weapon level bands above; Meitou has five grade colours, Specialist and Masterwork share the last); then, Meitou's own, a blank row and `Mod: {1}` / `Mods: {1}` (GreyBright) naming every mod that defines or changes the item's record, in load order (`RecordModsText`, `GameDatabase.ModsOf`: not the core files or translations; none for an untouched base-game record). **Not shown (Unknown data or format):**
   the grade-scaled skill lines (armour's other rows: `ArmourTooltip`, [Item tooltip](#6-inventory-trade-dialogue-build)).
 - **Backpack rows** (CONTAINER, `FUN_1407aa090`, **Verified** decompile; constants and colour tags from `.rdata`): the name (Title), then ` (` + `empty` + `)` when its inventory
   (vfunc `0x160`) holds no items; `Buyback`, `Stolen`; `-Weight` `{1,num} kg` (#140806 both) of int(vfunc `0x248`, the shared getter of Item `+0x120`): the bag's own weight,

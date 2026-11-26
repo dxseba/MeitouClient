@@ -18,8 +18,9 @@ namespace Meitou.Simulation.Movement;
 /// that speed at once (the nav agent, Observed), speeds up by 15 units/s per second only in combat (<see cref="Acceleration"/>, the combat steering),
 /// and stops at once on arrival.</item>
 /// <item>Separation: the repulsion along self-other is nonzero only closer than R and proportional to 100 x (1 - d/R), over at most
-/// 26 neighbours (Observed); R is twice the footprint radius 4 of a human (<see cref="SeparationRadius"/>), and the scale from that
-/// proportionality to a speed is an engine choice (<see cref="SeparationStrength"/>).</item>
+/// 26 neighbours (Observed); R is the two footprint radii, 8 for two humans (<see cref="SeparationRadius"/>; the nav agent's avoidance circle is
+/// the other's footprint plus its own), and the scale from that proportionality to a speed is an engine choice
+/// (<see cref="SeparationStrength"/>).</item>
 /// <item>Body contact (engine choice; the original only avoids the standing bodies round a character, no physical collision was found:
 /// docs/game/pathfinding.md "Bodies in the way"): two standing bodies (<see cref="BodyShare"/> of their footprints) do not stay overlapped. Each
 /// takes half of the overlap between its stepped position and the other's last position, averaged over the bodies it overlaps, so a walker shoves a
@@ -1260,11 +1261,15 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
         var squad = cold.SquadId >= 0 ? world.Squads.Find(cold.SquadId) : null;
         var leader = Followed(world, squad, cold);
 
-        if (leader.IsNone || leader.Slot == i || !table.IsAlive(leader))
+        if (leader.IsNone || !table.IsAlive(leader) || (leader.Slot == i && squad?.Leader == table.IdOf(i)))
         {
             TaskStart.Step(table, i, CharacterTask.Wander);
             return;
         }
+
+        // It stands in for its leader, who is down (carried, often by itself): it follows nobody and waits for its think to give it the leader's
+        // goals.
+        if (leader.Slot == i) return;
 
         // It carries its leader: the squad follows it, it does not follow itself. Nor does the original's: a carried character is down (isDown), the
         // follow rows need it standing (state 7), so no Task_Follow runs and no hold point is written.
@@ -1467,7 +1472,9 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     /// </summary>
     static CharacterId Followed(World world, Squad? squad, CharacterCold cold) =>
         !cold.FollowOrder.IsNone ? cold.FollowOrder : cold.Ai is { FollowTarget.IsNone: false } follows ? follows.FollowTarget
-        : Kidnap.ObedientSlave.OwnerOf(world, cold) is { } owner ? owner : squad?.Leader ?? CharacterId.None;
+        : Kidnap.ObedientSlave.OwnerOf(world, cold) is { } owner ? owner
+        : squad is not null ? Population.PopulationSystem.ActingLeaderOf(world, squad)
+        : CharacterId.None;
 
     /// <summary>
     /// The squad whose formation a follower takes its slot in (<c>Task_Follow</c>'s formation test <c>FUN_14033b160</c> and its spot
@@ -1560,7 +1567,7 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     public const float Acceleration = 15;
 
     /// <summary>
-    /// R of the separation steering: neighbour radius plus margin; a human's footprint radius is 4.
+    /// R of the separation steering between two humans (footprint radius 4 each); a pair's R is its two footprints (<see cref="AddSeparation"/>).
     /// </summary>
     public const float SeparationRadius = 8;
 
@@ -1741,6 +1748,11 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
         /// The stepping character's slot.
         /// </summary>
         public int Self;
+
+        /// <summary>
+        /// The stepping character's footprint radius.
+        /// </summary>
+        public float Own;
 
         /// <summary>
         /// Neighbours counted.
@@ -2033,7 +2045,8 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
             reached = occupied || dist <= (last ? cold.ArriveWithin > 0 ? cold.ArriveWithin : FinalArrive : pass)
                 && (last || dist <= CornerReach || CanCut(walk, p.Position, cold.Path[n.PathCursor + 1], 2 * pass))
                 // A corner the agent's velocity has carried past (it turns at its acceleration, not at once) is behind it, not circled.
-                || !last && dist <= ArriveRadius && to.X * p.Velocity.X + to.Y * p.Velocity.Z < 0;
+                || !last && dist <= ArriveRadius && to.X * p.Velocity.X + to.Y * p.Velocity.Z < 0
+                || !last && AtFeet(p.Position, cold.Path[n.PathCursor + 1]);
 
             if (reached)
             {
@@ -2055,7 +2068,7 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
             else if (!cold.InCombat)
             {
                 var past = PastCorner(p, cold.Path[n.PathCursor + 1]);
-                (s.Dir, s.Desired) = CornerBrake(p.Velocity, past, s.Dir, s.Desired, PathAcceleration(cold));
+                if (TurnsAhead(past, dist)) (s.Dir, s.Desired) = CornerBrake(p.Velocity, past, s.Dir, s.Desired, PathAcceleration(cold));
             }
         }
 
@@ -2263,8 +2276,9 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
         if (s.FollowStepLimit > 0 && s.Speed * dt > s.FollowStepLimit) dt = s.FollowStepLimit / s.Speed;
 
         // Separation from the neighbours of the last tick, visited in the grid's fixed order.
-        var push = new SeparationState { Table = world.Characters, Self = i };
-        world.Grid.Query(p.Position.X, p.Position.Z, SeparationRadius, ref push, AddSeparation);
+        // Those within twice its own footprint (at least two humans' R): a larger body finds the smaller ones round it and gives way itself.
+        var push = new SeparationState { Table = world.Characters, Self = i, Own = Footprint(cold) };
+        world.Grid.Query(p.Position.X, p.Position.Z, MathF.Max(SeparationRadius, 2 * push.Own), ref push, AddSeparation);
 
         // Closing on its spot it is not held off by those standing round it (they are pushed aside as it arrives); a sitter is not moved at all.
         bool seated = Seated(n, cold);
@@ -2327,29 +2341,29 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     }
 
     /// <summary>
-    /// One neighbour of the separation query (<see cref="StepBody"/>): its repulsion, and its slot for the body contact.
+    /// One neighbour of the separation query (<see cref="StepBody"/>): its repulsion within the two footprints, and its slot for the body contact.
     /// </summary>
     static void AddSeparation(int other, ref SeparationState s)
     {
         if (other == s.Self || s.Count >= MaxSeparationContributions) return;
 
         var all = s.Table.Previous;
+        var them = s.Table.Cold(other);
         var d = new Vector2(all[s.Self].Position.X - all[other].Position.X, all[s.Self].Position.Z - all[other].Position.Z);
-        float len = d.Length();
-        if (len >= SeparationRadius) return;
+        float len = d.Length(), reach = s.Own + Footprint(them);
+        if (len >= reach) return;
 
         // One on another floor is out of the avoidance list, which holds only bodies within 20 in height (FUN_14085a070).
         if (MathF.Abs(all[s.Self].Position.Y - all[other].Position.Y) >= CombatSteering.FlockHeight) return;
 
         // A carried body is on its carrier's shoulder and a downed or dead one lies out of the flocking list: neither is in anyone's way
         // (docs/game/pathfinding.md "Bodies in the way").
-        if (s.Table.Cold(other) is { } them && (!them.CarriedBy.IsNone || them.Medical is { Incapacitated: true }))
-            return;
+        if (them is not null && (!them.CarriedBy.IsNone || them.Medical is { Incapacitated: true })) return;
 
         s.Near[s.Count++] = other;
 
         // Exactly on top of each other: the lower slot is pushed one way, the other the opposite.
-        s.Sum += (len > 1e-4f ? d / len : (s.Self < other ? Vector2.UnitX : -Vector2.UnitX)) * (100 * (1 - len / SeparationRadius));
+        s.Sum += (len > 1e-4f ? d / len : (s.Self < other ? Vector2.UnitX : -Vector2.UnitX)) * (100 * (1 - len / reach));
     }
 
     /// <summary>
@@ -2457,7 +2471,8 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     /// <summary>
     /// Whether a walker at <paramref name="from"/> can step straight toward <paramref name="to"/> for <paramref name="probe"/> units (at least
     /// <see cref="ArriveRadius"/>), its height carried on as each step's is: a corner is cut early only then (engine choice; Observed: zone 22.10, a
-    /// walker beside a door stair's foot cut its corner up the stair's side and stood there).
+    /// walker beside a door stair's foot cut its corner up the stair's side and stood there), and never onto another layer than the leg's own
+    /// (<see cref="LeavesLeg"/>).
     /// </summary>
     static bool CanCut(IWalkability walk, Vector3 from, Vector3 to, float probe = ArriveRadius)
     {
@@ -2468,9 +2483,26 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
         float y = from.Y;
         float most = MathF.Min(length, MathF.Max(probe, ArriveRadius));
         for (float d = 1; d <= most; d += 1)
-            if (!walk.TryStand(from.X + leg.X * (d / length), from.Z + leg.Y * (d / length), y, out y)) return false;
+        {
+            float t = d / length;
+            float x = from.X + leg.X * t, z = from.Z + leg.Y * t;
+            if (!walk.TryStand(x, z, y, out y) || LeavesLeg(walk, x, z, y, float.Lerp(from.Y, to.Y, t))) return false;
+        }
 
         return true;
+    }
+
+    /// <summary>
+    /// Whether a cut's step at (<paramref name="x"/>, <paramref name="z"/>), standing at <paramref name="y"/>, has left the leg it cuts along: off the
+    /// leg's straight height <paramref name="along"/> by more than <see cref="CorridorSlack"/> while another layer is there at that height (engine
+    /// choice, #1414: town guards cut a stair's foot across the ground beside it, walked on under the stair and into the storey below their upstairs
+    /// goal before turning back). Terrain that bulges off the straight height has no such layer and is cut as before.
+    /// </summary>
+    static bool LeavesLeg(IWalkability walk, float x, float z, float y, float along)
+    {
+        if (MathF.Abs(y - along) <= CorridorSlack) return false;
+
+        return walk.TryStand(x, z, along, out float own) && MathF.Abs(own - along) <= CorridorSlack && MathF.Abs(own - y) > CorridorSlack;
     }
 
     /// <summary>
@@ -2524,6 +2556,27 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     static Vector2 PastCorner(in CharacterHot p, Vector3 past) => new(past.X - p.Position.X, past.Z - p.Position.Z);
 
     /// <summary>
+    /// Whether the point past the corner lies ahead of the walker for <see cref="CornerBrake"/> to test: one nearer than the corner, or within
+    /// <see cref="ArriveRadius"/>, lies back at the walker (a path doubling back to its feet, #1387), and steering square across toward it circles
+    /// it for good (engine choice; the original's corner is an end of the first portal the agent has not crossed, <c>FUN_140144330</c>).
+    /// </summary>
+    static bool TurnsAhead(Vector2 past, float dist)
+    {
+        float length2 = past.LengthSquared();
+        return length2 >= dist * dist && length2 > ArriveRadius * ArriveRadius;
+    }
+
+    /// <summary>
+    /// Whether a path point lies at the walker's feet: within <see cref="CornerReach"/> on the ground plane and <see cref="CorridorSlack"/> in
+    /// height. The waypoint before such a point is passed, not walked to and back (engine choice, #1387).
+    /// </summary>
+    static bool AtFeet(Vector3 at, Vector3 point)
+    {
+        var flat = new Vector2(point.X - at.X, point.Z - at.Z);
+        return flat.LengthSquared() <= CornerReach * CornerReach && MathF.Abs(point.Y - at.Y) <= CorridorSlack;
+    }
+
+    /// <summary>
     /// The factor on a character's step time: <see cref="OffViewTime"/> out of view.
     /// </summary>
     static float OffViewTimeFactor(World world, Vector3 at) => world.View is { } view && !MedicalClock.OnScreen(view, at) ? OffViewTime : 1;
@@ -2531,7 +2584,12 @@ public sealed partial class MovementSystem(PathService paths) : ITickSystem, IDi
     /// <summary>
     /// The solid radius of a body: <see cref="BodyShare"/> of its footprint (a human's when it has no race data).
     /// </summary>
-    static float BodyRadius(CharacterCold cold) => BodyShare * (cold.FootprintRadius > 0 ? cold.FootprintRadius : CombatTuning.DefaultFootprint);
+    static float BodyRadius(CharacterCold cold) => BodyShare * Footprint(cold);
+
+    /// <summary>
+    /// A body's footprint radius (a human's when it has no race data).
+    /// </summary>
+    static float Footprint(CharacterCold? cold) => cold?.FootprintRadius > 0 ? cold.FootprintRadius : CombatTuning.DefaultFootprint;
 
     /// <summary>
     /// How far a character stepped to <paramref name="at"/> is put out of the standing bodies among its separation neighbours (partition-safe: the

@@ -30,6 +30,11 @@ public sealed partial class ProductionSystem
     readonly SmithViewCache _smiths;
 
     /// <summary>
+    /// The crafting stations last published (<see cref="CraftStationsView"/>), handed out again while unchanged.
+    /// </summary>
+    IReadOnlyList<CraftStationView> _craftStations = [];
+
+    /// <summary>
     /// The crafts some research can unlock; a record no research enables is never offered (<see cref="EverOffered"/>).
     /// </summary>
     HashSet<(CraftKind, string)> EverEnabled()
@@ -319,6 +324,53 @@ public sealed partial class ProductionSystem
     public IReadOnlyList<CraftOptionView> CraftOptions(World world, string site) => _craftOptions.Of(world, site);
 
     /// <summary>
+    /// The crafting stations the overview's Craft tab lists, in the machines' order: the original's STATIONS (<c>FUN_1402bed80</c>, <b>Verified</b>,
+    /// decompile) collects the loaded buildings of crafting functionality whose faction is the player's or an ally of it (<c>FUN_1406b2630</c>), so a
+    /// town's bench of another faction is left out (#1445). The same list while unchanged.
+    /// </summary>
+    public IReadOnlyList<CraftStationView> CraftStationsView(World world)
+    {
+        var fresh = world.Machines.All
+            .Where(m => m.Craft is not null)
+            .Select(m => CraftStationOf(world, m))
+            .OfType<CraftStationView>()
+            .ToArray();
+        if (fresh.SequenceEqual(_craftStations)) return _craftStations;
+
+        return _craftStations = fresh;
+    }
+
+    /// <summary>
+    /// A crafting machine's station when its site stands and is the player's faction's or an ally's, named by its site, else its record; null for
+    /// any other.
+    /// </summary>
+    CraftStationView? CraftStationOf(World world, Machine m)
+    {
+        if (Site(world, m.Site) is not { } site || !PlayerOrAlly(world, site.Owner)) return null;
+        if (IsTownWork(m.Site) && TownBuildingOf(m.Site[TownWorkPrefix.Length..]) is { } found && world.Fixtures.IsDestroyed(found.Building))
+            return null;
+
+        return new CraftStationView(m.Site, site.Name.Length > 0 ? site.Name : RecordName(site.Record));
+    }
+
+    /// <summary>
+    /// A record's shown name; its id when it is missing.
+    /// </summary>
+    string RecordName(string record) => _db.Find(record) is { } r ? ShownText.Record(record, r.Name) : record;
+
+    /// <summary>
+    /// Whether <paramref name="owner"/> is the player's faction or one it regards as an ally (relation 50 or more, <c>FUN_1406b2630</c>).
+    /// </summary>
+    bool PlayerOrAlly(World world, int owner)
+    {
+        int player = world.Player.Faction;
+        if (player < 0 || owner < 0) return false;
+        if (owner == player) return true;
+
+        return _towns?.Relations is { } r && r.Contains(player) && r.Contains(owner) && r.IsAlly(player, owner);
+    }
+
+    /// <summary>
     /// Every option of a crafting machine's bench with its recipe and whether it can be queued now (<see cref="CraftOptionsCache"/> keeps them).
     /// </summary>
     IReadOnlyList<CraftOptionView> BuildCraftOptions(World world, Machine m) =>
@@ -332,7 +384,45 @@ public sealed partial class ProductionSystem
         var recipe = RecipeOf(m, option);
         var inputs = recipe.Inputs.Select(i => (ShownItemName(i.Item), i.PerItem)).ToArray();
         bool can = CanCraft(world, bench, option);
-        return new CraftOptionView(option.Key, recipe.ShownName(_db), option.Kind, option.Level, recipe.Hours, inputs, can);
+        var view = new CraftOptionView(option.Key, recipe.ShownName(_db), option.Kind, option.Level, recipe.Hours, inputs, can)
+        {
+            Product = Product(option) is { } made ? InventoryItemView.Of(0, made) : null,
+        };
+
+        return option.Kind switch
+        {
+            CraftKind.Armour => ArmourCosts(view, option),
+            CraftKind.Weapon => view with { MaterialCost = _items.Db.Find(option.Item)?.GetInt("material cost", 4) ?? 4 },
+            _ => view,
+        };
+    }
+
+    /// <summary>
+    /// The item a hovered ITEMS row describes (<b>Verified</b>, <c>FUN_1402b79b0</c>): the item factory's item of the option's record, armour at the
+    /// quality <c>FUN_14082e6b0</c> gives level 40 with no critical, the other kinds at 0, a weapon of the option's model from the player's
+    /// manufacturer.
+    /// </summary>
+    ItemInstance? Product(CraftOption option)
+    {
+        float quality = option.Kind == CraftKind.Armour ? CraftBench.ArmourQuality(40, false) : 0;
+        var made = _items.Create(option.Item, 1, quality);
+        if (made is null || option.Kind != CraftKind.Weapon) return made;
+
+        made.Level = option.Level;
+        made.MaterialId = option.Model ?? "";
+        made.CompanyId = CraftBench.PlayerWeapons;
+        return made;
+    }
+
+    /// <summary>
+    /// An armour row's costs (<b>Verified</b>, <c>FUN_1402b79b0</c> and <c>FUN_1402b7800</c>): <c>total coverage</c> x 0.01, and that x the
+    /// record's <c>fabrics amount</c>.
+    /// </summary>
+    CraftOptionView ArmourCosts(CraftOptionView view, CraftOption option)
+    {
+        var record = _items.Db.Find(option.Item);
+        float materials = CraftBench.TotalCoverage(record) * 0.01f;
+        return view with { MaterialCost = materials, FabricsCost = materials * (record?.GetFloat("fabrics amount", 0.2f) ?? 0.2f) };
     }
 
     /// <summary>
@@ -347,24 +437,24 @@ public sealed partial class ProductionSystem
     }
 
     /// <summary>
-    /// A finished item (at most <paramref name="count"/> units, 0: all) taken from a bench's output into a character's inventory (what does not fit
-    /// stays).
+    /// A finished item (at most <paramref name="count"/> units, 0: all) taken from a bench's output into a character's inventory, its bag first with
+    /// <paramref name="bagFirst"/> (what does not fit stays).
     /// </summary>
-    void TakeCrafted(World world, Machine m, CraftState state, Inventory root, int index, int count = 0)
+    void TakeCrafted(World world, Machine m, CraftState state, Inventory root, int index, int count = 0, bool bagFirst = false)
     {
         if (index < 0 || index >= state.Done.Count) return;
         var item = state.Done[index];
         if (count > 0 && count < item.Quantity)
         {
             var unit = item.WithQuantity(count);
-            item.Quantity -= count;
-            if (!root.Add(unit)) item.Quantity += unit.Quantity;
+            item.Quantity -= Placed(root, unit, bagFirst);
             world.Machines.Touch();
             return;
         }
 
+        int units = item.Quantity;
         state.Done.RemoveAt(index);
-        if (!root.Add(item) && item.Quantity > 0) state.Done.Insert(index, item);
+        if (Placed(root, item, bagFirst) < units && item.Quantity > 0) state.Done.Insert(index, item);
         world.Machines.Touch();
     }
 }

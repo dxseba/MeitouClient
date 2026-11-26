@@ -89,6 +89,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         _occlusion = new AmbientOcclusion(this, ssao, blur, new AmbientOcclusion.SsaoMaskPass(gpu));
         (_compositePass, _fxaaPass, _hazePass) = (new CompositePass(gpu), new FxaaPass(gpu), new HeatHazePass(gpu));
         _smaaPasses = new SmaaPasses(gpu);
+        _smaaLookup = new SmaaLookup(gpu);
         (_velocityPass, _taaPass, _fogPass) = (new VelocityPass(gpu), new TaaPass(gpu), new FogPass(gpu));
         _cloudMotionPass = new CloudMotionPass(gpu);
         (_particleDepthPass, _particleCompositePass, _particleCoveragePass) = (new ParticleDepthPass(gpu), new ParticleCompositePass(gpu),
@@ -133,6 +134,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
                 _velocityPass, _cloudMotionPass, _taaPass, _fogPass, _particleDepthPass, _particleSoftDepthPass, _particleCompositePass,
                 _particleCoveragePass }) p.P.Dispose();
         _smaaPasses.Dispose();
+        _smaaLookup.Dispose();
         foreach (var pass in _giResolvePasses) pass?.P.Dispose();
         _giApplyPass?.P.Dispose();
         _aoApplyPass?.P.Dispose();
@@ -166,6 +168,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     /// SMAA's three passes.
     /// </summary>
     readonly SmaaPasses _smaaPasses;
+    /// <summary>
+    /// SMAA's area and search textures.
+    /// </summary>
+    readonly SmaaLookup _smaaLookup;
     /// <summary>
     /// The heat haze pass.
     /// </summary>
@@ -361,9 +367,14 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         /// </summary>
         public readonly LegacyProgram Edges, Weights, Blend;
         /// <summary>
-        /// The samplers: the edges pass's <c>uImage</c>, the weights pass's <c>uEdges</c>, the blend pass's <c>uImage</c> and <c>uWeights</c>.
+        /// The samplers: the edges pass's <c>uImage</c>, the weights pass's <c>uEdges</c>, <c>uArea</c> and <c>uSearch</c>, the blend pass's
+        /// <c>uImage</c> and <c>uWeights</c>.
         /// </summary>
-        public readonly SamplerSlot EdgesImage, WeightsEdges, BlendImage, BlendWeights;
+        public readonly SamplerSlot EdgesImage, WeightsEdges, WeightsArea, WeightsSearch, BlendImage, BlendWeights;
+        /// <summary>
+        /// The edges pass's <c>uThreshold</c> and the weights pass's <c>uMaxSteps</c>.
+        /// </summary>
+        public readonly UniformHandle Threshold, MaxSteps;
         /// <summary>
         /// Compiles the three programs and resolves their samplers.
         /// </summary>
@@ -373,6 +384,8 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             Weights = LegacyProgram.Create(gpu, PostProcessShaders.Vertex, PostProcessShaders.SmaaWeights, "post smaa weights");
             Blend = LegacyProgram.Create(gpu, PostProcessShaders.Vertex, PostProcessShaders.SmaaBlend, "post smaa blend");
             (EdgesImage, WeightsEdges) = (Edges.Sampler("uImage"), Weights.Sampler("uEdges"));
+            (WeightsArea, WeightsSearch) = (Weights.Sampler("uArea"), Weights.Sampler("uSearch"));
+            (Threshold, MaxSteps) = (Edges.Uniform("uThreshold"), Weights.Uniform("uMaxSteps"));
             (BlendImage, BlendWeights) = (Blend.Sampler("uImage"), Blend.Sampler("uWeights"));
         }
 
@@ -1263,6 +1276,10 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         }
         if (ao && !_aoApplied) Stamp("ssao");
 
+        // The rooms in view at their own exposure (MergedKernels.Exposure's gain, from last frame's picture), before anything reads the colour:
+        // with or without an upscaler (the rooms are measured as drawn with the gain).
+        if (RoomMaskNow is { } roomPixels && _sceneColour is not null) _merged.InteriorGain(roomPixels, _sceneColour);
+
         // The upscaler: the scene at the render size becomes the display-size picture the rest of the chain reads.
         _postColour = _sceneColour!;
         if (Temporal)
@@ -1270,7 +1287,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             _postColour = RunUpscale();
             Stamp("upscale");
         }
-        else ActiveUpscaler = "off";
+        else ActiveUpscaler = Options.Smaa ? "SMAA" : Options.Fxaa ? "FXAA" : "off";
         _postColour = RunDepthOfField(_postColour);
         bool auto = AutoExposure is not null && _luminance is not null;
         if (auto) RunExposure();
@@ -1386,6 +1403,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     void MakeLdrTargets(bool smaa, bool fxaa, bool haze)
     {
         bool wantLdr = smaa || fxaa || haze, wantSecond = haze && (smaa || fxaa);
+        if (smaa) _smaaLookup.Ensure();
 
         // The pictures between the composite and the target carry the highlights in HDR output.
         var format = Options.HdrPeak > 1 ? InternalFormat.Rgba16F : InternalFormat.Rgba8;
@@ -1407,7 +1425,7 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
             if (wantSecond) _ldrFxaa ??= Make(batch, _displayWidth, _displayHeight, format, TextureMinFilter.Linear, "post ldr fxaa");
             if (smaa && _smaaWeights is null)
             {
-                _smaaEdges ??= Make(batch, _displayWidth, _displayHeight, InternalFormat.Rgba8, TextureMinFilter.Nearest, "post smaa edges");
+                _smaaEdges ??= Make(batch, _displayWidth, _displayHeight, InternalFormat.Rgba8, TextureMinFilter.Linear, "post smaa edges");
                 _smaaWeights = Make(batch, _displayWidth, _displayHeight, InternalFormat.Rgba8, TextureMinFilter.Nearest, "post smaa weights");
             }
         }
@@ -1421,9 +1439,13 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
     void RunSmaa(bool haze, PassTargets final)
     {
         var s = _smaaPasses;
+        s.Edges.Set(s.Threshold, Options.SmaaThreshold);
+        s.Weights.Set(s.MaxSteps, Options.SmaaSearchSteps);
         Bind(s.Edges, s.EdgesImage, _ldr);
         Draw(s.Edges, _smaaEdges!);
         Bind(s.Weights, s.WeightsEdges, _smaaEdges);
+        s.Weights.Bind(s.WeightsArea, _smaaLookup.Area);
+        s.Weights.Bind(s.WeightsSearch, _smaaLookup.Search);
         Draw(s.Weights, _smaaWeights!);
         Bind(s.Blend, s.BlendImage, _ldr);
         Bind(s.Blend, s.BlendWeights, _smaaWeights);
@@ -1777,8 +1799,6 @@ public sealed unsafe partial class PostProcess : IDisposable, IWorldPostChain
         var external = ExternalFor(Options.Upscale.Kind);
         bool merged = MergeVelocity && MergeSupported;
         PrepareSunMotion();
-        // The rooms in view at their own exposure (MergedKernels.Exposure's gain, from last frame's picture), before anything reads the colour.
-        if (RoomMaskNow is { } roomPixels && _sceneColour is not null) _merged.InteriorGain(roomPixels, _sceneColour);
         RunVelocity(external, merged);
         if (ObjectMotion is { } objectMotion) RunObjectMotion(objectMotion);
         if (CloudMotion is { } clouds && !reset) RunCloudMotion(clouds);

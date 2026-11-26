@@ -26,8 +26,9 @@ drop-in replacement that runs original content and mods unchanged.
 
 ## Layout
 
-- `src`: Core (shared with the launcher), Data (formats and pure rules), Simulation (the headless world: never references Game), Game
-  (the executable `MeitouClient`). Tests, tools and the viewer reference Game. Metal code compiles where `MeitouMetal` is set (macOS).
+- `src`: Core (shared with the launcher), Data (formats and pure rules), Simulation (the headless world: never references Game), Lua (the
+  sandboxed KenshiLua runtime on MoonSharp), Game (the executable `MeitouClient`). Tests, tools and the viewer reference Game.
+  Metal code compiles where `MeitouMetal` is set (macOS).
 - `analyzers`: Roslyn analyzers the build runs on src and the launcher (wired in `Directory.Build.targets`); MEI0001 (`$"..."` text) and
   MEI0002 (missing translation) port `.github/scripts/loc-strings.mjs`'s check, so change both together.
 - Folders are feature slices and the namespace follows the folder (`Simulation/Population` is `Meitou.Simulation.Population`); a
@@ -91,6 +92,8 @@ drop-in replacement that runs original content and mods unchanged.
 
 - Contract: [docs/modding.md](docs/modding.md) and [docs/modding-dependencies.md](docs/modding-dependencies.md). A change to
   `CodeModManifest`, `ModHost` or `ModContext` updates them; bump `ModApi.Version` when an older game would misread the manifest.
+- A public method or constructor that gains a parameter keeps its old signature as a forwarding overload; the build fails on any public
+  member gone since the last release unless `CompatibilitySuppressions.xml` lists it ([API compatibility](docs/modding.md#api-compatibility)).
 
 ## Build
 

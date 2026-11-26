@@ -715,6 +715,11 @@ public sealed class CharacterSounds
     }
 
     /// <summary>
+    /// The signature before <c>playing</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void Job(ulong key, string eventName, float limit, string? group, string? value) => Job(key, eventName, limit, group, value, 0);
+
+    /// <summary>
     /// A person lifted onto a shoulder or set down (<c>FUN_14034fbe0</c>, <c>Task_PutDownObject</c>): posted on the carried person with its own
     /// <c>Armor_Worn</c>, 1000 units.
     /// </summary>
@@ -843,6 +848,11 @@ public sealed class CharacterSounds
     }
 
     /// <summary>
+    /// The signature before <c>shootSound</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void TurretShot(Vector3 at) => TurretShot(at, 3);
+
+    /// <summary>
     /// A wall line broke at <paramref name="at"/> (<c>WallBuilding::vfunc_62</c>): <c>Break</c>, on a pooled object there (the exe: the building's
     /// object). <paramref name="fix"/>: the <c>Break</c> switch set to <c>Gate</c> (<b>engine choice</b>, the bank has only <c>Door</c> and
     /// <c>Gate</c>); off, as the exe, which never sets it, so it plays nothing.
@@ -920,19 +930,29 @@ public sealed class CharacterSounds
     }
 
     /// <summary>
-    /// A character went down. An animal calls <c>VO_Creature_Die</c> (<c>FUN_1405cbd60</c>); the attacker animal <c>VO_Creature_Victory</c>
-    /// (<c>CharacterAnimal::vfunc_62</c>).
+    /// A character went down. An animal calls <c>VO_Creature_Die</c> (<c>FUN_1405cbd60</c>).
     /// </summary>
-    public void Down(ulong key, ulong attacker)
+    public void Down(ulong key)
     {
-        if (_entries.TryGetValue(key, out var e))
-        {
-            e.Down = true;
-            if (e.Profile?.Animal == true && Post(key, "VO_Creature_Die")) Voices++;
-        }
+        if (!_entries.TryGetValue(key, out var e)) return;
 
-        if (attacker == 0 || !_entries.TryGetValue(attacker, out var a) || a.Profile?.Animal != true) return;
-        if (Post(attacker, "VO_Creature_Victory")) Voices++;
+        e.Down = true;
+        if (e.Profile?.Animal == true && Post(key, "VO_Creature_Die")) Voices++;
+    }
+
+    /// <summary>
+    /// The signature before the victory voice moved to <see cref="Victory"/>, kept for code mods built against it
+    /// (docs/modding.md "API compatibility").
+    /// </summary>
+    public void Down(ulong key, ulong attacker) => Down(key);
+
+    /// <summary>
+    /// An animal's melee blow beat its victim's whole squad: <c>VO_Creature_Victory</c> on the striker (<c>FUN_1404394f0</c>, its only caller).
+    /// </summary>
+    public void Victory(ulong striker)
+    {
+        if (!_entries.TryGetValue(striker, out var e) || e.Profile?.Animal != true) return;
+        if (Post(striker, "VO_Creature_Victory")) Voices++;
     }
 
     /// <summary>

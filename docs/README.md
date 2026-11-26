@@ -21,7 +21,7 @@ Not built, by design: the original's in-game level editor and fog editor (`Kensh
 - [impostors](impostors.md)
 - [launch-options](launch-options.md): every command-line option and environment variable
 - [launcher](launcher.md): game release installer, mod list and presets
-- [feedback](feedback.md): the roadmap page, the in-game feedback button and its service, issue forms and the Haiku area labels
+- [feedback](feedback.md): the in-game feedback button and its service, issue forms and the Haiku area labels
 - [macos-port](macos-port.md): running on MoltenVK, its constraints and fixes; the native Metal path next to it
 - [metal-backend](metal-backend.md): a native Metal path next to Vulkan - what the spike proved and what a second backend would need
 - [metal-content-testability-plan](metal-content-testability-plan.md): the content/testability gaps and the order to close them
@@ -31,6 +31,7 @@ Not built, by design: the original's in-game level editor and fog editor (`Kensh
 - [modding](modding.md): code mods: `meitou.json`, per-mod load context, one game-shipped Harmony, tick anchors, dialogue codes, sidecar saves, UI, F10 rows
 - [modding-dependencies](modding-dependencies.md): code mods building on code mods: versions, `dependencies`, shared assemblies, Arrange
 - [native-ui](native-ui.md)
+- [optional-fixes](optional-fixes.md): faithful original behaviour that reads as a bug, each to get an opt-in fix
 - [render-clouds](render-clouds.md)
 - [render-distance-benchmark](render-distance-benchmark.md)
 - [render-foliage](render-foliage.md)
@@ -75,7 +76,7 @@ Not built, by design: the original's in-game level editor and fog editor (`Kensh
 - [particle-universe](formats/particle-universe.md)
 - [phs](formats/phs.md)
 - [post-processing](formats/post-processing.md)
-- [rekenshi](formats/rekenshi.md)
+- [RE_Kenshi compatibility](formats/rekenshi.md) and [data entries](formats/rekenshi-data.md)
 - [runtime-materials](formats/runtime-materials.md)
 - [save](formats/save.md)
 - [settings](formats/settings.md)

@@ -181,7 +181,27 @@ public interface IPackageRules
 /// A guarded gate: its door leaf's centre at the leaf's foot, the unit X/Z way through it pointing away from the town, and half the leaf's width.
 /// <paramref name="Inside"/>: its guards stand on the town's side of the leaf (a gate the player built, so they never pass through it).
 /// </summary>
-public readonly record struct GatePost(TownBuilding Building, Vector3 Door, Vector2 Out, float HalfWidth, bool Inside = false);
+public readonly record struct GatePost(TownBuilding Building, Vector3 Door, Vector2 Out, float HalfWidth, bool Inside = false)
+{
+    /// <summary>
+    /// The signature before <c>Inside</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public GatePost(TownBuilding building, Vector3 door, Vector2 outward, float halfWidth)
+        : this(building, door, outward, halfWidth, false)
+    {
+    }
+
+    /// <summary>
+    /// The signature before <c>Inside</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void Deconstruct(out TownBuilding building, out Vector3 door, out Vector2 outward, out float halfWidth)
+    {
+        building = Building;
+        door = Door;
+        outward = Out;
+        halfWidth = HalfWidth;
+    }
+}
 
 /// <summary>
 /// A seat a member sitting around claimed: the piece <paramref name="Index"/> (<see cref="TownBuilding.SeatAt"/>) of <paramref name="Building"/>.
@@ -710,6 +730,12 @@ public sealed class Blackboard
     }
 
     /// <summary>
+    /// The signature before <c>phase</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void StartContract(AiPackage package, double now, double hours, IPackageRules? rules, CharacterId? target, bool anyRange) =>
+        StartContract(package, now, hours, rules, target, anyRange, false);
+
+    /// <summary>
     /// Ends the running contract now, as its hours running out would (engine API for code mods, not in the original): its end talk to its target,
     /// and the slots choose again on the next update. False when none runs.
     /// </summary>
@@ -779,6 +805,13 @@ public sealed class Blackboard
         if (MissionTown < 0) ContractTown = mission;
         else if (mission.Site >= 0) (MissionTown, Destination) = (mission.Site, targetTown is { IsNone: false } kept ? kept : mission);
     }
+
+    /// <summary>
+    /// The signature before <c>phase</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void ResumeContract(AiPackage package, double end, IPackageRules? rules, CharacterId? target, bool anyRange, CharacterId? employer,
+        CampaignTown? town, CampaignTown? targetTown) =>
+        ResumeContract(package, end, rules, target, anyRange, employer, town, targetTown, false);
 
     /// <summary>
     /// The package <c>change AI</c> put in place of the template's (saved as <c>replacementAI</c>); null: the template's.
@@ -1201,19 +1234,32 @@ public sealed class AiMind
     /// <summary>
     /// Where it stood when the walk to <see cref="ArrivedAt"/> finished. Not hashed: it follows the position.
     /// </summary>
-    public Vector2 ArrivedFrom { get; set; }
+    public Vector3 ArrivedFrom { get; set; }
 
     /// <summary>
-    /// How far (units) it may have moved from <see cref="ArrivedFrom"/> and still count as arrived at <see cref="ArrivedAt"/> (engine choice: shoves
-    /// from its neighbours stay within it, another system's walk, a round to a door, does not).
+    /// How far (units, X/Z) it may have moved from <see cref="ArrivedFrom"/> and still count as arrived at <see cref="ArrivedAt"/> (engine choice:
+    /// shoves from its neighbours stay within it, another system's walk, a round to a door, does not).
     /// </summary>
     public const float ArrivedDrift = 20;
 
     /// <summary>
-    /// Its last walk finished at <paramref name="target"/> and it still stands where that walk ended (<see cref="ArrivedDrift"/>).
+    /// How far up or down it may have moved from <see cref="ArrivedFrom"/> and still count as arrived: the original's |dy| slack of
+    /// <c>isAtLocation</c> (20). Past it, it is on another floor, as one a fight took from a roof to the floor under it (#1446).
     /// </summary>
-    public bool ArrivedThere(Vector2 target, Vector2 here) =>
-        ArrivedAt == target && Vector2.DistanceSquared(here, ArrivedFrom) <= ArrivedDrift * ArrivedDrift;
+    public const float ArrivedRise = 20;
+
+    /// <summary>
+    /// Its last walk finished at <paramref name="target"/> and it still stands where that walk ended (<see cref="ArrivedDrift"/>, on the same floor:
+    /// <see cref="ArrivedRise"/>).
+    /// </summary>
+    public bool ArrivedThere(Vector2 target, Vector3 here)
+    {
+        if (ArrivedAt != target || MathF.Abs(here.Y - ArrivedFrom.Y) >= ArrivedRise) return false;
+
+        float dx = here.X - ArrivedFrom.X;
+        float dz = here.Z - ArrivedFrom.Z;
+        return dx * dx + dz * dz <= ArrivedDrift * ArrivedDrift;
+    }
 
     /// <summary>
     /// Walks in a row that ended away from the spot (no way there, or interrupted); at <see cref="AiSystem.MaxFailedWalks"/> it gives the spot up.

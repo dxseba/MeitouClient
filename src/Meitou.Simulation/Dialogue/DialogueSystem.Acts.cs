@@ -46,7 +46,7 @@ public sealed partial class DialogueSystem
     /// 52); else A's faction is allied to B's, with <paramref name="disguise"/> the faction B's working disguise passes for (the third argument,
     /// <c>FUN_1407c0520</c>, <see cref="Crime.ArrestSystem.SeenFaction"/>; <b>Verified</b>). The same-faction test reads the real factions.
     /// </summary>
-    bool RegardsFriendly(World world, CharacterId a, CharacterCold ac, CharacterId b, CharacterCold bc, bool disguise = false)
+    internal bool RegardsFriendly(World world, CharacterId a, CharacterCold ac, CharacterId b, CharacterCold bc, bool disguise = false)
     {
         if (ac.Faction == bc.Faction) return true;
         // One memory lookup each way (A's squad on B, B's on A) for all the tag tests.
@@ -180,6 +180,11 @@ public sealed partial class DialogueSystem
         var table = world.Characters;
         return table.Cold(a) is { } ac && table.Cold(b) is { } bc && RegardsFriendly(world, table.IdOf(a), ac, table.IdOf(b), bc, disguise);
     }
+
+    /// <summary>
+    /// The signature before <c>disguise</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public bool RegardsFriendly(World world, int a, int b) => RegardsFriendly(world, a, b, false);
 
     /// <summary>
     /// The loot finder's <c>FUN_14059a7b0</c> (DC 54, <see cref="ScrewOver(World, CharacterId, CharacterCold, CharacterId, CharacterCold)"/>) for two

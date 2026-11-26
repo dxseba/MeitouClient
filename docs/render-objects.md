@@ -81,12 +81,14 @@ Debris (severed limbs, bolts) takes its textures from the character cache rather
 The sharing caches also have one high-water mark together (`TextureShare.ResidentBytes` against `MarkMb`, 2 GB at full quality), not one each.
 Above it, textures unused for 8 s are unloaded, least recently used first, until the total is under three quarters of the mark. Below it,
 a texture is unloaded after 20 s unused. The mark is three quarters while `VramGuard` is under pressure or clamps the ranges ([engine](engine.md)).
+Under pressure a texture unused for 2 s is unloaded too (`GuardIdleSeconds`). After a gap of over 1 s between two pumps (`HitchMs`: a hitch, a GC
+pause) the trim waits a second, so what is drawn is marked used again before anything is judged idle (#1439: frames of up to 2.4 s).
 
 Under `VramGuard` pressure no texture is refined, but one that something draws still loads *lean*: top side at most 256
 (`WorldTextureCache.LeanSize`), while the use stays under 94.5% of the budget (`AllowsLean`). It is refined once the pressure ends. Before this, a
 6 GB laptop (3.5 GB budget, never back under 80%) drew characters with no texture at all (**Observed**, issue #135 log).
-Zones within 3000 of the camera (`VramGuard.NearReach`) are still laid out and their object meshes decoded under pressure, also while the use stays under
-94.5% (`StreamsNear`); farther ones wait for the pressure to end. Before this, a 4 GB laptop (3.4 GB budget, never back under 80%) never loaded the town the
+Zones within 3000 of the camera (`VramGuard.NearReach`) are still laid out and their object meshes decoded under pressure, also while the held use (less
+the room free in our blocks) stays under 94.5% and the driver's figure under the budget (`StreamsNear`, [foliage](render-foliage.md), #1440); farther ones wait for the pressure to end. Before this, a 4 GB laptop (3.4 GB budget, never back under 80%) never loaded the town the
 start put it in (**Observed**, issue #336 log).
 An allocation the driver refuses is retried after the spare blocks are freed, then (render thread only) after the submitted frames are waited for,
 their deferred frees run and the empty blocks are given back (`GpuAllocator.Reclaim`). A refusal that survives puts the guard into pressure.
@@ -122,7 +124,7 @@ zone and come back by one zone test against the current ranges. **Observed** (of
 ## Batching and depth
 
 Batch compatible mesh/material/state instances; sort colour batches near-first when enabled.
-Building parts cull back faces ("Back faces" below; **Observed** by a mesh probe too: Tower of Abuse's level-1 inner wall faces inward, so from outside its near side is not seen). Other open meshes are double-sided. A cut-out clips on the normal map's alpha whether or not the mesh has tangents (**Verified**: installed `objects.hlsl` runs `clip(normalTex.a - threshold)` under `TRANSPARENCY` alone, and `shadowcaster.hlsl` clips under `ALPHA` with no tangent condition either; the vertex declarations of `Carpet_RustyRug.mesh` and `Carpet_Fancy Rug.mesh` hold no tangents. **Observed** in the decoded normal maps: the mask cuts the Rusty Rug's holes and ends and the Fancy Rug's fringes and black margin), so Meitou loads and samples that map for its alpha, in colour and shadows, and leaves the lighting to check for tangents. Floor view: a part is drawn when its floor (clamped to 3) is at most the building's viewed floor, 4 (all) for a building not in the view (**Observed**, decompile `FUN_14092add0`, the clamp in `FUN_14055f6e0`; Meitou does not clamp, so a floor-4 roof hides at viewed floor 3). Fade uses per-instance dither lo/hi windows; solid,
+Building parts cull back faces ("Back faces" below; **Observed** by a mesh probe too: Tower of Abuse's level-1 inner wall faces inward, so from outside its near side is not seen). Other open meshes are double-sided. A cut-out clips on the normal map's alpha whether or not the mesh has tangents (**Verified**: installed `objects.hlsl` runs `clip(normalTex.a - threshold)` under `TRANSPARENCY` alone, and `shadowcaster.hlsl` clips under `ALPHA` with no tangent condition either; the vertex declarations of `Carpet_RustyRug.mesh` and `Carpet_Fancy Rug.mesh` hold no tangents. **Observed** in the decoded normal maps: the mask cuts the Rusty Rug's holes and ends and the Fancy Rug's fringes and black margin), so Meitou loads and samples that map for its alpha, in colour and shadows, and leaves the lighting to check for tangents. Floor view: a part is drawn when its floor (clamped to 3 in the original) is at most the building's viewed floor, 4 (all) for a building not in the view (**Observed**, decompile `FUN_14092add0`, the clamp in `FUN_14055f6e0`; Meitou clamps parts to each building's own standable floor range, at least 0..3, and keeps unwalkable roofs one floor above the top walkable storey on buildings taller than 3 so the roof hides when viewing the top floor). Fade uses per-instance dither lo/hi windows; solid,
 fading and distant-town batches have different coverage needs. `EarlyDepth.Enabled` selects
 opaque, discard-free colour only for no-cutout/non-fading parts. Draw solids first; retain
 cutout/dither shaders for other batches. Cache native state per program so solid/fading variants
@@ -220,7 +222,7 @@ above it ([construction look](game/buildings-production.md#construction-look)). 
 `scaffolding tex scale`)) over its two flag bits (`BuildingLodShaders.PackSite`). The vertex shader passes mesh y / top; the
 fragment samples `construction.dds` (bindless index + 1 in the push spare's bits 8+) at the tiled mesh coordinates x the tiling,
 discards above `1.2 f` unless grid alpha > 0.7, and blends the grid over the albedo below `1 - 5 (f - 0.8)`. The shadow pass
-clips the same. Until the texture is resident a procedural world-space grid stands in. Not done: the grid's gloss 0.4 and
+clips the same. A site takes no weather dust (the game's construction material has no DUST, [runtime materials](formats/runtime-materials.md)): the dust test skips `vScaffold > 2`. Until the texture is resident a procedural world-space grid stands in. Not done: the grid's gloss 0.4 and
 normal blend. Sites always use the fading (discard-capable) batch.
 
 **Ghost.** `WorldObjectRenderer.SetGhosts(GhostDraw[])` draws a building's parts (laid out once at the origin, exterior

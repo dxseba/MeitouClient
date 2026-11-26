@@ -724,7 +724,7 @@ public sealed class CharacterSnapshot
     /// </summary>
     public bool NoLootGuilt { get; internal set; }
     /// <summary>
-    /// Wears locked armour (shackles, <see cref="Items.ItemInstance.IsLocked"/>): the portrait's <c>Slave</c> overlay.
+    /// Wears shackles (<see cref="Items.ItemInstance.IsLocked"/>) in the boots or armour section, locked or not: the portrait's <c>Slave</c> overlay.
     /// </summary>
     public bool Shackled { get; internal set; }
     /// <summary>
@@ -732,6 +732,11 @@ public sealed class CharacterSnapshot
     /// Strength. Set for a selected, inspected or pointed character only (<see cref="PlayerState.Pointed"/>).
     /// </summary>
     public bool ShacklesLocked { get; internal set; }
+    /// <summary>
+    /// A player character wearing open shackles (<see cref="Locks.LockSystem.OpenShackles"/>): the context menu offers Take off Shackles. Pointed
+    /// only, as <see cref="ShacklesLocked"/>.
+    /// </summary>
+    public bool ShacklesOpen { get; internal set; }
     /// <summary>
     /// Alive, down or caged and wearing no shackles (<see cref="Locks.LockSystem.CanBeShackled"/>): the context menu offers Put on Shackles to a
     /// selection that carries some. Pointed only, as <see cref="ShacklesLocked"/>.
@@ -913,7 +918,26 @@ public readonly record struct PrisonView(bool Locked, float Sentence, double Hou
 /// hours an escaped slave or ex-slave has left to lie low (<see cref="Locks.FixtureRegistry.SlaveHoursLeft"/>) and whether it has been seen (the
 /// recently-wanted marker runs, <see cref="CharacterCold.RecentlyWanted"/>).
 /// </summary>
-public readonly record struct SlaveView(int State, string Owner, float Looks = 0, int HoursLeft = 0, bool Seen = false);
+public readonly record struct SlaveView(int State, string Owner, float Looks = 0, int HoursLeft = 0, bool Seen = false)
+{
+    /// <summary>
+    /// The signature before <c>HoursLeft</c> and <c>Seen</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public SlaveView(int state, string owner, float looks)
+        : this(state, owner, looks, 0, false)
+    {
+    }
+
+    /// <summary>
+    /// The signature before <c>HoursLeft</c> and <c>Seen</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void Deconstruct(out int state, out string owner, out float looks)
+    {
+        state = State;
+        owner = Owner;
+        looks = Looks;
+    }
+}
 
 /// <summary>
 /// A disguise for the data panel and the health word (docs/game/ui-screens.md "Which lines"): the clothing level, the uniform faction's name, the
@@ -1184,6 +1208,10 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     /// The player's research: levels, queue, rate and what may be queued.
     /// </summary>
     public Production.ResearchSnapshot Research { get; init; } = Production.ResearchSnapshot.Empty;
+    /// <summary>
+    /// The crafting stations the Craft tab lists: the player's faction's and its allies' (<see cref="Production.ProductionSystem.CraftStationsView"/>).
+    /// </summary>
+    public IReadOnlyList<Production.CraftStationView> CraftStations { get; init; } = [];
     /// <summary>
     /// What each of the player's crafting benches can craft (by site), for the Craft tab.
     /// </summary>

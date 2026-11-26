@@ -24,7 +24,10 @@ changed or went 600 updates undrawn. A body with code mod tints ([modding](moddi
 them with it (`CharacterLookTints`), named in the body record's `alphaChannel.x` with material flag bit 31. An update lists the parts it draws (`CollectSlotParts`): those shown in the world and, for a
 character with a portrait request, the stowed weapon its portrait shows while the weapon is in the hands; a part drawn unlisted would read
 a stale record or slot -1. Texture needs
-are offered, and the textures marked used, only on the frame `CharacterTextureBudget` commits (every 500 ms, under the cache's 2 s idle limit).
+are offered, and the textures marked used, only on the frame `CharacterTextureBudget` commits (every 500 ms, under the cache's 2 s idle limit), and
+it commits only on a frame that offered: `Due` and `Commit` read one clock. **Observed** (#1439 log, 4 GB card under pressure): with a second clock
+for the commit, runs of commits without offers let the drawn textures pass 2 s idle, and characters drew untextured grey (10555 unloads of 381
+textures).
 CharacterShaders set0 bindings: bones6, materials7 (persistent), morphs8, previous bones9; material20 texture
 slots. CharacterLayoutTests pins CPU/GLSL layouts. Push depthIndex is near-depth bindless index
 for motion,0 otherwise. Camera-relative transforms preserve precision; previous bone/transform
@@ -273,6 +276,8 @@ are the colour shader at fog distance -5, returning after its cut-outs. The map 
 interior-cut fields (`cutPad`, `cutVolumes`, `cutRanges[0]`, `cutPlanes[0..3]`), which characters never read. The sun: portraits from the camera's
 right and front, 35 degrees above the level (the camera is at the head's height: the way to it already climbs); the stage fixed to the character (the shadows stay while the editor's camera turns round it): from the right of its first
 view (yaw 0, its front), to the side and about 55 up.
+When the driver has no memory for the shadow and sky maps (made on first use), the previews are drawn without the studio and the maps tried
+again 5 s later (`StudioMapsReady`); before, a 2 GB GTX 965M at 99% of its budget stopped on the sky atlas (**Observed**, #1477 log).
 The stage's platform (`WorldObjectRenderer.DrawStageProp`, the objects' shader, `StudioShaders`) takes the same view: lit by the studio's sun, it
 receives the character's shadow and the sky's occlusion round the feet (its `cutVolumes` left 0: the objects read it as their shadow cut; the
 centre made eye-relative like its positions). The platform casts too: the host's `StageCasters` draws it

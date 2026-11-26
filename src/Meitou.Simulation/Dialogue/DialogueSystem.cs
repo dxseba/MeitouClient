@@ -131,8 +131,8 @@ public sealed class DialogueSettings
 /// (<see cref="World.ApplyPausedInterfaceCommands"/>);
 /// effects that give AI orders start on the next tick.
 /// <list type="bullet">
-/// <item><b>Engine choices</b>: a childless NPC line is shown with a single <c>[Leave]</c> (the original ends at once and how it shows such a line is
-/// <b>Unknown</b>); a reply whose best
+/// <item><b>Engine choices</b>: an NPC line whose children all fail is shown with a single <c>[Leave]</c> (a childless one ends the conversation
+/// and is said as a bubble, as the original's); a reply whose best
 /// next line is another reply shows that reply as the only choice; conditions whose inputs Meitou lacks compute "no"
 /// (<see cref="Condition"/>).</item>
 /// <item><b>State</b> (hashed): last use per line (global, as the original's), permanent chance rolls and event counters per character, the squads'
@@ -245,6 +245,14 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
     /// Who started each character's last conversation (Dialogue <c>+0x2a0</c>).
     /// </summary>
     readonly ConversationStarters _starters = new();
+    /// <summary>
+    /// BFrizz's Extra Extensions' conditions 1000-1006, tested ahead of the line check.
+    /// </summary>
+    readonly ExtraExtensionChecks _extraChecks;
+    /// <summary>
+    /// BFrizz's Extra Extensions' item actions, run ahead of a line's other effects.
+    /// </summary>
+    readonly ExtraExtensionActions _extraActions;
 
     /// <summary>
     /// Sets up the dialogue system on <paramref name="data"/>'s dialogue (default settings when none are given) and its helpers.
@@ -260,6 +268,8 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         _illegalGoods = new(data);
         _arrival = new(this, data, _dialogue);
         _characterTrading = new(this, data);
+        _extraChecks = new(this);
+        _extraActions = new(data);
         _followers = new(this);
         _stalkers = new(this, data);
         _orders = new(_talks, _npcApproaches, _followers, _stalkers);
@@ -432,7 +442,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         // The order check (FUN_1405d1940, order 12): a character whose record says dumb refuses to talk to people.
         if (_data.Db.Find(pc.RecordId)?.GetBool("dumb") == true)
         {
-            world.Post(Loc.Tr("{1} can't talk to people", world.ShownName(pc)));
+            world.Post(Loc.Tr("{1} can't talk to people", world.ShownName(pc, ShownPlace.Notice)));
             return;
         }
         if (!Talkable(table, n) || SleepsThrough(table, n, DialogueEvents.PlayerTalkToMe)) return;
@@ -568,7 +578,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         if (picked is not { } p)
         {
             world.DialogueLines.Line(world, "talk", $"{pair}: nothing to say (from {from})");
-            if (!quiet) world.Post($"{world.ShownName(nc)} has nothing to say.");
+            if (!quiet) world.Post($"{world.ShownName(nc, ShownPlace.Notice)} has nothing to say.");
             return;
         }
 
@@ -675,6 +685,12 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
     /// </summary>
     void Say(World world, Conversation c, DialogueNode line, CharacterId speaker)
     {
+        if (line.Children.Count == 0)
+        {
+            SayAsBubble(world, c, line, speaker);
+            return;
+        }
+
         c.Line = line;
         c.Speaker = speaker;
         MarkUsed(world, c, line);
@@ -682,7 +698,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         string cost = MoneySuffix(line);
         string text = said + cost;
         c.Text = shown + cost;
-        string name = world.ShownName(speaker);
+        string name = world.ShownName(speaker, ShownPlace.Dialogue);
         c.Log.Add($"{name}: {c.Text}");
         world.Said(name, c.Text, false);
         world.DialogueLines.Line(world, "say", $"{EventLog.Who(world, speaker)} to {EventLog.Who(world, c.Player)}: \"{text}\" "
@@ -690,6 +706,18 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         RunEffects(world, c, line, speaker);
         if (c.Ended) return;
         Offer(world, c, line);
+    }
+
+    /// <summary>
+    /// A player conversation's NPC line with no children (<c>FUN_1406839a0</c>, <b>Verified</b>): the conversation ends and the line is said as a
+    /// bubble (<c>FUN_140683910</c>: its text and bubble, then its effects), never shown in the window.
+    /// </summary>
+    void SayAsBubble(World world, Conversation c, DialogueNode line, CharacterId speaker)
+    {
+        c.Ended = true;
+        if (!world.Characters.TryResolveNext(speaker, out int n)) return;
+
+        SayBubble(world, new Bubble(c, line, world.Tick, speaker), n);
     }
 
     /// <summary>
@@ -740,7 +768,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         DialogueNode? from = c.Line;
         if (reply is not null)
         {
-            string name = world.ShownName(c.Player);
+            string name = world.ShownName(c.Player, ShownPlace.Dialogue);
             c.Log.Add($"{name}: {chosen ?? text}");
             world.Said(name.Length > 0 ? name : "Player", chosen ?? text, true);
             world.DialogueLines.Line(world, "reply", $"{EventLog.Who(world, c.Player)} to {EventLog.Who(world, c.Npc)}: \"{text}\" "
@@ -849,8 +877,8 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
             _view = null;
             return;
         }
-        var speaker = world.ShownName(c.Speaker.IsNone ? c.Npc : c.Speaker);
-        _view = new ConversationView(c.Npc, c.Player, c.Speaker, speaker, world.ShownName(c.Player), c.Text,
+        var speaker = world.ShownName(c.Speaker.IsNone ? c.Npc : c.Speaker, ShownPlace.Dialogue);
+        _view = new ConversationView(c.Npc, c.Player, c.Speaker, speaker, world.ShownName(c.Player, ShownPlace.Dialogue), c.Text,
             [.. c.Choices.Select(Shown)], [.. c.Log], world.Player.Money) { PlayerStarted = c.PlayerStarted };
     }
 

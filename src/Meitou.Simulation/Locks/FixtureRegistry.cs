@@ -542,7 +542,7 @@ public sealed partial class FixtureRegistry
         foreach (var f in OfBuilding(building).ToArray())
         {
             if (f.Occupant.IsNone) continue;
-            if (f.Kind == FixtureKind.Bed) LeaveBed(world, f.Occupant);
+            if (f.Kind == FixtureKind.Bed) LeaveAll(world, f);
             else if (f.Kind == FixtureKind.Cage)
             {
                 if (f.Lock is { } cageLock) cageLock.Locked = false;
@@ -643,6 +643,7 @@ public sealed partial class FixtureRegistry
                 Position = spot.Position,
                 Yaw = spot.Yaw,
                 Marker = spot.Marker,
+                Rotation = Whole(spot.Rotation),
                 UseRange = 15,
                 RecordId = spot.Record ?? "",
                 Indoors = true,
@@ -768,7 +769,7 @@ public sealed partial class FixtureRegistry
                 Owner = owner,
                 Position = at,
                 Yaw = yaw,
-                Rotation = rotation is { } turn && turn.LengthSquared() > 1e-12f ? Quaternion.Normalize(turn) : null,
+                Rotation = Whole(rotation),
                 DoorIndex = i,
                 WantsLock = door?.GetBool("always locks") ?? false,
                 HostRecordId = record.StringId,
@@ -884,13 +885,19 @@ public sealed partial class FixtureRegistry
         Owner = owner,
         Position = at,
         Yaw = TownBuildings.YawOf(rotation),
-        Rotation = rotation.LengthSquared() > 1e-12f ? Quaternion.Normalize(rotation) : null,
+        Rotation = Whole(rotation),
         Marker = WorldObjectLayout.PositionMarker(db, record, at, rotation),
         UseRange = 15,
         RecordId = record.StringId,
         HostRecordId = record.StringId,
         Bed = bed,
     };
+
+    /// <summary>
+    /// A placement turn as a fixture keeps it (<see cref="Fixture.Rotation"/>): normalised, null when there is none or it is degenerate.
+    /// </summary>
+    static Quaternion? Whole(Quaternion? rotation) =>
+        rotation is { } turn && turn.LengthSquared() > 1e-12f ? Quaternion.Normalize(turn) : null;
 
     /// <summary>
     /// How a bed standing on a slope leans its sleeper: the turn that, applied after the sleeper's own yaw about +Y, gives the bed's whole
@@ -933,12 +940,26 @@ public sealed partial class FixtureRegistry
                 {
                     return new BedData(f.GetInt("function"),
                             f.GetReferences("animation").Select(a => db.Find(a.TargetStringId)?.Name).FirstOrDefault(n => n is not null),
-                        Data.Gameplay.Construction.BuildingBuildData.From(building).Target, UseNodes(db, building));
+                        Data.Gameplay.Construction.BuildingBuildData.From(building).Target, UseNodes(db, building))
+                    {
+                        Operators = BedOperators(building, f),
+                    };
                 }
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// A bed's raw <c>max operators</c> (the exe's <c>+0x3ac</c>, as for machines, <c>FUN_1402a3750</c>): the BUILDING's unless below 0, then its bed
+    /// functionality's (1 when neither says).
+    /// </summary>
+    static int BedOperators(GameRecord building, GameRecord function)
+    {
+        int own = building.GetInt("max operators", -1);
+
+        return own >= 0 ? own : function.GetInt("max operators", 1);
     }
 
     /// <summary>
@@ -986,7 +1007,7 @@ public sealed partial class FixtureRegistry
     public static void MarkBadNode(World world, Fixture bed, Vector3 at)
     {
         if (bed.Bed.Nodes is not { Length: >= 2 } nodes) return;
-        var turn = Matrix4x4.CreateRotationY(bed.Yaw);
+        var turn = NodeTurn(bed);
         int best = -1;
         float bestD = BadNodeReach * BadNodeReach;
         for (int i = 0; i < nodes.Length; i++)
@@ -1031,7 +1052,7 @@ public sealed partial class FixtureRegistry
         if (Find(fixtureId) is not { } f) return null;
         if (f.Kind == FixtureKind.Bed || f.UseNodes is not { Length: > 0 } nodes) return PositionMarker(fixtureId, from, now);
 
-        var turn = Matrix4x4.CreateRotationY(f.Yaw);
+        var turn = NodeTurn(f);
         Vector3? best = null;
         float bestD = float.MaxValue;
         foreach (var node in nodes)
@@ -1046,13 +1067,19 @@ public sealed partial class FixtureRegistry
     }
 
     /// <summary>
+    /// How the fixture's use nodes are turned into the world: by its whole rotation where it is known (a bed in a tilted building has its nodes
+    /// tilted with it, as the original's node instances are children of the building), else by its yaw about +Y.
+    /// </summary>
+    static Matrix4x4 NodeTurn(Fixture f) => f.Rotation is { } whole ? Matrix4x4.CreateFromQuaternion(whole) : Matrix4x4.CreateRotationY(f.Yaw);
+
+    /// <summary>
     /// The use node of <paramref name="f"/> nearest <paramref name="from"/> in the world (squared 3D distance), with its facing; null with no nodes.
     /// </summary>
     static (Vector3 At, float Yaw)? Nearest(Fixture f, UseNode[]? nodes, Vector3 from, Func<int, bool>? skip = null)
     {
         if (nodes is null) return null;
 
-        var turn = Matrix4x4.CreateRotationY(f.Yaw);
+        var turn = NodeTurn(f);
         (Vector3 At, float Yaw)? best = null;
         float bestD = float.MaxValue;
         for (int i = 0; i < nodes.Length; i++)
@@ -1197,8 +1224,9 @@ public sealed partial class FixtureRegistry
             if (!next[s].Alive || table.Cold(s) is not { InSomething: not HeldState.None, InWhat: { } what } c)
                 continue;
 
-            if (HeldFixture(c, what) is not { } f || !Claims(world, f, new CharacterId(s, next[s].Generation), c)) continue;
-            f.Occupant = new CharacterId(s, next[s].Generation);
+            var id = new CharacterId(s, next[s].Generation);
+            if (HeldFixture(c, what) is not { } f || Holds(table, f, id) || !Claims(world, f, id, c)) continue;
+            Admit(table, f, id);
             c.InWhat = f.Id;
 
             // A loaded prisoner plays its cage's poses as one put in does (Imprison): stand, out-cold foetal, a pole's own clip.
@@ -1649,28 +1677,71 @@ public sealed partial class FixtureRegistry
     /// <summary>
     /// Whether a character is at a cage to use it (goal 108's <c>isAtLocation</c> for a building, <c>AI::isWithinChoppingRange</c>
     /// <c>FUN_14059c6d0</c>:114-122, docs/game/buildings-production.md "Work distance"): its flat distance to the cage's position is below the
-    /// functionality's <c>use range</c>, doubled while it is not moving, and it is less than 15 above or below it (the original's same-floor test has
-    /// no counterpart here: Meitou's cage has no floor of its own).
+    /// functionality's <c>use range</c>, doubled while it is not moving, and it stands on the cage's floor (<see cref="OnCageFloor"/>).
     /// </summary>
-    public static bool AtCage(Fixture cage, Vector3 character, bool moving) => AtFixture(cage, character, moving);
+    public bool AtCage(Fixture cage, Vector3 character, bool moving, IWalkability walk) =>
+        InReach(cage, character, moving) && OnCageFloor(cage, character, walk);
 
     /// <summary>
-    /// Whether a character is at a piece of furniture to use it (a cage, a bed, a storage container; <c>isAtLocation</c> for a building,
-    /// <c>AI::isWithinChoppingRange</c> <c>FUN_14059c6d0</c>, <b>Verified</b>): as <see cref="AtCage"/>.
+    /// The level half of <c>AI::isWithinChoppingRange</c> for a cage (<c>FUN_14059c6d0</c>, <b>Verified</b>: the same floor, or less than
+    /// <see cref="WorkHeight"/> apart). Engine stand-in for the floor number: <paramref name="at"/> is within <see cref="WorkHeight"/> of the floor
+    /// under the cage's use node nearest it (<see cref="FloorMarker"/>; its origin when no node has a floor), not of the cage's origin, which can
+    /// stand 17 to 19 over that floor (rebirth's Storm House cages, <b>Observed</b>, #1383).
     /// </summary>
-    public static bool AtFixture(Fixture f, Vector3 character, bool moving)
+    public bool OnCageFloor(Fixture cage, Vector3 at, IWalkability walk)
     {
-        float reach = f.UseRange * (moving ? 1 : StillReachFactor);
-        return Vector2.Distance(new(character.X, character.Z), new(f.Position.X, f.Position.Z)) < reach
-                && MathF.Abs(character.Y - f.Position.Y) < WorkHeight;
+        float floor = FloorMarker(cage.Id, at, walk)?.Y ?? cage.Position.Y;
+        return MathF.Abs(at.Y - floor) < WorkHeight;
     }
 
     /// <summary>
-    /// Whether nobody is in it: no occupant, or one that is gone or no longer held there.
+    /// Whether a character is at a bed or a storage container to use it (<c>isAtLocation</c> for a building, <c>AI::isWithinChoppingRange</c>
+    /// <c>FUN_14059c6d0</c>, <b>Verified</b>): within its reach (<see cref="InReach"/>) and less than <see cref="WorkHeight"/> above or below its
+    /// origin.
     /// </summary>
-    public static bool IsFree(CharacterTable table, Fixture f) =>
-        f.Occupant.IsNone || !table.TryResolveNext(f.Occupant, out int s) || table.Cold(s) is not { } held || held.InWhat != f.Id
-                || held.InSomething == HeldState.None;
+    public static bool AtFixture(Fixture f, Vector3 character, bool moving) =>
+        InReach(f, character, moving) && MathF.Abs(character.Y - f.Position.Y) < WorkHeight;
+
+    /// <summary>
+    /// The flat half of <c>AI::isWithinChoppingRange</c> for furniture: the flat distance to its position below its <c>use range</c>, doubled while
+    /// the character is not moving.
+    /// </summary>
+    static bool InReach(Fixture f, Vector3 character, bool moving)
+    {
+        float reach = f.UseRange * (moving ? 1 : StillReachFactor);
+        return Vector2.Distance(new(character.X, character.Z), new(f.Position.X, f.Position.Z)) < reach;
+    }
+
+    /// <summary>
+    /// Whether it has room for one more (the original's "free" for a newcomer, UseableStuff slot 158 <c>FUN_1400f7bf0</c>): fewer than its
+    /// <see cref="Fixture.Capacity"/> are held there (<see cref="Holds"/>). A cage, or a bed of <c>max operators</c> 1: nobody is in it.
+    /// </summary>
+    public static bool IsFree(CharacterTable table, Fixture f) => HeldCount(table, f) < f.Capacity;
+
+    /// <summary>
+    /// Whether <paramref name="id"/> may be in it (slot 158 <c>FUN_1400f7bf0</c>): it is held there already, or there is room
+    /// (<see cref="IsFree"/>).
+    /// </summary>
+    public static bool IsFreeFor(CharacterTable table, Fixture f, CharacterId id) => Holds(table, f, id) || IsFree(table, f);
+
+    /// <summary>
+    /// How many of <see cref="Fixture.Occupants"/> are held there still (<see cref="Holds"/>).
+    /// </summary>
+    public static int HeldCount(CharacterTable table, Fixture f)
+    {
+        int n = 0;
+        foreach (var id in f.Occupants)
+            if (Holds(table, f, id)) n++;
+
+        return n;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="id"/> is one of the fixture's occupants and still held there (alive in the table, its held state set and naming it).
+    /// </summary>
+    public static bool Holds(CharacterTable table, Fixture f, CharacterId id) =>
+        !id.IsNone && f.Occupants.Contains(id) && table.TryResolveNext(id, out int s) && table.Cold(s) is { } held && held.InWhat == f.Id
+                && held.InSomething != HeldState.None;
 
     /// <summary>
     /// The cage <paramref name="carrier"/> at <paramref name="at"/> puts a captive in (the original's finder <c>FUN_1408d0770</c>, economy.md 11.7,
@@ -2055,18 +2126,27 @@ public sealed partial class FixtureRegistry
         var table = world.Characters;
         foreach (var f in _bedList ??= [.. _all.Where(x => x.Kind == FixtureKind.Bed)])
         {
-            if (f.Occupant.IsNone || !table.TryResolveNext(f.Occupant, out int s) || table.Cold(s) is not { InSomething: HeldState.Bed } c
-                    || c.InWhat != f.Id)
-                continue;
-
-            c.BedUsedHours = world.GameHours;   // Task_UseBed's update stamps the status clock (+0xc0)
-            ref var n = ref table.Next[s];
-            var (at, yaw) = LieSpot(f, n.Position, world.GameHours);
-            if (n.Position == at && n.Yaw == yaw) continue;
-            (byte task, var time) = (n.Task, n.TaskTime);
-            table.Place(s, at, yaw);
-            (n.Task, n.TaskTime) = (task, time);   // Place stands it; a sleeper stays asleep
+            foreach (var sleeper in f.Occupants)
+                HoldSleeper(world, f, sleeper);
         }
+    }
+
+    /// <summary>
+    /// Re-places one sleeper of <paramref name="f"/> (see <see cref="HoldSleepers"/>); a stale entry is passed over.
+    /// </summary>
+    static void HoldSleeper(World world, Fixture f, CharacterId sleeper)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(sleeper, out int s) || table.Cold(s) is not { InSomething: HeldState.Bed } c || c.InWhat != f.Id)
+            return;
+
+        c.BedUsedHours = world.GameHours;   // Task_UseBed's update stamps the status clock (+0xc0)
+        ref var n = ref table.Next[s];
+        var (at, yaw) = LieSpot(f, n.Position, world.GameHours);
+        if (n.Position == at && n.Yaw == yaw) return;
+        (byte task, var time) = (n.Task, n.TaskTime);
+        table.Place(s, at, yaw);
+        (n.Task, n.TaskTime) = (task, time);   // Place stands it; a sleeper stays asleep
     }
 
     /// <summary>
@@ -2134,7 +2214,7 @@ public sealed partial class FixtureRegistry
             c.SlaveOwner = releaserFaction;
 
         if (jailer && c.IsPlayer && c.SlaveState == 0)
-            world.Post(Loc.Tr("{1} has been released from prison.", world.ShownName(c)));
+            world.Post(Loc.Tr("{1} has been released from prison.", world.ShownName(c, ShownPlace.Notice)));
         return true;
     }
 
@@ -2165,6 +2245,24 @@ public sealed partial class FixtureRegistry
         if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c) return false;
 
         LeaveCage(world, s, c, false, crimes);
+        return true;
+    }
+
+    /// <summary>
+    /// Takes a prisoner out of whatever holds it by another's hand with nothing else changed (the hold clear <c>FUN_140330600</c> with 0, which
+    /// <c>Task_FirstAid</c>'s end calls for a friendly caged patient, docs/game/locks.md "Leaving", <b>Verified</b>): it stands at the
+    /// <see cref="ExitSpot"/>; the lock, the escaped flag, the slave state and the crimes stay as they were. False when it is not imprisoned or its
+    /// cage or restraint is not found.
+    /// </summary>
+    public bool LetOut(World world, CharacterId prisoner)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c) return false;
+        if (c.InWhat is not { } id || Find(id) is not { } cage) return false;
+
+        if (cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+        StepOut(table, s, cage);
+        Clear(c);
         return true;
     }
 
@@ -2220,9 +2318,9 @@ public sealed partial class FixtureRegistry
         if (!IsFree(table, bed) || c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone)
             return false;
 
+        Admit(table, bed, sleeper);
         c.InSomething = HeldState.Bed;
         c.InWhat = bed.Id;
-        bed.Occupant = sleeper;
         TaskStart.Stand(table, s);
         var (at, yaw) = LieSpot(bed, table.Next[s].Position, world.GameHours);
         Hold(table, s, c, at, yaw);
@@ -2230,6 +2328,16 @@ public sealed partial class FixtureRegistry
         table.Next[s].Velocity = Vector3.Zero;
         c.OperateClip = bed.Bed.Clip;
         return true;
+    }
+
+    /// <summary>
+    /// Adds <paramref name="id"/> to the fixture's occupants after dropping the stale ones (<see cref="Holds"/>), so a bed of
+    /// <c>max operators</c> 1 holds only the newcomer, as the one-occupant fixture it replaces did.
+    /// </summary>
+    static void Admit(CharacterTable table, Fixture f, CharacterId id)
+    {
+        f.PruneOccupants(o => !Holds(table, f, o));
+        f.AddOccupant(id);
     }
 
     /// <summary>
@@ -2241,8 +2349,7 @@ public sealed partial class FixtureRegistry
         if (!world.Characters.TryResolveNext(held, out int s) || world.Characters.Cold(s) is not { InSomething: not HeldState.None } c)
             return;
 
-        if (c.InWhat is { } id && Find(id) is { } fixture && fixture.Occupant == held)
-            fixture.Occupant = CharacterId.None;
+        if (c.InWhat is { } id && Find(id) is { } fixture) fixture.RemoveOccupant(held);
 
         Clear(c);
     }
@@ -2276,11 +2383,19 @@ public sealed partial class FixtureRegistry
         if (!table.TryResolveNext(sleeper, out int s) || table.Cold(s) is not { InSomething: HeldState.Bed } c)
             return false;
 
-        if (c.InWhat is { } id && Find(id) is { } bed && bed.Occupant == sleeper) bed.Occupant = CharacterId.None;
+        if (c.InWhat is { } id && Find(id) is { } bed) bed.RemoveOccupant(sleeper);
         Clear(c);
         StandBeside(world, s);
         DropBedPose(c);
         return true;
+    }
+
+    /// <summary>
+    /// Gets everyone out of <paramref name="bed"/> (<see cref="LeaveBed"/>), in the order they entered.
+    /// </summary>
+    void LeaveAll(World world, Fixture bed)
+    {
+        foreach (var sleeper in bed.Occupants.ToArray()) LeaveBed(world, sleeper);
     }
 
     /// <summary>
@@ -2380,7 +2495,7 @@ public sealed partial class FixtureRegistry
     {
         byte before = c.SlaveState;
         if (c.SlaveState == 0 && state == 1 && (c.IsPlayer || world.Player.Faction >= 0 && c.Faction == world.Player.Faction))
-            world.Post(Loc.Tr("{1} has been enslaved", world.ShownName(c)));
+            world.Post(Loc.Tr("{1} has been enslaved", world.ShownName(c, ShownPlace.Notice)));
 
         if (state == 2) c.RecentlyWanted = CrimeSystem.RecentlyWantedSeconds;
         if (state > 1 && before != state) c.SlaveSince = world.GameHours;

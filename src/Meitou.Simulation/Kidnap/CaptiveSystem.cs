@@ -722,7 +722,8 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
     internal bool DrawWeapon(CharacterCold cold)
     {
         if (cold.Fighter is null || cold.Inventory is not { } inv) return false;
-        if (cold.Fighter.Unarmed
+        // A worn unarmed weapon in hand is not swapped for a packed one (engine extension, docs/characters.md "Worn unarmed weapons").
+        if (cold.Fighter is { Unarmed: true, Weapon: null }
                 && inv.All().FirstOrDefault(i => i.Type == FcsRecordType.Weapon && !InventoryCommands.IsEquipmentSection(i.Section)) is { } packed)
         {
             var owner = inv.Items.Contains(packed) ? inv : inv.Backpack?.Contents;
@@ -1322,7 +1323,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
     /// (<see cref="ReachOf"/>) it has arrived, or when a walk ended within <see cref="CaptiveSettings.Slack"/>; a walk that ended farther counts
     /// against <see cref="CaptiveSettings.Walks"/>. Either way only on the cage's level: the rows these jobs plan reach a cage through
     /// <c>isAtLocation</c>, which for a building is <c>AI::isWithinChoppingRange</c> (<c>FUN_14059c6d0</c>, <b>Verified</b>: the flat distance
-    /// and the same floor, <see cref="FixtureRegistry.WorkHeight"/> here), so one standing under a cage on an upper storey is not at it, and 107
+    /// and the same floor, <see cref="FixtureRegistry.OnCageFloor"/> here), so one standing under a cage on an upper storey is not at it, and 107
     /// <c>Task_UseCage</c>'s start (<c>FUN_140358040</c>) puts it into the cage wherever it stands. Its own faction's shut doors on the way are
     /// unlocked first (the lock rounds' "keys", engine choice). False: give up.
     /// </summary>
@@ -1331,7 +1332,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
         var table = world.Characters;
         ref var n = ref table.Next[w];
         float d = Vector2.Distance(new Vector2(n.Position.X, n.Position.Z), new Vector2(cage.Position.X, cage.Position.Z));
-        bool level = MathF.Abs(n.Position.Y - cage.Position.Y) < FixtureRegistry.WorkHeight;
+        bool level = world.Fixtures.OnCageFloor(cage, n.Position, world.Walkability);
         bool walking = WalksOwn(table, w, j);
         arrived = level && (d <= cage.UseRange + ReachOf(j) || !walking && j.Walks > 0 && d <= Settings.Slack);
         if (arrived || walking) return true;
@@ -1670,7 +1671,7 @@ public sealed partial class CaptiveSystem(PopulationData data, CombatSystem? com
 
         // "{1} has been eaten alive." for the player's own (FUN_140856bc0: of the player's faction, or of a squad that is).
         if (eaten && (cc.IsPlayer || world.Player.Faction >= 0 && cc.Faction == world.Player.Faction))
-            world.Post(Loc.Tr("{1} has been eaten alive.", world.ShownName(cc)));
+            world.Post(Loc.Tr("{1} has been eaten alive.", world.ShownName(cc, ShownPlace.Notice)));
 
         return wasDead ? eaten : medical.Dead;
     }

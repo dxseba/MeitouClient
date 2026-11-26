@@ -33,12 +33,16 @@ public sealed partial class DialogueSystem
 
     /// <summary>
     /// A line's effects (<c>FUN_140680560</c>, docs/game/dialogue.md "Effects"), run as it is said or clicked, with <paramref name="me"/> the
-    /// NPC-side speaker and the player character the target, in the original's order: locks, interrupt, relation changes, then the DA effects in data
-    /// order, then AI changes and contracts. Not built yet: arrests other than the bounty desk's hand-over, DA 5, 15, 17,
+    /// NPC-side speaker and the player character the target, in the original's order: BFrizz's Extra Extensions item actions and variable changes
+    /// (its hook runs first), locks, interrupt, relation changes, then the DA effects in data order, then AI changes and contracts. Not built yet: arrests other than the bounty desk's hand-over, DA 5, 15, 17,
     /// 39 and 58 (docs/game/dialogue.md "Effects").
     /// </summary>
     void RunEffects(World world, Conversation c, DialogueNode line, CharacterId me)
     {
+        _extraActions.Run(world, line, me, c.Player);
+        if (line.SetVariables.Count + line.AddToVariables.Count > 0)
+            world.Variables.Apply(_data.Db, line.SetVariables, line.AddToVariables);
+
         var mc = Cold(world, me);
         if (mc is not null) RunLocks(c, line, mc);
         if (line.Interrupt is { } interrupt)
@@ -573,11 +577,12 @@ public sealed partial class DialogueSystem
     }
 
     /// <summary>
-    /// A mod's condition code: the handler's answer, or "no" when no mod handles it (as an unknown vanilla code computes).
+    /// A mod's condition code: the handler's answer; a code no mod handles passes, as the game passes every code it does not know (BFrizz's Extra
+    /// Extensions' 1000-1006 included: <see cref="ExtraExtensionChecks"/> tested them already).
     /// </summary>
     bool ModCondition(World world, CharacterId me, CharacterId subject, DialogueCondition dc)
     {
-        if (Extensions?.DialogueConditions.GetValueOrDefault(dc.Condition) is not { } handler) return dc.Value <= 0;
+        if (Extensions?.DialogueConditions.GetValueOrDefault(dc.Condition) is not { } handler) return true;
         return handler(new DialogueCheck(world, me, subject, dc));
     }
 
@@ -756,11 +761,11 @@ public sealed partial class DialogueSystem
         switch (token)
         {
             case "MYNAME":
-                if (showing) swapped = world.ShownName(me);
+                if (showing) swapped = world.ShownName(me, ShownPlace.Dialogue);
                 return NameOf(world, me);
             case "YOURNAME":
                 if (Cold(world, other) is not { } you) return "you";
-                if (showing) swapped = world.ShownName(you);
+                if (showing) swapped = world.ShownName(you, ShownPlace.Dialogue);
                 return you.Name;
             case "TARGETFACTION":
                 if (Cold(world, other) is not { } o || !_data.Relations.Contains(o.Faction)) return "you";

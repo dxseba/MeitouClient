@@ -11,7 +11,30 @@ namespace Meitou.Game.Building;
 /// A ghost waiting for Confirm: what it is and where it stands, with its footprint in the world.
 /// </summary>
 public sealed record QueuedGhost(
-    BuildingBuildData Building, Vector3 Position, Quaternion Rotation, int Floor, Vector2[]? Hull, string? Parent = null, bool Outside = false);
+    BuildingBuildData Building, Vector3 Position, Quaternion Rotation, int Floor, Vector2[]? Hull, string? Parent = null, bool Outside = false)
+{
+    /// <summary>
+    /// The signature before <c>Outside</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public QueuedGhost(BuildingBuildData building, Vector3 position, Quaternion rotation, int floor, Vector2[]? hull, string? parent)
+        : this(building, position, rotation, floor, hull, parent, false)
+    {
+    }
+
+    /// <summary>
+    /// The signature before <c>Outside</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void Deconstruct(
+        out BuildingBuildData building, out Vector3 position, out Quaternion rotation, out int floor, out Vector2[]? hull, out string? parent)
+    {
+        building = Building;
+        position = Position;
+        rotation = Rotation;
+        floor = Floor;
+        hull = Hull;
+        parent = Parent;
+    }
+}
 
 /// <summary>
 /// A ghost standing on a building's floor: the building (its placement id, a player site's own id), its indoor hull in the world, and the floor
@@ -198,6 +221,11 @@ public sealed record PlacementQuery(
     /// </summary>
     public Func<string, bool>? PassThrough { get; init; }
     /// <summary>
+    /// The BUILDING records whose queued ghosts (not their sites) never block this ghost, on top of <see cref="Passes"/>: an unsnapped wall ghost's
+    /// connectors and wedges (docs/game/buildings-production.md "Walls").
+    /// </summary>
+    public Func<string, bool>? QueuedPassThrough { get; init; }
+    /// <summary>
     /// The building floor the ghost stands on; null on the terrain.
     /// </summary>
     public GhostFloor? On { get; init; }
@@ -236,6 +264,12 @@ public sealed record PlacementQuery(
     /// </summary>
     public bool Passes(string record, Vector3 position, Quaternion rotation) =>
         PassThrough?.Invoke(record) == true || Ignore?.Invoke(record, position, rotation) == true;
+
+    /// <summary>
+    /// Whether a queued ghost never blocks this ghost: it <see cref="Passes"/>, or its record is a <see cref="QueuedPassThrough"/>.
+    /// </summary>
+    public bool PassesQueued(QueuedGhost queued) =>
+        QueuedPassThrough?.Invoke(queued.Building.Id) == true || Passes(queued.Building.Id, queued.Position, queued.Rotation);
 }
 
 /// <summary>
@@ -427,7 +461,7 @@ public static class PlacementCheck
         {
             if (queued.Hull is not null
                 && !OtherFloor(q, parent, queued.Parent, queued.Floor)
-                && !q.Passes(queued.Building.Id, queued.Position, queued.Rotation)
+                && !q.PassesQueued(queued)
                 && (q.SnappedOn is null && !queued.Outside || OverlapsHeight(q.Position.Y, ghostFootprint, q.Building.BuildingHeight, queued.Position.Y,
                     q.Services.Footprint(queued.Building.Id), queued.Building.BuildingHeight))
                 && Overlap(hull, queued.Hull))
@@ -645,6 +679,11 @@ public static class PlacementCheck
     /// </summary>
     public static string Message(PlacementFailure failure, string? refusal = null) =>
         failure == PlacementFailure.RefusedByMod ? refusal ?? "" : PlacementRules.Message(failure);
+
+    /// <summary>
+    /// The signature before <c>refusal</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public static string Message(PlacementFailure failure) => Message(failure, null);
 
     #endregion
 

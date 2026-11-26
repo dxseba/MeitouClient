@@ -329,6 +329,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         }
 
         (m.PowerOn, m.GetsBattery, m.Charge, m.Broken) = (old.PowerOn, old.GetsBattery, old.Charge, old.Broken);
+        if (m.Data.IsStorage) (m.PutPriority, m.TakePriority) = (old.PutPriority, old.TakePriority);
         world.Machines.Replace(m);
         _sweep = true;
     }
@@ -384,10 +385,11 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     #region Orders and the operators' walk
 
     /// <summary>
-    /// The gunner spots of the player's turrets, as their walks found them, with each turret's <c>use range</c> (derived from the site and the
-    /// ground; not saved, not hashed).
+    /// The gunner spots of the player's turrets, as their walks found them, with each turret's <c>use range</c> and whether the spot was found on
+    /// the stand-in of a zone whose navmesh was not loaded (<see cref="IWalkability.AwaitsMesh"/>; derived from the site and the ground; not saved,
+    /// not hashed).
     /// </summary>
-    readonly Dictionary<string, (Vector3 Spot, float Range)> _turretSpots = [];
+    readonly Dictionary<string, (Vector3 Spot, float Range, bool Provisional)> _turretSpots = [];
 
     /// <summary>
     /// The seats that play a bed's clip, lain on at their use nodes with <see cref="World.SeatBedFix"/>.
@@ -494,6 +496,9 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
                     if (set.PowerOn is { } on) powered.PowerOn = on;
                     if (set.GetsBattery is { } battery && powered.Data.IsConsumer) powered.GetsBattery = battery;
                     world.Machines.Touch();
+                    break;
+                case SetStoragePriority set:
+                    SetStoragePriority(world, set);
                     break;
                 case IncinerateFurnace burn when world.Machines.Find(burn.Site) is { Data.IsFurnace: true } furnace
                     && Site(world, burn.Site) is { Complete: true } lit && lit.Owner == world.Player.Faction:
@@ -626,7 +631,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         if (m.Data.Function == Meitou.Data.World.ObjectRanges.TurretFunction && TurretPostOf(site) is { } post)
         {
             var spot = AiSystem.TurretSpot(world, post);
-            _turretSpots[site.Id] = (spot, post.UseRange);
+            _turretSpots[site.Id] = (spot, post.UseRange, world.Walkability.AwaitsMesh(post.Position.X, post.Position.Z));
             return spot;
         }
 
@@ -1088,7 +1093,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
     void Approach(World world, int i, ref CharacterHot n, CharacterCold cold, BuildSite site, Machine m, float dt)
     {
         const ushort path = (ushort)MoveFlags.AnyPath;
-        if (m.Data.Function == Meitou.Data.World.ObjectRanges.TurretFunction && !_turretSpots.ContainsKey(site.Id)) GoalOf(world, site, m, n.Position);
+        if (m.Data.Function == Meitou.Data.World.ObjectRanges.TurretFunction) FindTurretSpot(world, ref n, cold, site, m);
         if (AtSite(world, n, site, m))
         {
             StopWalk(ref n, cold);
@@ -1107,6 +1112,20 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         WalkToSite(ref n, cold, site, GoalOf(world, site, m, n.Position));
         n.Mode = SpeedMode.Free;
         n.TaskTime = PursuitSystem.RepathSeconds;
+    }
+
+    /// <summary>
+    /// Finds a turret's gunner spot for its operator's walk the first time, and again while the one found lay on the open-ground stand-in of a zone
+    /// whose navmesh was not loaded yet (#1422: such a spot was on the terrain under a wall's turret, and the gunner walked there and manned it from
+    /// the foot of the wall); a walk under way to the old spot is sent to the new one.
+    /// </summary>
+    void FindTurretSpot(World world, ref CharacterHot n, CharacterCold cold, BuildSite site, Machine m)
+    {
+        bool known = _turretSpots.TryGetValue(site.Id, out var old);
+        if (known && !old.Provisional) return;
+
+        var spot = GoalOf(world, site, m, n.Position);
+        if (known && spot != old.Spot && (n.Flags & (ushort)MoveFlags.AnyPath) != 0) WalkToSite(ref n, cold, site, spot);
     }
 
     /// <summary>
@@ -2447,7 +2466,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
             && mark == StolenMark.None)
             item.Mark = Crime.CrimeSystem.GoodsMark(world, Crime.StealSource.Of(container));
 
-        bool bagFirst = take.BagFirst || cold.IsPlayer && world.TakeIntoBackpack;
+        bool bagFirst = BagFirst(world, cold, take);
         int wanted = InventoryCommands.ClickCount(item, take.Count);
         if (Caught(world, container, take.Character, InventoryCommands.HasRoomFor(cold.Inventory!, item, bagFirst, cold)))
         {
@@ -2636,7 +2655,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
 
         if (take.Slot == -2 && m.Craft is { } craft)
         {
-            TakeCrafted(world, m, craft, root, take.Index, take.Count);
+            TakeCrafted(world, m, craft, root, take.Index, take.Count, BagFirst(world, cold, take));
             return;
         }
 
@@ -2646,12 +2665,17 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         if (take.Count > 0) held.Count = Math.Min(held.Count, take.Count);
         if (held.Count <= 0 || _items.Create(held.Item, held.Count) is not { } made) return;
         made.Mark = mark;
-        int moved = Placed(root, made);
+        int moved = Placed(root, made, BagFirst(world, cold, take));
         if (moved <= 0) return;
         if (take.Slot == -2) m.Output!.Count -= moved;
         else m.Inputs[take.Slot].Count -= moved;
         world.Machines.Touch();
     }
+
+    /// <summary>
+    /// Whether a take puts into the taker's bag first: its bag window is open, or the player's "Loot into backpack" is on.
+    /// </summary>
+    static bool BagFirst(World world, CharacterCold cold, TakeFromMachine take) => take.BagFirst || cold.IsPlayer && world.TakeIntoBackpack;
 
     /// <summary>
     /// Whether the take out of town machine <paramref name="m"/> finds room for one unit with the stolen mark <paramref name="mark"/> (a dry run): a
@@ -2667,7 +2691,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
             var item = storage.Items[take.Index];
             var kept = item.Mark;
             if (mark != StolenMark.None && kept == StolenMark.None) item.Mark = mark;
-            bool room = InventoryCommands.HasRoomFor(cold.Inventory!, item, take.BagFirst || cold.IsPlayer && world.TakeIntoBackpack, cold);
+            bool room = InventoryCommands.HasRoomFor(cold.Inventory!, item, BagFirst(world, cold, take), cold);
             item.Mark = kept;
             return room;
         }
@@ -2695,7 +2719,7 @@ public sealed partial class ProductionSystem : ITickSystem, ITaskOwner, ITaskHan
         if (mark != StolenMark.None && kept == StolenMark.None) item.Mark = mark;
 
         int moved = InventoryCommands.MoveInto(storage, item, InventoryCommands.ClickCount(item, take.Count), cold.Inventory!,
-            take.BagFirst || cold.IsPlayer && world.TakeIntoBackpack, out bool worn, cold);
+            BagFirst(world, cold, take), out bool worn, cold);
         if (storage.Items.Contains(item)) item.Mark = kept;   // what stayed keeps its mark
         if (moved > 0) world.Machines.Touch();
         if (worn) Assembly?.RefreshEquipment(cold);

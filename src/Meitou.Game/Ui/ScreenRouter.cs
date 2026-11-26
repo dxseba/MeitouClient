@@ -37,6 +37,7 @@ sealed class ScreenRouter(PlayerInterface player)
         else if (e.Screen == FeedbackPanel.FeedbackScreen) player.FeedbackPanel.FeedbackFormAction(e);
         else if (e.Screen == DebugCharactersLayout.Screen) player.CharactersWindow.Action(e);
         else if (e.Screen == DebugItemsLayout.Screen) player.ItemsWindow.Action(e);
+        else if (e.Screen == Modding.LuaHudOverlay.ScreenId) player.LuaHudEvent?.Invoke(e);
         else if (player.Frontend.HandleFrontendAction(e)) player.UpdateMenuPause();
         else if (e.Screen == "stats" && e.Action == "select") player.StatsWindow.SelectedStat = e.Text;
         else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) player.StatsWindow.SelectedStat = e.Action[5..];
@@ -115,6 +116,12 @@ sealed class ScreenRouter(PlayerInterface player)
             return b;
         }
 
+        if (id == Modding.LuaHudOverlay.ScreenId && player.LuaHudBind is { } bindLua)
+        {
+            bindLua(b);
+            return b;
+        }
+
         if (player.Frontend.BindFrontend(id, b)) return b;
         if (id == "editor")
         {
@@ -160,10 +167,10 @@ sealed class ScreenRouter(PlayerInterface player)
     /// </summary>
     string CharacterWindowCaption(string id, CharacterSnapshot? lead) => id switch
     {
-        "stats" => player.ShownLeadName(lead) ?? "CHARACTER STATS",
+        "stats" => player.ShownLeadName(lead, ShownPlace.Panel) ?? "CHARACTER STATS",
         "bag" => player.ShownBackpackName(lead) ?? "BACKPACK",
         "limbs" => "LIMBS",
-        _ => player.ShownLeadName(lead) ?? "INVENTORY",
+        _ => player.ShownLeadName(lead, ShownPlace.Panel) ?? "INVENTORY",
     };
 
     /// <summary>

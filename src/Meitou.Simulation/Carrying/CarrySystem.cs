@@ -28,9 +28,8 @@ namespace Meitou.Simulation.Carrying;
 /// carrier does not regard as friendly is knocked out again.</item>
 /// <item><b>Dropped</b> at once when the carrier is knocked out or dies or its left arm fails or is cut off. A body that comes round on an NPC
 /// carrier rides on awake until a goal of the carrier's puts it down (169, <see cref="PutDownGoals"/>, or any goal that needs empty hands: the
-/// plan's step 69); a player-side carrier sets only a friendly one down (one that is no friend is knocked out again on the shoulder, engine
-/// choice). A squad mate lifted awake (<see cref="CharacterCold.CarriedAwake"/>) rides until
-/// put down.</item>
+/// plan's step 69); on a player's carrier, whose lists hold no 169, until the player puts it down. A squad mate lifted awake
+/// (<see cref="CharacterCold.CarriedAwake"/>) rides until put down.</item>
 /// <item><b>Rescue</b>: the rescue job, and the rescue goals 148 and 142 of anyone whose lists weigh them (<see cref="RescueGoals"/>).</item>
 /// <item><b>Loot</b> (<see cref="CharacterTask.Loot"/>): the walk, then everything of the main inventory and the backpack that fits moves to the
 /// looter (<see cref="LootOrder"/>), or the body's inventory opens in a window to take from (<see cref="OpenLootOrder"/>); a member of the victim's
@@ -446,6 +445,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         if (table.TryResolveNext(open.Target, out int body2) && Openable(table, body2)
             && Nearest(table, Who(world, open.Looters), body2, s => PlayerOrders.CanRun(world, s, entry).CanRun) is int opener)
         {
+            InventoryPause.Told(world, opener);
             PlayerOrders.Give(world, opener, entry, open.Queued);
         }
     }
@@ -1278,24 +1278,12 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
                 Unlink(world, i, b, drop: true);
                 continue;
             }
-            if (body.Medical is { Incapacitated: true }) body.CarriedAwake = false;   // knocked out on the shoulder: set down when it comes round
-            else if (body.Medical is not null && !body.CarriedAwake)
-            {
-                // The body came round. An NPC carrier's goals put it down through the chooser (169 PUT_DOWN_CARRIED_DUDE_IF_THEY_CAN_WALK,
-                // PutDownGoals, or a goal that needs empty hands: the plan's step 69); until then it rides on awake. The put-down task knocks a
-                // body the carrier does not regard as friendly out again on the ground.
-                if (PlayerSide(world, cold))
-                {
-                    if (RegardsBody(world, i, b))
-                    {
-                        Unlink(world, i, b, drop: false);
-                        continue;
-                    }
+            // A body knocked out on the shoulder rides on awake once it comes round, the player's carrier's too: only goal 169
+            // (PUT_DOWN_CARRIED_DUDE_IF_THEY_CAN_WALK, PutDownGoals; listed by AI packages alone) or a goal that needs empty hands (the plan's step 69)
+            // puts it down. The put-down task knocks a body the carrier does not regard as friendly out again on the ground.
+            if (body.Medical is { Incapacitated: true }) body.CarriedAwake = false;
+            else if (body.Medical is not null) body.CarriedAwake = true;
 
-                    KnockOutHeld(cold, body);
-                }
-                else body.CarriedAwake = true;
-            }
             ref var bn = ref next[b];
             bn.Position = next[i].Position;
             bn.Yaw = next[i].Yaw;
@@ -1347,7 +1335,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         var player = world.Player;
         if (opening)
         {
-            OpenWindow(player, cold);   // an open-loot order: the window opens instead of a take-all
+            OpenWindow(world, i, cold);   // an open-loot order: the window opens instead of a take-all
             return;
         }
         int death = DeathUnits(victim.Inventory!);
@@ -1359,7 +1347,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         bool seen = Looted(world, table, i, t, taken, left, crime: true);
         if (cold.IsPlayer)
         {
-            string looter = world.ShownName(cold), body = world.ShownName(victim);
+            string looter = world.ShownName(cold, ShownPlace.Notice), body = world.ShownName(victim, ShownPlace.Notice);
             string report = left > 0
                 ? $"{looter} took {taken} items from {body}; {left} did not fit"
                 : $"{looter} took {taken} items from {body}";
@@ -1370,13 +1358,15 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
     }
 
     /// <summary>
-    /// The open-loot walker's window opens: <see cref="PlayerState.OpenLoot"/> is its body, and the looter holds it
-    /// (<see cref="LootStart.WindowHeld"/>).
+    /// The open-loot walker's window opens: <see cref="PlayerState.OpenLoot"/> is its body, the looter holds it
+    /// (<see cref="LootStart.WindowHeld"/>) and, the player's, is selected (<see cref="InventoryPause.Focus"/>).
     /// </summary>
-    static void OpenWindow(PlayerState player, CharacterCold cold)
+    static void OpenWindow(World world, int slot, CharacterCold cold)
     {
+        var player = world.Player;
         (player.OpenLoot, player.LootOpener, player.OpeningLoot) = (player.OpeningLoot, player.LootWalker, CharacterId.None);
         cold.LootFlags |= LootStart.WindowHeld;
+        InventoryPause.Focus(world, slot);
     }
 
     /// <summary>
@@ -1390,20 +1380,20 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         var cold = table.Cold(i)!;
         if (table.Next[i].Task != (byte)CharacterTask.Loot || !Opening(world, i) || cold.Inventory is null) return;
         if (!table.TryResolveNext(cold.CarryTarget, out int t) || !Openable(table, t)) return;
-        if (InReach(world, table.Next[i], table.Next[t], LootReach(world, i, t))) OpenWindow(world.Player, cold);
+        if (InReach(world, table.Next[i], table.Next[t], LootReach(world, i, t))) OpenWindow(world, i, cold);
     }
 
     /// <summary>
     /// The looter holding the open window (<c>Task_Loot_Order</c>'s update, <c>FUN_140354ef0</c>): it stays in the task, with no other task, while
-    /// the window stays open, and ends it when the window closes or a melee threat is within 40 (Character <c>+0x2b0</c>,
-    /// <see cref="CharacterFacts.ImmediateThreat"/>). Only this held phase tests the threat, not the walk to the body (#372). The task's end closes
-    /// the window (<see cref="CloseHeldWindow"/>).
+    /// the window stays open, and ends it when the window closes. The original also ends it at a melee threat within 40 (Character <c>+0x2b0</c>);
+    /// Meitou's pause ends it when the looter was out of combat when told and it or an ally near it fights now, and ignores combat otherwise
+    /// (<see cref="InventoryPause.CombatEnds"/>, engine choice). Only this held phase tests combat, not the walk to the body (#372). The task's
+    /// end closes the window (<see cref="CloseHeldWindow"/>).
     /// </summary>
     static void HoldWindow(World world, int i, CharacterCold cold)
     {
         bool open = world.Player.OpenLoot == cold.CarryTarget && world.Player.LootOpener == world.Characters.IdOf(i);
-        bool threat = world.SystemOf<CombatSystem>() is { } combat && CharacterFacts.ImmediateThreat(combat, world, i);
-        if (open && !threat) return;
+        if (open && !InventoryPause.CombatEnds(world, i, cold)) return;
         End(world, i);
     }
 
@@ -1511,7 +1501,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         if (owner.Items.Contains(item)) item.Mark = mark;   // what stays keeps its mark
         if (moved == 0)
         {
-            if (cold.IsPlayer) world.Post($"{world.ShownName(cold)} has no room for {item.ShownName()}.");
+            if (cold.IsPlayer) world.Post($"{world.ShownName(cold, ShownPlace.Notice)} has no room for {item.ShownName()}.");
             return;
         }
         Crime.GoodsTakenObservers.Report(world, table.IdOf(i), victim.Faction, table.IdOf(t), "", record, moved, caught: false);
@@ -1543,7 +1533,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         }
 
         if (npcOwner) Crimes?.PendPickpocket(world, looter, body, kind);
-        if (cold.IsPlayer) world.Post($"{world.ShownName(cold)} has no room for {item.ShownName()}.");
+        if (cold.IsPlayer) world.Post($"{world.ShownName(cold, ShownPlace.Notice)} has no room for {item.ShownName()}.");
         return true;
     }
 
@@ -1592,7 +1582,11 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         if (Looted(world, table, looter, body, 1, left, crime: false))
         {
             if (first && table.Cold(looter)!.IsPlayer)
-                world.Post($"{world.ShownName(table.Cold(looter)!)} was seen looting {world.ShownName(table.Cold(body)!)}");
+            {
+                string looterName = world.ShownName(table.Cold(looter)!, ShownPlace.Notice);
+                string bodyName = world.ShownName(table.Cold(body)!, ShownPlace.Notice);
+                world.Post($"{looterName} was seen looting {bodyName}");
+            }
             _seenLoot = world.Player.OpenLoot;
         }
     }
@@ -1616,7 +1610,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         {
             medical.Butcher();
             DeathObservers.Report(world, t, world.Characters.IdOf(i), DeathSite.Butchered);
-            world.Post($"{world.ShownName(victim)} has been butchered");
+            world.Post($"{world.ShownName(victim, ShownPlace.Notice)} has been butchered");
         }
         Seen(world, i, t, 0);
     }
@@ -1644,7 +1638,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         medical.Butcher();
         DeathObservers.Report(world, body, table.IdOf(looter), DeathSite.Butchered);
         if (table.Cold(looter)!.IsPlayer || victim.IsPlayer)
-            world.Post($"{world.ShownName(victim)} has been butchered");
+            world.Post($"{world.ShownName(victim, ShownPlace.Notice)} has been butchered");
     }
 
     /// <summary>

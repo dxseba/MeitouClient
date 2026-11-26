@@ -435,6 +435,7 @@ the act-out is a round on the one target, done once worked; 111's inner point is
   (its lock node is 14.1 away); Peeler Machine's one node at (0.1, 11.3). Meitou: `FixtureRegistry.ExitSpot` for Get out and Release; lifting out leaves the body to the carrier, but a gatherer's take-out
   (173, 217, 245), which no one carries, puts it at the exit spot too (`LiftOut` with `stepOut`). **Observed** (Rebirth, 2026-11-09): the middle of an
   emptied Prisoner Cage is a pocket of the navmesh no path leaves, so a slave left there stood still all hour while the original's walked to the mines.
+- **Medic's release**: an NPC medic finishing a friendly prisoner's first aid clears the hold, cage left locked ([first aid](character-stats.md#first-aid-update); `FixtureRegistry.LetOut`).
 - **Release** (`Task_ReleasePrisoner` 110): clears the occupancy, "{1} has been released from prison." (**Observed**).
 - **Beds**: `+0x2f8 = 1`, bed handle +0x300 ([carry-loot](carry-loot.md)); beds have no lock. Details below.
 - Character save keys: `in something` (= +0x2f8) and `in what` (handle +0x300) (**Verified**, `FUN_1406280a0`); platoons
@@ -450,6 +451,12 @@ Meitou registers them as outdoor fixtures using their level placement and bed ma
 - **Enter / leave** (`FUN_14032e2f0(character, enter, bed)`): entering sets `+0x2f8 = 1` and the handle, and adds the character to the bed's occupant
   set (UseableStuff slot 159 `FUN_1400f8030`, refused once the set holds `max operators`); leaving (`FUN_140345620`) removes it and clears both.
   "Free for X" (slot 158 `FUN_1400f7bf0`): X is in the set or the set is below `max operators`.
+  Meitou (shared beds): `Fixture.Occupants` is the set in entry order (`Occupant` its first; hashed; not saved: `Bind` rebuilds it from each
+  sleeper's `in what`, in slot order), `Fixture.Capacity` the bed's `BedData.Operators`: the BUILDING's `max operators` unless below 0, else the bed
+  functionality's (the machines' `+0x3ac` rule, `FUN_1402a3750`; every base bed has 1), below 1 read as 1 (engine choice).
+  `FixtureRegistry.IsFree` is room for a newcomer, `IsFreeFor` slot 158 with X; every bed path (orders, put-in, the bed searches, the trips'
+  reservations `BedSystem.Reserved`) tests them. Each sleeper lies at the node nearest to itself ("Lie spot"), with no test of the other's node,
+  so two may share one.
 - **Task_UseBed** (98 USE_BED, 100 GET_PUT_IN_BED, 258 USE_BED_ORDER; slots 1 `FUN_140357d00`, 2 `FUN_140351770`, 5 `FUN_140347950`, 6 `FUN_140347ba0`):
   the character is put at the bed's position marker and plays its clip (below, "Lie spot"); with the task's flag +0xa0 the start first
   checks rent (`FUN_140357ad0`: a negative cost is passed on to the payment only when the bed has a parent building, slot 59) and power; with the flag clear
@@ -501,8 +508,8 @@ Meitou registers them as outdoor fixtures using their level placement and bed ma
   (only less the feet's lift, `CharacterRenderer.Lowering`): with it, a short-legged paladin (offset 1.23) lay with its back through the mattress. **Tilt** (**Observed** by decompile, `FUN_1405cf130` state 1 and `FUN_140549720`; the listing drops the operands of the two quaternion products, read as marker = building x (building inverse x marker)): the sleeper is given the direction marker's whole quaternion, written straight to its node
   (`FUN_1405c8540` over `FUN_1405b1a30`), so on a bed placed on a slope the body leans with the bed. `FUN_140549720` returns the building's orientation (vfunc 0xc0) when the bed has no use node
   (count 0, not the position marker's "fewer than 2"), else the nearest node's orientation turned -90° about Y; the nearest-node search there skips no bad node. Meitou: display only, the simulation keeps a yaw:
-  a bed standing on its own keeps its whole rotation (`Fixture.Rotation`), `FixtureRegistry.LeanOf` gives the snapshot's `Lean` (none for a level bed) and the host draws the body turned by its yaw, then
-  the lean; a tilted bed with use nodes still has its nodes placed by yaw only (`Nearest`), no base bed on its own has any (#688: sleepers on Camp Beds built on a hillside lay level and cut through the mattress).
+  every bed keeps its whole rotation (`Fixture.Rotation`; an interior bed its placed one, the building's tilt included), its use nodes are placed by it (`FixtureRegistry.NodeTurn`), `FixtureRegistry.LeanOf` gives the snapshot's `Lean` (none for a level bed) and the host draws the body turned by its yaw, then
+  the lean (#688: sleepers on Camp Beds built on a hillside lay level and cut through the mattress; #1420: Rebirth's slaver house stands tilted 10°, **Observed** by probe, and its sleepers lay level with their heads through the `Bed`s).
 - **Getting out of bed** (`Task_GetOutOfBed`, **Verified**): the start `FUN_140345760` posts Get_Out / Character_Bed; when the bed's clip name (`FUN_140297330`) is `gotobed` the sleeper stays in bed, else it leaves at once (`FUN_140345620`). The update `FUN_140348480` plays `gotobed` at rate -1 and leaves once its progress is under 0.1. No base bed names `gotobed` (they use `sleepinbed`), so only modded beds animate the exit. Meitou: `FixtureRegistry.GetOutOfBed` (`CharacterCold.LeavingBed` / `BedExitDone`, `AnimationSystem.FinishBedExit`) for the AI's get-out step and the bed system's get-up; forced removals (carried off, kidnapped, an order) use `LeaveBed` at once. Meitou stands one getting out where it lay unless the bed's navmesh hole leaves no floor at its height there (a modded bunk's node lies 16 or more inside it); then it stands on the nearest floor point at that height within 40.
 - **Out cold in a bed** (#1263): a knock-out only sets its time and no task or AI runs while down ([combat](combat.md), `FUN_14034cd80`, `FUN_1405d00b0`), so a sleeper knocked out lies on in its bed. Meitou: `BedSystem.GetUp` leaves a knocked-out occupant in, whatever its task (the debug `ko`'s task reset got it up). A body that leaves a bed while out cold (carried off) drops the bed's clips at once (`FixtureRegistry.DropBedPose`, engine choice): from `sleepinbed` its ragdoll started with the pelvis inside the Bed's collision (box top 8.1 over the lie spot, `meitou-tools navmesh --ragdoll --probe`) and fell through to the floor under the mattress, where the bed took every click; now it goes limp at the lie spot beside the bed (**Observed**, the reporter's save, United Cities house `Bed`s: 11.4 units to the mattress centre at floor height before, 0.2 after).
 - **Rent cost** (UseableStuff slot 152 `FUN_140330ab0(bed, character)`): 0 in this order: no bed faction; the faction's `not real` flag
@@ -551,7 +558,8 @@ Meitou registers them as outdoor fixtures using their level placement and bed ma
   list count gates them), so a home with BF_BED beds that are all taken or targeted gives no bed at all; the lister matches the function exactly, so
   skeleton beds (25) are not in step 1's list (**Verified** by decompile, `FUN_1408cfe00`, `FUN_14054d4f0`). Meitou: `HomeBedClaims` (serial, on the
   package cadence, member order) gives each member lying in bed, going to bed or with going to bed open at this hour a BF_BED bed of its home: the
-  one it lies in, else the one it claimed while still free, else the first free one no one claimed (Meitou's thinks run in parallel, so the claims
+  one it lies in, else the one it claimed while still free, else the first free one no one claimed (a shared bed with room included; the sub-target
+  test above keeps mates out of one a mate claimed or lies in) (Meitou's thinks run in parallel, so the claims
   are made serially; which members get the beds is an engine choice). A think takes its claim, else the free unclaimed bed the next
   pass would give it, and with none the goal's desire is 0. Without such beds (homeless, or a home with none) `AiSystem.SpareBed` runs the search
   (a squad without a town: own or allied beds within the bed search range, engine choice); with no bed found the goal's desire is 0.

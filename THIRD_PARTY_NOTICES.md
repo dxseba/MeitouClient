@@ -141,6 +141,40 @@ Used as packages (not copied into this repository); each is distributed under it
 The DDS reader and decoder (`src/Meitou.Data/Textures/`) are written from Microsoft's public DDS and
 block-compression documentation; no code is taken from other implementations.
 
+## SMAA
+
+`assets/smaa/AreaTex.rg8` and `SearchTex.r8` are the lookup tables of SMAA's `AreaTex.h` and `SearchTex.h`
+(https://github.com/iryoku/smaa), and the SMAA passes in `src/Meitou.Game/Rendering/Post/PostProcessShaders.cs`
+follow SMAA's algorithm and constants.
+
+```
+Copyright (C) 2013 Jorge Jimenez (jorge@iryoku.com)
+Copyright (C) 2013 Jose I. Echevarria (joseignacioechevarria@gmail.com)
+Copyright (C) 2013 Belen Masia (bmasia@unizar.es)
+Copyright (C) 2013 Fernando Navarro (fernandn@microsoft.com)
+Copyright (C) 2013 Diego Gutierrez (diegog@unizar.es)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to
+do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software. As clarification, there
+is no requirement that the copyright notice and permission be included in
+binary distributions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Harmony
 
 `0Harmony.dll` (NuGet `Lib.Harmony` 3.0.0-rc.7) ships with the game for code mods (docs/modding.md). It merges MonoMod and Mono.Cecil, whose
@@ -287,9 +321,68 @@ freely, subject to the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 ```
 
+## Cirrus Texture
+
+`assets/high-cirrus.png` (the high clouds' cirrus wisps: two cloud images in its red and green channels) is made from
+FX_CloudAlpha08 and FX_CloudAlpha09 of "Clouds with Transparency" by wickedinsignia
+(https://opengameart.org/content/clouds-with-transparency), licensed CC0 1.0.
+
+## 2D Cloud Shader
+
+The cloud pattern of the Meitou high clouds (`src/Meitou.Game/Rendering/Sky/HighClouds.cs`: the simplex noise, the octave
+sums and their combination into cover and shading) is adapted from "2D Clouds" by drift on Shadertoy
+(https://www.shadertoy.com/view/4tdSWr), used with the author's permission as mentioned on the page. Many modifications
+and additions have been made for MeitouClient.
+
 ## Kenshi logo
 
 `assets/branding/kenshi-logo.png` (shown on the Meitou title screen) is the Kenshi logo, artwork
 and trademark of Lo-Fi Games. It is not covered by this project's GPL license and is included
 only to identify the game this engine runs. MeitouClient is not affiliated with or endorsed by
 Lo-Fi Games.
+
+## MoonSharp
+
+`src/Meitou.Lua/` hosts KenshiLua-compatible Lua scripts using the MoonSharp NuGet package (`MoonSharp`),
+which is licensed under the BSD 3-Clause License.
+
+```
+Copyright (c) 2014-2016, Marco Mastropaolo
+All rights reserved.
+
+Parts of the string library are based on the KopiLua project (https://github.com/NLua/KopiLua)
+Copyright (c) 2012 LoDC
+
+Visual Studio Code debugger code is based on code from Microsoft vscode-mono-debug project (https://github.com/Microsoft/vscode-mono-debug).
+Copyright (c) Microsoft Corporation - released under MIT license.
+
+Remote Debugger icons are from the Eclipse project (https://www.eclipse.org/).
+Copyright of The Eclipse Foundation
+
+The MoonSharp icon is (c) Isaac, 2014-2015
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the {organization} nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```

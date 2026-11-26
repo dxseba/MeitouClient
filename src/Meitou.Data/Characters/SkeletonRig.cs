@@ -221,6 +221,16 @@ public sealed class SkeletonRig
     readonly IReadOnlyList<Lazy<OgreSkeleton?>> _linked;
 
     /// <summary>
+    /// Reads the skeleton a skeleton file's own animation link names (null: not in the install), for the clips the skeleton lacks.
+    /// </summary>
+    readonly Func<string, OgreSkeleton?>? _linkSource;
+
+    /// <summary>
+    /// How deep a clip lookup follows skeleton files' animation links: a cycle of links ends there (engine choice).
+    /// </summary>
+    const int MaxLinkDepth = 8;
+
+    /// <summary>
     /// The scratches given back, shared by every thread.
     /// </summary>
     readonly ConcurrentBag<PoseScratch> _scratches = [];
@@ -236,10 +246,12 @@ public sealed class SkeletonRig
     /// </summary>
     /// <param name="linked">The linked animation sources in link order: a clip is taken from the first that has it, its tracks applied by bone
     /// handle, and from the skeleton itself only when none does.</param>
-    public SkeletonRig(OgreSkeleton skeleton, IReadOnlyList<Lazy<OgreSkeleton?>>? linked = null)
+    /// <param name="linkSource">Reads a skeleton that a skeleton file's own animation link names; null follows no such link.</param>
+    public SkeletonRig(OgreSkeleton skeleton, IReadOnlyList<Lazy<OgreSkeleton?>>? linked = null, Func<string, OgreSkeleton?>? linkSource = null)
     {
         Skeleton = skeleton;
         this._linked = linked ?? [];
+        _linkSource = linkSource;
         BoneCount = skeleton.Bones.Count == 0 ? 0 : skeleton.Bones.Max(b => b.Handle) + 1;
         ByHandle = new OgreBone?[BoneCount];
         Parent = new int[BoneCount];
@@ -279,6 +291,14 @@ public sealed class SkeletonRig
     }
 
     /// <summary>
+    /// The signature before <c>linkSource</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public SkeletonRig(OgreSkeleton skeleton, IReadOnlyList<Lazy<OgreSkeleton?>>? linked)
+        : this(skeleton, linked, null)
+    {
+    }
+
+    /// <summary>
     /// A working set for posing on the calling thread; give it back with <see cref="Return"/>.
     /// </summary>
     public PoseScratch Rent()
@@ -306,15 +326,31 @@ public sealed class SkeletonRig
     public int? Handle(string name) => _handles.TryGetValue(name, out var h) ? h : null;
 
     /// <summary>
-    /// The animation called <paramref name="name"/> as arrays: the first linked source's that has it, else the skeleton's own (null: none has
-    /// it). A mod's animation file so replaces a base clip of the same name (docs/animation.md, "Animation files").
+    /// The animation called <paramref name="name"/> as arrays: the first linked source's that has it, else the skeleton's own, else the one its
+    /// file's animation links reach (null: none has it). A mod's animation file so replaces a base clip of the same name (docs/animation.md,
+    /// "Animation files").
     /// </summary>
     public AnimationClip? Clip(string name)
     {
         if (_clips.TryGetValue(name, out var cached)) return cached;
 
-        var animation = FindLinked(name) ?? Find(Skeleton, name);
+        var animation = FindLinked(name) ?? FindOwn(Skeleton, name, 0);
         return _clips[name] = animation is null ? null : Compile(animation);
+    }
+
+    /// <summary>
+    /// The animation called <paramref name="name"/> of <paramref name="skeleton"/>, else of the skeletons its file links, depth first in link order
+    /// (Ogre's <c>Skeleton::_getAnimationImpl</c>; docs/formats/ogre-skeleton.md "Animation links"); null when none has it.
+    /// </summary>
+    OgreAnimation? FindOwn(OgreSkeleton skeleton, string name, int depth)
+    {
+        if (Find(skeleton, name) is { } own) return own;
+        if (_linkSource is null || depth >= MaxLinkDepth) return null;
+
+        foreach (var link in skeleton.AnimationLinks)
+            if (_linkSource(link.SkeletonName) is { } source && FindOwn(source, name, depth + 1) is { } animation) return animation;
+
+        return null;
     }
 
     /// <summary>
@@ -472,6 +508,13 @@ public sealed class PoseScratch
     }
 
     /// <summary>
+    /// The signature before <c>unitMovement</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void Pose(
+        BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, Span<Matrix4x4> skin, BonePose? overrides, (float Neck, float Head) pitch) =>
+        Pose(shape, layers, skin, overrides, pitch, false);
+
+    /// <summary>
     /// The posed derived (model-space) transform of a bone: scale, rotation, translation.
     /// </summary>
     public Matrix4x4 BoneTransform(int h) =>
@@ -502,6 +545,12 @@ public sealed class PoseScratch
         BlendLayers(layers, count, movement);
         Derive(shape, overrides, pitch);
     }
+
+    /// <summary>
+    /// The signature before <c>unitMovement</c>, kept for code mods built against it (docs/modding.md "API compatibility").
+    /// </summary>
+    public void PoseDerived(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, BonePose? overrides, (float Neck, float Head) pitch) =>
+        PoseDerived(shape, layers, overrides, pitch, false);
 
     /// <summary>
     /// Starts every bone's local transform at its binding one.

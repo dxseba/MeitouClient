@@ -651,6 +651,7 @@ sealed partial class GameHost(
         var bounds = (Scene.X0, Scene.Z0, Scene.X1, Scene.Z1);
         Session = new WorldSession(Scene.Focus, bounds, Gpu.Terrain.HeightAt, WorldOptions.Hour, Config.TickRate,
             clock: clock, simulation: settings, systems: systems, walkability: walkability);
+        if (RagdollGeometry is not null) RagdollGeometry.InsideCutInterior = p => Session.World.Sight.InsideCutRoom(p);
 
         Session.World.BenchFacingFix = Config.FixBenchFacing;
         Session.World.SeatBedFix = Config.FixSeatBeds;
@@ -660,6 +661,7 @@ sealed partial class GameHost(
         Session.World.PickUpTheftFix = Config.FixPickUpTheft;
         Session.World.CounterTalk = Config.CounterTalk;
         Session.World.TakeIntoBackpack = Config.TakeIntoBackpack;
+        Session.World.DropFromLoot = Config.DropFromLoot;
         Session.World.ActionLog = ActionLogs.Log;
         Session.Simulation.SetFastSpeeds(Config.FastSpeed, Config.FastestSpeed);
         if (Gpu.Characters is { } nearChars)
@@ -709,6 +711,7 @@ sealed partial class GameHost(
     void KeepWorldContent(WorldBoot boot, Meitou.Data.World.WorldLevelData? levels)
     {
         Nav = boot.Nav;
+        if (Nav is not null) Nav.Walkability.StreamsZones = true;   // LoadWantedZones streams in the zones routes ask for
         RagdollGeometry = boot.RagdollGeometry;
         CharacterRigs = boot.Rigs;
         AnimationLengths = boot.AnimationLengths;
@@ -1295,6 +1298,7 @@ sealed partial class GameHost(
         // Kept per item with the shown text revision it was made at, since the race names in it are shown text.
         var specialFoodRaces = new System.Collections.Concurrent.ConcurrentDictionary<string, (int Revision, string Text)>(StringComparer.Ordinal);
         ui.TooltipRuntime.ItemRecordOf = id => PopData?.Db.Find(id);
+        ui.TooltipRuntime.RecordMods = record => PopData?.Db.ModsOf(record) ?? [];
         ui.TooltipRuntime.SpecialFoodRaces = id =>
         {
             if (PopData is not { } d) return "";

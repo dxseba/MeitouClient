@@ -76,6 +76,18 @@ sealed partial class PlayerInterface
     /// An action of the screens for the host (save, load, new game, the options and exit buttons).
     /// </summary>
     public event Action<MyGuiEvent>? ScreenAction;
+    /// <summary>
+    /// Built-in Lua HUD overlay binder, attached when KenshiLua mods are active.
+    /// </summary>
+    internal Action<UiBindings>? LuaHudBind;
+    /// <summary>
+    /// Built-in Lua HUD overlay event handler, attached when KenshiLua mods are active.
+    /// </summary>
+    internal Action<MyGuiEvent>? LuaHudEvent;
+    /// <summary>
+    /// Built-in Lua key-down listener, attached when KenshiLua mods are active.
+    /// </summary>
+    internal Action<Key>? LuaKeyDown;
 
     /// <summary>
     /// The interface style, Faithful (the original's layouts) or Meitou.
@@ -308,14 +320,23 @@ sealed partial class PlayerInterface
         ShownText.Any && PopulationOf?.Invoke() is { } d ? d.Db.ShownName(what, record, name) : name;
 
     /// <summary>
-    /// Character <paramref name="c"/>'s name as shown (<see cref="ShownName(string, string, string)"/>, with the record it was made from).
+    /// As <see cref="ShownName(string, string, string)"/>, for one character's name: <paramref name="character"/> its lasting id (0: none known),
+    /// <paramref name="place"/> where it is shown.
     /// </summary>
-    internal string ShownName(CharacterSnapshot c) => ShownName("character", c.RecordId, c.Name);
+    internal string ShownName(string what, string record, string name, ulong character, ShownPlace place) =>
+        ShownText.Any && PopulationOf?.Invoke() is { } d ? d.Db.ShownName(what, record, name, character, place) : name;
 
     /// <summary>
-    /// <paramref name="lead"/>'s name as shown (<see cref="ShownName(CharacterSnapshot)"/>); null when there is no character.
+    /// Character <paramref name="c"/>'s name as shown at <paramref name="place"/> (<see cref="ShownName(string, string, string)"/>, with the record
+    /// it was made from and its lasting id).
     /// </summary>
-    internal string? ShownLeadName(CharacterSnapshot? lead) => lead is null ? null : ShownName(lead);
+    internal string ShownName(CharacterSnapshot c, ShownPlace place) => ShownName("character", c.RecordId, c.Name, c.LastingId.Value, place);
+
+    /// <summary>
+    /// <paramref name="lead"/>'s name as shown at <paramref name="place"/> (<see cref="ShownName(CharacterSnapshot, ShownPlace)"/>); null when
+    /// there is no character.
+    /// </summary>
+    internal string? ShownLeadName(CharacterSnapshot? lead, ShownPlace place) => lead is null ? null : ShownName(lead, place);
 
     /// <summary>
     /// The name of the backpack <paramref name="lead"/> wears (the item in its <c>backpack_attach</c> section) as shown
@@ -358,6 +379,18 @@ sealed partial class PlayerInterface
 
         return d.Db.ShownName("faction", record, name);
     }
+
+    /// <summary>
+    /// Whether any UI extension adds bars to the building panel.
+    /// </summary>
+    internal bool HasModBuildingRows => _uiHost.HasBuildingRows;
+
+    /// <summary>
+    /// The bars the interface extensions add under the Condition of <paramref name="building"/> (<see cref="UiHost.BuildingRows"/>), given the
+    /// snapshot the panel is laid out from.
+    /// </summary>
+    internal IReadOnlyList<UiBuildingRow> ModBuildingRows(UiSelectedBuilding building, WorldSnapshot snapshot) =>
+        _uiHost.BuildingRows(new UiBuildingContext(building, snapshot, () => Session.World.Tick, Say));
 
     /// <summary>
     /// The lines the interface extensions add to an item's tooltip (<see cref="UiHost.ItemTooltipLines"/>); none without an extension that adds any.
@@ -651,7 +684,7 @@ sealed partial class PlayerInterface
         b.Text["MoneyAmountText"] = "c." + Session.World.Player.Money.ToString("N0", CultureInfo.InvariantCulture);
 
         // The name bar draws its own lines over the widget (HudPanels).
-        b.Text["NameText"] = lead is null ? "No character selected" : ShownName(lead);
+        b.Text["NameText"] = lead is null ? "No character selected" : ShownName(lead, ShownPlace.Panel);
         b.Properties["NameText"] = new Dictionary<string, string> { ["SkipCaption"] = "true" };
         b.Text["hunger"] = lead?.Body is { } hungry ? $"Hunger {hungry.Hunger:0.00} / 3" : "";
         b.Text["condition"] = lead?.Body is { } status
@@ -693,7 +726,7 @@ sealed partial class PlayerInterface
         {
             if (!c.IsPlayer) continue;
 
-            if (count < 8) b.Text[RosterNameKeys[count]] = ShownName(c);
+            if (count < 8) b.Text[RosterNameKeys[count]] = ShownName(c, ShownPlace.Squad);
             count++;
         }
 
@@ -949,7 +982,7 @@ sealed partial class PlayerInterface
             [UiSlots.Squad] = FaithfulSlot("SquadPanel"),
         };
         var overlay = hud ? _uiHost.Arrange(UiMode, Width, Height, b, slots).ToList() : [];
-        var layers = RecordPortraits.Resolve(overlay).ToLookup(UiHost.LayerOf);
+        var layers = overlay.ToLookup(UiHost.LayerOf);
         controls.InsertRange(0, layers[UiOverlayLayer.Back]);
         controls.AddRange(layers[UiOverlayLayer.Hud]);
         PortraitBar.SquadBarRow = 0;
@@ -966,7 +999,9 @@ sealed partial class PlayerInterface
 
         // After the screens: a mod's text box may lie in one (screen controls) as well as on the overlay.
         FaithfulScreens.ArrangeOverlayEdits(controls);
-        return controls;
+
+        // Last: the portraits the overlay, the screens' extension controls and the screen overrides ask for share the atlas cells.
+        return [.. RecordPortraits.Resolve(controls)];
     }
 
     /// <summary>
@@ -1013,6 +1048,7 @@ sealed partial class PlayerInterface
         MessageRoller.AddNotice(controls);
         InventoryWindows.AddInventoryDrag(controls);
         ItemsWindow.AddDrag(controls);
+        OrdersPanel.AddJobDrag(controls);
 
         AddUnderLayers(controls);
 
@@ -1521,6 +1557,7 @@ sealed partial class PlayerInterface
         if (key == Key.Escape && LevelEditorPanel.LevelEscape()) return true;
         if (key == Key.Escape) return EscapeKey();
         if (FaithfulScreens.HasKeyboardFocus && EditFocusKey(key, ctrl, shift)) return true;
+        if (!FaithfulScreens.HasKeyboardFocus) LuaKeyDown?.Invoke(key);
         if (WorldMap.ModMapKey(key, ctrl, shift)) return true;
         if (GameHotkeys.Bound(InputAction.RotateItem, key) && InventoryWindows.RotateAt(Mouse)) return true;
         if (ScreenKey(key, shift) is { } screenTook) return screenTook;
