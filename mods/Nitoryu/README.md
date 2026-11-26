@@ -28,7 +28,8 @@ records, about 135 `nitoryu ...` settings on GLOBAL CONSTANTS, the Pair Training
 - **Flow** (rank 4+): the third attack at the fighter within 5 s gives 4 s of +12 % more Dexterity in the cut, +0.04 speed and cap 1.8; 5 s
   before it counts again.
 - **Learning is hard**: -10 melee attack and defence at Path 0, gone at 40; the split guard's -4 / -4 / -2 defence at ranks 0 to 2.
-- **The second blade held**: drawn in the left hand (its sheath stays worn, empty), display only.
+- **The second blade held**: drawn in the left hand (its sheath stays worn, empty), display only, on `Bip01 L Hand` with the main weapon's grip
+  mirrored (the original's grip without its pose engine). The original's `[OffHand] bone / pos / rot` override it.
 - **Pressure** (rank 3+): every hit of a dual fighter an enemy blocks piles a stack on it (up to 5, one fades every 3 s, cleared when it lands a
   hit on that fighter); each stack counts `pressure points` (1) in the initiative roll between the two, against the pressured enemy.
 - **The same body part** (rank 3+): the second impact of a twin strike on the same enemy within 1 s goes for the part the first hit (80 % at
@@ -79,8 +80,15 @@ records, about 135 `nitoryu ...` settings on GLOBAL CONSTANTS, the Pair Training
 - **Observed** (README numbers): the speed bonus fits 0.3 x ((Dex - 30) / 70) x ((Path - 30) / 70), the constants' `speed bonus from` 30
   (Dex 60 + Path 60: x1.06; Dex 100 + Path 60: x1.13; both 100: x1.3).
 - **Observed** (`fcs.def`): the skill is the STATS key `NIT_ambidexterity` in the original's saves.
-- **Observed** (Meitou `AnimationMask`: `override L arm` moves `Bip01 Prop1`): `Bip01 Prop1` is the left-hand prop bone. **Unknown**: whether a
-  blade mesh sits in it as in the right hand's `Bip01 Prop2` (the original mirrors the right hand's grip).
+- **Verified** (`male_skeleton.skeleton` and `female_skeleton.skeleton`, read with `OgreSkeletonReader`): `Bip01 Prop1` is no grip bone. It is
+  a child of `Bip01 L Hand` 3.6 to 3.7 units from it in the bind pose, and every vanilla clip keys it (174 and 166). A blade on it jumps next to
+  the right hand or swings loose (players' reports). `Bip01 Prop2`, the main weapon's, is 0.27 to 0.28 from `Bip01 R Hand`.
+- **Verified** (decompile): the original holds the second blade on `Bip01 Prop1` only while its pose engine (a hook on
+  `Ogre::Skeleton::_updateTransforms`) mirrors the right arm onto it; otherwise on `[OffHand] bone` (default `Bip01 L Hand`) at
+  `[OffHand] pos` and `rot` (w x y z), logging "the second blade hangs in the left hand with a fixed grip". Meitou has no such pose engine, so
+  the port always holds it in the left hand.
+- **Observed** (the two skeletons): the hands' bind rotations differ by (x, y, z, w) to (-x, y, -z, w), so the default grip is `Bip01 Prop2`'s
+  offset reflected that way. **Unknown**: the original's built-in `pos` and `rot` defaults (set at run time; zero in the file).
 - **Unknown**: the original's exact pick order and pool weights beyond what `FCS.md` and the README say; the overload factor's formula (the
   port uses the encumbrance factor); not checked in game.
 
@@ -97,7 +105,8 @@ records, about 135 `nitoryu ...` settings on GLOBAL CONSTANTS, the Pair Training
 - `Meitou.Simulation.Movement.AnimationSystem.Update` (prefix) and `Meitou.Simulation.Movement.AnimationSystem.PickGait` (postfix): the pose
   layer (moves, blocks, stances, runs); `AnimationSystem.Plays` by reflection.
 - `Meitou.Data.Characters.PoseScratch.AddLayer` (prefix): the mirrored clips; `PoseScratch.Sample` and its fields by reflection.
-- `Meitou.Game.Host.HiddenHatLooks.WorldLook` (postfix): the second blade in the left hand; `CharacterRenderer.IsPrepared` / `Warm` by reflection.
+- `Meitou.Game.Host.HiddenHatLooks.WorldLook` (postfix): the second blade in the left hand; `CharacterRenderer.IsPrepared` / `Warm`,
+  `CharacterRenderer._content` and `CharacterContent.Fetched` by reflection.
 - `Meitou.Simulation.Bodies.HudTips.StatsWindow` (postfix), `Meitou.Game.Ui.StatsWindow.AddModSkillDescription` (prefix, finalizer) and
   `Meitou.Game.Ui.StatsWindow.AddDescriptionPanels` (prefix): the pane's live lines.
 - By reflection, not patched: `CombatSystem.Eff`, `CombatTuning.Gap`, `XpService.ContinuousRate`.

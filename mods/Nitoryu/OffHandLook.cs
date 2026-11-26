@@ -10,18 +10,19 @@ namespace Meitou.Nitoryu;
 
 /// <summary>
 /// The second blade held and drawn (display only): while a dual fighter has its pair out, the host draws it with a look in which the second
-/// weapon's bare blade (<c>bare sword</c>) sits in the left hand's prop bone (<c>Bip01 Prop1</c>, the bone the game's <c>override L arm</c>
-/// clips move with the left hand) and its sheath stays where it is worn, empty, as the main weapon's does. Harmony: a postfix on
-/// <c>Meitou.Game.Host.HiddenHatLooks.WorldLook</c> (the look a character is drawn with in the world, on the host's thread). The look is made
-/// once per worn look and side and drawn once the renderer has prepared it (<c>CharacterRenderer.IsPrepared</c> / <c>Warm</c>); until then
-/// the plain look shows. A failure logs once and draws the plain look.
+/// weapon's bare blade (<c>bare sword</c>) sits in the left hand with a fixed grip (<see cref="OffHandGrip"/>) and its sheath stays where it is
+/// worn, empty, as the main weapon's does. Harmony: a postfix on <c>Meitou.Game.Host.HiddenHatLooks.WorldLook</c> (the look a character is drawn
+/// with in the world, on the host's thread). The look is made once per worn look and side and drawn once its meshes are prepared
+/// (<c>CharacterRenderer.IsPrepared</c>, or <c>CharacterContent.Fetched</c>); until then the plain look shows. A failure logs once and draws the
+/// plain look.
 /// </summary>
 static class OffHandLook
 {
     /// <summary>The attachment point the port adds for the left hand.</summary>
     const string LeftPoint = "nitoryu left hand";
 
-    const string LeftBone = "Bip01 Prop1";
+    /// <summary>The bone and offset the blade is held at (<see cref="OffHandGrip"/>); set at start from the original's ini.</summary>
+    public static OffHandGrip Grip { get; set; } = OffHandGrip.Default;
 
     static readonly ConditionalWeakTable<CharacterAppearance, Dictionary<(string Weapon, bool Back), CharacterAppearance>> Looks = [];
     static readonly MethodInfo? Clone = typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -101,7 +102,9 @@ static class OffHandLook
         return false;
     }
 
-    /// <summary>The look with the second weapon's blade in the left hand, made once per look and side; the look itself when it has no such parts.</summary>
+    /// <summary>
+    /// The look with the second weapon's blade in the left hand, made once per look and side; the look itself when it has no such parts.
+    /// </summary>
     static CharacterAppearance DualLook(CharacterAppearance look, (string Weapon, bool Back) second)
     {
         var made = Looks.GetValue(look, static _ => []);
@@ -153,7 +156,7 @@ static class OffHandLook
         var copy = (CharacterAppearance)Clone!.Invoke(look, null)!;
         var points = new Dictionary<string, AttachmentPoint>(look.AttachmentPoints, StringComparer.Ordinal)
         {
-            [LeftPoint] = new AttachmentPoint(LeftPoint, LeftBone, Vector3.Zero, Quaternion.Identity),
+            [LeftPoint] = new AttachmentPoint(LeftPoint, Grip.Bone, Grip.Position, Grip.Rotation),
         };
         s_parts!.SetValue(copy, parts);
         s_points!.SetValue(copy, points);

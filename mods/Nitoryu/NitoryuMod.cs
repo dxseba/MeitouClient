@@ -21,6 +21,7 @@ public sealed class NitoryuMod : IMod, IModDataPhase, INitoryuApi, IModDependent
         Diag.Context = context;
         string? ini = OriginalFiles.Find(context.Folder, "Nitoryu.ini", context.Log);
         var config = NitoryuConfig.Load(context.Data, ini, context.Log);
+        OffHandLook.Grip = OffHandGrip.From(config, context.Log);
         Settings.OnlyMyStrikes = config.OnlyMyStrikes;
         Settings.Guard = config.Guard;
         Settings.Flow = config.Flow;
