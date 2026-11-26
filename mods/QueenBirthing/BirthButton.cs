@@ -62,6 +62,12 @@ sealed class BirthButton(IReadOnlyList<BirthKind> kinds) : IUiExtension
     int _outside;
 
     /// <summary>
+    /// The pointer at the last frame, in screen pixels. A press on a screen's extension control runs its action without the pointer
+    /// (<c>UiActionContext.Position</c> is set for overlay pointer events only), so the popup opens where the pointer last was.
+    /// </summary>
+    Vector2 _pointer;
+
+    /// <summary>
     /// Whether a window built the popup this frame (it hides when its window closes).
     /// </summary>
     bool _shown;
@@ -104,6 +110,7 @@ sealed class BirthButton(IReadOnlyList<BirthKind> kinds) : IUiExtension
     /// </summary>
     public void Frame(ModFrame frame)
     {
+        _pointer = frame.Pointer;
         if (_open.IsNone) return;
 
         bool shown = _shown;
@@ -164,8 +171,9 @@ sealed class BirthButton(IReadOnlyList<BirthKind> kinds) : IUiExtension
         if (_last?.Character is not { } queen) return;
 
         var view = action.Frame.Viewport;
-        float x = Math.Clamp(action.Position.X - PointerLeft, view.X, Math.Max(view.X, view.X + view.Width - MenuWidth));
-        float y = Math.Clamp(action.Position.Y - PointerUp, view.Y, Math.Max(view.Y, view.Y + view.Height - MenuHeight));
+        var at = action.Position != Vector2.Zero ? action.Position : _pointer;
+        float x = Math.Clamp(at.X - PointerLeft, view.X, Math.Max(view.X, view.X + view.Width - MenuWidth));
+        float y = Math.Clamp(at.Y - PointerUp, view.Y, Math.Max(view.Y, view.Y + view.Height - MenuHeight));
         (_open, _menuAt, _outside, _shown) = (queen.Id, new(x, y), 0, true);
     }
 
