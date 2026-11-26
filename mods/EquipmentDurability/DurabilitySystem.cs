@@ -243,9 +243,15 @@ sealed class DurabilitySystem(DurabilityConfig config, PopulationData data, RngP
         if (cold is not { Fighter: { Crossbow: { } x } fighter, Stats: { } stats, Medical: { } medical }) return null;
 
         float skill = stats[StatsEnumerated.Crossbows] * stats.Scale * medical.StatMultiplier(StatsEnumerated.Crossbows) * fighter.Factors.Ranged;
-        float dexterity = stats[StatsEnumerated.Dexterity] * stats.Scale * medical.StatMultiplier(StatsEnumerated.Dexterity);
-        return RangedFormulas.ReloadTime(RangedFormulas.SkillBlend(skill, dexterity, fighter.DexterityMult), x.Stats.ReloadMin, x.Stats.ReloadMax);
+        float dexterity = stats[StatsEnumerated.Dexterity] * stats.Scale * medical.StatMultiplier(StatsEnumerated.Dexterity) * fighter.DexterityMult;
+        return RangedFormulas.ReloadTime(SkillBlend(skill, dexterity), x.Stats.ReloadMin, x.Stats.ReloadMax);
     }
+
+    /// <summary>
+    /// The reload skill: 0.6 of the crossbow skill and 0.4 of Dexterity, in hundredths (<c>RangedFormulas.SkillBlend</c>). Written here because
+    /// that method's signature differs between Meitou 0.23.2 and later builds, so calling it would bind to only one of them.
+    /// </summary>
+    static float SkillBlend(float skill, float dexterity) => 0.01f * (0.6f * skill + 0.4f * dexterity);
 
     #endregion
 
