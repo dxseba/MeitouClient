@@ -79,6 +79,10 @@ static class AttackChoice
         {
             bool started = s.AttackSeq == c.Seq + 1;
             if (started) MovePicker.Commit(system, world, c.Slot, c.Pick, s.AttackSeq, s.AttackTech, c.Now);
+
+            int tech = s.AttackTech;
+            if (c.Pick.Move is { } move)
+                Diag.Log("attack-start", 20, () => $"slot {c.Slot}: {move.Tech.Name} {(started ? $"started as technique {tech}" : "did not start")}");
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
@@ -93,8 +97,15 @@ static class AttackChoice
         try
         {
             var picker = new MovePicker(system, world, c.Slot, c.Key, c.Seq, c.Now);
+            int vanilla = __result;
             c.Pick = picker.Choose(q, __result, ref maxReach);
             if (c.Pick.Move is { } move) __result = move.Index;
+
+            if (world.Characters.Cold(c.Slot) is { IsPlayer: true } cold)
+            {
+                var chosen = c.Pick.Move;
+                Diag.Log("attack", 20, () => $"{cold.Name}: game picked {vanilla}, dual pick {(chosen is null ? "none" : $"{chosen.Tech.Name} ({chosen.Kind})")}");
+            }
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {

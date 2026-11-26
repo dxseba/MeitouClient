@@ -106,6 +106,20 @@ sealed class Pairs
         return (off, ReferenceEquals(off, back));
     }
 
+    /// <summary>Why a fighter with a back and a hip weapon has no second blade, for the log; null when it has one.</summary>
+    public string? WhyNot(Fighter fighter, bool any)
+    {
+        if (fighter.Weapon is not { } main) return "no weapon in hand";
+        if (fighter.BackWeapon is not { } back || fighter.HipWeapon is not { } hip) return "not one weapon on the back and one on the hip";
+
+        var off = ReferenceEquals(main, back) ? hip : back;
+        if (!HasBlade(off.Data)) return $"'{off.Data.StringId}' has no 'bare sword' mesh";
+        if (!Allowed(main.Data, any)) return $"'{main.Data.StringId}' (category {main.Data.SkillCategory}) may not pair";
+        if (!Allowed(off.Data, any)) return $"'{off.Data.StringId}' (category {off.Data.SkillCategory}) may not pair";
+
+        return SecondBlade(fighter, any) is null ? "an add-on rule refuses the pair" : null;
+    }
+
     /// <summary>The pair's traits by the blades' lengths (<c>nitoryu pair length</c> where set) and kinds.</summary>
     public PairTraits Traits(WeaponData a, WeaponData b)
     {

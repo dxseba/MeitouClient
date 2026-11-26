@@ -26,7 +26,8 @@ static class OffHandLook
     static readonly ConditionalWeakTable<CharacterAppearance, Dictionary<(string Weapon, bool Back), CharacterAppearance>> Looks = [];
     static readonly MethodInfo? Clone = typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic);
     static FieldInfo? s_parts, s_points, s_host;
-    static MethodInfo? s_prepared, s_warm;
+    static MethodInfo? s_prepared, s_warm, s_fetched;
+    static FieldInfo? s_content;
     static ModContext? s_context;
     static int s_failed;
 
@@ -41,6 +42,9 @@ static class OffHandLook
         var renderer = AccessTools.TypeByName("Meitou.Game.Rendering.Characters.CharacterRenderer");
         s_prepared = renderer is null ? null : AccessTools.Method(renderer, "IsPrepared");
         s_warm = renderer is null ? null : AccessTools.Method(renderer, "Warm");
+        s_content = renderer is null ? null : AccessTools.Field(renderer, "_content");
+        var content = AccessTools.TypeByName("Meitou.Game.Rendering.Characters.CharacterContent");
+        s_fetched = content is null ? null : AccessTools.Method(content, "Fetched", [typeof(CharacterAppearance), typeof(bool)]);
         if (world is null || s_host is null || s_parts is null || s_points is null || s_prepared is null || s_warm is null || Clone is null)
         {
             context.LogError("HiddenHatLooks.WorldLook or the look's members not found: the second blade is drawn sheathed");
@@ -59,7 +63,17 @@ static class OffHandLook
         try
         {
             var look = DualLook(__result, second);
-            if (!ReferenceEquals(look, __result) && Ready(__instance, look)) __result = look;
+            if (ReferenceEquals(look, __result)) return;
+
+            if (Ready(__instance, look))
+            {
+                __result = look;
+                Diag.Log("blade-drawn", 3, () => $"second blade drawn in the left hand ('{second.Weapon}')");
+            }
+            else
+            {
+                Diag.Log("blade-wait", 5, () => $"second blade look not prepared yet ('{second.Weapon}')");
+            }
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
@@ -68,7 +82,11 @@ static class OffHandLook
     }
 #pragma warning restore IDE1006
 
-    /// <summary>Whether the renderer has prepared <paramref name="look"/>; asks it to when not.</summary>
+    /// <summary>
+    /// Whether <paramref name="look"/> can be drawn now: uploaded already, or its meshes prepared so the renderer builds it the first frame it is
+    /// drawn (<c>CharacterContent.Fetched</c>, which starts the preparation when it is not). The renderer uploads a look only once it is drawn, so
+    /// waiting for the upload alone would never end.
+    /// </summary>
     static bool Ready(object looks, CharacterAppearance look)
     {
         var host = s_host!.GetValue(looks);
@@ -76,6 +94,8 @@ static class OffHandLook
         var characters = gpu is null ? null : Traverse.Create(gpu).Field("Characters").GetValue();
         if (characters is null) return false;
         if (s_prepared!.Invoke(characters, [look]) is true) return true;
+
+        if (s_content?.GetValue(characters) is { } content && s_fetched is not null) return s_fetched.Invoke(content, [look, true]) is true;
 
         s_warm!.Invoke(characters, [look, false, false]);
         return false;
@@ -89,10 +109,21 @@ static class OffHandLook
         {
             if (made.TryGetValue(second, out var dual)) return dual;
 
-            dual = Make(look, second.Weapon, second.Back) ?? look;
+            var built = Make(look, second.Weapon, second.Back);
+            if (built is null) LogParts(look, second.Weapon);
+            else s_context?.Log($"second blade look made for '{second.Weapon}' ({(second.Back ? "back" : "hip")})");
+
+            dual = built ?? look;
             made[second] = dual;
             return dual;
         }
+    }
+
+    /// <summary>Logs the parts the look has for <paramref name="weapon"/> when no left-hand blade could be made from them (support only).</summary>
+    static void LogParts(CharacterAppearance look, string weapon)
+    {
+        var mine = look.Parts.Where(p => p.Record.StringId == weapon).Select(p => $"{p.Slot}/{p.Field}/{p.Shown}");
+        s_context?.Log($"no left-hand blade for '{weapon}': its parts in the look are [{string.Join(", ", mine)}]");
     }
 
     static CharacterAppearance? Make(CharacterAppearance look, string weapon, bool back)

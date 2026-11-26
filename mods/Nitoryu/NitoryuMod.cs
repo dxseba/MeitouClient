@@ -18,6 +18,7 @@ public sealed class NitoryuMod : IMod, IModDataPhase, INitoryuApi, IModDependent
 
     public void Initialize(ModContext context)
     {
+        Diag.Context = context;
         string? ini = OriginalFiles.Find(context.Folder, "Nitoryu.ini", context.Log);
         var config = NitoryuConfig.Load(context.Data, ini, context.Log);
         Settings.OnlyMyStrikes = config.OnlyMyStrikes;

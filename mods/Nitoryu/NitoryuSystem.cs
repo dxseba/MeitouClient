@@ -41,6 +41,9 @@ sealed partial class NitoryuSystem(NitoryuSession session) : IWorldReady
     readonly HashSet<CharacterId> _any = [];
     readonly List<ToggleAnyWeaponOrder> _anyOrders = [];
 
+    /// <summary>The last reason logged per player character for not fighting dual, so each change is logged once.</summary>
+    readonly Dictionary<CharacterId, string> _whyLogged = [];
+
     /// <summary>The save key of a character who fights with blunt weapons or hackers as a pair (the second button).</summary>
     const string AnyKey = "nitoryu any weapon";
     readonly List<ToggleDualOrder> _orders = [];
@@ -193,6 +196,7 @@ sealed partial class NitoryuSystem(NitoryuSession session) : IWorldReady
         if (!allowed)
         {
             s.Off = null;
+            LogWhyNot(id, cold, pair is not null);
             return;
         }
 
@@ -200,6 +204,39 @@ sealed partial class NitoryuSystem(NitoryuSession session) : IWorldReady
         s.OffIsBack = pair.Value.OffIsBack;
         s.Traits = session.Pairs.Traits(fighter.Weapon!.Data, s.Off.Data);
         Rank(ref s, cold);
+        LogDual(ref s, id, cold);
+    }
+
+    /// <summary>Logs once per rank when a player character fights with two blades (support only).</summary>
+    void LogDual(ref DualFighter s, CharacterId id, CharacterCold cold)
+    {
+        if (!cold.IsPlayer) return;
+
+        string state = $"dual with '{s.Off!.Data.StringId}' as second blade, Path {s.Path:0}, rank {s.Tier}";
+        if (_whyLogged.TryGetValue(id, out var last) && last.StartsWith("dual", StringComparison.Ordinal) && last.EndsWith($"rank {s.Tier}"))
+            return;
+
+        _whyLogged[id] = state;
+        session.Log($"{cold.Name}: {state}");
+    }
+
+    /// <summary>
+    /// Logs once per change why a player character carrying a back and a hip weapon does not fight with both (display and support only).
+    /// </summary>
+    void LogWhyNot(CharacterId id, CharacterCold cold, bool paired)
+    {
+        var fighter = cold.Fighter!;
+        if (!cold.IsPlayer || fighter.BackWeapon is null || fighter.HipWeapon is null) return;
+
+        string why = !session.Settings.Enabled ? "dual wielding is off in Mod settings"
+            : _off.Contains(id) ? "its dual stance is toggled off"
+            : !MeleeDrawn(cold) ? "no melee weapon drawn"
+            : paired ? "an arm does not work"
+            : session.Pairs.WhyNot(fighter, _any.Contains(id)) ?? "unknown";
+        if (_whyLogged.TryGetValue(id, out var last) && last == why) return;
+
+        _whyLogged[id] = why;
+        session.Log($"{cold.Name}: not fighting with two blades: {why}");
     }
 
     static bool MeleeDrawn(CharacterCold cold) =>
