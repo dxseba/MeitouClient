@@ -3,5 +3,5 @@
   "apiVersion": 2,
   "assemblies": ["HappyFamilies.dll"],
   "entry": "Meitou.HappyFamilies.HappyFamiliesMod",
-  "gameVersion": ">=0.23.1"
+  "gameVersion": ">=0.23.3"
 }
