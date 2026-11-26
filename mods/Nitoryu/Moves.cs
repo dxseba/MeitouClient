@@ -80,7 +80,7 @@ sealed class MovePool
         for (int i = 0; i < techniques.Count; i++)
         {
             var t = techniques[i];
-            if (t.Disabled || t.Kinds != WeaponKinds.None || db.Find(t.StringId) is not { } r) continue;
+            if (t.Disabled || WeaponFlags(t) != WeaponKinds.None || db.Find(t.StringId) is not { } r) continue;
 
             int kind = r.GetInt("nitoryu move");
             if (kind is < 1 or > 4) continue;
@@ -90,6 +90,12 @@ sealed class MovePool
 
         return new MovePool(moves);
     }
+
+    /// <summary>
+    /// The weapon type flags of a technique. <c>1 handed</c> is left out: the shipped moves all set it, and the game does not match it against the
+    /// weapon either.
+    /// </summary>
+    static WeaponKinds WeaponFlags(CombatTechnique t) => t.Kinds & ~WeaponKinds.OneHanded;
 
     static Move FromRecord(int index, CombatTechnique t, MoveKind kind, GameRecord r)
     {
