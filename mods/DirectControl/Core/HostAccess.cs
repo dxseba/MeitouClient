@@ -89,9 +89,22 @@ static class HostAccess
     }
 
     /// <summary>
-    /// Whether the character renderer has the look's meshes ready.
+    /// Whether the look can be drawn now: uploaded already (<c>IsPrepared</c>), or its meshes prepared so the renderer builds it the first frame
+    /// it is drawn (<c>CharacterContent.Fetched</c>, which starts the preparation when it is not). The renderer uploads a look only once it is
+    /// drawn, so waiting for the upload alone would never end.
     /// </summary>
-    public static bool Prepared(CharacterAppearance look) => RendererCall("IsPrepared", look) is true;
+    public static bool Prepared(CharacterAppearance look) => RendererCall("IsPrepared", look) is true || ContentFetched(look);
+
+    static bool ContentFetched(CharacterAppearance look)
+    {
+        if (Host is not { } h || GpuMember is null) return false;
+
+        object? gpu = GpuMember is FieldInfo f ? f.GetValue(h) : ((PropertyInfo)GpuMember).GetValue(h);
+        object? renderer = gpu?.GetType().GetField("Characters", Any)?.GetValue(gpu);
+        object? content = renderer?.GetType().GetField("_content", Any)?.GetValue(renderer);
+        var fetched = content?.GetType().GetMethod("Fetched", Any, [typeof(CharacterAppearance), typeof(bool)]);
+        return fetched?.Invoke(content, [look, true]) is true;
+    }
 
     /// <summary>
     /// Asks the character renderer to prepare the look's meshes.
