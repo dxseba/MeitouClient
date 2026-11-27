@@ -18,6 +18,12 @@ namespace Meitou.Nitoryu;
 /// frame onto the left one. The two hands' bind rotations differ by that reflection: (x, y, z, w) to (-x, y, -z, w), so positions map
 /// (x, y, z) to (x, -y, z).
 /// </para>
+/// <para>
+/// A rotation mirrored that way turns a mesh axis that the reflection flips the other way round. Kenshi's blade meshes lie along +Y (hilt about
+/// -2, tip about +10 in <c>katana04R_bare.mesh</c>), with their width and curve along Z and their thickness along X, so the mirrored grip alone held
+/// the blade point back along the forearm (seen in game). A half turn about the mesh's Z first sets the point forward again and keeps the edge
+/// mirrored; only the blade's thin X flips.
+/// </para>
 /// </summary>
 readonly record struct OffHandGrip(string Bone, Vector3 Position, Quaternion Rotation)
 {
@@ -26,8 +32,12 @@ readonly record struct OffHandGrip(string Bone, Vector3 Position, Quaternion Rot
     static readonly Vector3 MainGripPosition = new(-0.001004219f, -0.0016928315f, -0.2817644f);
     static readonly Quaternion MainGripRotation = new(-0.0007300798f, 0.00071391946f, -0.70532733f, 0.7088811f);
 
-    /// <summary>The main weapon's grip mirrored onto the left hand.</summary>
-    public static OffHandGrip Default => new(HandBone, Mirror(MainGripPosition), Mirror(MainGripRotation));
+    /// <summary>A half turn about the blade mesh's Z (its width), applied before the mirrored grip.</summary>
+    static readonly Quaternion BladeFlip = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI);
+
+    /// <summary>The main weapon's grip mirrored onto the left hand, the blade turned so its point stays forward.</summary>
+    public static OffHandGrip Default =>
+        new(HandBone, Mirror(MainGripPosition), Quaternion.Normalize(Quaternion.Concatenate(BladeFlip, Mirror(MainGripRotation))));
 
     /// <summary>
     /// The grip with the original's ini overrides: <c>[OffHand] bone</c>, <c>pos</c> (x y z) and <c>rot</c> (w x y z, Ogre's order). A value that
