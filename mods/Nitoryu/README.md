@@ -107,6 +107,8 @@ records, about 135 `nitoryu ...` settings on GLOBAL CONSTANTS, the Pair Training
 - `Meitou.Data.Characters.PoseScratch.AddLayer` (prefix): the mirrored clips; `PoseScratch.Sample` and its fields by reflection.
 - `Meitou.Game.Host.HiddenHatLooks.WorldLook` (postfix): the second blade in the left hand; `CharacterRenderer.IsPrepared` / `Warm`,
   `CharacterRenderer._content` and `CharacterContent.Fetched` by reflection.
+- `Meitou.Game.Rendering.Characters.CharacterContent.AddSway` (prefix): the held blade stays out of the optional gear sway, which swings every
+  weapon part off the `hands` point as hanging gear (it swung from the grip, point down).
 - `Meitou.Simulation.Bodies.HudTips.StatsWindow` (postfix), `Meitou.Game.Ui.StatsWindow.AddModSkillDescription` (prefix, finalizer) and
   `Meitou.Game.Ui.StatsWindow.AddDescriptionPanels` (prefix): the pane's live lines.
 - By reflection, not patched: `CombatSystem.Eff`, `CombatTuning.Gap`, `XpService.ContinuousRate`.

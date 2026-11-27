@@ -53,9 +53,29 @@ static class OffHandLook
         }
 
         context.Harmony.Patch(world, postfix: new HarmonyMethod(typeof(OffHandLook), nameof(Postfix)));
+        PatchSway(context, content);
+    }
+
+    /// <summary>
+    /// Keeps the held blade out of the optional gear sway: <c>CharacterContent.AddSway</c> swings every weapon part on a point other than
+    /// <c>hands</c> as gear hanging at the hip or on the back, and a blade in the hand swung from its grip, point down (a player's report).
+    /// </summary>
+    static void PatchSway(ModContext context, Type? content)
+    {
+        var sway = content is null ? null : AccessTools.Method(content, "AddSway");
+        if (sway is null)
+        {
+            context.Log("CharacterContent.AddSway not found: with gear sway on, the held second blade may swing");
+            return;
+        }
+
+        context.Harmony.Patch(sway, prefix: new HarmonyMethod(typeof(OffHandLook), nameof(SwayPrefix)));
     }
 
 #pragma warning disable IDE1006 // Harmony's injected parameter names
+    /// <summary>The held blade's part never joins a sway group (false skips <c>AddSway</c>).</summary>
+    static bool SwayPrefix(CharacterPart part) => part.Point != LeftPoint;
+
     static void Postfix(object __instance, CharacterSnapshot c, ref CharacterAppearance __result)
     {
         if (s_failed != 0 || !NitoryuMod.Settings.ShowBlade || !c.WeaponDrawn || c.RangedDrawn) return;
